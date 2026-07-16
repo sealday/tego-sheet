@@ -211,4 +211,38 @@ describe('demo workbench', () => {
     expect(rendered.queryByRole('combobox', { name: 'Mode' })).toBeNull();
     expect(rendered.queryByRole('button', { name: 'Reset workbook' })).toBeNull();
   });
+
+  it('exposes stable fullscreen layout hooks and disclosure relationships', () => {
+    const rendered = render(<App />);
+    const shell = rendered.container.querySelector('.preview-shell');
+    const controls = rendered.container.querySelector('.preview-controls');
+    const workspace = rendered.container.querySelector('.preview-workspace');
+    const jsonDisclosure = rendered.getByRole('button', { name: 'Show JSON' });
+    const eventDisclosure = rendered.getByRole('button', { name: 'Show events' });
+    const collapseDisclosure = rendered.getByRole('button', { name: 'Collapse controls' });
+
+    expect(shell).toBeTruthy();
+    expect(controls).toBeTruthy();
+    expect(workspace).toBeTruthy();
+
+    fireEvent.click(jsonDisclosure);
+    const jsonPanel = rendered.container.querySelector('.preview-json-panel');
+    expect(jsonPanel).toBeTruthy();
+    expect(jsonDisclosure.getAttribute('aria-expanded')).toBe('true');
+    expect(jsonDisclosure.getAttribute('aria-controls')).toBe(jsonPanel?.id);
+
+    fireEvent.click(eventDisclosure);
+    const eventsPanel = rendered.container.querySelector('.preview-events-panel');
+    expect(eventsPanel).toBeTruthy();
+    expect(eventDisclosure.getAttribute('aria-expanded')).toBe('true');
+    expect(eventDisclosure.getAttribute('aria-controls')).toBe(eventsPanel?.id);
+
+    const secondaryControlsId = collapseDisclosure.getAttribute('aria-controls');
+    expect(collapseDisclosure.getAttribute('aria-expanded')).toBe('true');
+    expect(secondaryControlsId).toBeTruthy();
+    expect(rendered.container.querySelector(`#${secondaryControlsId}`)).toBeTruthy();
+
+    fireEvent.click(collapseDisclosure);
+    expect(rendered.getByRole('button', { name: 'Expand controls' }).getAttribute('aria-expanded')).toBe('false');
+  });
 });

@@ -122,6 +122,7 @@ export function App() {
           <button
             type="button"
             aria-expanded={!controlsCollapsed}
+            aria-controls="preview-controls-secondary"
             onClick={() => setControlsCollapsed(current => !current)}
           >
             {controlsCollapsed ? 'Expand controls' : 'Collapse controls'}
@@ -129,7 +130,7 @@ export function App() {
         </div>
 
         {!controlsCollapsed && (
-          <div className="preview-controls__secondary">
+          <div id="preview-controls-secondary" className="preview-controls__secondary">
             <div className="preview-controls__fields">
               <label>
                 Mode
@@ -188,7 +189,7 @@ export function App() {
             {error !== null && <p role="alert">{error}</p>}
 
             {jsonVisible && (
-              <div id="workbook-json-panel">
+              <div id="workbook-json-panel" className="preview-json-panel">
                 <label htmlFor="workbook-json">Workbook JSON</label>
                 <textarea
                   id="workbook-json"
@@ -199,7 +200,12 @@ export function App() {
             )}
 
             {eventsVisible && (
-              <ol id="preview-events-panel" role="log" aria-label="Spreadsheet events">
+              <ol
+                id="preview-events-panel"
+                className="preview-events-panel"
+                role="log"
+                aria-label="Spreadsheet events"
+              >
                 {events.map(event => (
                   <li key={event.id}>
                     <strong>{event.label}</strong>
