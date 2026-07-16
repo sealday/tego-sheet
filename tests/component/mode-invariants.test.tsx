@@ -38,9 +38,11 @@ it('throws invalid initial workbook data during initialization', () => {
 it('does not reinterpret explicit null as a missing workbook prop', () => {
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
-  expect(() => renderSheet({
-    defaultValue: null as unknown as WorkbookInput,
-  })).toThrowError(expect.objectContaining({ code: 'INVALID_DATA' }));
+  expect(() =>
+    renderSheet({
+      defaultValue: null as unknown as WorkbookInput,
+    }),
+  ).toThrowError(expect.objectContaining({ code: 'INVALID_DATA' }));
 });
 
 it('applies live readOnly before a parent layout effect can dispatch', () => {
@@ -51,11 +53,14 @@ it('applies live readOnly before a parent layout effect can dispatch', () => {
     {
       onParentLayout(runtime) {
         if (!shouldDispatch || runtime === null) return;
-        parentOutcome = runtime.dispatchUi({
-          type: 'set-cell-text',
-          address: { sheet, row: 0, column: 0 },
-          text: 'must be rejected',
-        }, 'keyboard');
+        parentOutcome = runtime.dispatchUi(
+          {
+            type: 'set-cell-text',
+            address: { sheet, row: 0, column: 0 },
+            text: 'must be rejected',
+          },
+          'keyboard',
+        );
       },
     },
   );

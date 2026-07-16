@@ -7,5 +7,5 @@ export const visualMaskSelectors = {
 } as const satisfies Record<VisualMaskName, string>;
 
 export function namedMasks(page: Page, names: readonly VisualMaskName[]): readonly Locator[] {
-  return names.map(name => page.locator(visualMaskSelectors[name]));
+  return names.map((name) => page.locator(visualMaskSelectors[name]));
 }

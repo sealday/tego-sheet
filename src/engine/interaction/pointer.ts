@@ -77,17 +77,27 @@ export function selectionForRegion(
   }
   if (region.kind === 'row-header') {
     const active = { row: region.row, column: 0 };
-    return createRangeSelection(active, active, {
-      start: active,
-      end: { row: region.row, column: all.end.column },
-    }, 'row');
+    return createRangeSelection(
+      active,
+      active,
+      {
+        start: active,
+        end: { row: region.row, column: all.end.column },
+      },
+      'row',
+    );
   }
   if (region.kind === 'column-header') {
     const active = { row: 0, column: region.column };
-    return createRangeSelection(active, active, {
-      start: active,
-      end: { row: all.end.row, column: region.column },
-    }, 'column');
+    return createRangeSelection(
+      active,
+      active,
+      {
+        start: active,
+        end: { row: all.end.row, column: region.column },
+      },
+      'column',
+    );
   }
   return normalizeSelection(createSelectionState(region.cell), viewport.model);
 }

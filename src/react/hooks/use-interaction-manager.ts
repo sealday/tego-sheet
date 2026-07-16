@@ -27,9 +27,16 @@ export interface UseInteractionManagerOptions {
   readonly onViewportChange?: () => void;
   readonly commitEditor?: (selectionAfterCommit?: EditorSelectionTarget) => EditorCommitResult;
   readonly requestCancelTransient?: () => void;
-  readonly requestContextMenu?: (point: Readonly<{ readonly x: number; readonly y: number }>, selection: Selection) => void;
+  readonly requestContextMenu?: (
+    point: Readonly<{ readonly x: number; readonly y: number }>,
+    selection: Selection,
+  ) => void;
   readonly requestDelete?: (selection: Selection, source: ChangeSource) => void;
-  readonly requestEdit?: (point: CellPoint, initialText: string | undefined, source: ChangeSource) => void;
+  readonly requestEdit?: (
+    point: CellPoint,
+    initialText: string | undefined,
+    source: ChangeSource,
+  ) => void;
   readonly requestFormat?: (format: 'bold' | 'italic' | 'underline') => void;
   readonly requestSurfaceFocus?: () => void;
 }
@@ -62,12 +69,13 @@ export function useInteractionManager(options: UseInteractionManagerOptions): vo
     const surface = surfaceRef.current;
     const engine = engineSlot.get();
     if (
-      root === null
-      || surface === null
-      || engine === null
-      || !isActive()
-      || typeof window === 'undefined'
-    ) return;
+      root === null ||
+      surface === null ||
+      engine === null ||
+      !isActive() ||
+      typeof window === 'undefined'
+    )
+      return;
     engine.render(controller.getSnapshot(), activeSheet);
     const manager = createInteractionAdapter({
       controller,

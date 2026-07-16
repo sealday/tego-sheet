@@ -204,9 +204,7 @@ function declarations(rows: readonly ParityRow[]): Array<{ id: string; lane: Par
   return rows.flatMap((entry) =>
     lanes.flatMap((lane) => {
       const value = entry[lane];
-      return 'assertions' in value
-        ? value.assertions.map((id) => ({ id, lane }))
-        : [];
+      return 'assertions' in value ? value.assertions.map((id) => ({ id, lane })) : [];
     }),
   );
 }
@@ -214,7 +212,19 @@ function declarations(rows: readonly ParityRow[]): Array<{ id: string; lane: Par
 function evidenceFor(
   rows: readonly ParityRow[],
   status: EvidenceStatus = 'passed',
-): Array<Omit<ParityEvidenceRecord, 'runId' | 'revision' | 'treeHash' | 'manifestHash' | 'runner' | 'configHash' | 'startedAt' | 'observedAt'>> {
+): Array<
+  Omit<
+    ParityEvidenceRecord,
+    | 'runId'
+    | 'revision'
+    | 'treeHash'
+    | 'manifestHash'
+    | 'runner'
+    | 'configHash'
+    | 'startedAt'
+    | 'observedAt'
+  >
+> {
   return declarations(rows).map(({ id, lane }) => ({
     lane,
     status,
@@ -270,9 +280,9 @@ type VerifyWithContext = (
 const verifyWithContext = verifyManifest as unknown as VerifyWithContext;
 
 function provenEvidenceFor(rows: readonly ParityRow[]): Array<Record<string, unknown>> {
-  return evidenceFor(rows).flatMap(record => {
+  return evidenceFor(rows).flatMap((record) => {
     const lane = releaseContext.lanes[record.lane];
-    return lane.expectedProjects.map(project => ({
+    return lane.expectedProjects.map((project) => ({
       ...record,
       runId: releaseContext.runId,
       revision: releaseContext.revision,
@@ -317,17 +327,23 @@ test('@parity:manifest.revision-bound rejects evidence from another revision or 
 test('@parity:manifest.project-matrix rejects missing and unexpected browser projects', () => {
   const rows = validRows();
   rows[0] = browserRow('workbook', 'workbook.browser');
-  const missing = provenEvidenceFor(rows).filter(record => (
-    record.title !== '@parity:workbook.browser executable parity check'
-    || record.project !== 'firefox-desktop'
-  ));
+  const missing = provenEvidenceFor(rows).filter(
+    (record) =>
+      record.title !== '@parity:workbook.browser executable parity check' ||
+      record.project !== 'firefox-desktop',
+  );
   assert.throws(
     () => verifyWithContext(rows, missing, releaseContext),
     /workbook\.browser.*missing project.*firefox-desktop/i,
   );
 
   const unexpected = provenEvidenceFor(rows);
-  unexpected.push({ ...unexpected.find(record => record.title === '@parity:workbook.browser executable parity check')!, project: 'synthetic-browser' });
+  unexpected.push({
+    ...unexpected.find(
+      (record) => record.title === '@parity:workbook.browser executable parity check',
+    )!,
+    project: 'synthetic-browser',
+  });
   assert.throws(
     () => verifyWithContext(rows, unexpected, releaseContext),
     /unexpected project.*synthetic-browser/i,
@@ -337,19 +353,19 @@ test('@parity:manifest.project-matrix rejects missing and unexpected browser pro
 test('@parity:manifest.project-skips allows only explicitly catalogued project skips', () => {
   const rows = validRows();
   rows[0] = browserRow('workbook', 'input.touch-gestures');
-  const allowed = provenEvidenceFor(rows).map(record => (
-    record.title === '@parity:input.touch-gestures executable parity check'
-      && String(record.project).endsWith('-desktop')
+  const allowed = provenEvidenceFor(rows).map((record) =>
+    record.title === '@parity:input.touch-gestures executable parity check' &&
+    String(record.project).endsWith('-desktop')
       ? { ...record, status: 'skipped' }
-      : record
-  ));
+      : record,
+  );
   assert.doesNotThrow(() => verifyWithContext(rows, allowed, releaseContext));
 
-  const disallowed = allowed.map(record => (
+  const disallowed = allowed.map((record) =>
     record.title === '@parity:correction.empty-workbook executable parity check'
       ? { ...record, status: 'skipped' }
-      : record
-  ));
+      : record,
+  );
   assert.throws(
     () => verifyWithContext(rows, disallowed, releaseContext),
     /correction\.empty-workbook.*skip.*not allowed/i,
@@ -360,8 +376,8 @@ function runCliPaths(paths: readonly string[]) {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const status = runParityCli(paths, {
-    log: message => stdout.push(message),
-    error: message => stderr.push(message),
+    log: (message) => stdout.push(message),
+    error: (message) => stderr.push(message),
   });
   return {
     status,
@@ -389,10 +405,7 @@ function projectCatalog(rows: readonly ParityRow[]): CatalogRow[] {
   return rows.map((row) => ({
     id: row.id,
     ...Object.fromEntries(
-      lanes.map((lane) => [
-        lane,
-        'assertions' in row[lane] ? [...row[lane].assertions] : null,
-      ]),
+      lanes.map((lane) => [lane, 'assertions' in row[lane] ? [...row[lane].assertions] : null]),
     ),
   })) as CatalogRow[];
 }
@@ -420,10 +433,7 @@ test('@parity:manifest.execution-complete rejects missing structured evidence', 
     ({ title }) => !title.includes('@parity:correction.printable-cells '),
   );
 
-  assert.throws(
-    () => verifyManifest(rows, evidence),
-    /correction\.printable-cells.*not executed/,
-  );
+  assert.throws(() => verifyManifest(rows, evidence), /correction\.printable-cells.*not executed/);
 });
 
 test('@parity:manifest.execution-declared rejects unknown structured evidence', () => {
@@ -598,10 +608,7 @@ test('@parity:manifest.row-shape rejects missing and unexpected row properties',
     unit: { assertions: [] },
     integration: { assertions: ['workbook.integration'] },
   } as unknown as ParityRow;
-  assert.throws(
-    () => verifyManifest(extra),
-    /workbook row has unexpected property "integration"/,
-  );
+  assert.throws(() => verifyManifest(extra), /workbook row has unexpected property "integration"/);
 });
 
 test('@parity:manifest.lane-shape rejects extra lane properties', () => {
@@ -631,10 +638,7 @@ test('@parity:manifest.na-explained rejects unexplained N/A lanes', () => {
   const rows = validRows();
   rows[0] = { ...rows[0], visual: { notApplicable: '   ' } };
 
-  assert.throws(
-    () => verifyManifest(rows),
-    /workbook\.visual.*nonempty notApplicable explanation/,
-  );
+  assert.throws(() => verifyManifest(rows), /workbook\.visual.*nonempty notApplicable explanation/);
 });
 
 test('@parity:manifest.corrections-required rejects a missing correction row', () => {
@@ -688,16 +692,16 @@ test('@parity:manifest.catalog is complete and uses stable assertion prefixes', 
   const projection = projectCatalog(parityManifest);
   assert.deepEqual(projection, expectedCatalog);
   assert.equal(projection.length, 19);
-  assert.equal(
-    projection.flatMap((row) => lanes.flatMap((lane) => row[lane] ?? [])).length,
-    64,
-  );
+  assert.equal(projection.flatMap((row) => lanes.flatMap((lane) => row[lane] ?? [])).length, 64);
   assert.equal(
     projection.flatMap((row) => lanes.map((lane) => row[lane])).filter((lane) => lane === null)
       .length,
     16,
   );
-  assert.deepEqual(parityManifest.map(({ id }) => id), expectedRows);
+  assert.deepEqual(
+    parityManifest.map(({ id }) => id),
+    expectedRows,
+  );
   for (const entry of parityManifest) {
     const prefix = entry.id.startsWith('correction.')
       ? 'correction.'
@@ -786,7 +790,10 @@ test('@parity:manifest.cli-structured rejects bare, missing, failed, and wrong-l
   wrongLaneRecords[0] = { ...wrongLaneRecords[0], lane: 'browser' };
   const wrongLane = runCli(JSON.stringify(wrongLaneRecords));
   assert.equal(wrongLane.status, 1);
-  assert.match(wrongLane.stderr, /workbook\.canonical-roundtrip.*declared in unit.*reported in browser/);
+  assert.match(
+    wrongLane.stderr,
+    /workbook\.canonical-roundtrip.*declared in unit.*reported in browser/,
+  );
 
   const mixedFailedRecords = structuredClone(complete);
   mixedFailedRecords[0] = { ...mixedFailedRecords[0], project: 'chromium' };
@@ -822,20 +829,14 @@ test('@parity:manifest.cli-structured rejects bare, missing, failed, and wrong-l
 test('@parity:manifest.cli-artifact-errors include malformed and unreadable artifact paths', () => {
   const malformed = runCli('[{"lane":');
   assert.equal(malformed.status, 1);
-  assert.match(
-    malformed.stderr,
-    /execution artifact ".*evidence\.json" has invalid JSON:/,
-  );
+  assert.match(malformed.stderr, /execution artifact ".*evidence\.json" has invalid JSON:/);
 
   const directory = mkdtempSync(join(tmpdir(), 'parity-manifest-missing-'));
   const missingPath = join(directory, 'missing-evidence.json');
   rmSync(directory, { recursive: true, force: true });
   const missing = runCliPaths([missingPath]);
   assert.equal(missing.status, 1);
-  assert.match(
-    missing.stderr,
-    /could not read execution artifact ".*missing-evidence\.json":/,
-  );
+  assert.match(missing.stderr, /could not read execution artifact ".*missing-evidence\.json":/);
 
   const unreadableDirectory = mkdtempSync(join(tmpdir(), 'parity-manifest-directory-'));
   try {

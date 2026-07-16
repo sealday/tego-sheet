@@ -1,13 +1,21 @@
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { createRef } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { TegoSheet, type SheetOptions, type TegoSheetHandle, type ToolbarRenderProps } from '../../src';
+import {
+  TegoSheet,
+  type SheetOptions,
+  type TegoSheetHandle,
+  type ToolbarRenderProps,
+} from '../../src';
 import { createCanvasHarness } from '../helpers/canvas-harness';
 
 beforeEach(() => {
   const context = createCanvasHarness().canvas.getContext('2d');
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => context);
-  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+  vi.stubGlobal(
+    'requestAnimationFrame',
+    vi.fn(() => 1),
+  );
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
 });
 
@@ -31,7 +39,7 @@ it('applies mount geometry, default style and autofocus', async () => {
         autoFocus: true,
       }}
       toolbar={toolbar}
-      onSelectionChange={selection => selections.push(selection.active.column)}
+      onSelectionChange={(selection) => selections.push(selection.active.column)}
     />,
   );
   const root = rendered.container.querySelector<HTMLElement>('[data-tego-sheet]')!;
@@ -78,7 +86,12 @@ it('reconciles live flags but warns once per changed mount-only option without r
   rendered.rerender(
     <TegoSheet
       defaultValue={[]}
-      options={{ showGrid: false, showContextMenu: false, rows: { initialCount: 5 }, defaultStyle: {} }}
+      options={{
+        showGrid: false,
+        showContextMenu: false,
+        rows: { initialCount: 5 },
+        defaultStyle: {},
+      }}
     />,
   );
   expect(warn).toHaveBeenCalledTimes(calls);

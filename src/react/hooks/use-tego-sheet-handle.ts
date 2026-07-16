@@ -1,9 +1,4 @@
-import {
-  useImperativeHandle,
-  useLayoutEffect,
-  useState,
-  type ForwardedRef,
-} from 'react';
+import { useImperativeHandle, useLayoutEffect, useState, type ForwardedRef } from 'react';
 import {
   selectCell,
   selectCellStyle,
@@ -15,10 +10,7 @@ import {
 } from '../../core';
 import type { WorkbookCommand } from '../../core/commands/workbook-command';
 import type { ControllerEpoch } from './use-controller-epoch';
-import {
-  printWorkbook,
-  type EventDispatcher,
-} from '../adapters/event-dispatcher';
+import { printWorkbook, type EventDispatcher } from '../adapters/event-dispatcher';
 import type { EngineAdapterSlot } from './use-canvas-engine';
 import type { TegoSheetHandle } from '../tego-sheet.types';
 
@@ -70,7 +62,9 @@ export interface TegoSheetRuntimeAuthority<Runtime extends TegoSheetHandleRuntim
   readonly activate: (sheet: SheetId | null) => void;
 }
 
-function createRuntimeAuthority<Runtime extends TegoSheetHandleRuntime>(): TegoSheetRuntimeAuthority<Runtime> {
+function createRuntimeAuthority<
+  Runtime extends TegoSheetHandleRuntime,
+>(): TegoSheetRuntimeAuthority<Runtime> {
   let current: Runtime | null = null;
   let activeDecisionVersion = 0;
   const committedTokens = new WeakSet<object>();
@@ -89,12 +83,10 @@ function createRuntimeAuthority<Runtime extends TegoSheetHandleRuntime>(): TegoS
     capture: () => ({ activeDecisionVersion, runtime: requireRuntime() }),
     commit(token, runtime) {
       if (
-        current !== null
-        && (
-          current.controller !== runtime.controller
-          || current.activeSheet !== runtime.activeSheet
-        )
-      ) activeDecisionVersion += 1;
+        current !== null &&
+        (current.controller !== runtime.controller || current.activeSheet !== runtime.activeSheet)
+      )
+        activeDecisionVersion += 1;
       current = runtime;
       committedTokens.add(token);
     },
@@ -106,11 +98,12 @@ function createRuntimeAuthority<Runtime extends TegoSheetHandleRuntime>(): TegoS
     compareAndSetActiveSheet(capture, sheet) {
       const runtime = current;
       if (
-        runtime === null
-        || !runtime.isActive()
-        || runtime.controller !== capture.runtime.controller
-        || activeDecisionVersion !== capture.activeDecisionVersion
-      ) return false;
+        runtime === null ||
+        !runtime.isActive() ||
+        runtime.controller !== capture.runtime.controller ||
+        activeDecisionVersion !== capture.activeDecisionVersion
+      )
+        return false;
       applyActiveSheet(runtime, sheet);
       return true;
     },
@@ -133,7 +126,7 @@ function createRuntimeAuthority<Runtime extends TegoSheetHandleRuntime>(): TegoS
 
 function runtimeSheet(runtime: TegoSheetHandleRuntime, address: CellAddress) {
   const snapshot = runtime.controller.getSnapshot();
-  const index = snapshot.sheets.findIndex(sheet => sheet.id === address.sheet);
+  const index = snapshot.sheets.findIndex((sheet) => sheet.id === address.sheet);
   if (index < 0) throw invalid(`Unknown sheet ID: ${address.sheet}`);
   return snapshot.value[index]!;
 }
@@ -182,7 +175,7 @@ function createStableHandle<Runtime extends TegoSheetHandleRuntime>(
       const capture = authority.capture();
       const { runtime } = capture;
       const before = runtime.controller.getSnapshot();
-      const removedIndex = before.sheets.findIndex(item => item.id === sheet);
+      const removedIndex = before.sheets.findIndex((item) => item.id === sheet);
       runtime.dispatcher.dispatchRef({ type: 'delete-sheet', sheet }, 'ref');
       if (runtime.activeSheet !== sheet) return;
       const after = runtime.controller.getSnapshot();
@@ -197,7 +190,7 @@ function createStableHandle<Runtime extends TegoSheetHandleRuntime>(
     },
     activateSheet(sheet) {
       const runtime = authority.require();
-      const index = runtime.controller.getSnapshot().sheets.findIndex(item => item.id === sheet);
+      const index = runtime.controller.getSnapshot().sheets.findIndex((item) => item.id === sheet);
       if (index < 0) throw invalid(`Unknown sheet ID: ${sheet}`);
       authority.activate(sheet);
       runtime.dispatcher.emitActiveSheetChange({ sheet, index, source: 'ref' });

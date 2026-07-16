@@ -22,16 +22,20 @@ function sortedSheet(
     rows: {
       len: values.length + 1,
       0: { cells: { 0: { text: 'Value' } } },
-      ...Object.fromEntries(values.map((text, index) => [index + 1, {
-        cells: { 0: { text } },
-      }])),
+      ...Object.fromEntries(
+        values.map((text, index) => [
+          index + 1,
+          {
+            cells: { 0: { text } },
+          },
+        ]),
+      ),
     },
     cols: { len: 1 },
     autofilter: {
       ref: `A1:A${values.length + 1}`,
-      filters: filterValues === undefined
-        ? []
-        : [{ ci: 0, operator: 'in', value: [...filterValues] }],
+      filters:
+        filterValues === undefined ? [] : [{ ci: 0, operator: 'in', value: [...filterValues] }],
       sort: { ci: 0, order },
     },
   };
@@ -42,8 +46,9 @@ describe('sorted row geometry', () => {
     const model = createSheetGridModel(sortedSheet('asc'));
     const viewport = createViewportMetrics(model, { width: 200, height: 180 });
 
-    expect(Array.from({ length: 5 }, (_, visual) => model.logicalRowAtVisualIndex(visual)))
-      .toEqual([0, 2, 3, 1, 4]);
+    expect(Array.from({ length: 5 }, (_, visual) => model.logicalRowAtVisualIndex(visual))).toEqual(
+      [0, 2, 3, 1, 4],
+    );
     expect(model.visualIndexOfRow(2)).toBe(1);
     expect(model.visualIndexOfRow(3)).toBe(2);
     expect(model.logicalRowRange(1, 3)).toEqual([1, 3]);
@@ -55,8 +60,9 @@ describe('sorted row geometry', () => {
   it('maps descending order while retaining stable equal rows and empty-last behavior', () => {
     const model = createSheetGridModel(sortedSheet('desc'));
 
-    expect(Array.from({ length: 5 }, (_, visual) => model.logicalRowAtVisualIndex(visual)))
-      .toEqual([0, 1, 2, 3, 4]);
+    expect(Array.from({ length: 5 }, (_, visual) => model.logicalRowAtVisualIndex(visual))).toEqual(
+      [0, 1, 2, 3, 4],
+    );
     expect(model.visualIndexOfRow(1)).toBe(1);
     expect(model.visualIndexOfRow(4)).toBe(4);
   });
@@ -66,8 +72,9 @@ describe('sorted row geometry', () => {
     const model = createSheetGridModel(sheet);
     const viewport = createViewportMetrics(model, { width: 200, height: 180 });
 
-    expect(Array.from({ length: 5 }, (_, visual) => model.logicalRowAtVisualIndex(visual)))
-      .toEqual([0, 2, 3, 1, 4]);
+    expect(Array.from({ length: 5 }, (_, visual) => model.logicalRowAtVisualIndex(visual))).toEqual(
+      [0, 2, 3, 1, 4],
+    );
     expect(model.rowHeight(1)).toBe(0);
     expect(model.rowHeight(4)).toBe(0);
     expect(hitTest({ x: 70, y: 62 }, viewport)).toEqual({ row: 2, column: 0 });
@@ -90,9 +97,9 @@ describe('sorted row geometry', () => {
     harness.animationFrame.flush();
 
     const paintedValues = harness.operations
-      .filter(operation => operation.name === 'fillText')
-      .filter(operation => ['Value', 'a', 'b'].includes(String(operation.args[0])))
-      .map(operation => ({ text: operation.args[0], y: operation.args[2] }));
+      .filter((operation) => operation.name === 'fillText')
+      .filter((operation) => ['Value', 'a', 'b'].includes(String(operation.args[0])))
+      .map((operation) => ({ text: operation.args[0], y: operation.args[2] }));
     expect(paintedValues).toEqual([
       { text: 'Value', y: 37.5 },
       { text: 'a', y: 62.5 },
@@ -128,10 +135,15 @@ describe('sorted row geometry', () => {
       scroll: { x: 0, y: 50 },
     });
 
-    expect(rangeRect({
-      start: { row: 0, column: 0 },
-      end: { row: 2, column: 0 },
-    }, viewport)).toMatchObject({ top: 0, height: 75 });
+    expect(
+      rangeRect(
+        {
+          start: { row: 0, column: 0 },
+          end: { row: 2, column: 0 },
+        },
+        viewport,
+      ),
+    ).toMatchObject({ top: 0, height: 75 });
   });
 
   it('keeps invalid imported sort metadata inert', () => {
@@ -139,7 +151,8 @@ describe('sorted row geometry', () => {
     (sheet.autofilter as { ref: string }).ref = 'not-a-range';
     const model = createSheetGridModel(sheet);
 
-    expect(Array.from({ length: 5 }, (_, visual) => model.logicalRowAtVisualIndex(visual)))
-      .toEqual([0, 1, 2, 3, 4]);
+    expect(Array.from({ length: 5 }, (_, visual) => model.logicalRowAtVisualIndex(visual))).toEqual(
+      [0, 1, 2, 3, 4],
+    );
   });
 });

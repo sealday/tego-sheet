@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test';
 import { capture, openHarness, selectCell } from './support';
 
-test('@parity:formatting.shortcuts applies bold italic and underline through browser keymaps', async ({ page }) => {
+test('@parity:formatting.shortcuts applies bold italic and underline through browser keymaps', async ({
+  page,
+}) => {
   await openHarness(page);
   await selectCell(page, 1, 1);
   await page.keyboard.press('Control+b');
@@ -13,13 +15,19 @@ test('@parity:formatting.shortcuts applies bold italic and underline through bro
   await page.getByRole('button', { name: 'Strike' }).click();
   await page.getByLabel('Text color').evaluate((element, value) => {
     const input = element as HTMLInputElement;
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, String(value));
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(
+      input,
+      String(value),
+    );
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }, '#123456');
   await page.getByLabel('Fill color').evaluate((element, value) => {
     const input = element as HTMLInputElement;
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, String(value));
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(
+      input,
+      String(value),
+    );
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }, '#fedcba');
@@ -27,7 +35,7 @@ test('@parity:formatting.shortcuts applies bold italic and underline through bro
   await page.getByRole('combobox', { name: 'Vertical align' }).selectOption('middle');
   await page.getByRole('button', { name: 'Wrap text' }).click();
   await page.getByRole('combobox', { name: 'Borders' }).selectOption('outside');
-  const value = await capture(page) as Array<{
+  const value = (await capture(page)) as Array<{
     styles?: Array<Record<string, unknown>>;
     rows?: Record<string, { cells?: Record<string, { style?: number }> }>;
   }>;

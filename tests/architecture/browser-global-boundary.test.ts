@@ -24,7 +24,7 @@ const browserGlobals = new Set([
 function sourceFiles(): readonly string[] {
   return execFileSync('git', ['ls-files', '-z', 'src'], { cwd: root, encoding: 'utf8' })
     .split('\0')
-    .filter(file => /\.tsx?$/.test(file));
+    .filter((file) => /\.tsx?$/.test(file));
 }
 
 interface ListedTest {
@@ -46,15 +46,15 @@ interface ListedSuite {
   readonly suites?: readonly ListedSuite[];
 }
 
-function listedParityRegistrations(arguments_: readonly string[]): ReadonlyMap<string, ReadonlySet<string>> {
+function listedParityRegistrations(
+  arguments_: readonly string[],
+): ReadonlyMap<string, ReadonlySet<string>> {
   const cli = resolve(root, 'node_modules/@playwright/test/cli.js');
-  const output = execArchitectureChild(process.execPath, [
-    cli,
-    'test',
-    ...arguments_,
-    '--list',
-    '--reporter=json',
-  ], { cwd: root });
+  const output = execArchitectureChild(
+    process.execPath,
+    [cli, 'test', ...arguments_, '--list', '--reporter=json'],
+    { cwd: root },
+  );
   const report = JSON.parse(output) as {
     readonly errors: readonly unknown[];
     readonly suites: readonly ListedSuite[];
@@ -66,24 +66,33 @@ function listedParityRegistrations(arguments_: readonly string[]): ReadonlyMap<s
     for (const spec of suite.specs ?? []) {
       const key = `${spec.file}:${spec.line}:${spec.title}`;
       const existing = logicalSpecs.get(key);
-      logicalSpecs.set(key, existing === undefined ? spec : {
-        ...spec,
-        ok: existing.ok && spec.ok,
-        tests: [...existing.tests, ...spec.tests],
-      });
+      logicalSpecs.set(
+        key,
+        existing === undefined
+          ? spec
+          : {
+              ...spec,
+              ok: existing.ok && spec.ok,
+              tests: [...existing.tests, ...spec.tests],
+            },
+      );
     }
     for (const child of suite.suites ?? []) visit(child);
   };
   for (const suite of report.suites) visit(suite);
   for (const [key, spec] of logicalSpecs) {
-    const parityTags = spec.tags.filter(tag => tag.startsWith('parity:'));
+    const parityTags = spec.tags.filter((tag) => tag.startsWith('parity:'));
     expect(parityTags, key).toHaveLength(1);
     expect(spec.ok, key).toBe(true);
     expect(spec.tests.length, key).toBeGreaterThan(0);
-    expect(spec.tests.every(test => (
-      test.expectedStatus === 'passed'
-      && test.annotations.every(annotation => !['skip', 'fixme'].includes(annotation.type))
-    )), key).toBe(true);
+    expect(
+      spec.tests.every(
+        (test) =>
+          test.expectedStatus === 'passed' &&
+          test.annotations.every((annotation) => !['skip', 'fixme'].includes(annotation.type)),
+      ),
+      key,
+    ).toBe(true);
     const id = parityTags[0]!.slice('parity:'.length);
     const entries = registrations.get(id) ?? new Set<string>();
     entries.add(key);
@@ -97,30 +106,34 @@ type BrowserAlias = string | typeof globalObject;
 
 function staticName(node: ts.Node | undefined): string | null {
   if (
-    node !== undefined
-    && (ts.isIdentifier(node) || ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
-  ) return node.text;
+    node !== undefined &&
+    (ts.isIdentifier(node) || ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
+  )
+    return node.text;
   return null;
 }
 
 function decoratorsOf(node: ts.Node): readonly ts.Decorator[] {
-  return ts.canHaveDecorators(node) ? ts.getDecorators(node) ?? [] : [];
+  return ts.canHaveDecorators(node) ? (ts.getDecorators(node) ?? []) : [];
 }
 
 function isAmbient(node: ts.Node): boolean {
-  return ts.canHaveModifiers(node)
-    && (ts.getModifiers(node) ?? []).some(modifier => modifier.kind === ts.SyntaxKind.DeclareKeyword);
+  return (
+    ts.canHaveModifiers(node) &&
+    (ts.getModifiers(node) ?? []).some((modifier) => modifier.kind === ts.SyntaxKind.DeclareKeyword)
+  );
 }
 
 function unwrapped(expression: ts.Expression): ts.Expression {
   let current = expression;
   while (
-    ts.isParenthesizedExpression(current)
-    || ts.isAsExpression(current)
-    || ts.isTypeAssertionExpression(current)
-    || ts.isNonNullExpression(current)
-    || ts.isSatisfiesExpression(current)
-  ) current = current.expression;
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isNonNullExpression(current) ||
+    ts.isSatisfiesExpression(current)
+  )
+    current = current.expression;
   return current;
 }
 
@@ -129,11 +142,13 @@ function invokedFunctionFromCallee(
 ): ts.FunctionExpression | ts.ArrowFunction | null {
   let callee = unwrapped(expression);
   if (
-    (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee))
-    && ['apply', 'call'].includes(staticName(
-      ts.isPropertyAccessExpression(callee) ? callee.name : callee.argumentExpression,
-    ) ?? '')
-  ) callee = unwrapped(callee.expression);
+    (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) &&
+    ['apply', 'call'].includes(
+      staticName(ts.isPropertyAccessExpression(callee) ? callee.name : callee.argumentExpression) ??
+        '',
+    )
+  )
+    callee = unwrapped(callee.expression);
   return ts.isFunctionExpression(callee) || ts.isArrowFunction(callee) ? callee : null;
 }
 
@@ -143,7 +158,8 @@ function visitDecoratorExpression(
   visitor: (child: ts.Node) => void,
 ): void {
   const applied = unwrapped(decorator.expression);
-  if (ts.isFunctionExpression(applied) || ts.isArrowFunction(applied)) invokedFunctions.add(applied);
+  if (ts.isFunctionExpression(applied) || ts.isArrowFunction(applied))
+    invokedFunctions.add(applied);
   visitor(decorator.expression);
 }
 
@@ -186,7 +202,8 @@ function forEachEagerChild(
       for (const decorator of decoratorsOf(member)) {
         visitDecoratorExpression(decorator, invokedFunctions, visitor);
       }
-      if (member.name !== undefined && ts.isComputedPropertyName(member.name)) visitor(member.name.expression);
+      if (member.name !== undefined && ts.isComputedPropertyName(member.name))
+        visitor(member.name.expression);
       if (ts.isFunctionLike(member)) {
         for (const parameter of member.parameters) {
           for (const decorator of decoratorsOf(parameter)) {
@@ -194,10 +211,13 @@ function forEachEagerChild(
           }
         }
       }
-      const isStatic = (ts.canHaveModifiers(member) ? ts.getModifiers(member) : undefined)
-        ?.some(modifier => modifier.kind === ts.SyntaxKind.StaticKeyword) ?? false;
+      const isStatic =
+        (ts.canHaveModifiers(member) ? ts.getModifiers(member) : undefined)?.some(
+          (modifier) => modifier.kind === ts.SyntaxKind.StaticKeyword,
+        ) ?? false;
       if (!isStatic) continue;
-      if (ts.isPropertyDeclaration(member) && member.initializer !== undefined) visitor(member.initializer);
+      if (ts.isPropertyDeclaration(member) && member.initializer !== undefined)
+        visitor(member.initializer);
       if (ts.isClassStaticBlockDeclaration(member)) visitor(member);
     }
     return;
@@ -206,8 +226,13 @@ function forEachEagerChild(
 }
 
 function eagerBrowserGlobalsFromSource(source: string, file: string): readonly string[] {
-  const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true,
-    file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const sourceFile = ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
   interface Binding {
     readonly aliases: Set<BrowserAlias>;
   }
@@ -222,26 +247,27 @@ function eagerBrowserGlobalsFromSource(source: string, file: string): readonly s
   const invokedFunctions = new WeakSet<ts.FunctionExpression | ts.ArrowFunction>();
   const buildScopes = (node: ts.Node, parent: Scope): void => {
     if (ts.isTypeNode(node)) return;
-    const blockScope = ts.isBlock(node)
-      || ts.isCaseBlock(node)
-      || ts.isCatchClause(node)
-      || ts.isForStatement(node)
-      || ts.isForInStatement(node)
-      || ts.isForOfStatement(node)
-      || ts.isClassDeclaration(node)
-      || ts.isClassExpression(node);
+    const blockScope =
+      ts.isBlock(node) ||
+      ts.isCaseBlock(node) ||
+      ts.isCatchClause(node) ||
+      ts.isForStatement(node) ||
+      ts.isForInStatement(node) ||
+      ts.isForOfStatement(node) ||
+      ts.isClassDeclaration(node) ||
+      ts.isClassExpression(node);
     const varScope = ts.isFunctionLike(node) || ts.isClassStaticBlockDeclaration(node);
     const kind = varScope ? 'var' : blockScope ? 'block' : null;
     const scope: Scope = kind === null ? parent : { bindings: new Map(), kind, parent };
     scopes.set(node, scope);
-    forEachEagerChild(node, invokedFunctions, child => buildScopes(child, scope));
+    forEachEagerChild(node, invokedFunctions, (child) => buildScopes(child, scope));
   };
   buildScopes(sourceFile, rootScope);
   const visit = (node: ts.Node, visitor: (current: ts.Node, scope: Scope) => void): void => {
     if (ts.isTypeNode(node)) return;
     const scope = scopes.get(node)!;
     visitor(node, scope);
-    forEachEagerChild(node, invokedFunctions, child => visit(child, visitor));
+    forEachEagerChild(node, invokedFunctions, (child) => visit(child, visitor));
   };
   const declareName = (scope: Scope, name: string): Binding => {
     const existing = scope.bindings.get(name);
@@ -263,7 +289,8 @@ function eagerBrowserGlobalsFromSource(source: string, file: string): readonly s
   const variableScope = (node: ts.VariableDeclaration, scope: Scope): Scope => {
     if (ts.isCatchClause(node.parent)) return scope;
     const declarationList = ts.isVariableDeclarationList(node.parent) ? node.parent : null;
-    if (declarationList !== null && (declarationList.flags & ts.NodeFlags.BlockScoped) !== 0) return scope;
+    if (declarationList !== null && (declarationList.flags & ts.NodeFlags.BlockScoped) !== 0)
+      return scope;
     let owner = scope;
     while (owner.kind === 'block' && owner.parent !== null) owner = owner.parent;
     return owner;
@@ -271,24 +298,23 @@ function eagerBrowserGlobalsFromSource(source: string, file: string): readonly s
   visit(sourceFile, (node, scope) => {
     if (ts.isVariableDeclaration(node)) declare(variableScope(node, scope), node.name);
     if (ts.isParameter(node)) declare(scope, node.name);
-    if (ts.isFunctionExpression(node) && node.name !== undefined) declareName(scope, node.name.text);
+    if (ts.isFunctionExpression(node) && node.name !== undefined)
+      declareName(scope, node.name.text);
     if (ts.isClassExpression(node) && node.name !== undefined) declareName(scope, node.name.text);
     if (
-      (ts.isFunctionDeclaration(node)
-        || ts.isClassDeclaration(node)
-        || ts.isEnumDeclaration(node)
-        || ts.isImportClause(node)
-        || ts.isImportEqualsDeclaration(node)
-        || ts.isNamespaceImport(node)
-        || ts.isImportSpecifier(node))
-      && node.name !== undefined
+      (ts.isFunctionDeclaration(node) ||
+        ts.isClassDeclaration(node) ||
+        ts.isEnumDeclaration(node) ||
+        ts.isImportClause(node) ||
+        ts.isImportEqualsDeclaration(node) ||
+        ts.isNamespaceImport(node) ||
+        ts.isImportSpecifier(node)) &&
+      node.name !== undefined
     ) {
-      const owner = (
-        (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node))
-        && scope.parent !== null
-      )
-        ? scope.parent
-        : scope;
+      const owner =
+        (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) && scope.parent !== null
+          ? scope.parent
+          : scope;
       declareName(owner, node.name.text);
       if (ts.isClassDeclaration(node)) declareName(scope, node.name.text);
     }
@@ -304,7 +330,8 @@ function eagerBrowserGlobalsFromSource(source: string, file: string): readonly s
     if (ts.isIdentifier(expression)) {
       const binding = lookup(scope, expression.text);
       if (binding !== undefined) return binding.aliases;
-      if (expression.text === 'globalThis' || expression.text === 'window') return new Set([globalObject]);
+      if (expression.text === 'globalThis' || expression.text === 'window')
+        return new Set([globalObject]);
       return browserGlobals.has(expression.text) ? new Set([expression.text]) : new Set();
     }
     if (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) {
@@ -325,9 +352,12 @@ function eagerBrowserGlobalsFromSource(source: string, file: string): readonly s
     if (ts.isCallExpression(expression)) {
       const binder = expression.expression;
       if (
-        (ts.isPropertyAccessExpression(binder) || ts.isElementAccessExpression(binder))
-        && staticName(ts.isPropertyAccessExpression(binder) ? binder.name : binder.argumentExpression) === 'bind'
-      ) return aliasesFor(binder.expression, scope);
+        (ts.isPropertyAccessExpression(binder) || ts.isElementAccessExpression(binder)) &&
+        staticName(
+          ts.isPropertyAccessExpression(binder) ? binder.name : binder.argumentExpression,
+        ) === 'bind'
+      )
+        return aliasesFor(binder.expression, scope);
     }
     return new Set();
   };
@@ -371,9 +401,9 @@ function eagerBrowserGlobalsFromSource(source: string, file: string): readonly s
           bind(name === null ? undefined : declarationScope.bindings.get(name), aliases);
         }
       } else if (
-        ts.isBinaryExpression(node)
-        && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
-        && ts.isIdentifier(node.left)
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isIdentifier(node.left)
       ) {
         bind(lookup(scope, node.left.text), aliasesFor(node.right, scope));
       }
@@ -389,14 +419,16 @@ function eagerBrowserGlobalsFromSource(source: string, file: string): readonly s
     if (ts.isIdentifier(node)) {
       const parent = node.parent;
       if (
-        (ts.isPropertyAccessExpression(parent) && parent.name === node)
-        || (ts.isVariableDeclaration(parent) && parent.name === node)
-        || (ts.isBindingElement(parent) && (parent.name === node || parent.propertyName === node))
-        || (ts.isPropertyAssignment(parent) && parent.name === node)
-      ) return;
+        (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
+        (ts.isVariableDeclaration(parent) && parent.name === node) ||
+        (ts.isBindingElement(parent) && (parent.name === node || parent.propertyName === node)) ||
+        (ts.isPropertyAssignment(parent) && parent.name === node)
+      )
+        return;
     }
     for (const alias of aliasesFor(node, scope)) {
-      if (alias === globalObject && ts.isIdentifier(node) && node.text === 'window') found.add('window');
+      if (alias === globalObject && ts.isIdentifier(node) && node.text === 'window')
+        found.add('window');
       else if (alias !== globalObject) found.add(alias);
     }
   });
@@ -414,7 +446,8 @@ it('does not read browser globals while evaluating source modules', () => {
 });
 
 it('detects eager browser access through global, property, and destructured aliases', () => {
-  const found = eagerBrowserGlobalsFromSource(`
+  const found = eagerBrowserGlobalsFromSource(
+    `
     const browser = globalThis;
     const { document: doc, requestAnimationFrame: raf } = browser;
     const make = doc.createElement.bind(doc);
@@ -425,7 +458,9 @@ it('detects eager browser access through global, property, and destructured alia
     raf(() => undefined);
     storage.getItem('key');
     navigation.userAgent;
-  `, 'probe.ts');
+  `,
+    'probe.ts',
+  );
 
   expect([...found].sort()).toEqual([
     'document',
@@ -434,37 +469,60 @@ it('detects eager browser access through global, property, and destructured alia
     'requestAnimationFrame',
     'window',
   ]);
-  expect(eagerBrowserGlobalsFromSource(`
+  expect(
+    eagerBrowserGlobalsFromSource(
+      `
     const globalThis = { document: localDocument };
     globalThis.document;
-  `, 'shadowed.ts')).toEqual([]);
+  `,
+      'shadowed.ts',
+    ),
+  ).toEqual([]);
 });
 
 it('keeps browser shadowing lexical instead of suppressing outer global reads', () => {
-  expect(eagerBrowserGlobalsFromSource(`
+  expect(
+    eagerBrowserGlobalsFromSource(
+      `
     { const document = localDocument; }
     document.createElement('div');
-  `, 'block-shadow.ts')).toEqual(['document']);
+  `,
+      'block-shadow.ts',
+    ),
+  ).toEqual(['document']);
 
-  expect(eagerBrowserGlobalsFromSource(`
+  expect(
+    eagerBrowserGlobalsFromSource(
+      `
     const browser = globalThis;
     {
       const browser = localBrowser;
       browser.document.createElement('local');
     }
     browser.document.createElement('global');
-  `, 'nested-shadow.ts')).toEqual(['document']);
+  `,
+      'nested-shadow.ts',
+    ),
+  ).toEqual(['document']);
 
-  expect(eagerBrowserGlobalsFromSource(`
+  expect(
+    eagerBrowserGlobalsFromSource(
+      `
     {
       const document = localDocument;
       document.createElement('local');
     }
-  `, 'local-only.ts')).toEqual([]);
+  `,
+      'local-only.ts',
+    ),
+  ).toEqual([]);
 });
 
 it('terminates and conservatively tracks conflicting browser aliases per lexical binding', () => {
-  expect([...eagerBrowserGlobalsFromSource(`
+  expect(
+    [
+      ...eagerBrowserGlobalsFromSource(
+        `
     let browserValue = document;
     browserValue = navigator;
     {
@@ -472,62 +530,108 @@ it('terminates and conservatively tracks conflicting browser aliases per lexical
       browserValue.location;
     }
     browserValue.location;
-  `, 'browser-conflict.ts')].sort()).toEqual(['document', 'navigator']);
+  `,
+        'browser-conflict.ts',
+      ),
+    ].sort(),
+  ).toEqual(['document', 'navigator']);
 });
 
 it('models eager execution paths without entering lazy or ambient declarations', () => {
-  expect(eagerBrowserGlobalsFromSource(`
+  expect(
+    eagerBrowserGlobalsFromSource(
+      `
     (() => document.createElement('div'))();
-  `, 'iife.ts')).toEqual(['document']);
+  `,
+      'iife.ts',
+    ),
+  ).toEqual(['document']);
 
-  expect(eagerBrowserGlobalsFromSource(`
+  expect(
+    eagerBrowserGlobalsFromSource(
+      `
     class ComputedName {
       [navigator.userAgent]() {}
     }
-  `, 'computed-class-name.ts')).toEqual(['navigator']);
+  `,
+      'computed-class-name.ts',
+    ),
+  ).toEqual(['navigator']);
 
-  expect(eagerBrowserGlobalsFromSource(`
+  expect(
+    eagerBrowserGlobalsFromSource(
+      `
     @register(document.createElement('div'))
     class Decorated {}
-  `, 'decorator.ts')).toEqual(['document']);
+  `,
+      'decorator.ts',
+    ),
+  ).toEqual(['document']);
 
-  expect(eagerBrowserGlobalsFromSource(`
+  expect(
+    eagerBrowserGlobalsFromSource(
+      `
     function lazyFunction() { document.createElement('div'); }
     const lazyArrow = () => navigator.userAgent;
     (function document() { document(); })();
-  `, 'lazy-functions.ts')).toEqual([]);
+  `,
+      'lazy-functions.ts',
+    ),
+  ).toEqual([]);
 
-  expect(eagerBrowserGlobalsFromSource(`
+  expect(
+    eagerBrowserGlobalsFromSource(
+      `
     declare const document: Document;
     declare function factory(value: typeof navigator): void;
     declare class Ambient {
       [document.createElement('div')]: string;
     }
-  `, 'ambient.ts')).toEqual([]);
+  `,
+      'ambient.ts',
+    ),
+  ).toEqual([]);
 });
 
 it('invokes inline arrow and function decorators during class evaluation', () => {
-  expect(eagerBrowserGlobalsFromSource(`
+  expect(
+    eagerBrowserGlobalsFromSource(
+      `
     @((target: unknown) => { document.createElement('div'); })
     class ArrowDecorated {}
 
     @(function (_target: unknown) { navigator.userAgent; })
     class FunctionDecorated {}
-  `, 'inline-decorators.ts')).toEqual(['document', 'navigator']);
+  `,
+      'inline-decorators.ts',
+    ),
+  ).toEqual(['document', 'navigator']);
 
-  expect(eagerBrowserGlobalsFromSource(`
+  expect(
+    eagerBrowserGlobalsFromSource(
+      `
     const lazyArrow = (_target: unknown) => document.createElement('div');
     const lazyFunction = function (_target: unknown) { navigator.userAgent; };
-  `, 'unapplied-decorators.ts')).toEqual([]);
+  `,
+      'unapplied-decorators.ts',
+    ),
+  ).toEqual([]);
 });
 
 it('models wrapped invocation and class-local execution scopes', () => {
-  expect(eagerBrowserGlobalsFromSource(`
+  expect(
+    eagerBrowserGlobalsFromSource(
+      `
     (function () { document.createElement('div'); }).call(undefined);
     ((() => navigator.userAgent) as () => string)();
-  `, 'wrapped-iife.ts')).toEqual(['document', 'navigator']);
+  `,
+      'wrapped-iife.ts',
+    ),
+  ).toEqual(['document', 'navigator']);
 
-  expect(eagerBrowserGlobalsFromSource(`
+  expect(
+    eagerBrowserGlobalsFromSource(
+      `
     class StaticShadow {
       static {
         var document = localDocument;
@@ -535,20 +639,27 @@ it('models wrapped invocation and class-local execution scopes', () => {
       }
     }
     document.createElement('global');
-  `, 'static-block-var.ts')).toEqual(['document']);
+  `,
+      'static-block-var.ts',
+    ),
+  ).toEqual(['document']);
 
-  expect(eagerBrowserGlobalsFromSource(`
+  expect(
+    eagerBrowserGlobalsFromSource(
+      `
     const LocalClass = class document {
       static value = document.title;
     };
-  `, 'named-class-expression.ts')).toEqual([]);
+  `,
+      'named-class-expression.ts',
+    ),
+  ).toEqual([]);
 });
 
 it('[ARCH-9] imports the public source entry without creating browser globals', async () => {
-  const before = new Map([...browserGlobals].map(name => [
-    name,
-    Object.getOwnPropertyDescriptor(globalThis, name),
-  ]));
+  const before = new Map(
+    [...browserGlobals].map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]),
+  );
 
   await import('../../src');
 
@@ -557,19 +668,25 @@ it('[ARCH-9] imports the public source entry without creating browser globals', 
   }
 });
 
-it('[ARCH-8] lists an enabled Playwright registration for every browser and visual assertion', () => {
-  const lanes = {
-    browser: listedParityRegistrations(['tests/browser']),
-    visual: listedParityRegistrations(['--config', 'playwright.visual.config.ts']),
-  };
-  for (const lane of ['browser', 'visual'] as const) {
-    const declared = parityManifest.flatMap(row => {
-      const evidence = row[lane];
-      return 'assertions' in evidence ? evidence.assertions : [];
-    }).sort();
-    expect([...lanes[lane].keys()].sort(), `${lane} registration IDs`).toEqual(declared);
-    for (const id of declared) {
-      expect(lanes[lane].get(id)?.size ?? 0, `${lane}:${id}`).toBeGreaterThanOrEqual(1);
+it(
+  '[ARCH-8] lists an enabled Playwright registration for every browser and visual assertion',
+  () => {
+    const lanes = {
+      browser: listedParityRegistrations(['tests/browser']),
+      visual: listedParityRegistrations(['--config', 'playwright.visual.config.ts']),
+    };
+    for (const lane of ['browser', 'visual'] as const) {
+      const declared = parityManifest
+        .flatMap((row) => {
+          const evidence = row[lane];
+          return 'assertions' in evidence ? evidence.assertions : [];
+        })
+        .sort();
+      expect([...lanes[lane].keys()].sort(), `${lane} registration IDs`).toEqual(declared);
+      for (const id of declared) {
+        expect(lanes[lane].get(id)?.size ?? 0, `${lane}:${id}`).toBeGreaterThanOrEqual(1);
+      }
     }
-  }
-}, ARCHITECTURE_TEST_TIMEOUT_MS);
+  },
+  ARCHITECTURE_TEST_TIMEOUT_MS,
+);

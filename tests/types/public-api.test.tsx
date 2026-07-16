@@ -182,9 +182,9 @@ describe('the public type contract', () => {
     const absentCell: JsonValue | undefined = cells[99];
     const firstColumn: JsonValue | undefined = columns[0];
     const absentColumn: JsonValue | undefined = columns[99];
-    const undefinedRow: typeof rows[99] = undefined;
-    const undefinedCell: typeof cells[99] = undefined;
-    const undefinedColumn: typeof columns[99] = undefined;
+    const undefinedRow: (typeof rows)[99] = undefined;
+    const undefinedCell: (typeof cells)[99] = undefined;
+    const undefinedColumn: (typeof columns)[99] = undefined;
 
     expectTypeOf(firstRow).toMatchTypeOf<JsonValue | undefined>();
     expectTypeOf(absentRow).toMatchTypeOf<JsonValue | undefined>();
@@ -282,8 +282,16 @@ describe('the public type contract', () => {
     };
     const filter: FilterDefinition = { column: 0, operator: 'in', value: ['', 'open'] };
     const borderModes: readonly BorderMode[] = [
-      'none', 'all', 'inside', 'outside', 'horizontal', 'vertical',
-      'top', 'bottom', 'left', 'right',
+      'none',
+      'all',
+      'inside',
+      'outside',
+      'horizontal',
+      'vertical',
+      'top',
+      'bottom',
+      'left',
+      'right',
     ];
     const actions: readonly ToolbarAction[] = [
       { type: 'undo' },
@@ -352,8 +360,13 @@ describe('the public type contract', () => {
     expectTypeOf(gridOnlyOptions).toEqualTypeOf<SheetOptions>();
     expectTypeOf(partialNestedOptions).toEqualTypeOf<SheetOptions>();
 
-    // @ts-expect-error serialized legacy operators do not make invalid command rules legal
-    const invalidRule: ValidationRule = { mode: 'cell', type: 'list', required: false, operator: 'in' };
+    const invalidRule: ValidationRule = {
+      mode: 'cell',
+      type: 'list',
+      required: false,
+      // @ts-expect-error serialized legacy operators do not make invalid command rules legal
+      operator: 'in',
+    };
     // @ts-expect-error old action names are not part of the action union
     const invalidAction: ToolbarAction = { type: 'format-bold' };
     // @ts-expect-error sorting requires an approved order

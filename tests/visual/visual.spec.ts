@@ -1,11 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { visualFixtures } from './fixtures';
 import { namedMasks } from './masks';
-import {
-  geometryParityToken,
-  printableCellsParityToken,
-  visualParityByFixture,
-} from './parity';
+import { geometryParityToken, printableCellsParityToken, visualParityByFixture } from './parity';
 
 interface Rect {
   readonly height: number;
@@ -34,7 +30,10 @@ async function openFixture(page: Page, name: string): Promise<void> {
 }
 
 function expectCoordinate(actual: number, expected: number, label: string): void {
-  expect(Math.abs(actual - expected), `${label}: expected ${expected}, received ${actual}`).toBeLessThanOrEqual(1);
+  expect(
+    Math.abs(actual - expected),
+    `${label}: expected ${expected}, received ${actual}`,
+  ).toBeLessThanOrEqual(1);
 }
 
 function expectRect(actual: Rect, expected: Rect, label: string): void {
@@ -50,24 +49,31 @@ async function recordedRect(
   color: string,
   expected: Rect,
 ): Promise<Rect> {
-  const candidate = await page.evaluate(({ expectedRect, recordName, targetColor }) => {
-    const records = recordName === 'fills'
-      ? window.__tegoVisual.fills.map(item => ({ ...item, color: item.fill }))
-      : window.__tegoVisual.strokeRects.map(item => ({ ...item, color: item.stroke }));
-    return records
-      .filter(item => item.color === targetColor)
-      .map(item => ({
-        distance: Math.abs(item.x - expectedRect.x)
-          + Math.abs(item.y - expectedRect.y)
-          + Math.abs(item.width - expectedRect.width)
-          + Math.abs(item.height - expectedRect.height),
-        height: item.height,
-        width: item.width,
-        x: item.x,
-        y: item.y,
-      }))
-      .sort((first, second) => first.distance - second.distance)[0] ?? null;
-  }, { expectedRect: expected, recordName: record, targetColor: color });
+  const candidate = await page.evaluate(
+    ({ expectedRect, recordName, targetColor }) => {
+      const records =
+        recordName === 'fills'
+          ? window.__tegoVisual.fills.map((item) => ({ ...item, color: item.fill }))
+          : window.__tegoVisual.strokeRects.map((item) => ({ ...item, color: item.stroke }));
+      return (
+        records
+          .filter((item) => item.color === targetColor)
+          .map((item) => ({
+            distance:
+              Math.abs(item.x - expectedRect.x) +
+              Math.abs(item.y - expectedRect.y) +
+              Math.abs(item.width - expectedRect.width) +
+              Math.abs(item.height - expectedRect.height),
+            height: item.height,
+            width: item.width,
+            x: item.x,
+            y: item.y,
+          }))
+          .sort((first, second) => first.distance - second.distance)[0] ?? null
+      );
+    },
+    { expectedRect: expected, recordName: record, targetColor: color },
+  );
   expect(candidate, `${record} did not contain ${color}`).not.toBeNull();
   if (candidate === null) throw new Error(`Missing ${color} geometry record`);
   return candidate;
@@ -114,8 +120,9 @@ async function prepareScreenshot(page: Page, fixture: string, touch: boolean): P
       await expect(editor).toHaveValue('');
       await editor.fill('Editing');
       await expect(editor).toHaveValue('Editing');
-      await editor.evaluate(element => {
-        if (!(element instanceof HTMLTextAreaElement)) throw new Error('Cell editor is not a textarea');
+      await editor.evaluate((element) => {
+        if (!(element instanceof HTMLTextAreaElement))
+          throw new Error('Cell editor is not a textarea');
         element.setSelectionRange(0, 0);
       });
       await page.evaluate(() => window.__tegoVisual.installCaretMask());
@@ -141,14 +148,24 @@ async function prepareScreenshot(page: Page, fixture: string, touch: boolean): P
   }
 }
 
-test(`${geometryParityToken} geometry gate is green before any screenshot comparison`, async ({ page }) => {
+test(`${geometryParityToken} geometry gate is green before any screenshot comparison`, async ({
+  page,
+}) => {
   await openFixture(page, 'default-workbook');
   const canvas = page.locator('.tego-sheet__canvas');
   const canvasBox = await canvas.boundingBox();
   if (canvasBox === null) throw new Error('Canvas has no box');
-  const canvasSize = await canvas.evaluate(element => ({ height: element.clientHeight, width: element.clientWidth }));
+  const canvasSize = await canvas.evaluate((element) => ({
+    height: element.clientHeight,
+    width: element.clientWidth,
+  }));
 
-  const cell = await recordedRect(page, 'fills', '#ffffff', { x: 61, y: 26, width: 98, height: 23 });
+  const cell = await recordedRect(page, 'fills', '#ffffff', {
+    x: 61,
+    y: 26,
+    width: 98,
+    height: 23,
+  });
   expectRect(cell, { x: 61, y: 26, width: 98, height: 23 }, 'cell A1 content');
 
   const columnHeader = await recordedRect(page, 'fills', '#f4f5f8', {
@@ -179,17 +196,21 @@ test(`${geometryParityToken} geometry gate is green before any screenshot compar
   await expect(editor).toBeVisible();
   const editorBox = await editor.boundingBox();
   if (editorBox === null) throw new Error('Editor has no box');
-  expectRect({
-    height: editorBox.height,
-    width: editorBox.width,
-    x: editorBox.x - canvasBox.x,
-    y: editorBox.y - canvasBox.y,
-  }, {
-    x: 60,
-    y: 25,
-    width: canvasSize.width < 500 ? 158 : 170,
-    height: 42.5,
-  }, 'editor');
+  expectRect(
+    {
+      height: editorBox.height,
+      width: editorBox.width,
+      x: editorBox.x - canvasBox.x,
+      y: editorBox.y - canvasBox.y,
+    },
+    {
+      x: 60,
+      y: 25,
+      width: canvasSize.width < 500 ? 158 : 170,
+      height: 42.5,
+    },
+    'editor',
+  );
   await page.keyboard.press('Escape');
 
   const contextPoint = { x: canvasBox.x + 110, y: canvasBox.y + 37.5 };
@@ -198,28 +219,35 @@ test(`${geometryParityToken} geometry gate is green before any screenshot compar
   await expect(overlay).toBeVisible();
   const overlayBox = await overlay.boundingBox();
   if (overlayBox === null) throw new Error('Context overlay has no box');
-  expectRect({
-    height: overlayBox.height,
-    width: overlayBox.width,
-    x: overlayBox.x - canvasBox.x,
-    y: overlayBox.y - canvasBox.y,
-  }, { x: 110, y: 37.5, width: 186, height: 490 }, 'context overlay');
+  expectRect(
+    {
+      height: overlayBox.height,
+      width: overlayBox.width,
+      x: overlayBox.x - canvasBox.x,
+      y: overlayBox.y - canvasBox.y,
+    },
+    { x: 110, y: 37.5, width: 186, height: 490 },
+    'context overlay',
+  );
 
   await openFixture(page, 'frozen-panes');
   const frozenCanvas = page.locator('.tego-sheet__canvas');
-  const frozenCanvasSize = await frozenCanvas.evaluate(element => ({
+  const frozenCanvasSize = await frozenCanvas.evaluate((element) => ({
     height: element.clientHeight,
     width: element.clientWidth,
   }));
-  const frozenLines = await page.evaluate(() => window.__tegoVisual.lines
-    .filter(line => line.stroke === 'rgba(75, 137, 255, 0.6)')
-    .slice(-2));
+  const frozenLines = await page.evaluate(() =>
+    window.__tegoVisual.lines.filter((line) => line.stroke === 'rgba(75, 137, 255, 0.6)').slice(-2),
+  );
   expect(frozenLines).toHaveLength(2);
-  const vertical = frozenLines.find(line => Math.abs(line.points[0]!.x - line.points[1]!.x) <= 1);
-  const horizontal = frozenLines.find(line => Math.abs(line.points[0]!.y - line.points[1]!.y) <= 1);
+  const vertical = frozenLines.find((line) => Math.abs(line.points[0]!.x - line.points[1]!.x) <= 1);
+  const horizontal = frozenLines.find(
+    (line) => Math.abs(line.points[0]!.y - line.points[1]!.y) <= 1,
+  );
   expect(vertical).toBeDefined();
   expect(horizontal).toBeDefined();
-  if (vertical === undefined || horizontal === undefined) throw new Error('Frozen pane lines are missing');
+  if (vertical === undefined || horizontal === undefined)
+    throw new Error('Frozen pane lines are missing');
   expectCoordinate(vertical.points[0]!.x, 160, 'frozen column x');
   expectCoordinate(vertical.points[0]!.y, 25, 'frozen column top');
   expectCoordinate(vertical.points[1]!.y, frozenCanvasSize.height, 'frozen column bottom');
@@ -229,12 +257,15 @@ test(`${geometryParityToken} geometry gate is green before any screenshot compar
 });
 
 for (const fixture of visualFixtures) {
-  test(`${visualParityByFixture[fixture.name]} visual fixture: ${fixture.name}`, async ({ page }, testInfo) => {
+  test(`${visualParityByFixture[fixture.name]} visual fixture: ${fixture.name}`, async ({
+    page,
+  }, testInfo) => {
     await openFixture(page, fixture.name);
     await prepareScreenshot(page, fixture.name, testInfo.project.name.startsWith('touch-'));
-    const screenshot = fixture.name === 'print-preview'
-      ? page.locator('[data-visual-print-page="1"]')
-      : page.locator('[data-tego-sheet]');
+    const screenshot =
+      fixture.name === 'print-preview'
+        ? page.locator('[data-visual-print-page="1"]')
+        : page.locator('[data-tego-sheet]');
     await expect(screenshot).toHaveScreenshot(`${fixture.name}.png`, {
       mask: [...namedMasks(page, fixture.masks ?? [])],
       ...(fixture.name === 'editing-overlays-menus'
@@ -244,7 +275,9 @@ for (const fixture of visualFixtures) {
   });
 }
 
-test(`${visualParityByFixture['editing-overlays-menus']} context menu from a public right-click interaction`, async ({ page }) => {
+test(`${visualParityByFixture['editing-overlays-menus']} context menu from a public right-click interaction`, async ({
+  page,
+}) => {
   await openFixture(page, 'editing-overlays-menus');
   const point = await cellCenter(page, 4, 0);
   await page.mouse.click(point.x, point.y, { button: 'right' });
@@ -252,7 +285,9 @@ test(`${visualParityByFixture['editing-overlays-menus']} context menu from a pub
   await expect(page.locator('[data-tego-sheet]')).toHaveScreenshot('context-menu.png');
 });
 
-test(`${printableCellsParityToken} printable cells are preserved while private cells are omitted`, async ({ page }) => {
+test(`${printableCellsParityToken} printable cells are preserved while private cells are omitted`, async ({
+  page,
+}) => {
   await openFixture(page, 'print-preview');
   await preparePrintPreview(page);
   const printSnapshot = await page.evaluate(() => window.__tegoVisual.printSnapshot);
@@ -262,12 +297,15 @@ test(`${printableCellsParityToken} printable cells are preserved while private c
   expect(printSnapshot?.texts).toContain('Print report');
   expect(printSnapshot?.texts).toContain('Visible');
   expect(printSnapshot?.texts).not.toContain('private');
-  expect(printSnapshot?.fills).toContainEqual(expect.objectContaining({
-    fill: '#e8f1ff',
-    height: 32,
-    width: 388,
-  }));
+  expect(printSnapshot?.fills).toContainEqual(
+    expect.objectContaining({
+      fill: '#e8f1ff',
+      height: 32,
+      width: 388,
+    }),
+  );
   expect(printSnapshot?.strokes).toBeGreaterThan(0);
-  await expect(page.locator('[data-visual-print-crop="printable-cells"]'))
-    .toHaveScreenshot('printable-cells-visual.png');
+  await expect(page.locator('[data-visual-print-crop="printable-cells"]')).toHaveScreenshot(
+    'printable-cells-visual.png',
+  );
 });

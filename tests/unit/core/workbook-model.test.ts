@@ -23,13 +23,7 @@ import {
   setRowHidden,
   synchronizeMergeAnchors,
 } from '../../../src/core';
-import type {
-  CellData,
-  CellRange,
-  CellStyle,
-  SheetData,
-  WorkbookInput,
-} from '../../../src/core';
+import type { CellData, CellRange, CellStyle, SheetData, WorkbookInput } from '../../../src/core';
 
 const range = (
   startRow: number,
@@ -56,8 +50,8 @@ describe('immutable workbook state and runtime sheet identity', () => {
     expect(renamed.sheets[0]?.data.name).toBe('Renamed');
 
     const replaced = renamed.replace([{ name: 'Renamed' }, { name: 'B' }]);
-    expect(replaced.sheets.map(sheet => sheet.id)).not.toContain(firstId);
-    expect(replaced.sheets.map(sheet => sheet.id)).not.toContain(secondId);
+    expect(replaced.sheets.map((sheet) => sheet.id)).not.toContain(firstId);
+    expect(replaced.sheets.map((sheet) => sheet.id)).not.toContain(secondId);
   });
 
   it('parses and isolates frozen caller data while preserving recursive extensions and falsy cache', () => {
@@ -100,7 +94,7 @@ describe('immutable workbook state and runtime sheet identity', () => {
     const id = added.sheets[0]!.id;
     const updated = added.update(
       id,
-      sheet => ({ ...sheet, vendor: { kept: true } }) as unknown as SheetData,
+      (sheet) => ({ ...sheet, vendor: { kept: true } }) as unknown as SheetData,
     );
     const renamed = updated.rename(id, 'Final');
     const deleted = renamed.delete(id);
@@ -126,21 +120,22 @@ describe('immutable workbook state and runtime sheet identity', () => {
 });
 
 describe('sparse row, column, and cell model helpers', () => {
-  const structuredSheet = (): SheetData => WorkbookState.from({
-    name: 'Sparse',
-    merges: ['A1:B2'],
-    rows: {
-      len: 4,
-      0: { cells: { 0: { text: 'top', merge: [1, 1] }, 1: { text: 'drop' } } },
-      2: { height: 0, hide: false, cells: { 1: { text: '=B3', value: 'cached' } } },
-      vendorRows: { falsy: false },
-    },
-    cols: {
-      len: 4,
-      2: { width: 0, hide: false, vendorColumn: '' },
-      vendorCols: [0, false],
-    },
-  }).sheets[0]!.data;
+  const structuredSheet = (): SheetData =>
+    WorkbookState.from({
+      name: 'Sparse',
+      merges: ['A1:B2'],
+      rows: {
+        len: 4,
+        0: { cells: { 0: { text: 'top', merge: [1, 1] }, 1: { text: 'drop' } } },
+        2: { height: 0, hide: false, cells: { 1: { text: '=B3', value: 'cached' } } },
+        vendorRows: { falsy: false },
+      },
+      cols: {
+        len: 4,
+        2: { width: 0, hide: false, vendorColumn: '' },
+        vendorCols: [0, false],
+      },
+    }).sheets[0]!.data;
 
   it('inserts and deletes rows with sparse metadata, formula references, lengths, and merge transforms', () => {
     const source = structuredSheet();
@@ -356,8 +351,9 @@ describe('sparse row, column, and cell model helpers', () => {
 
     const synced = synchronizeMergeAnchors(raw);
     expect(getCellData(synced, 1, 1)).toMatchObject({ text: 'anchor', merge: [1, 1] });
-    expect((synced.rows?.['1'] as { readonly cells: Record<string, CellData> }).cells['01'])
-      .toMatchObject({ text: 'extension cell', merge: [7, 7] });
+    expect(
+      (synced.rows!['1'] as { readonly cells: Record<string, CellData> }).cells['01'],
+    ).toMatchObject({ text: 'extension cell', merge: [7, 7] });
     expect(synced.rows?.['01']).toMatchObject({
       cells: { 1: { text: 'extension row', merge: [8, 8] } },
     });
@@ -366,7 +362,10 @@ describe('sparse row, column, and cell model helpers', () => {
 
 describe('styles and merges', () => {
   it('deduplicates styles at sheet scope and selects an isolated deep cascade', () => {
-    const defaultStyle = { color: 'black', font: { name: 'Arial', bold: false } } satisfies CellStyle;
+    const defaultStyle = {
+      color: 'black',
+      font: { name: 'Arial', bold: false },
+    } satisfies CellStyle;
     const source = WorkbookState.from({
       styles: [
         { color: 'blue', font: { bold: true }, vendor: { row: false } },
@@ -375,7 +374,11 @@ describe('styles and merges', () => {
       rows: { 1: { style: 0, cells: { 2: { style: 1 } } } },
       cols: { 2: { style: 0 } },
     }).sheets[0]!.data;
-    const found = addStyleToSheet(source, { font: { bold: true }, color: 'blue', vendor: { row: false } });
+    const found = addStyleToSheet(source, {
+      font: { bold: true },
+      color: 'blue',
+      vendor: { row: false },
+    });
     const added = addStyleToSheet(source, { underline: false, vendor: { new: 0 } });
     const selected = selectCellStyle(source, 1, 2, defaultStyle);
 
@@ -435,8 +438,9 @@ describe('styles and merges', () => {
     const merged = addMerge(source, range(0, 0, nearMaximum, nearMaximum));
 
     expect(merged.merges).toHaveLength(1);
-    expect(findMerge(merged, nearMaximum, nearMaximum))
-      .toEqual(range(0, 0, nearMaximum, nearMaximum));
+    expect(findMerge(merged, nearMaximum, nearMaximum)).toEqual(
+      range(0, 0, nearMaximum, nearMaximum),
+    );
     expect(getCellData(merged, 0, 0)).toEqual({
       text: 'anchor',
       merge: [nearMaximum, nearMaximum],

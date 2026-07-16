@@ -4,13 +4,15 @@ export interface AnimationFramePort {
 }
 
 function browserAnimationFrame(): AnimationFramePort {
-  if (typeof globalThis.requestAnimationFrame !== 'function'
-    || typeof globalThis.cancelAnimationFrame !== 'function') {
+  if (
+    typeof globalThis.requestAnimationFrame !== 'function' ||
+    typeof globalThis.cancelAnimationFrame !== 'function'
+  ) {
     throw new TypeError('AnimationFramePort is required outside a browser');
   }
   return {
-    request: callback => globalThis.requestAnimationFrame(callback),
-    cancel: id => globalThis.cancelAnimationFrame(id),
+    request: (callback) => globalThis.requestAnimationFrame(callback),
+    cancel: (id) => globalThis.cancelAnimationFrame(id),
   };
 }
 

@@ -33,11 +33,5 @@
     "scripts/**/*.ts",
     "*.config.ts"
   ],
-  "exclude": [
-    "dist",
-    "coverage",
-    "node_modules",
-    "playwright-report",
-    "test-results"
-  ]
+  "exclude": ["dist", "coverage", "node_modules", "playwright-report", "test-results"]
 }

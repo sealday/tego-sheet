@@ -9,9 +9,11 @@ const styleEntry = resolve(root, 'src/ui/styles/index.less');
 function selectors(css: string): readonly string[] {
   const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
   return [...withoutComments.matchAll(/([^{}]+)\{/g)]
-    .flatMap(match => (match[1] ?? '').trim().startsWith('@')
-      ? []
-      : (match[1] ?? '').split(',').map(value => value.trim()))
+    .flatMap((match) =>
+      (match[1] ?? '').trim().startsWith('@')
+        ? []
+        : (match[1] ?? '').split(',').map((value) => value.trim()),
+    )
     .filter(Boolean);
 }
 
@@ -24,7 +26,9 @@ it('keeps every emitted stylesheet selector beneath the tego-sheet namespace', a
   expect(emitted.length).toBeGreaterThan(0);
   for (const selector of emitted) {
     expect(selector, selector).toMatch(/^\.tego-sheet(?:[\s.#:[>+~]|$)/);
-    expect(selector, selector).not.toMatch(/^(?:html|body|button|input|select|textarea|label|fieldset)\b/i);
+    expect(selector, selector).not.toMatch(
+      /^(?:html|body|button|input|select|textarea|label|fieldset)\b/i,
+    );
   }
 });
 
@@ -46,7 +50,7 @@ it('renders toolbar icons as component-owned SVG without a global icon font', as
 
 it('keeps the demo on declared package imports instead of implementation paths', () => {
   const demoSources = ['demo/src/main.tsx', 'demo/src/app.tsx']
-    .map(file => readFileSync(resolve(root, file), 'utf8'))
+    .map((file) => readFileSync(resolve(root, file), 'utf8'))
     .join('\n');
 
   expect(demoSources).toMatch(/from ['"]tego-sheet['"]/);

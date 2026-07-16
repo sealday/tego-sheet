@@ -1,10 +1,5 @@
 import { act, cleanup, render, waitFor } from '@testing-library/react';
-import {
-  createRef,
-  startTransition,
-  StrictMode,
-  Suspense,
-} from 'react';
+import { createRef, startTransition, StrictMode, Suspense } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { TegoSheet, type TegoSheetError, type TegoSheetHandle } from '../../src';
 import { createCanvasHarness } from '../helpers/canvas-harness';
@@ -12,7 +7,10 @@ import { createCanvasHarness } from '../helpers/canvas-harness';
 beforeEach(() => {
   const context = createCanvasHarness().canvas.getContext('2d');
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => context);
-  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+  vi.stubGlobal(
+    'requestAnimationFrame',
+    vi.fn(() => 1),
+  );
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
 });
 
@@ -41,8 +39,7 @@ it('exposes every approved command and isolated query through one stable handle'
   );
   await waitFor(() => expect(ref.current).not.toBeNull());
   const handle = ref.current!;
-  const firstId = onActiveSheetChange.mock.lastCall?.[0].sheet
-    ?? handle.addSheet('temporary');
+  const firstId = onActiveSheetChange.mock.lastCall?.[0].sheet ?? handle.addSheet('temporary');
   if (handle.getValue().length > 1) handle.deleteSheet(firstId);
   const sheet = handle.addSheet('B');
 
@@ -125,28 +122,22 @@ it('reports ref print failures through the latest onError and propagates consume
     throw printFailure;
   });
   const rendered = render(
-    <TegoSheet
-      ref={ref}
-      defaultValue={[{ name: 'A' }]}
-      onError={error => first.push(error)}
-    />,
+    <TegoSheet ref={ref} defaultValue={[{ name: 'A' }]} onError={(error) => first.push(error)} />,
   );
   await waitFor(() => expect(ref.current).not.toBeNull());
   rendered.rerender(
-    <TegoSheet
-      ref={ref}
-      defaultValue={[]}
-      onError={error => latest.push(error)}
-    />,
+    <TegoSheet ref={ref} defaultValue={[]} onError={(error) => latest.push(error)} />,
   );
 
   expect(() => ref.current!.print()).not.toThrow();
   expect(first).toEqual([]);
-  expect(latest).toEqual([expect.objectContaining({
-    code: 'PRINT_FAILED',
-    recoverable: true,
-    cause: expect.objectContaining({ name: 'Error', message: 'printer offline' }),
-  })]);
+  expect(latest).toEqual([
+    expect.objectContaining({
+      code: 'PRINT_FAILED',
+      recoverable: true,
+      cause: expect.objectContaining({ name: 'Error', message: 'printer offline' }),
+    }),
+  ]);
 
   const consumerFailure = new Error('consumer onError failed');
   rendered.rerender(
@@ -170,7 +161,7 @@ it.each([
   const rendered = render(
     <TegoSheet
       defaultValue={value}
-      ref={next => {
+      ref={(next) => {
         if (next === null) return;
         handle = next;
         next.focus();
@@ -192,7 +183,7 @@ it('keeps callback-ref roots isolated across StrictMode teardown and unmount', (
     <StrictMode>
       <TegoSheet
         defaultValue={[]}
-        ref={next => {
+        ref={(next) => {
           attachments.push(next);
           if (next === null) return;
           handle = next;
@@ -207,9 +198,7 @@ it('keeps callback-ref roots isolated across StrictMode teardown and unmount', (
   rendered.unmount();
 
   expect(attachments.at(-1)).toBeNull();
-  expect(() => handle!.focus()).toThrowError(
-    expect.objectContaining({ code: 'INVALID_COMMAND' }),
-  );
+  expect(() => handle!.focus()).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
   expect(document.activeElement).not.toBe(root);
 });
 
@@ -229,7 +218,7 @@ it('does not attach an imperative root from an aborted render', () => {
         <TegoSheet
           key={props.pending ? 'pending' : 'committed'}
           defaultValue={[{ name: props.pending ? 'Pending' : 'Committed' }]}
-          ref={next => {
+          ref={(next) => {
             if (next === null) return;
             if (props.pending) pendingAttachments += 1;
             else committedHandle = next;

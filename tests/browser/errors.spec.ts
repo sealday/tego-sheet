@@ -9,11 +9,13 @@ interface ResourceCounts {
   readonly timers: number;
 }
 
-test('@parity:view.render-recovery routes a real Canvas frame failure through the public recovery channel', async ({ page }) => {
+test('@parity:view.render-recovery routes a real Canvas frame failure through the public recovery channel', async ({
+  page,
+}) => {
   await page.addInitScript(() => {
     const nativeClearRect = CanvasRenderingContext2D.prototype.clearRect;
     let failed = false;
-    CanvasRenderingContext2D.prototype.clearRect = function(x, y, width, height) {
+    CanvasRenderingContext2D.prototype.clearRect = function (x, y, width, height) {
       if (!failed) {
         failed = true;
         throw new Error('browser canvas clear failed');
@@ -29,12 +31,19 @@ test('@parity:view.render-recovery routes a real Canvas frame failure through th
   await expect(page.locator('[role="status"][data-error-code="RENDER_FAILED"]')).toBeVisible();
 });
 
-test('@parity:correction.resource-cleanup returns every owned browser resource to baseline', async ({ page }) => {
+test('@parity:correction.resource-cleanup returns every owned browser resource to baseline', async ({
+  page,
+}) => {
   await page.addInitScript(() => {
     const activeListeners = new Map<string, EventTarget>();
     const listenerIds = new WeakMap<object, number>();
     let nextListenerId = 1;
-    const key = (target: EventTarget, type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | AddEventListenerOptions) => {
+    const key = (
+      target: EventTarget,
+      type: string,
+      listener: EventListenerOrEventListenerObject | null,
+      options?: boolean | AddEventListenerOptions,
+    ) => {
       if (listener === null) return '';
       let id = listenerIds.get(listener as object);
       if (id === undefined) {
@@ -47,11 +56,11 @@ test('@parity:correction.resource-cleanup returns every owned browser resource t
     };
     const originalAdd = EventTarget.prototype.addEventListener;
     const originalRemove = EventTarget.prototype.removeEventListener;
-    EventTarget.prototype.addEventListener = function(type, listener, options) {
+    EventTarget.prototype.addEventListener = function (type, listener, options) {
       activeListeners.set(key(this, type, listener, options), this);
       return originalAdd.call(this, type, listener, options);
     };
-    EventTarget.prototype.removeEventListener = function(type, listener, options) {
+    EventTarget.prototype.removeEventListener = function (type, listener, options) {
       activeListeners.delete(key(this, type, listener, options));
       return originalRemove.call(this, type, listener, options);
     };
@@ -81,12 +90,13 @@ test('@parity:correction.resource-cleanup returns every owned browser resource t
     const nativeClearTimeout = window.clearTimeout.bind(window);
     window.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
       let id = 0;
-      const wrapped = typeof handler === 'function'
-        ? () => {
-          activeTimers.delete(id);
-          handler(...args);
-        }
-        : handler;
+      const wrapped =
+        typeof handler === 'function'
+          ? () => {
+              activeTimers.delete(id);
+              handler(...args);
+            }
+          : handler;
       id = nativeSetTimeout(wrapped, timeout);
       activeTimers.add(id);
       return id;
@@ -99,16 +109,16 @@ test('@parity:correction.resource-cleanup returns every owned browser resource t
     const activeFrames = new Set<number>();
     const nativeRequestFrame = window.requestAnimationFrame.bind(window);
     const nativeCancelFrame = window.cancelAnimationFrame.bind(window);
-    window.requestAnimationFrame = callback => {
+    window.requestAnimationFrame = (callback) => {
       let id = 0;
-      id = nativeRequestFrame(time => {
+      id = nativeRequestFrame((time) => {
         activeFrames.delete(id);
         callback(time);
       });
       activeFrames.add(id);
       return id;
     };
-    window.cancelAnimationFrame = id => {
+    window.cancelAnimationFrame = (id) => {
       activeFrames.delete(id);
       nativeCancelFrame(id);
     };
@@ -118,13 +128,9 @@ test('@parity:correction.resource-cleanup returns every owned browser resource t
     const nativeMapSet = Map.prototype.set;
     const nativeMapDelete = Map.prototype.delete;
     const nativeMapClear = Map.prototype.clear;
-    Map.prototype.set = function(key, value) {
+    Map.prototype.set = function (key, value) {
       const stack = new Error().stack ?? '';
-      if (
-        typeof value === 'function'
-        && stack.includes('subscription-store')
-        && !this.has(key)
-      ) {
+      if (typeof value === 'function' && stack.includes('subscription-store') && !this.has(key)) {
         const keys = trackedSubscriptions.get(this) ?? new Set<unknown>();
         keys.add(key);
         trackedSubscriptions.set(this, keys);
@@ -132,13 +138,13 @@ test('@parity:correction.resource-cleanup returns every owned browser resource t
       }
       return nativeMapSet.call(this, key, value);
     };
-    Map.prototype.delete = function(key) {
+    Map.prototype.delete = function (key) {
       const deleted = nativeMapDelete.call(this, key);
       const keys = trackedSubscriptions.get(this);
       if (deleted && keys?.delete(key) === true) subscriptions -= 1;
       return deleted;
     };
-    Map.prototype.clear = function() {
+    Map.prototype.clear = function () {
       const keys = trackedSubscriptions.get(this);
       if (keys !== undefined) {
         subscriptions -= keys.size;
@@ -149,29 +155,33 @@ test('@parity:correction.resource-cleanup returns every owned browser resource t
 
     (window as unknown as { __resourceCounts: () => ResourceCounts }).__resourceCounts = () => ({
       frames: activeFrames.size,
-      listeners: [...activeListeners.values()].filter(target => (
-        target === window
-        || target === document
-        || !(target instanceof Node)
-        || target.isConnected
-      )).length,
+      listeners: [...activeListeners.values()].filter(
+        (target) =>
+          target === window ||
+          target === document ||
+          !(target instanceof Node) ||
+          target.isConnected,
+      ).length,
       observers,
-      overlays: document.querySelectorAll([
-        '.tego-sheet__editor',
-        '.tego-sheet__context-menu',
-        '.tego-sheet__dialog',
-        '.tego-sheet__filter-menu',
-        '[data-tego-print-pages]',
-      ].join(',')).length,
+      overlays: document.querySelectorAll(
+        [
+          '.tego-sheet__editor',
+          '.tego-sheet__context-menu',
+          '.tego-sheet__dialog',
+          '.tego-sheet__filter-menu',
+          '[data-tego-print-pages]',
+        ].join(','),
+      ).length,
       subscriptions,
       timers: activeTimers.size,
     });
   });
   await page.goto('/?mounted=0');
   await expect(page.getByRole('button', { name: 'Mount sheet', exact: true })).toBeVisible();
-  const counts = () => page.evaluate(() => (
-    window as unknown as { __resourceCounts(): ResourceCounts }
-  ).__resourceCounts());
+  const counts = () =>
+    page.evaluate(() =>
+      (window as unknown as { __resourceCounts(): ResourceCounts }).__resourceCounts(),
+    );
   const baseline = await counts();
   await page.getByRole('button', { name: 'Mount sheet', exact: true }).click();
   await expect(page.locator('[data-tego-sheet]')).toHaveAttribute('data-mode', 'controlled');
@@ -207,7 +217,9 @@ test('@parity:correction.resource-cleanup returns every owned browser resource t
     });
     canvas.dispatchEvent(end);
     window.__tegoHarness.recalculateLayout();
-    const resources = (window as unknown as { __resourceCounts(): ResourceCounts }).__resourceCounts();
+    const resources = (
+      window as unknown as { __resourceCounts(): ResourceCounts }
+    ).__resourceCounts();
     window.__tegoHarness.unmount();
     return resources;
   });
@@ -215,12 +227,16 @@ test('@parity:correction.resource-cleanup returns every owned browser resource t
   expect(beforeUnmount.frames).toBeGreaterThan(baseline.frames);
   expect(beforeUnmount.overlays).toBeGreaterThan(baseline.overlays);
   await expect(page.locator('[data-tego-sheet]')).toHaveCount(0);
-  await expect(page.locator([
-    '.tego-sheet__editor',
-    '.tego-sheet__context-menu',
-    '.tego-sheet__dialog',
-    '.tego-sheet__filter-menu',
-    '[data-tego-print-pages]',
-  ].join(','))).toHaveCount(0);
+  await expect(
+    page.locator(
+      [
+        '.tego-sheet__editor',
+        '.tego-sheet__context-menu',
+        '.tego-sheet__dialog',
+        '.tego-sheet__filter-menu',
+        '[data-tego-print-pages]',
+      ].join(','),
+    ),
+  ).toHaveCount(0);
   await expect.poll(counts).toEqual(baseline);
 });

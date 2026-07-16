@@ -9,9 +9,9 @@ const visualMasks = readFileSync('tests/visual/masks.ts', 'utf8');
 const visualCss = readFileSync('tests/visual/harness/src/visual.css', 'utf8');
 const editingFixture = readFileSync('tests/visual/fixtures/editing-overlays-menus.ts', 'utf8');
 
-const requiredVisualIds = parityManifest.flatMap(row => (
-  'assertions' in row.visual ? row.visual.assertions : []
-));
+const requiredVisualIds = parityManifest.flatMap((row) =>
+  'assertions' in row.visual ? row.visual.assertions : [],
+);
 
 describe('visual regression release contract', () => {
   it('maps every declared visual parity assertion to an exact test title token', () => {
@@ -25,7 +25,7 @@ describe('visual regression release contract', () => {
     expect(visualHarness).toContain('data-visual-print-preview');
     expect(visualHarness).toContain('data-visual-print-page');
     expect(visualHarness).toContain('printSnapshot');
-    expect(visualParity).toContain("@parity:correction.printable-cells-visual");
+    expect(visualParity).toContain('@parity:correction.printable-cells-visual');
     expect(visualSpec).toContain("not.toContain('private')");
   });
 

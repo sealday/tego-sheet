@@ -14,8 +14,9 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  document.querySelectorAll('[data-tego-print-pages], [data-tego-print-style]')
-    .forEach(node => node.remove());
+  document
+    .querySelectorAll('[data-tego-print-pages], [data-tego-print-style]')
+    .forEach((node) => node.remove());
 });
 
 it('rolls back the style and host when host installation mutates before failing', () => {
@@ -26,8 +27,7 @@ it('rolls back the style and host when host installation mutates before failing'
     throw failure;
   });
 
-  expect(() => mountPrintPages(sheet, { paper: 'A4', orientation: 'portrait' }))
-    .toThrow(failure);
+  expect(() => mountPrintPages(sheet, { paper: 'A4', orientation: 'portrait' })).toThrow(failure);
 
   expect(document.querySelector('[data-tego-print-pages]')).toBeNull();
   expect(document.querySelector('[data-tego-print-style]')).toBeNull();
@@ -91,8 +91,7 @@ it('rolls back already hidden host siblings when isolation fails midway', () => 
     setAttribute(name, value);
   });
 
-  expect(() => mountPrintPages(sheet, { paper: 'A4', orientation: 'portrait' }))
-    .toThrow(failure);
+  expect(() => mountPrintPages(sheet, { paper: 'A4', orientation: 'portrait' })).toThrow(failure);
 
   expect(first.hasAttribute('hidden')).toBe(false);
   expect(second.hasAttribute('hidden')).toBe(false);

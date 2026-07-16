@@ -169,10 +169,15 @@ describe('DOM-free grid geometry', () => {
       width: 100,
       height: 25,
     });
-    expect(overlayAnchor({
-      start: { row: 0, column: 0 },
-      end: { row: 1, column: 1 },
-    }, metrics)).toEqual({
+    expect(
+      overlayAnchor(
+        {
+          start: { row: 0, column: 0 },
+          end: { row: 1, column: 1 },
+        },
+        metrics,
+      ),
+    ).toEqual({
       left: 60,
       top: 25,
       width: 120,
@@ -205,10 +210,14 @@ describe('DOM-free grid geometry', () => {
       start: { row: 0, column: 0 },
       end: { row: 9_999, column: 9_999 },
     });
-    expect(visibleCellRange(createViewportMetrics(model, {
-      ...size,
-      scroll: { x: 5e-8, y: 5e-8 },
-    }))).toEqual({
+    expect(
+      visibleCellRange(
+        createViewportMetrics(model, {
+          ...size,
+          scroll: { x: 5e-8, y: 5e-8 },
+        }),
+      ),
+    ).toEqual({
       // 5e-8 is one IEEE-754 step below offset(500), so modelAt(scroll) is 499.
       start: { row: 499, column: 499 },
       end: { row: 10_499, column: 10_499 },
@@ -342,10 +351,12 @@ describe('DOM-free grid geometry', () => {
     });
     expect(Number.isFinite(rowOffset(Number.MAX_SAFE_INTEGER, model))).toBe(true);
     expect(Number.isFinite(columnOffset(Number.MAX_SAFE_INTEGER, model))).toBe(true);
-    expect(() => createSheetGridModel(
-      { rows: { len: Number.MAX_SAFE_INTEGER } },
-      { defaultRowHeight: Number.MAX_VALUE },
-    )).toThrow(/finite extent/);
+    expect(() =>
+      createSheetGridModel(
+        { rows: { len: Number.MAX_SAFE_INTEGER } },
+        { defaultRowHeight: Number.MAX_VALUE },
+      ),
+    ).toThrow(/finite extent/);
   });
 
   it('keeps a finite sparse extent when a hidden override avoids fallback overflow', () => {

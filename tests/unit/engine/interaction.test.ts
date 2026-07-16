@@ -68,13 +68,15 @@ class FakeTarget {
 
 describe('client coordinate conversion', () => {
   it('maps CSS-zoomed client coordinates back into viewport coordinates', () => {
-    expect(localPoint(
-      { clientX: 272.5, clientY: 97.5 },
-      {
-        getBoundingClientRect: () => ({ left: 10, top: 20, width: 875, height: 500 }),
-        getClientSize: () => ({ width: 700, height: 400 }),
-      },
-    )).toEqual({ x: 210, y: 62 });
+    expect(
+      localPoint(
+        { clientX: 272.5, clientY: 97.5 },
+        {
+          getBoundingClientRect: () => ({ left: 10, top: 20, width: 875, height: 500 }),
+          getClientSize: () => ({ width: 700, height: 400 }),
+        },
+      ),
+    ).toEqual({ x: 210, y: 62 });
   });
 });
 
@@ -92,17 +94,17 @@ function hugeHiddenRowModel(count: number, hiddenStart: number) {
     rowCount: count,
     columnCount: 2,
     merges: [],
-    rowHeight: row => row < hiddenStart ? 25 : 0,
+    rowHeight: (row) => (row < hiddenStart ? 25 : 0),
     columnWidth: () => 100,
     rowOffset,
-    columnOffset: boundary => boundary * 100,
+    columnOffset: (boundary) => boundary * 100,
     rowAt,
-    columnAt: coordinate => Math.min(1, Math.max(0, Math.floor(coordinate / 100))),
+    columnAt: (coordinate) => Math.min(1, Math.max(0, Math.floor(coordinate / 100))),
     previousVisibleRow,
-    previousVisibleColumn: boundary => boundary === 0 ? null : boundary - 1,
+    previousVisibleColumn: (boundary) => (boundary === 0 ? null : boundary - 1),
     mergeAt: () => null,
-    logicalRowAtVisualIndex: row => row,
-    visualIndexOfRow: row => row,
+    logicalRowAtVisualIndex: (row) => row,
+    visualIndexOfRow: (row) => row,
     visualRowRange: (start, end) => [start, end],
     visualRowRuns: (start, end) => [[start, end]],
     logicalRowRange: (start, end) => [start, end],
@@ -118,11 +120,13 @@ function setup(
   const root = new FakeTarget();
   const globalTarget = new FakeTarget();
   const clipboard = new ClipboardHarness();
-  const model = modelOverride ?? createSheetGridModel({
-    rows: { len: 6, 1: { hide: true }, 3: { height: 40 } },
-    cols: { len: 6, 1: { hide: true }, 3: { width: 140 } },
-    merges: ['A1:B2', 'B2:C3'],
-  });
+  const model =
+    modelOverride ??
+    createSheetGridModel({
+      rows: { len: 6, 1: { hide: true }, 3: { height: 40 } },
+      cols: { len: 6, 1: { hide: true }, 3: { width: 140 } },
+      merges: ['A1:B2', 'B2:C3'],
+    });
   let snapshot: InteractionSnapshot = {
     viewport: createViewportMetrics(model, viewportSize),
     selection: createSelectionState({ row: 0, column: 0 }),
@@ -137,21 +141,24 @@ function setup(
     globalTarget,
     clipboard: clipboard.port,
     getSnapshot: () => snapshot,
-    setSelection: selection => {
+    setSelection: (selection) => {
       selections.push(selection);
       snapshot = { ...snapshot, selection };
     },
-    setScroll: scroll => {
+    setScroll: (scroll) => {
       snapshot = {
         ...snapshot,
         viewport: createViewportMetrics(model, { ...snapshot.viewport, scroll }),
       };
     },
-    dispatch: command => {
+    dispatch: (command) => {
       commands.push(command);
       return { status: 'committed' };
     },
-    readSelection: () => [['raw', '=A1'], ['0', '']],
+    readSelection: () => [
+      ['raw', '=A1'],
+      ['0', ''],
+    ],
     commitEditor: () => true,
     requestEdit: vi.fn(),
     requestDelete: vi.fn(),
@@ -160,7 +167,7 @@ function setup(
     requestEnsureVisible: vi.fn(),
     requestResizePreview: vi.fn(),
     requestFormat: vi.fn(),
-    requestError: error => errors.push(error),
+    requestError: (error) => errors.push(error),
     requestCancelTransient: vi.fn(),
     ...overrides,
   };
@@ -181,13 +188,21 @@ function setup(
 describe('InteractionManager pointer and selection behavior', () => {
   it('owns and idempotently removes every root/global listener and blocks disposed callbacks', () => {
     const harness = setup();
-    const before = [...harness.root.listeners.values()].reduce((sum, listeners) => sum + listeners.size, 0)
-      + [...harness.globalTarget.listeners.values()].reduce((sum, listeners) => sum + listeners.size, 0);
+    const before =
+      [...harness.root.listeners.values()].reduce((sum, listeners) => sum + listeners.size, 0) +
+      [...harness.globalTarget.listeners.values()].reduce(
+        (sum, listeners) => sum + listeners.size,
+        0,
+      );
     expect(before).toBeGreaterThan(0);
     harness.manager.dispose();
     harness.manager.dispose();
-    const after = [...harness.root.listeners.values()].reduce((sum, listeners) => sum + listeners.size, 0)
-      + [...harness.globalTarget.listeners.values()].reduce((sum, listeners) => sum + listeners.size, 0);
+    const after =
+      [...harness.root.listeners.values()].reduce((sum, listeners) => sum + listeners.size, 0) +
+      [...harness.globalTarget.listeners.values()].reduce(
+        (sum, listeners) => sum + listeners.size,
+        0,
+      );
     harness.root.emit('pointerdown', { clientX: 511, clientY: 196 });
     harness.globalTarget.emit('keydown', { key: 'ArrowRight' });
     expect(after).toBe(0);
@@ -201,12 +216,12 @@ describe('InteractionManager pointer and selection behavior', () => {
     const cancelTimer = vi.fn();
     const resize = vi.fn();
     const harness = setup({
-      observeRoot: callback => {
+      observeRoot: (callback) => {
         observer = callback;
         return disconnect;
       },
       requestViewportResize: resize,
-      setTimer: callback => {
+      setTimer: (callback) => {
         timer = callback;
         return cancelTimer;
       },
@@ -234,7 +249,8 @@ describe('InteractionManager pointer and selection behavior', () => {
         return true;
       },
       requestSurfaceFocus: () => order.push('focus'),
-      setSelection: selection => order.push(`select:${selection.range.end.row},${selection.range.end.column}`),
+      setSelection: (selection) =>
+        order.push(`select:${selection.range.end.row},${selection.range.end.column}`),
     });
 
     harness.root.emit('pointerdown', { clientX: 71, clientY: 46 });
@@ -249,28 +265,25 @@ describe('InteractionManager pointer and selection behavior', () => {
     const harness = setup();
 
     harness.root.emit('pointerdown', { clientX: 20, clientY: 116 });
-    expect(normalizeSelection(
-      harness.snapshot().selection,
-      harness.snapshot().viewport.model,
-    )).toMatchObject({
+    expect(
+      normalizeSelection(harness.snapshot().selection, harness.snapshot().viewport.model),
+    ).toMatchObject({
       kind: 'row',
       active: { row: 3, column: 0 },
       range: { start: { row: 3, column: 0 }, end: { row: 3, column: 5 } },
     });
     harness.root.emit('pointerdown', { clientX: 340, clientY: 30 });
-    expect(normalizeSelection(
-      harness.snapshot().selection,
-      harness.snapshot().viewport.model,
-    )).toMatchObject({
+    expect(
+      normalizeSelection(harness.snapshot().selection, harness.snapshot().viewport.model),
+    ).toMatchObject({
       kind: 'column',
       active: { row: 0, column: 3 },
       range: { start: { row: 0, column: 3 }, end: { row: 5, column: 3 } },
     });
     harness.root.emit('pointerdown', { clientX: 20, clientY: 30 });
-    expect(normalizeSelection(
-      harness.snapshot().selection,
-      harness.snapshot().viewport.model,
-    )).toMatchObject({
+    expect(
+      normalizeSelection(harness.snapshot().selection, harness.snapshot().viewport.model),
+    ).toMatchObject({
       kind: 'all',
       active: { row: 0, column: 0 },
       range: { start: { row: 0, column: 0 }, end: { row: 5, column: 5 } },
@@ -283,10 +296,9 @@ describe('InteractionManager pointer and selection behavior', () => {
 
     harness.root.emit('pointerdown', { clientX: 20, clientY: 46 });
     harness.globalTarget.emit('pointermove', { clientX: 20, clientY: 121, buttons: 1 });
-    expect(normalizeSelection(
-      harness.snapshot().selection,
-      harness.snapshot().viewport.model,
-    )).toMatchObject({
+    expect(
+      normalizeSelection(harness.snapshot().selection, harness.snapshot().viewport.model),
+    ).toMatchObject({
       kind: 'row',
       anchor: { row: 0, column: 0 },
       focus: { row: 3, column: 5 },
@@ -297,10 +309,9 @@ describe('InteractionManager pointer and selection behavior', () => {
 
     harness.root.emit('pointerdown', { clientX: 71, clientY: 30 });
     harness.globalTarget.emit('pointermove', { clientX: 340, clientY: 30, buttons: 1 });
-    expect(normalizeSelection(
-      harness.snapshot().selection,
-      harness.snapshot().viewport.model,
-    )).toMatchObject({
+    expect(
+      normalizeSelection(harness.snapshot().selection, harness.snapshot().viewport.model),
+    ).toMatchObject({
       kind: 'column',
       anchor: { row: 0, column: 0 },
       focus: { row: 5, column: 3 },
@@ -316,10 +327,9 @@ describe('InteractionManager pointer and selection behavior', () => {
     harness.root.emit('pointerdown', { clientX: 20, clientY: 116 });
     harness.globalTarget.emit('pointerup', { buttons: 0 });
     harness.root.emit('pointerdown', { clientX: 20, clientY: 46, shiftKey: true });
-    expect(normalizeSelection(
-      harness.snapshot().selection,
-      harness.snapshot().viewport.model,
-    )).toMatchObject({
+    expect(
+      normalizeSelection(harness.snapshot().selection, harness.snapshot().viewport.model),
+    ).toMatchObject({
       kind: 'row',
       anchor: { row: 3, column: 0 },
       active: { row: 3, column: 0 },
@@ -329,10 +339,9 @@ describe('InteractionManager pointer and selection behavior', () => {
     harness.root.emit('pointerdown', { clientX: 340, clientY: 30 });
     harness.globalTarget.emit('pointerup', { buttons: 0 });
     harness.root.emit('pointerdown', { clientX: 71, clientY: 30, shiftKey: true });
-    expect(normalizeSelection(
-      harness.snapshot().selection,
-      harness.snapshot().viewport.model,
-    )).toMatchObject({
+    expect(
+      normalizeSelection(harness.snapshot().selection, harness.snapshot().viewport.model),
+    ).toMatchObject({
       kind: 'column',
       anchor: { row: 0, column: 3 },
       active: { row: 0, column: 3 },
@@ -409,9 +418,8 @@ describe('InteractionManager keyboard, wheel, and focus behavior', () => {
     chrome.parent = harness.root;
     Object.defineProperty(harness.ports, 'classifyInteractionTarget', {
       configurable: true,
-      value: (target: unknown) => target === harness.root
-        ? 'surface'
-        : harness.root.contains(target) ? 'chrome' : 'outside',
+      value: (target: unknown) =>
+        target === harness.root ? 'surface' : harness.root.contains(target) ? 'chrome' : 'outside',
     });
     harness.root.emit('focusin');
 
@@ -454,13 +462,17 @@ describe('InteractionManager keyboard, wheel, and focus behavior', () => {
     const harness = setup();
     harness.root.emit('focusin');
 
-    expect(() => harness.globalTarget.emit('keydown', {
-      target: Object.freeze({ kind: 'window-like' }),
-      key: 'ArrowRight',
-    })).not.toThrow();
-    expect(() => harness.root.emit('focusout', {
-      relatedTarget: Object.freeze({ kind: 'window-like' }),
-    })).not.toThrow();
+    expect(() =>
+      harness.globalTarget.emit('keydown', {
+        target: Object.freeze({ kind: 'window-like' }),
+        key: 'ArrowRight',
+      }),
+    ).not.toThrow();
+    expect(() =>
+      harness.root.emit('focusout', {
+        relatedTarget: Object.freeze({ kind: 'window-like' }),
+      }),
+    ).not.toThrow();
 
     harness.manager.dispose();
   });
@@ -471,8 +483,15 @@ describe('InteractionManager keyboard, wheel, and focus behavior', () => {
     expect(outside.preventDefault).not.toHaveBeenCalled();
     harness.root.emit('focusin');
     const input = new FakeTarget();
-    const ignored = harness.globalTarget.emit('keydown', { key: 'ArrowRight', target: input, targetKind: 'input' });
-    const composing = harness.globalTarget.emit('keydown', { key: 'ArrowRight', isComposing: true });
+    const ignored = harness.globalTarget.emit('keydown', {
+      key: 'ArrowRight',
+      target: input,
+      targetKind: 'input',
+    });
+    const composing = harness.globalTarget.emit('keydown', {
+      key: 'ArrowRight',
+      isComposing: true,
+    });
     const processKey = harness.globalTarget.emit('keydown', { key: 'ArrowRight', keyCode: 229 });
     const unknown = harness.globalTarget.emit('keydown', { key: 'AudioVolumeUp' });
     const handled = harness.globalTarget.emit('keydown', { key: 'ArrowRight' });
@@ -503,11 +522,13 @@ describe('InteractionManager keyboard, wheel, and focus behavior', () => {
     expect(harness.snapshot().selection.active).toEqual({ row: 0, column: 5 });
     harness.globalTarget.emit('keydown', { key: ' ', ctrlKey: true });
     expect(harness.snapshot().selection.range).toMatchObject({
-      start: { row: 0, column: 5 }, end: { row: 5, column: 5 },
+      start: { row: 0, column: 5 },
+      end: { row: 5, column: 5 },
     });
     harness.globalTarget.emit('keydown', { key: ' ', shiftKey: true });
     expect(harness.snapshot().selection.range).toMatchObject({
-      start: { row: 0, column: 0 }, end: { row: 0, column: 5 },
+      start: { row: 0, column: 0 },
+      end: { row: 0, column: 5 },
     });
     harness.globalTarget.emit('keydown', { key: 'F2' });
     harness.globalTarget.emit('keydown', { key: 'q' });
@@ -521,8 +542,8 @@ describe('InteractionManager keyboard, wheel, and focus behavior', () => {
     expect(edit).toHaveBeenNthCalledWith(1, { row: 0, column: 5 }, undefined, 'keyboard');
     expect(edit).toHaveBeenNthCalledWith(2, { row: 0, column: 5 }, 'q', 'keyboard');
     expect(remove).toHaveBeenCalledOnce();
-    expect(harness.commands.map(command => command.type)).toEqual(['undo', 'redo']);
-    expect(format.mock.calls.map(call => call[0])).toEqual(['bold', 'italic', 'underline']);
+    expect(harness.commands.map((command) => command.type)).toEqual(['undo', 'redo']);
+    expect(format.mock.calls.map((call) => call[0])).toEqual(['bold', 'italic', 'underline']);
     expect(ensure).toHaveBeenCalled();
     harness.manager.dispose();
   });
@@ -613,7 +634,8 @@ describe('InteractionManager keyboard, wheel, and focus behavior', () => {
     const second = harness.root.emit('wheel', { deltaX: 40, deltaY: 2 });
     expect(harness.snapshot().viewport.scroll.x).toBe(100);
     expect(second.preventDefault).toHaveBeenCalledOnce();
-    for (let index = 0; index < 20; index += 1) harness.root.emit('wheel', { deltaX: 40, deltaY: 0 });
+    for (let index = 0; index < 20; index += 1)
+      harness.root.emit('wheel', { deltaX: 40, deltaY: 0 });
     const atEnd = harness.root.emit('wheel', { deltaX: 40, deltaY: 0 });
     expect(atEnd.preventDefault).not.toHaveBeenCalled();
     harness.manager.dispose();
@@ -644,11 +666,15 @@ describe('InteractionManager keyboard, wheel, and focus behavior', () => {
     const rowOffset = vi.fn(base.rowOffset);
     const model: GridModelPort = { ...base, rowAt, rowOffset };
     const initial = 1_000_000_000_000;
-    const harness = setup({}, {
-      width: 260,
-      height: 125,
-      scroll: { x: 0, y: initial },
-    }, model);
+    const harness = setup(
+      {},
+      {
+        width: 260,
+        height: 125,
+        scroll: { x: 0, y: initial },
+      },
+      model,
+    );
 
     const forward = harness.root.emit('wheel', { deltaX: 0, deltaY: 1 });
     expect(harness.snapshot().viewport.scroll.y).toBe(initial + 25);
@@ -666,12 +692,22 @@ describe('InteractionManager keyboard, wheel, and focus behavior', () => {
   });
 
   it('keeps exact-boundary wheel stepping isolated between manager instances', () => {
-    const first = setup({}, {
-      width: 260, height: 75, scroll: { x: 0, y: 25 },
-    });
-    const second = setup({}, {
-      width: 260, height: 75, scroll: { x: 0, y: 50 },
-    });
+    const first = setup(
+      {},
+      {
+        width: 260,
+        height: 75,
+        scroll: { x: 0, y: 25 },
+      },
+    );
+    const second = setup(
+      {},
+      {
+        width: 260,
+        height: 75,
+        scroll: { x: 0, y: 50 },
+      },
+    );
 
     first.root.emit('wheel', { deltaX: 0, deltaY: 1 });
     second.root.emit('wheel', { deltaX: 0, deltaY: -1 });
@@ -726,11 +762,13 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
     expect(massive.rowAt).not.toHaveBeenCalled();
 
     const initial = hugeHiddenRowModel(count, 0);
-    expect(hiddenRunBefore(
-      'row',
-      count,
-      createViewportMetrics(initial.model, { width: 300, height: 200 }),
-    )).toEqual([0, count]);
+    expect(
+      hiddenRunBefore(
+        'row',
+        count,
+        createViewportMetrics(initial.model, { width: 300, height: 200 }),
+      ),
+    ).toEqual([0, count]);
     expect(initial.previousVisibleRow).toHaveBeenCalledTimes(1);
     expect(initial.rowOffset).not.toHaveBeenCalled();
     expect(initial.rowAt).not.toHaveBeenCalled();
@@ -741,22 +779,22 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
       ...visibleBase,
       previousVisibleRow: visiblePreviousRow,
     };
-    expect(hiddenRunBefore(
-      'row',
-      2,
-      createViewportMetrics(visible, { width: 300, height: 200 }),
-    )).toBeNull();
+    expect(
+      hiddenRunBefore('row', 2, createViewportMetrics(visible, { width: 300, height: 200 })),
+    ).toBeNull();
     expect(visiblePreviousRow).toHaveBeenCalledTimes(1);
   });
 
   it('resolves near-MAX_SAFE visible boundaries and hidden tails by index, not pixel ULP', () => {
     const count = Number.MAX_SAFE_INTEGER;
     const visible = createSheetGridModel({ rows: { len: count }, cols: { len: 2 } });
-    expect(hiddenRunBefore(
-      'row',
-      count - 1,
-      createViewportMetrics(visible, { width: 300, height: 200 }),
-    )).toBeNull();
+    expect(
+      hiddenRunBefore(
+        'row',
+        count - 1,
+        createViewportMetrics(visible, { width: 300, height: 200 }),
+      ),
+    ).toBeNull();
 
     const hiddenStart = count - 3;
     const hidden = createSheetGridModel({
@@ -768,11 +806,9 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
       },
       cols: { len: 2 },
     });
-    expect(hiddenRunBefore(
-      'row',
-      count,
-      createViewportMetrics(hidden, { width: 300, height: 200 }),
-    )).toEqual([hiddenStart, 3]);
+    expect(
+      hiddenRunBefore('row', count, createViewportMetrics(hidden, { width: 300, height: 200 })),
+    ).toEqual([hiddenStart, 3]);
   });
 
   it('selects the exact near-MAX_SAFE resize predecessor despite coarse pixel ULP', () => {
@@ -785,15 +821,15 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
       merges: [],
       rowHeight: () => 25,
       columnWidth: () => 25,
-      rowOffset: value => value * 25,
-      columnOffset: value => value >= target ? huge : value * 25,
-      rowAt: coordinate => Math.min(1, Math.max(0, Math.floor(coordinate / 25))),
-      columnAt: coordinate => coordinate >= huge ? target : target - 1,
-      previousVisibleRow: value => value === 0 ? null : value - 1,
-      previousVisibleColumn: value => value === 0 ? null : value - 1,
+      rowOffset: (value) => value * 25,
+      columnOffset: (value) => (value >= target ? huge : value * 25),
+      rowAt: (coordinate) => Math.min(1, Math.max(0, Math.floor(coordinate / 25))),
+      columnAt: (coordinate) => (coordinate >= huge ? target : target - 1),
+      previousVisibleRow: (value) => (value === 0 ? null : value - 1),
+      previousVisibleColumn: (value) => (value === 0 ? null : value - 1),
       mergeAt: () => null,
-      logicalRowAtVisualIndex: row => row,
-      visualIndexOfRow: row => row,
+      logicalRowAtVisualIndex: (row) => row,
+      visualIndexOfRow: (row) => row,
       visualRowRange: (start, end) => [start, end],
       visualRowRuns: (start, end) => [[start, end]],
       logicalRowRange: (start, end) => [start, end],
@@ -804,7 +840,9 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
       scroll: { x: huge, y: 0 },
     });
     expect(findResizeHandle({ x: 85, y: 10 }, viewport)).toMatchObject({
-      axis: 'column', boundary, index: target,
+      axis: 'column',
+      boundary,
+      index: target,
     });
   });
 
@@ -822,7 +860,10 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
     harness.globalTarget.emit('paste', { clipboardData: external });
     expect(harness.commands.at(-1)).toMatchObject({
       type: 'paste-external',
-      values: [['"quoted"', 'B'], ['C', 'D']],
+      values: [
+        ['"quoted"', 'B'],
+        ['C', 'D'],
+      ],
     });
     expect(harness.clipboard.reads).toBe(0);
     harness.manager.dispose();
@@ -831,7 +872,9 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
   it('reports synchronous selection-read failure without writing or retaining clipboard data', async () => {
     const cause = new RangeError('clipboard selection is too large');
     const harness = setup({
-      readSelection: () => { throw cause; },
+      readSelection: () => {
+        throw cause;
+      },
     });
     const transfer = new DataTransferHarness();
 
@@ -880,7 +923,8 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
     await harness.manager.copy(new DataTransferHarness());
     await expect(harness.manager.paste(new DataTransferHarness())).resolves.toBe(true);
     expect(harness.commands.at(-1)).toMatchObject({
-      type: 'paste-external', values: [['']],
+      type: 'paste-external',
+      values: [['']],
     });
     harness.manager.dispose();
   });
@@ -891,15 +935,21 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
 
     await harness.manager.copy();
     await expect(harness.manager.paste(undefined, 'value', 'context-menu')).resolves.toBe(true);
-    expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
-      type: 'paste-internal',
-      mode: 'value',
-    }), 'context-menu');
+    expect(dispatch).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        type: 'paste-internal',
+        mode: 'value',
+      }),
+      'context-menu',
+    );
     await expect(harness.manager.paste(undefined, 'format', 'context-menu')).resolves.toBe(true);
-    expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
-      type: 'paste-internal',
-      mode: 'format',
-    }), 'context-menu');
+    expect(dispatch).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        type: 'paste-internal',
+        mode: 'format',
+      }),
+      'context-menu',
+    );
     expect(harness.clipboard.reads).toBe(0);
     harness.manager.dispose();
   });
@@ -911,11 +961,14 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
     for (const mode of ['value', 'format'] as const) {
       await harness.manager.copy(undefined, true);
       await expect(harness.manager.paste(undefined, mode, 'context-menu')).resolves.toBe(true);
-      expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
-        type: 'paste-internal',
-        mode: 'all',
-        cut: true,
-      }), 'context-menu');
+      expect(dispatch).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          type: 'paste-internal',
+          mode: 'all',
+          cut: true,
+        }),
+        'context-menu',
+      );
     }
     harness.manager.dispose();
   });
@@ -946,7 +999,9 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
     expect(harness.errors[0]).toMatchObject({ code: 'CLIPBOARD_DENIED', recoverable: true });
 
     let resolve!: (value: string) => void;
-    const pending = new Promise<string>(done => { resolve = done; });
+    const pending = new Promise<string>((done) => {
+      resolve = done;
+    });
     const late = setup({ clipboard: { readText: () => pending, writeText: async () => {} } });
     late.root.emit('focusin');
     const lateRequest = late.manager.paste();
@@ -958,7 +1013,10 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
     let reject!: (cause: unknown) => void;
     const lateRejection = setup({
       clipboard: {
-        readText: () => new Promise((_, fail) => { reject = fail; }),
+        readText: () =>
+          new Promise((_, fail) => {
+            reject = fail;
+          }),
         writeText: async () => {},
       },
     });
@@ -977,7 +1035,10 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
     const first = setup({
       getSnapshot: () => state.current!,
       clipboard: {
-        readText: () => new Promise(done => { resolveFirst = done; }),
+        readText: () =>
+          new Promise((done) => {
+            resolveFirst = done;
+          }),
         writeText: async () => {},
       },
     });
@@ -1001,7 +1062,10 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
     const second = setup({
       getSnapshot: () => replacement,
       clipboard: {
-        readText: () => new Promise(done => { resolveSecond = done; }),
+        readText: () =>
+          new Promise((done) => {
+            resolveSecond = done;
+          }),
         writeText: async () => {},
       },
     });
@@ -1018,7 +1082,9 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
     const callbackError = new Error('consumer callback failed');
     const throwing = setup({
       clipboard: { readText: async () => 'value', writeText: async () => {} },
-      dispatch: () => { throw callbackError; },
+      dispatch: () => {
+        throw callbackError;
+      },
     });
     await expect(throwing.manager.paste()).rejects.toBe(callbackError);
     expect(throwing.errors).toEqual([]);
@@ -1027,10 +1093,14 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
     const errorCallback = new Error('error callback failed');
     const throwingErrorCallback = setup({
       clipboard: {
-        readText: async () => { throw new Error('denied'); },
+        readText: async () => {
+          throw new Error('denied');
+        },
         writeText: async () => {},
       },
-      requestError: () => { throw errorCallback; },
+      requestError: () => {
+        throw errorCallback;
+      },
     });
     await expect(throwingErrorCallback.manager.paste()).rejects.toBe(errorCallback);
     throwingErrorCallback.manager.dispose();
@@ -1042,7 +1112,10 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
     const harness = setup({
       getSnapshot: () => state.current!,
       clipboard: {
-        readText: () => new Promise(done => { resolve = done; }),
+        readText: () =>
+          new Promise((done) => {
+            resolve = done;
+          }),
         writeText: async () => {},
       },
     });
@@ -1061,11 +1134,14 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
     let now = 0;
     const edit = vi.fn();
     const focus = vi.fn();
-    const harness = setup({
-      now: () => now,
-      requestEdit: edit,
-      requestSurfaceFocus: focus,
-    }, { width: 260, height: 125 });
+    const harness = setup(
+      {
+        now: () => now,
+        requestEdit: edit,
+        requestSurfaceFocus: focus,
+      },
+      { width: 260, height: 125 },
+    );
     const touch = (x: number, y: number) => ({ clientX: x, clientY: y });
     harness.root.emit('touchstart', { touches: [touch(71, 46)] });
     harness.root.emit('touchend', { changedTouches: [touch(71, 46)], touches: [] });
@@ -1079,7 +1155,10 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
     expect(harness.snapshot().viewport.scroll.x).toBeGreaterThan(0);
     const before = harness.snapshot().viewport.scroll;
     harness.root.emit('touchcancel');
-    harness.root.emit('touchmove', { touches: [touch(100, 100)], changedTouches: [touch(100, 100)] });
+    harness.root.emit('touchmove', {
+      touches: [touch(100, 100)],
+      changedTouches: [touch(100, 100)],
+    });
     expect(harness.snapshot().viewport.scroll).toEqual(before);
     harness.root.emit('touchstart', { touches: [touch(1, 1), touch(2, 2)] });
     harness.root.emit('touchend', { changedTouches: [touch(1, 1)], touches: [] });
@@ -1120,7 +1199,11 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
     expect(preview).toHaveBeenLastCalledWith({ axis: 'column', start: 2, count: 3, size: 30 });
     harness.globalTarget.emit('pointerup', { buttons: 0 });
     expect(harness.commands.at(-1)).toEqual({
-      type: 'set-column-width', sheet: sheetId('sheet-1'), column: 2, count: 3, width: 30,
+      type: 'set-column-width',
+      sheet: sheetId('sheet-1'),
+      column: 2,
+      count: 3,
+      width: 30,
     });
 
     const count = harness.commands.length;
@@ -1146,7 +1229,11 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
       autofilter: { ref: 'A1:A7', sort: { ci: 0, order: 'asc' } },
     });
     const state: { current?: InteractionSnapshot } = {};
-    const harness = setup({ getSnapshot: () => state.current! }, { width: 260, height: 220 }, model);
+    const harness = setup(
+      { getSnapshot: () => state.current! },
+      { width: 260, height: 220 },
+      model,
+    );
     state.current = {
       ...harness.snapshot(),
       selection: createSelectionState({ row: 2, column: 0 }, { row: 4, column: 0 }),
@@ -1213,10 +1300,14 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
     const model = createSheetGridModel({ rows: { len: 300_002 }, cols: { len: 300_002 } });
     const state: { current?: InteractionSnapshot } = {};
     const preview = vi.fn();
-    const harness = setup({
-      getSnapshot: () => state.current!,
-      requestResizePreview: preview,
-    }, { width: 700, height: 400 }, model);
+    const harness = setup(
+      {
+        getSnapshot: () => state.current!,
+        requestResizePreview: preview,
+      },
+      { width: 700, height: 400 },
+      model,
+    );
     state.current = {
       ...harness.snapshot(),
       selection: createSelectionState({ row: 0, column: 0 }, { row: 0, column: 250_000 }),
@@ -1249,13 +1340,24 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
     };
     expect(harness.manager.hideSelection()).toBe(true);
     expect(harness.commands.at(-1)).toEqual({
-      type: 'set-row-hidden', sheet: sheetId('sheet-1'), row: 1, count: 2, hidden: true,
+      type: 'set-row-hidden',
+      sheet: sheetId('sheet-1'),
+      row: 1,
+      count: 2,
+      hidden: true,
     });
-    snapshot = { ...snapshot, selection: createSelectionState({ row: 1, column: 1 }, { row: 2, column: 2 }) };
+    snapshot = {
+      ...snapshot,
+      selection: createSelectionState({ row: 1, column: 1 }, { row: 2, column: 2 }),
+    };
     expect(harness.manager.hideSelection()).toBe(false);
     expect(harness.manager.unhideBefore('row', 2)).toBe(true);
     expect(harness.commands.at(-1)).toEqual({
-      type: 'set-row-hidden', sheet: sheetId('sheet-1'), row: 1, count: 1, hidden: false,
+      type: 'set-row-hidden',
+      sheet: sheetId('sheet-1'),
+      row: 1,
+      count: 1,
+      hidden: false,
     });
     harness.manager.dispose();
   });
@@ -1271,12 +1373,20 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
     const row = harness.root.emit('dblclick', { clientX: 20, clientY: 70 });
     expect(row.preventDefault).toHaveBeenCalledOnce();
     expect(harness.commands.at(-1)).toEqual({
-      type: 'set-row-hidden', sheet: sheetId('sheet-1'), row: 1, count: 2, hidden: false,
+      type: 'set-row-hidden',
+      sheet: sheetId('sheet-1'),
+      row: 1,
+      count: 2,
+      hidden: false,
     });
     const column = harness.root.emit('dblclick', { clientX: 170, clientY: 30 });
     expect(column.preventDefault).toHaveBeenCalledOnce();
     expect(harness.commands.at(-1)).toEqual({
-      type: 'set-column-hidden', sheet: sheetId('sheet-1'), column: 1, count: 2, hidden: false,
+      type: 'set-column-hidden',
+      sheet: sheetId('sheet-1'),
+      column: 1,
+      count: 2,
+      hidden: false,
     });
     expect(edit).not.toHaveBeenCalled();
     harness.manager.dispose();
@@ -1288,11 +1398,7 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
       rows: { len: 4 },
       cols: { len: 6, 0: { hide: true }, 1: { hide: true }, 2: { hide: true } },
     });
-    const harness = setup(
-      { requestResizePreview: preview },
-      { width: 700, height: 400 },
-      model,
-    );
+    const harness = setup({ requestResizePreview: preview }, { width: 700, height: 400 }, model);
 
     harness.root.emit('pointerdown', { clientX: 70, clientY: 30 });
     harness.globalTarget.emit('pointermove', { clientX: 100, clientY: 30, buttons: 1 });
@@ -1302,9 +1408,15 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
 
     const event = harness.root.emit('dblclick', { clientX: 70, clientY: 30 });
     expect(event.preventDefault).toHaveBeenCalledOnce();
-    expect(harness.commands).toEqual([{
-      type: 'set-column-hidden', sheet: sheetId('sheet-1'), column: 0, count: 3, hidden: false,
-    }]);
+    expect(harness.commands).toEqual([
+      {
+        type: 'set-column-hidden',
+        sheet: sheetId('sheet-1'),
+        column: 0,
+        count: 3,
+        hidden: false,
+      },
+    ]);
     harness.manager.dispose();
   });
 
@@ -1314,7 +1426,11 @@ describe('InteractionManager clipboard, touch, resize and hide behavior', () => 
       rows: { len: 4, 1: { hide: true }, 2: { hide: true } },
       cols: { len: 4 },
     });
-    const harness = setup({ getSnapshot: () => state.current! }, { width: 700, height: 400 }, model);
+    const harness = setup(
+      { getSnapshot: () => state.current! },
+      { width: 700, height: 400 },
+      model,
+    );
     state.current = { ...harness.snapshot(), readOnly: true };
     const event = harness.root.emit('dblclick', { clientX: 20, clientY: 70 });
     expect(event.preventDefault).not.toHaveBeenCalled();

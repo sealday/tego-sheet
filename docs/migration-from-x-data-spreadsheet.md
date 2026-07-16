@@ -32,17 +32,17 @@ The input and callback payloads remain isolated from internal state. `getValue()
 
 ## Map UI options to React props
 
-| Legacy option or integration | React API |
-| --- | --- |
-| `showToolbar: false` | `toolbar={false}` |
-| custom toolbar DOM | `toolbar={renderer}` with typed `ToolbarRenderProps` |
-| `showBottomBar: false` | `sheetTabs={false}` |
-| custom sheet-tab DOM | `sheetTabs={renderer}` with typed `SheetTabsRenderProps` |
-| `mode: 'read'` | `readOnly` |
-| global locale registration | `locale={definition}` on each component |
-| imperative load | controlled `value`, or remount an uncontrolled component with a new `key` and `defaultValue` |
-| imperative data export | `ref.current.getValue()` or the `onChange` value |
-| resize callbacks | size the container and call `recalculateLayout()` when needed |
+| Legacy option or integration | React API                                                                                    |
+| ---------------------------- | -------------------------------------------------------------------------------------------- |
+| `showToolbar: false`         | `toolbar={false}`                                                                            |
+| custom toolbar DOM           | `toolbar={renderer}` with typed `ToolbarRenderProps`                                         |
+| `showBottomBar: false`       | `sheetTabs={false}`                                                                          |
+| custom sheet-tab DOM         | `sheetTabs={renderer}` with typed `SheetTabsRenderProps`                                     |
+| `mode: 'read'`               | `readOnly`                                                                                   |
+| global locale registration   | `locale={definition}` on each component                                                      |
+| imperative load              | controlled `value`, or remount an uncontrolled component with a new `key` and `defaultValue` |
+| imperative data export       | `ref.current.getValue()` or the `onChange` value                                             |
+| resize callbacks             | size the container and call `recalculateLayout()` when needed                                |
 
 Import bundled dictionaries from their explicit paths:
 

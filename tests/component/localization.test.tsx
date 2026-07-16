@@ -9,7 +9,10 @@ import { createTranslator } from '../../src/ui/translate';
 beforeEach(() => {
   const context = createCanvasHarness().canvas.getContext('2d');
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => context);
-  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+  vi.stubGlobal(
+    'requestAnimationFrame',
+    vi.fn(() => 1),
+  );
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
 });
 

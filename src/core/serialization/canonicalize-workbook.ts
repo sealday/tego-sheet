@@ -54,11 +54,7 @@ function arrayAt(value: unknown, path: string): readonly unknown[] {
   }
   for (let index = 0; index < value.length; index += 1) {
     const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
-    if (
-      descriptor === undefined
-      || !descriptor.enumerable
-      || !own(descriptor, 'value')
-    ) {
+    if (descriptor === undefined || !descriptor.enumerable || !own(descriptor, 'value')) {
       fail(`${path}[${index}]`, 'must be an enumerable data property');
     }
   }
@@ -77,11 +73,7 @@ function validateJsonGraph(
   active: WeakSet<object>,
   depth: number,
 ): void {
-  if (
-    value === null
-    || typeof value === 'string'
-    || typeof value === 'boolean'
-  ) {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') {
     return;
   }
   if (typeof value === 'number') {
@@ -185,14 +177,16 @@ function knownObject(
 ): MutableJsonObject {
   const source = objectAt(value, path);
   const output: MutableJsonObject = {};
-  const knownNames = new Set(fields.map(field => field.name));
+  const knownNames = new Set(fields.map((field) => field.name));
 
   for (const field of fields) {
     if (own(source, field.name)) {
       define(output, field.name, field.write(source[field.name], `${path}.${field.name}`));
     }
   }
-  for (const key of Object.keys(source).filter(key => !knownNames.has(key)).sort()) {
+  for (const key of Object.keys(source)
+    .filter((key) => !knownNames.has(key))
+    .sort()) {
     define(output, key, cloneJson(source[key], `${path}.${key}`));
   }
   return output;
@@ -249,8 +243,14 @@ function style(value: unknown, path: string): JsonValue {
   return optionalKnownObject(value, path, [
     { name: 'format', write: stringAt },
     { name: 'bgcolor', write: stringAt },
-    { name: 'align', write: (item, itemPath) => enumAt(item, itemPath, ['left', 'center', 'right']) },
-    { name: 'valign', write: (item, itemPath) => enumAt(item, itemPath, ['top', 'middle', 'bottom']) },
+    {
+      name: 'align',
+      write: (item, itemPath) => enumAt(item, itemPath, ['left', 'center', 'right']),
+    },
+    {
+      name: 'valign',
+      write: (item, itemPath) => enumAt(item, itemPath, ['top', 'middle', 'bottom']),
+    },
     { name: 'textwrap', write: booleanAt },
     { name: 'strike', write: booleanAt },
     { name: 'underline', write: booleanAt },
@@ -308,7 +308,7 @@ function sparseCollection(
 ): JsonValue {
   const source = objectAt(value, path);
   const output: MutableJsonObject = {};
-  const knownNames = new Set(knownFields.map(field => field.name));
+  const knownNames = new Set(knownFields.map((field) => field.name));
 
   for (const field of knownFields) {
     if (own(source, field.name)) {
@@ -353,7 +353,8 @@ function validation(value: unknown, path: string): JsonValue {
     { name: 'mode', write: (item, itemPath) => enumAt(item, itemPath, ['cell']) },
     {
       name: 'type',
-      write: (item, itemPath) => enumAt(item, itemPath, ['date', 'number', 'list', 'phone', 'email']),
+      write: (item, itemPath) =>
+        enumAt(item, itemPath, ['date', 'number', 'list', 'phone', 'email']),
     },
     { name: 'required', write: booleanAt },
     {
@@ -394,11 +395,7 @@ function autofilter(value: unknown, path: string): JsonValue {
   ]);
 }
 
-function initializationCount(
-  value: number | undefined,
-  fallback: number,
-  label: string,
-): number {
+function initializationCount(value: number | undefined, fallback: number, label: string): number {
   return value === undefined ? fallback : nonNegativeIntegerAt(value, label);
 }
 
@@ -444,7 +441,9 @@ function sheet(
   for (const [key, fallback] of fields) {
     define(completed, key, own(output, key) ? output[key] : fallback);
   }
-  for (const key of Object.keys(output).filter(key => !own(completed, key)).sort()) {
+  for (const key of Object.keys(output)
+    .filter((key) => !own(completed, key))
+    .sort()) {
     define(completed, key, output[key]);
   }
 
@@ -473,15 +472,8 @@ export function canonicalizeWorkbook(
       rowCount: initializationCount(defaults.rowCount, 100, 'initial row count'),
       columnCount: initializationCount(defaults.columnCount, 26, 'initial column count'),
     };
-    validateJsonGraph(
-      input,
-      Array.isArray(input) ? 'workbook' : 'workbook[0]',
-      new WeakSet(),
-      1,
-    );
-    const sheets: readonly unknown[] = Array.isArray(input)
-      ? arrayAt(input, 'workbook')
-      : [input];
+    validateJsonGraph(input, Array.isArray(input) ? 'workbook' : 'workbook[0]', new WeakSet(), 1);
+    const sheets: readonly unknown[] = Array.isArray(input) ? arrayAt(input, 'workbook') : [input];
     return sheets.map((item, index) => sheet(item, index, validatedDefaults));
   } catch (cause) {
     throw invalidData(cause);

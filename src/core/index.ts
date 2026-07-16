@@ -34,13 +34,7 @@ export {
   normalizeCellRange,
   sheetId,
 } from './types/coordinates';
-export type {
-  CellAddress,
-  CellPoint,
-  CellRange,
-  Selection,
-  SheetId,
-} from './types/coordinates';
+export type { CellAddress, CellPoint, CellRange, Selection, SheetId } from './types/coordinates';
 export type {
   ActiveSheetChangeEvent,
   CellEditEvent,
@@ -104,11 +98,7 @@ export { tokenizeFormula } from './formulas/tokenizer';
 export type { FormulaToken, FormulaTokenKind } from './formulas/tokenizer';
 export { infixToPostfix, parseFormula } from './formulas/parser';
 export type { BinaryOperator, FormulaExpression } from './formulas/parser';
-export {
-  FORMULA_FUNCTIONS,
-  legacyDigits,
-  legacyNumberCalc,
-} from './formulas/functions';
+export { FORMULA_FUNCTIONS, legacyDigits, legacyNumberCalc } from './formulas/functions';
 export type {
   FormulaFunction,
   FormulaFunctionName,
@@ -165,18 +155,9 @@ export {
   transformMergesForDelete,
   transformMergesForInsert,
 } from './model/merges';
-export {
-  addStyle,
-  addStyleToSheet,
-  normalizeStyle,
-  stylesEqual,
-} from './model/styles';
+export { addStyle, addStyleToSheet, normalizeStyle, stylesEqual } from './model/styles';
 export type { AddSheetStyleResult, AddStyleResult } from './model/styles';
-export {
-  selectRuntimeSheet,
-  selectSheetData,
-  selectWorkbookData,
-} from './selectors/workbook';
+export { selectRuntimeSheet, selectSheetData, selectWorkbookData } from './selectors/workbook';
 export { selectCell, selectCellText } from './selectors/cell';
 export { selectCellStyle } from './selectors/style';
 export { validateWorkbook } from './selectors/validation';

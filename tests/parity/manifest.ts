@@ -27,7 +27,9 @@ export const parityManifest: readonly ParityRow[] = [
     unit: { assertions: ['history.undo-redo'] },
     component: { assertions: ['history.command-controls'] },
     browser: { assertions: ['history.shortcuts'] },
-    visual: { notApplicable: 'History state has no distinct visual output beyond the restored workbook.' },
+    visual: {
+      notApplicable: 'History state has no distinct visual output beyond the restored workbook.',
+    },
   },
   {
     id: 'formatting',
@@ -76,7 +78,9 @@ export const parityManifest: readonly ParityRow[] = [
     unit: { assertions: ['formulas.references', 'formulas.computation'] },
     component: { assertions: ['formulas.editor-display'] },
     browser: { assertions: ['formulas.keyboard-commit'] },
-    visual: { notApplicable: 'Formula computation is evidenced by rendered values in non-visual lanes.' },
+    visual: {
+      notApplicable: 'Formula computation is evidenced by rendered values in non-visual lanes.',
+    },
   },
   {
     id: 'output',

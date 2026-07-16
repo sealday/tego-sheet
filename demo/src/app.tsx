@@ -1,4 +1,12 @@
-import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  Component,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import {
   TegoSheet,
   type ActiveSheetChangeEvent,
@@ -77,7 +85,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [events, setEvents] = useState<ReturnType<typeof appendPreviewEvent>>([]);
 
-  const locale = useMemo(() => localeCode === 'zh-CN' ? zhCN : undefined, [localeCode]);
+  const locale = useMemo(() => (localeCode === 'zh-CN' ? zhCN : undefined), [localeCode]);
 
   useEffect(() => {
     const stableWorkbook = sheetRef.current?.getValue();
@@ -88,16 +96,18 @@ export function App() {
   }, [mode, mountEpoch, workbook]);
 
   const recordEvent = useCallback((input: Omit<PreviewEventInput, 'timestamp'>) => {
-    setEvents(current => appendPreviewEvent(current, {
-      ...input,
-      timestamp: new Date().toISOString(),
-    }));
+    setEvents((current) =>
+      appendPreviewEvent(current, {
+        ...input,
+        timestamp: new Date().toISOString(),
+      }),
+    );
   }, []);
 
   const changeMode = (nextMode: PreviewMode) => {
     recoveringRef.current = false;
     setMode(nextMode);
-    setMountEpoch(current => current + 1);
+    setMountEpoch((current) => current + 1);
   };
 
   const importJson = () => {
@@ -111,7 +121,7 @@ export function App() {
       setWorkbook(imported);
       setJsonText(formatWorkbookJson(imported));
       setError(null);
-      setMountEpoch(current => current + 1);
+      setMountEpoch((current) => current + 1);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Workbook JSON is invalid.');
     }
@@ -124,7 +134,7 @@ export function App() {
     setJsonText(formatWorkbookJson(freshWorkbook));
     setError(null);
     setEvents([]);
-    setMountEpoch(current => current + 1);
+    setMountEpoch((current) => current + 1);
   };
 
   const exportJson = () => {
@@ -168,7 +178,7 @@ export function App() {
     setMode(stable.mode);
     setJsonText(formatWorkbookJson(stable.workbook));
     setError(`Workbook import failed: ${renderError.message}`);
-    setMountEpoch(current => current + 1);
+    setMountEpoch((current) => current + 1);
   };
 
   return (
@@ -187,13 +197,17 @@ export function App() {
             type="button"
             aria-expanded={!controlsCollapsed}
             aria-controls="preview-controls-secondary"
-            onClick={() => setControlsCollapsed(current => !current)}
+            onClick={() => setControlsCollapsed((current) => !current)}
           >
             {controlsCollapsed ? 'Expand controls' : 'Collapse controls'}
           </button>
         </div>
 
-        {error !== null && <p className="preview-alert" role="alert">{error}</p>}
+        {error !== null && (
+          <p className="preview-alert" role="alert">
+            {error}
+          </p>
+        )}
 
         {!controlsCollapsed && (
           <div id="preview-controls-secondary" className="preview-controls__secondary">
@@ -202,7 +216,7 @@ export function App() {
                 Mode
                 <select
                   value={mode}
-                  onChange={event => changeMode(event.currentTarget.value as PreviewMode)}
+                  onChange={(event) => changeMode(event.currentTarget.value as PreviewMode)}
                 >
                   <option value="uncontrolled">Uncontrolled</option>
                   <option value="controlled">Controlled</option>
@@ -213,7 +227,7 @@ export function App() {
                 <input
                   type="checkbox"
                   checked={readOnly}
-                  onChange={event => setReadOnly(event.currentTarget.checked)}
+                  onChange={(event) => setReadOnly(event.currentTarget.checked)}
                 />
                 Read only
               </label>
@@ -222,7 +236,7 @@ export function App() {
                 Locale
                 <select
                   value={localeCode}
-                  onChange={event => setLocaleCode(event.currentTarget.value as LocaleCode)}
+                  onChange={(event) => setLocaleCode(event.currentTarget.value as LocaleCode)}
                 >
                   <option value="en">English</option>
                   <option value="zh-CN">简体中文</option>
@@ -231,14 +245,20 @@ export function App() {
             </div>
 
             <div className="preview-controls__actions">
-              <button type="button" onClick={resetWorkbook}>Reset workbook</button>
-              <button type="button" onClick={importJson}>Import JSON</button>
-              <button type="button" onClick={exportJson}>Export JSON</button>
+              <button type="button" onClick={resetWorkbook}>
+                Reset workbook
+              </button>
+              <button type="button" onClick={importJson}>
+                Import JSON
+              </button>
+              <button type="button" onClick={exportJson}>
+                Export JSON
+              </button>
               <button
                 type="button"
                 aria-expanded={jsonVisible}
                 aria-controls="workbook-json-panel"
-                onClick={() => setJsonVisible(current => !current)}
+                onClick={() => setJsonVisible((current) => !current)}
               >
                 {jsonVisible ? 'Hide JSON' : 'Show JSON'}
               </button>
@@ -246,7 +266,7 @@ export function App() {
                 type="button"
                 aria-expanded={eventsVisible}
                 aria-controls="preview-events-panel"
-                onClick={() => setEventsVisible(current => !current)}
+                onClick={() => setEventsVisible((current) => !current)}
               >
                 {eventsVisible ? 'Hide events' : 'Show events'}
               </button>
@@ -258,7 +278,7 @@ export function App() {
                 <textarea
                   id="workbook-json"
                   value={jsonText}
-                  onChange={event => setJsonText(event.currentTarget.value)}
+                  onChange={(event) => setJsonText(event.currentTarget.value)}
                 />
               </div>
             )}
@@ -270,7 +290,7 @@ export function App() {
                 role="log"
                 aria-label="Spreadsheet events"
               >
-                {events.map(event => (
+                {events.map((event) => (
                   <li key={event.id}>
                     <strong>{event.label}</strong>
                     {event.details === undefined ? null : ` — ${event.details}`}
@@ -284,7 +304,10 @@ export function App() {
       </header>
 
       <section className="preview-workspace" aria-label="Spreadsheet preview">
-        <PreviewErrorBoundary key={`preview-boundary-${mountEpoch}`} onError={recoverFromRenderError}>
+        <PreviewErrorBoundary
+          key={`preview-boundary-${mountEpoch}`}
+          onError={recoverFromRenderError}
+        >
           <TegoSheet
             key={mountEpoch}
             ref={sheetRef}

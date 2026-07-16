@@ -1,18 +1,16 @@
 import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { createRef } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import {
-  TegoSheet,
-  type Selection,
-  type TegoSheetHandle,
-  type WorkbookChange,
-} from '../../src';
+import { TegoSheet, type Selection, type TegoSheetHandle, type WorkbookChange } from '../../src';
 import { createCanvasHarness } from '../helpers/canvas-harness';
 
 beforeEach(() => {
   const context = createCanvasHarness().canvas.getContext('2d');
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => context);
-  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+  vi.stubGlobal(
+    'requestAnimationFrame',
+    vi.fn(() => 1),
+  );
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
 });
 
@@ -37,16 +35,18 @@ function renderBoundarySheet() {
   const rendered = render(
     <TegoSheet
       ref={ref}
-      defaultValue={[{
-        rows: {
-          len: 2,
-          0: { cells: { 0: { text: 'old' }, 1: { text: 'other' } } },
-          1: { cells: { 1: { text: 'bottom' } } },
+      defaultValue={[
+        {
+          rows: {
+            len: 2,
+            0: { cells: { 0: { text: 'old' }, 1: { text: 'other' } } },
+            1: { cells: { 1: { text: 'bottom' } } },
+          },
+          cols: { len: 2 },
         },
-        cols: { len: 2 },
-      }]}
+      ]}
       onChange={(_value, change) => changes.push(change)}
-      onSelectionChange={selection => selections.push(selection)}
+      onSelectionChange={(selection) => selections.push(selection)}
     />,
   );
   const root = rendered.container.querySelector<HTMLElement>('[data-tego-sheet]')!;
@@ -76,7 +76,7 @@ it('does not let toolbar pointer/focus events pre-commit the editor or navigate 
   fireEvent.click(bold);
 
   expect(selections).toEqual([]);
-  expect(changes.map(change => change.kind)).toEqual(['cell', 'style']);
+  expect(changes.map((change) => change.kind)).toEqual(['cell', 'style']);
   expect(ref.current!.getValue()[0]).toMatchObject({
     rows: { 0: { cells: { 0: { text: 'draft' } } } },
     styles: [{ font: { bold: true } }],
@@ -129,10 +129,14 @@ it('keeps context-menu pointer and keyboard events out of grid selection', async
   expect(changes).toHaveLength(1);
   expect(changes[0]).toMatchObject({ kind: 'cell', source: 'context-menu' });
   expect(ref.current!.getValue()[0]).toMatchObject({
-    rows: { 0: { cells: {
-      0: { text: 'old', printable: false },
-      1: { text: 'other' },
-    } } },
+    rows: {
+      0: {
+        cells: {
+          0: { text: 'old', printable: false },
+          1: { text: 'other' },
+        },
+      },
+    },
   });
 });
 
@@ -192,7 +196,7 @@ it('closes a focused context menu and restores grid keys when the canvas is pres
 
 it.each(['Escape', 'action'] as const)(
   'restores grid focus after context-menu %s close',
-  async close => {
+  async (close) => {
     const { ref, rendered, root, selections } = renderBoundarySheet();
     await waitFor(() => expect(ref.current).not.toBeNull());
     fireEvent.contextMenu(root, { clientX: 70, clientY: 40 });
@@ -299,8 +303,11 @@ it('@parity:tools.filter-controls isolates source and opening selection across i
   await waitFor(() => expect(ref.current).not.toBeNull());
 
   fireEvent.contextMenu(root, { clientX: 70, clientY: 40 });
-  fireEvent.click(within(rendered.getByRole('menu', { name: /cell actions/i }))
-    .getByRole('menuitem', { name: /data validation/i }));
+  fireEvent.click(
+    within(rendered.getByRole('menu', { name: /cell actions/i })).getByRole('menuitem', {
+      name: /data validation/i,
+    }),
+  );
   const validation = rendered.getByRole('dialog', { name: /data validation/i });
   fireEvent.change(validation.querySelector('select[name="type"]')!, {
     target: { value: 'number' },

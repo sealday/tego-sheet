@@ -17,17 +17,23 @@ export function DateEditor(props: {
       type="date"
       aria-label="Date editor"
       value={props.value}
-      onChange={event => props.onChange(event.currentTarget.value)}
+      onChange={(event) => props.onChange(event.currentTarget.value)}
       onBlur={props.onBlur}
-      onKeyDown={event => {
+      onKeyDown={(event) => {
         if (event.key === 'Escape') {
           event.preventDefault();
           props.onCancel();
         } else if (event.key === 'Enter' || event.key === 'Tab') {
           event.preventDefault();
-          props.onCommit(event.key === 'Tab'
-            ? event.shiftKey ? 'left' : 'right'
-            : event.shiftKey ? 'up' : 'down');
+          props.onCommit(
+            event.key === 'Tab'
+              ? event.shiftKey
+                ? 'left'
+                : 'right'
+              : event.shiftKey
+                ? 'up'
+                : 'down',
+          );
         }
       }}
     />

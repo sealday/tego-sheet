@@ -1,9 +1,5 @@
 import { parseA1Range } from '../coordinates/ranges';
-import {
-  deleteColumns,
-  getColumnData,
-  insertColumns,
-} from '../model/columns';
+import { deleteColumns, getColumnData, insertColumns } from '../model/columns';
 import { deleteRows, getRowData, insertRows } from '../model/rows';
 import { cloneSheet } from '../model/cells';
 import type {
@@ -39,7 +35,10 @@ export function structureRange(sheet: SheetData, command: StructureCommand): Cel
     case 'delete-row':
       return {
         start: { row: command.index, column: 0 },
-        end: { row: command.index + (command.count ?? 1) - 1, column: Math.max(0, columnCount(sheet) - 1) },
+        end: {
+          row: command.index + (command.count ?? 1) - 1,
+          column: Math.max(0, columnCount(sheet) - 1),
+        },
       };
     case 'set-row-height':
     case 'set-row-hidden':
@@ -54,7 +53,10 @@ export function structureRange(sheet: SheetData, command: StructureCommand): Cel
     case 'delete-column':
       return {
         start: { row: 0, column: command.index },
-        end: { row: Math.max(0, rowCount(sheet) - 1), column: command.index + (command.count ?? 1) - 1 },
+        end: {
+          row: Math.max(0, rowCount(sheet) - 1),
+          column: command.index + (command.count ?? 1) - 1,
+        },
       };
     case 'set-column-width':
     case 'set-column-hidden':
@@ -74,7 +76,7 @@ export function deletionSplitsMerge(
   start: number,
   end: number,
 ): boolean {
-  return (sheet.merges ?? []).some(value => {
+  return (sheet.merges ?? []).some((value) => {
     const merge = parseA1Range(value);
     const mergeStart = axis === 'row' ? merge.start.row : merge.start.column;
     const mergeEnd = axis === 'row' ? merge.end.row : merge.end.column;
@@ -92,7 +94,8 @@ export function assertStructureCommand(sheet: SheetData, command: StructureComma
   }
   switch (command.type) {
     case 'insert-row':
-      if (command.index > rowCount(sheet)) throw new RangeError('row insertion index exceeds row count');
+      if (command.index > rowCount(sheet))
+        throw new RangeError('row insertion index exceeds row count');
       return;
     case 'delete-row': {
       const end = command.index + (command.count ?? 1) - 1;
@@ -137,49 +140,48 @@ export function assertStructureCommand(sheet: SheetData, command: StructureComma
 export function applyStructureOperation(sheet: SheetData, command: StructureCommand): SheetData {
   assertStructureCommand(sheet, command);
   switch (command.type) {
-    case 'insert-row': return insertRows(sheet, command.index, command.count ?? 1);
-    case 'delete-row': return deleteRows(sheet, command.index, command.index + (command.count ?? 1) - 1);
-    case 'insert-column': return insertColumns(sheet, command.index, command.count ?? 1);
-    case 'delete-column': return deleteColumns(
-      sheet,
-      command.index,
-      command.index + (command.count ?? 1) - 1,
-    );
+    case 'insert-row':
+      return insertRows(sheet, command.index, command.count ?? 1);
+    case 'delete-row':
+      return deleteRows(sheet, command.index, command.index + (command.count ?? 1) - 1);
+    case 'insert-column':
+      return insertColumns(sheet, command.index, command.count ?? 1);
+    case 'delete-column':
+      return deleteColumns(sheet, command.index, command.index + (command.count ?? 1) - 1);
     case 'set-row-height':
-      return updateRows(sheet, command.row, command.count ?? 1, row => ({
+      return updateRows(sheet, command.row, command.count ?? 1, (row) => ({
         ...row,
         height: command.height,
       }));
-    case 'set-row-hidden': return updateRows(sheet, command.row, command.count ?? 1, row => {
-      const next = { ...row } as Record<string, unknown>;
-      if (command.hidden) next.hide = true;
-      else delete next.hide;
-      return next;
-    });
+    case 'set-row-hidden':
+      return updateRows(sheet, command.row, command.count ?? 1, (row) => {
+        const next = { ...row } as Record<string, unknown>;
+        if (command.hidden) next.hide = true;
+        else delete next.hide;
+        return next;
+      });
     case 'set-column-width':
-      return updateColumns(sheet, command.column, command.count ?? 1, column => ({
+      return updateColumns(sheet, command.column, command.count ?? 1, (column) => ({
         ...column,
         width: command.width,
       }));
-    case 'set-column-hidden': return updateColumns(
-      sheet,
-      command.column,
-      command.count ?? 1,
-      column => {
+    case 'set-column-hidden':
+      return updateColumns(sheet, command.column, command.count ?? 1, (column) => {
         const next = { ...column } as Record<string, unknown>;
         if (command.hidden) next.hide = true;
         else delete next.hide;
         return next;
-      },
-    );
+      });
   }
 }
 
 function shallowEqual(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
   const leftKeys = Object.keys(left);
   const rightKeys = Object.keys(right);
-  return leftKeys.length === rightKeys.length
-    && leftKeys.every(key => Object.is(left[key], right[key]));
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every((key) => Object.is(left[key], right[key]))
+  );
 }
 
 function updateRows(
@@ -202,7 +204,7 @@ function updateRows(
     const clonedCurrent = (rows[String(index)] ?? {}) as Record<string, unknown>;
     rows[String(index)] = update(clonedCurrent);
   }
-  return rows === null ? sheet : { ...cloned!, rows } as SheetData;
+  return rows === null ? sheet : ({ ...cloned!, rows } as SheetData);
 }
 
 function updateColumns(
@@ -225,5 +227,5 @@ function updateColumns(
     const clonedCurrent = (columns[String(index)] ?? {}) as Record<string, unknown>;
     columns[String(index)] = update(clonedCurrent);
   }
-  return columns === null ? sheet : { ...cloned!, cols: columns } as SheetData;
+  return columns === null ? sheet : ({ ...cloned!, cols: columns } as SheetData);
 }

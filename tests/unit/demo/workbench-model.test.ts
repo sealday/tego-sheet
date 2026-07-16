@@ -38,7 +38,9 @@ describe('fullscreen demo workbench model', () => {
     const parsed = parseWorkbookJson(source);
 
     expect(parsed).toEqual({ name: 'Solo', rows: { len: 1 } });
-    expect(formatWorkbookJson(parsed)).toBe('{\n  "name": "Solo",\n  "rows": {\n    "len": 1\n  }\n}');
+    expect(formatWorkbookJson(parsed)).toBe(
+      '{\n  "name": "Solo",\n  "rows": {\n    "len": 1\n  }\n}',
+    );
   });
 
   it('returns deeply independent example workbooks', () => {
@@ -72,7 +74,9 @@ describe('fullscreen demo workbench model', () => {
     ['a string', '"sheet"'],
     ['an array containing a primitive', '[1]'],
   ])('rejects %s as invalid top-level workbook data', (_description, source) => {
-    expect(() => parseWorkbookJson(source)).toThrow('Workbook JSON must be a sheet object or an array of sheet objects.');
+    expect(() => parseWorkbookJson(source)).toThrow(
+      'Workbook JSON must be a sheet object or an array of sheet objects.',
+    );
   });
 
   it.each([
@@ -86,12 +90,15 @@ describe('fullscreen demo workbench model', () => {
   });
 
   it('keeps useful event entries newest-first within the configured limit', () => {
-    const entries = Array.from({ length: PREVIEW_EVENT_LIMIT + 3 }, (_, index) => index)
-      .reduce((logs, index) => appendPreviewEvent(logs, {
-        timestamp: `2026-07-16T00:00:${String(index).padStart(2, '0')}.000Z`,
-        label: `event-${index}`,
-        details: `row ${index}`,
-      }), [] as ReturnType<typeof appendPreviewEvent>);
+    const entries = Array.from({ length: PREVIEW_EVENT_LIMIT + 3 }, (_, index) => index).reduce(
+      (logs, index) =>
+        appendPreviewEvent(logs, {
+          timestamp: `2026-07-16T00:00:${String(index).padStart(2, '0')}.000Z`,
+          label: `event-${index}`,
+          details: `row ${index}`,
+        }),
+      [] as ReturnType<typeof appendPreviewEvent>,
+    );
 
     expect(entries).toHaveLength(PREVIEW_EVENT_LIMIT);
     expect(entries[0]).toMatchObject({
@@ -101,7 +108,7 @@ describe('fullscreen demo workbench model', () => {
     });
     expect(entries[0]?.id).toBeTruthy();
     expect(entries.at(-1)?.label).toBe('event-3');
-    expect(new Set(entries.map(entry => entry.id))).toHaveLength(PREVIEW_EVENT_LIMIT);
+    expect(new Set(entries.map((entry) => entry.id))).toHaveLength(PREVIEW_EVENT_LIMIT);
   });
 
   it('keeps an event id stable when newer entries are appended', () => {
@@ -130,7 +137,7 @@ describe('fullscreen demo workbench model', () => {
       label: 'cell changed',
     });
 
-    expect(second.map(entry => entry.id)).not.toContain('caller-controlled-id');
-    expect(new Set(second.map(entry => entry.id))).toHaveLength(2);
+    expect(second.map((entry) => entry.id)).not.toContain('caller-controlled-id');
+    expect(new Set(second.map((entry) => entry.id))).toHaveLength(2);
   });
 });

@@ -1,15 +1,19 @@
 import { expect, test } from '@playwright/test';
 import { capture, openHarness } from './support';
 
-test('@parity:workbook.import-export imports controlled data and exports canonical workbook data', async ({ page }) => {
+test('@parity:workbook.import-export imports controlled data and exports canonical workbook data', async ({
+  page,
+}) => {
   await openHarness(page);
   await page.getByRole('button', { name: 'Load alternate workbook' }).click();
   const alternate = await capture(page);
-  expect(alternate).toMatchObject([{
-    name: 'Alternate',
-    rows: { len: 2, 0: { cells: { 0: { text: 'alternate-only' } } } },
-    cols: { len: 2 },
-  }]);
+  expect(alternate).toMatchObject([
+    {
+      name: 'Alternate',
+      rows: { len: 2, 0: { cells: { 0: { text: 'alternate-only' } } } },
+      cols: { len: 2 },
+    },
+  ]);
   expect(alternate[0]).toMatchObject({
     freeze: 'A1',
     merges: [],

@@ -14,16 +14,34 @@ const laneNames = ['unit', 'component', 'browser', 'visual'] as const;
 const evidenceStatuses = ['passed', 'failed', 'skipped'] as const;
 const rowPropertyNames = ['id', ...laneNames] as const;
 const evidencePropertyNames = [
-  'lane', 'status', 'title', 'source', 'project', 'runId', 'revision', 'treeHash',
-  'manifestHash', 'runner', 'configHash', 'startedAt', 'observedAt',
+  'lane',
+  'status',
+  'title',
+  'source',
+  'project',
+  'runId',
+  'revision',
+  'treeHash',
+  'manifestHash',
+  'runner',
+  'configHash',
+  'startedAt',
+  'observedAt',
 ] as const;
 const requiredEvidencePropertyNames = ['lane', 'status', 'title', 'source'] as const;
 const provenancePropertyNames = [
-  'runId', 'revision', 'treeHash', 'manifestHash', 'runner', 'configHash', 'startedAt', 'observedAt',
+  'runId',
+  'revision',
+  'treeHash',
+  'manifestHash',
+  'runner',
+  'configHash',
+  'startedAt',
+  'observedAt',
 ] as const;
 const rowIdPattern = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
 const assertionIdPattern = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$/;
-const controlCharacterPattern = /[\u0000-\u001f\u007f-\u009f]/;
+const controlCharacterPattern = /\p{Cc}/u;
 const mandatoryCorrectionIds = [
   'correction.empty-workbook',
   'correction.validation-all-sheets',
@@ -37,8 +55,17 @@ interface AssertionDeclaration {
   readonly lane: ParityLane;
 }
 
-interface ValidatedEvidenceRecord extends Omit<ParityEvidenceRecord,
-  'runId' | 'revision' | 'treeHash' | 'manifestHash' | 'runner' | 'configHash' | 'startedAt' | 'observedAt'> {
+interface ValidatedEvidenceRecord extends Omit<
+  ParityEvidenceRecord,
+  | 'runId'
+  | 'revision'
+  | 'treeHash'
+  | 'manifestHash'
+  | 'runner'
+  | 'configHash'
+  | 'startedAt'
+  | 'observedAt'
+> {
   readonly id: string;
   readonly runId?: string;
   readonly revision?: string;
@@ -139,7 +166,10 @@ function validateRowsInput(rows: readonly unknown[]): readonly Record<string, un
 }
 
 function extractEvidenceId(title: string, label: string): string {
-  const candidates = title.trim().split(/\s+/).filter((token) => token.startsWith('@parity:'));
+  const candidates = title
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token.startsWith('@parity:'));
   const exactTokens = candidates.filter((token) => {
     const id = token.slice('@parity:'.length);
     return assertionIdPattern.test(id);
@@ -206,8 +236,8 @@ function validateEvidenceRecords(
       throw new Error(`${label} source must not contain control characters`);
     }
     if (
-      Object.hasOwn(value, 'project')
-      && (typeof value.project !== 'string' || value.project.trim() === '')
+      Object.hasOwn(value, 'project') &&
+      (typeof value.project !== 'string' || value.project.trim() === '')
     ) {
       throw new Error(`${label} project must be a nonempty string when provided`);
     }
@@ -243,8 +273,8 @@ function validateEvidenceRecords(
       const observedAt = validateTimestamp(value.observedAt, `${label} observedAt`);
       const observedTime = Date.parse(observedAt);
       if (
-        observedTime < Date.parse(context.startedAt)
-        || observedTime > Date.parse(context.expiresAt)
+        observedTime < Date.parse(context.startedAt) ||
+        observedTime > Date.parse(context.expiresAt)
       ) {
         throw new Error(`${label} observedAt is outside the release validity window`);
       }
@@ -256,16 +286,18 @@ function validateEvidenceRecords(
       title: value.title,
       source: value.source,
       ...(value.project === undefined ? {} : { project: value.project as string }),
-      ...(context === undefined ? {} : {
-        runId: value.runId as string,
-        revision: value.revision as string,
-        treeHash: value.treeHash as string,
-        manifestHash: value.manifestHash as string,
-        runner: value.runner as string,
-        configHash: value.configHash as string,
-        startedAt: value.startedAt as string,
-        observedAt: value.observedAt as string,
-      }),
+      ...(context === undefined
+        ? {}
+        : {
+            runId: value.runId as string,
+            revision: value.revision as string,
+            treeHash: value.treeHash as string,
+            manifestHash: value.manifestHash as string,
+            runner: value.runner as string,
+            configHash: value.configHash as string,
+            startedAt: value.startedAt as string,
+            observedAt: value.observedAt as string,
+          }),
       id: extractEvidenceId(value.title, label),
     };
   });
@@ -407,7 +439,9 @@ export function verifyManifest(
             }
           }
         }
-        const missingProjects = expectedProjects.filter(project => !observedProjects.has(project));
+        const missingProjects = expectedProjects.filter(
+          (project) => !observedProjects.has(project),
+        );
         if (missingProjects.length > 0) {
           throw new Error(
             `assertion "${assertionId}" is missing project evidence: ${missingProjects.join(', ')}`,
@@ -419,9 +453,11 @@ export function verifyManifest(
           `assertion "${assertionId}" declared by row "${declaration.rowId}" has no passed evidence; observed records: ${recordSummary}`,
         );
       }
-      if (recordsForAssertion.some(({ status }) => (
-        status === 'failed' || (context === undefined && status === 'skipped')
-      ))) {
+      if (
+        recordsForAssertion.some(
+          ({ status }) => status === 'failed' || (context === undefined && status === 'skipped'),
+        )
+      ) {
         throw new Error(
           `assertion "${assertionId}" declared by row "${declaration.rowId}" has mixed terminal outcomes; no retained record may fail; observed records: ${recordSummary}`,
         );
@@ -478,7 +514,9 @@ export function parseEvidenceArtifact(path: string): unknown[] {
 
 export function verifyEvidenceArtifacts(args: readonly string[]): ManifestVerificationSummary {
   if (args.length === 0) {
-    throw new Error('missing execution artifact; pass one or more JSON-array or NDJSON record files');
+    throw new Error(
+      'missing execution artifact; pass one or more JSON-array or NDJSON record files',
+    );
   }
 
   const evidence = args.flatMap(parseEvidenceArtifact);
@@ -495,7 +533,9 @@ export function verifyReleaseEvidenceArtifacts(
     context = JSON.parse(readFileSync(contextPath, 'utf8')) as unknown;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`could not read parity release context ${JSON.stringify(contextPath)}: ${message}`);
+    throw new Error(
+      `could not read parity release context ${JSON.stringify(contextPath)}: ${message}`,
+    );
   }
   assertParityReleaseContextCurrent(context, resolve(repositoryRoot));
   const evidence = args.flatMap(parseEvidenceArtifact);

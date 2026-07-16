@@ -36,8 +36,12 @@ export interface EngineAdapterOptions {
 
 export interface EngineAdapter {
   readonly interactionSnapshot: () => InteractionSnapshot | null;
-  readonly overlayAnchor: (point: Readonly<{ readonly row: number; readonly column: number }>) => OverlayAnchor | null;
-  readonly ensureVisible: (point: Readonly<{ readonly row: number; readonly column: number }>) => OverlayAnchor | null;
+  readonly overlayAnchor: (
+    point: Readonly<{ readonly row: number; readonly column: number }>,
+  ) => OverlayAnchor | null;
+  readonly ensureVisible: (
+    point: Readonly<{ readonly row: number; readonly column: number }>,
+  ) => OverlayAnchor | null;
   readonly nextSelection: (direction: SelectionDirection) => Readonly<{
     readonly state: SelectionState;
     readonly selection: Selection;
@@ -55,18 +59,31 @@ export interface EngineAdapter {
   readonly dispose: () => void;
 }
 
-function dimensions(surface: HTMLElement, fallback: HTMLElement): { readonly width: number; readonly height: number } {
-  const rect = typeof surface.getBoundingClientRect === 'function'
-    ? surface.getBoundingClientRect()
-    : undefined;
+function dimensions(
+  surface: HTMLElement,
+  fallback: HTMLElement,
+): { readonly width: number; readonly height: number } {
+  const rect =
+    typeof surface.getBoundingClientRect === 'function'
+      ? surface.getBoundingClientRect()
+      : undefined;
   const fallbackRect = fallback.getBoundingClientRect();
   return {
-    width: Math.max(0, surface.clientWidth || rect?.width || fallback.clientWidth || fallbackRect.width || 0),
-    height: Math.max(0, surface.clientHeight || rect?.height || fallback.clientHeight || fallbackRect.height || 0),
+    width: Math.max(
+      0,
+      surface.clientWidth || rect?.width || fallback.clientWidth || fallbackRect.width || 0,
+    ),
+    height: Math.max(
+      0,
+      surface.clientHeight || rect?.height || fallback.clientHeight || fallbackRect.height || 0,
+    ),
   };
 }
 
-function clippedFreeze(value: string | undefined): { readonly row: number; readonly column: number } {
+function clippedFreeze(value: string | undefined): {
+  readonly row: number;
+  readonly column: number;
+} {
   return parseA1(value ?? 'A1');
 }
 
@@ -75,13 +92,15 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
   let failedSnapshot: ControllerSnapshot | null = null;
   const engine = new CanvasEngine(options.canvas, {
     defaultStyle: options.sheetOptions?.defaultStyle,
-    ...(options.onRenderError === undefined ? {} : {
-      onRenderError: (cause: unknown) => {
-        if (latestSnapshot === null || failedSnapshot === latestSnapshot) return;
-        failedSnapshot = latestSnapshot;
-        options.onRenderError?.(cause);
-      },
-    }),
+    ...(options.onRenderError === undefined
+      ? {}
+      : {
+          onRenderError: (cause: unknown) => {
+            if (latestSnapshot === null || failedSnapshot === latestSnapshot) return;
+            failedSnapshot = latestSnapshot;
+            options.onRenderError?.(cause);
+          },
+        }),
   });
   let activeSheet: SheetId | null = null;
   let viewport: ViewportMetrics | null = null;
@@ -92,16 +111,17 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
 
   const activeIndex = (): number => {
     if (latestSnapshot === null || activeSheet === null) return -1;
-    return latestSnapshot.sheets.findIndex(sheet => sheet.id === activeSheet);
+    return latestSnapshot.sheets.findIndex((sheet) => sheet.id === activeSheet);
   };
 
   const paint = () => {
     if (
-      disposed
-      || latestSnapshot === null
-      || failedSnapshot === latestSnapshot
-      || viewport === null
-    ) return;
+      disposed ||
+      latestSnapshot === null ||
+      failedSnapshot === latestSnapshot ||
+      viewport === null
+    )
+      return;
     const index = activeIndex();
     const sheet = index < 0 ? undefined : latestSnapshot.value[index];
     if (sheet === undefined) return;
@@ -155,13 +175,14 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
     paintNow = true,
   ) => {
     if (
-      disposed
-      || viewport === null
-      || point.row < 0
-      || point.column < 0
-      || point.row >= viewport.model.rowCount
-      || point.column >= viewport.model.columnCount
-    ) return null;
+      disposed ||
+      viewport === null ||
+      point.row < 0 ||
+      point.column < 0 ||
+      point.row >= viewport.model.rowCount ||
+      point.column >= viewport.model.columnCount
+    )
+      return null;
     const model = viewport.model;
     const frozenWidth = model.columnOffset(viewport.freeze.column);
     const frozenHeight = model.rowOffset(viewport.freeze.row);
@@ -198,12 +219,13 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
   return {
     interactionSnapshot() {
       if (
-        disposed
-        || latestSnapshot === null
-        || activeSheet === null
-        || viewport === null
-        || selection === null
-      ) return null;
+        disposed ||
+        latestSnapshot === null ||
+        activeSheet === null ||
+        viewport === null ||
+        selection === null
+      )
+        return null;
       return {
         viewport,
         selection,
@@ -238,7 +260,7 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
     },
     readSelection(requested) {
       if (latestSnapshot === null) return [];
-      const index = latestSnapshot.sheets.findIndex(sheet => sheet.id === requested.sheet);
+      const index = latestSnapshot.sheets.findIndex((sheet) => sheet.id === requested.sheet);
       const sheet = index < 0 ? undefined : latestSnapshot.value[index];
       if (sheet === undefined) return [];
       assertClipboardResourceLimit(requested.range);
@@ -251,16 +273,19 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
           column += 1
         ) {
           const rowData = sheet.rows?.[String(row)];
-          const rowRecord = typeof rowData === 'object' && rowData !== null && !Array.isArray(rowData)
-            ? rowData as Readonly<Record<string, unknown>>
-            : undefined;
+          const rowRecord =
+            typeof rowData === 'object' && rowData !== null && !Array.isArray(rowData)
+              ? (rowData as Readonly<Record<string, unknown>>)
+              : undefined;
           const cells = rowRecord?.cells;
-          const cell = typeof cells === 'object' && cells !== null && !Array.isArray(cells)
-            ? (cells as Readonly<Record<string, unknown>>)[String(column)]
-            : undefined;
-          const cellRecord = typeof cell === 'object' && cell !== null && !Array.isArray(cell)
-            ? cell as Readonly<Record<string, unknown>>
-            : undefined;
+          const cell =
+            typeof cells === 'object' && cells !== null && !Array.isArray(cells)
+              ? (cells as Readonly<Record<string, unknown>>)[String(column)]
+              : undefined;
+          const cellRecord =
+            typeof cell === 'object' && cell !== null && !Array.isArray(cell)
+              ? (cell as Readonly<Record<string, unknown>>)
+              : undefined;
           values.push(typeof cellRecord?.text === 'string' ? cellRecord.text : '');
         }
         output.push(values);

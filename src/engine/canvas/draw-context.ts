@@ -52,9 +52,7 @@ function backingDimension(
 ): number {
   const dimension = Math.floor(value * devicePixelRatio);
   if (!Number.isSafeInteger(dimension) || dimension < 0) {
-    throw new RangeError(
-      `canvas backing ${label} must be a non-negative safe integer`,
-    );
+    throw new RangeError(`canvas backing ${label} must be a non-negative safe integer`);
   }
   if (dimension > MAX_CANVAS_BACKING_DIMENSION) {
     throw new RangeError(
@@ -123,19 +121,10 @@ export class DrawContext {
     this.context.restore();
   }
 
-  withClip(
-    rect: CssRect,
-    paint: () => void,
-    translation?: CssPoint,
-  ): void {
+  withClip(rect: CssRect, paint: () => void, translation?: CssPoint): void {
     this.save();
     this.context.beginPath();
-    this.context.rect(
-      rect.left - this.originX,
-      rect.top - this.originY,
-      rect.width,
-      rect.height,
-    );
+    this.context.rect(rect.left - this.originX, rect.top - this.originY, rect.width, rect.height);
     this.context.clip();
     const previousX = this.originX;
     const previousY = this.originY;
@@ -154,12 +143,15 @@ export class DrawContext {
   }
 
   withPixelAlignedClip(rect: CssRect, paint: () => void): void {
-    this.withClip({
-      left: this.lineCoordinate(rect.left),
-      top: this.lineCoordinate(rect.top),
-      width: this.pixelSize(rect.width),
-      height: this.pixelSize(rect.height),
-    }, paint);
+    this.withClip(
+      {
+        left: this.lineCoordinate(rect.left),
+        top: this.lineCoordinate(rect.top),
+        width: this.pixelSize(rect.width),
+        height: this.pixelSize(rect.height),
+      },
+      paint,
+    );
   }
 
   private lineCoordinate(value: number): number {

@@ -98,21 +98,21 @@ function recordCanvasGeometry(): void {
     };
   };
 
-  prototype.beginPath = function() {
+  prototype.beginPath = function () {
     paths.set(this, []);
     beginPath.call(this);
   };
-  prototype.moveTo = function(x, y) {
+  prototype.moveTo = function (x, y) {
     paths.set(this, [transformedPoint(this, x, y)]);
     moveTo.call(this, x, y);
   };
-  prototype.lineTo = function(x, y) {
+  prototype.lineTo = function (x, y) {
     const path = paths.get(this) ?? [];
     path.push(transformedPoint(this, x, y));
     paths.set(this, path);
     lineTo.call(this, x, y);
   };
-  prototype.fillRect = function(x, y, width, height) {
+  prototype.fillRect = function (x, y, width, height) {
     const start = transformedPoint(this, x, y);
     const end = transformedPoint(this, x + width, y + height);
     const record = {
@@ -128,14 +128,14 @@ function recordCanvasGeometry(): void {
     fillsByCanvas.set(this.canvas, canvasRecords);
     fillRect.call(this, x, y, width, height);
   };
-  prototype.fillText = function(text, x, y, maxWidth) {
+  prototype.fillText = function (text, x, y, maxWidth) {
     const canvasRecords = textsByCanvas.get(this.canvas) ?? [];
     canvasRecords.push(String(text));
     textsByCanvas.set(this.canvas, canvasRecords);
     if (maxWidth === undefined) fillText.call(this, text, x, y);
     else fillText.call(this, text, x, y, maxWidth);
   };
-  prototype.strokeRect = function(x, y, width, height) {
+  prototype.strokeRect = function (x, y, width, height) {
     const start = transformedPoint(this, x, y);
     const end = transformedPoint(this, x + width, y + height);
     records.strokeRects.push({
@@ -147,7 +147,7 @@ function recordCanvasGeometry(): void {
     });
     strokeRect.call(this, x, y, width, height);
   };
-  prototype.stroke = function(this: CanvasRenderingContext2D, path?: Path2D) {
+  prototype.stroke = function (this: CanvasRenderingContext2D, path?: Path2D) {
     const points = paths.get(this);
     if (points !== undefined && points.length > 1) {
       const record = { points: [...points], stroke: String(this.strokeStyle) };
@@ -185,27 +185,32 @@ function recordCanvasGeometry(): void {
         crop.style.width = '410px';
         crop.style.height = '90px';
         crop.setAttribute('data-visual-print-crop', 'printable-cells');
-        crop.getContext('2d')?.drawImage(
-          source,
-          40 * scale,
-          40 * scale,
-          crop.width,
-          crop.height,
-          0,
-          0,
-          crop.width,
-          crop.height,
-        );
+        crop
+          .getContext('2d')
+          ?.drawImage(
+            source,
+            40 * scale,
+            40 * scale,
+            crop.width,
+            crop.height,
+            0,
+            0,
+            crop.width,
+            crop.height,
+          );
         preview.append(crop);
       }
     }
 
     records.printSnapshot = {
       css: document.querySelector('[data-tego-print-style]')?.textContent ?? '',
-      fills: canvases.flatMap(canvas => fillsByCanvas.get(canvas) ?? []),
-      pages: canvases.map(canvas => ({ height: canvas.height, width: canvas.width })),
-      strokes: canvases.reduce((count, canvas) => count + (linesByCanvas.get(canvas)?.length ?? 0), 0),
-      texts: canvases.flatMap(canvas => textsByCanvas.get(canvas) ?? []),
+      fills: canvases.flatMap((canvas) => fillsByCanvas.get(canvas) ?? []),
+      pages: canvases.map((canvas) => ({ height: canvas.height, width: canvas.width })),
+      strokes: canvases.reduce(
+        (count, canvas) => count + (linesByCanvas.get(canvas)?.length ?? 0),
+        0,
+      ),
+      texts: canvases.flatMap((canvas) => textsByCanvas.get(canvas) ?? []),
     };
     document.body.append(preview);
   };

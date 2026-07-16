@@ -15,12 +15,41 @@ import type { CellPoint } from '../../../src/core';
 
 describe('formula tokenization and parsing', () => {
   it('tokenizes literals, references, ranges, comparisons, and functions', () => {
-    expect(tokenizeFormula('=IF(A1>=2, SUM(A1:B2), "no")').map(token => token.kind)).toEqual([
-      'function', 'left-paren', 'reference', 'operator', 'number', 'comma',
-      'function', 'left-paren', 'reference', 'colon', 'reference', 'right-paren',
-      'comma', 'string', 'right-paren', 'eof',
+    expect(tokenizeFormula('=IF(A1>=2, SUM(A1:B2), "no")').map((token) => token.kind)).toEqual([
+      'function',
+      'left-paren',
+      'reference',
+      'operator',
+      'number',
+      'comma',
+      'function',
+      'left-paren',
+      'reference',
+      'colon',
+      'reference',
+      'right-paren',
+      'comma',
+      'string',
+      'right-paren',
+      'eof',
     ]);
     expect(parseFormula('=1+2*3')).toMatchObject({ kind: 'binary', operator: '+' });
+  });
+
+  it('rejects a trailing comma in function arguments', () => {
+    expect(() => parseFormula('=SUM(1,)')).toThrow(SyntaxError);
+  });
+
+  it('parses zero, one, and multiple function arguments', () => {
+    expect(parseFormula('=SUM()')).toMatchObject({ kind: 'call', arguments: [] });
+    expect(parseFormula('=SUM(1)')).toMatchObject({
+      kind: 'call',
+      arguments: [{ kind: 'number' }],
+    });
+    expect(parseFormula('=SUM(1,2)')).toMatchObject({
+      kind: 'call',
+      arguments: [{ kind: 'number' }, { kind: 'number' }],
+    });
   });
 
   it.each([
@@ -52,15 +81,23 @@ describe('formula tokenization and parsing', () => {
   });
 
   it('shifts only references outside quoted strings and honors absolute axes', () => {
-    expect(shiftFormulaReferences('=SUM(A1,$B2,C$3,$D$4)&"A1"', { row: 1, column: 2 }))
-      .toBe('=SUM(C2,$B3,E$3,$D$4)&"A1"');
+    expect(shiftFormulaReferences('=SUM(A1,$B2,C$3,$D$4)&"A1"', { row: 1, column: 2 })).toBe(
+      '=SUM(C2,$B3,E$3,$D$4)&"A1"',
+    );
   });
 });
 
 describe('formula functions', () => {
   it('contains exactly the eight supported legacy functions', () => {
     expect(Object.keys(FORMULA_FUNCTIONS)).toEqual([
-      'SUM', 'AVERAGE', 'MAX', 'MIN', 'IF', 'AND', 'OR', 'CONCAT',
+      'SUM',
+      'AVERAGE',
+      'MAX',
+      'MIN',
+      'IF',
+      'AND',
+      'OR',
+      'CONCAT',
     ]);
   });
 
@@ -124,15 +161,15 @@ describe('pure formula evaluation', () => {
 
   it('leaves stored values inert and never mutates selector-owned data', () => {
     const stored = Object.freeze({ text: '=A2+1', value: 99 });
-    const selector = (point: CellPoint) => point.row === 0 ? stored.text : '2';
+    const selector = (point: CellPoint) => (point.row === 0 ? stored.text : '2');
 
     expect(evaluateCell({ row: 0, column: 0 }, selector)).toBe('3');
     expect(stored).toEqual({ text: '=A2+1', value: 99 });
   });
 
   it('returns a deterministic rendered error for direct and indirect cycles', () => {
-    const direct = (point: CellPoint) => point.row === 0 ? '=A1' : '';
-    const indirect = (point: CellPoint) => point.row === 0 ? '=A2' : '=A1';
+    const direct = (point: CellPoint) => (point.row === 0 ? '=A1' : '');
+    const indirect = (point: CellPoint) => (point.row === 0 ? '=A2' : '=A1');
 
     expect(evaluateCell({ row: 0, column: 0 }, direct)).toBe('#CYCLE!');
     expect(evaluateCell({ row: 0, column: 0 }, indirect)).toBe('#CYCLE!');
@@ -149,7 +186,7 @@ describe('pure formula evaluation', () => {
 
   it.each(['TOSTRING', 'VALUEOF', 'CONSTRUCTOR', '__PROTO__'])(
     'rejects inherited function-table name %s',
-    name => {
+    (name) => {
       expect(evaluateFormula(`=${name}()`, select)).toBe('#NAME?');
       expect(evaluateFormula(`=${name.toLowerCase()}()`, select)).toBe('#NAME?');
     },

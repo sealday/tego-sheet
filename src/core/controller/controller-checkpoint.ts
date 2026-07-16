@@ -33,9 +33,6 @@ export function createControllerCheckpoint(
   return Object.freeze(checkpoint);
 }
 
-export function hasCheckpointOwner(
-  checkpoint: ControllerCheckpoint,
-  owner: object,
-): boolean {
+export function hasCheckpointOwner(checkpoint: ControllerCheckpoint, owner: object): boolean {
   return checkpoint[checkpointOwner] === owner;
 }

@@ -2,15 +2,7 @@ import type { CellAddress, SheetId } from './coordinates';
 
 export type ValidationType = 'date' | 'number' | 'list' | 'phone' | 'email';
 
-export type ValidationOperator =
-  | 'be'
-  | 'nbe'
-  | 'eq'
-  | 'neq'
-  | 'lt'
-  | 'lte'
-  | 'gt'
-  | 'gte';
+export type ValidationOperator = 'be' | 'nbe' | 'eq' | 'neq' | 'lt' | 'lte' | 'gt' | 'gte';
 
 export interface ValidationRule {
   readonly mode: 'cell';

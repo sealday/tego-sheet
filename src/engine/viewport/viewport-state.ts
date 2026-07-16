@@ -1,9 +1,4 @@
-import type {
-  FreezeState,
-  GridModelPort,
-  ScrollState,
-  ViewportMetrics,
-} from '../ports';
+import type { FreezeState, GridModelPort, ScrollState, ViewportMetrics } from '../ports';
 
 export interface ViewportState {
   readonly width: number;
@@ -56,11 +51,7 @@ export function createViewportState(
     }),
     freeze: Object.freeze({
       row: freezeIndex(input.freeze?.row ?? 0, model.rowCount, 'frozen row count'),
-      column: freezeIndex(
-        input.freeze?.column ?? 0,
-        model.columnCount,
-        'frozen column count',
-      ),
+      column: freezeIndex(input.freeze?.column ?? 0, model.columnCount, 'frozen column count'),
     }),
   });
 }

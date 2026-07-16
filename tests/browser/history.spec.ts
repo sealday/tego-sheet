@@ -2,7 +2,9 @@ import { expect, test } from '@playwright/test';
 import { capture, openHarness, selectCell } from './support';
 
 async function textAt(page: Parameters<typeof capture>[0]) {
-  const value = await capture(page) as Array<{ rows?: Record<string, { cells?: Record<string, { text?: string }> }> }>;
+  const value = (await capture(page)) as Array<{
+    rows?: Record<string, { cells?: Record<string, { text?: string }> }>;
+  }>;
   return value[0]?.rows?.['1']?.cells?.['0']?.text;
 }
 

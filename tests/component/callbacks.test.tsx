@@ -49,10 +49,7 @@ it('keeps semantic no-ops silent', () => {
   const onChange = vi.fn();
   const onCellEdit = vi.fn();
   const schedulePaint = vi.fn();
-  const rendered = renderSheet(
-    { defaultValue: [{}], onChange, onCellEdit },
-    { schedulePaint },
-  );
+  const rendered = renderSheet({ defaultValue: [{}], onChange, onCellEdit }, { schedulePaint });
   const sheet = rendered.runtime.epoch.snapshot.sheets[0]!.id;
 
   act(() => {
@@ -144,11 +141,13 @@ it('does not swallow exceptions thrown by consumer callbacks', () => {
   });
   const sheet = rendered.runtime.epoch.snapshot.sheets[0]!.id;
 
-  expect(() => rendered.runtime.dispatchRef({
-    type: 'set-cell-text',
-    address: { sheet, row: 0, column: 0 },
-    text: 'next',
-  })).toThrow(consumerError);
+  expect(() =>
+    rendered.runtime.dispatchRef({
+      type: 'set-cell-text',
+      address: { sheet, row: 0, column: 0 },
+      text: 'next',
+    }),
+  ).toThrow(consumerError);
 });
 
 it('does not convert a consumer TegoSheetException into a UI command failure', () => {
@@ -167,11 +166,16 @@ it('does not convert a consumer TegoSheetException into a UI command failure', (
   });
   const sheet = rendered.runtime.epoch.snapshot.sheets[0]!.id;
 
-  expect(() => rendered.runtime.dispatchUi({
-    type: 'set-cell-text',
-    address: { sheet, row: 0, column: 0 },
-    text: 'committed before callback',
-  }, 'keyboard')).toThrow(consumerError);
+  expect(() =>
+    rendered.runtime.dispatchUi(
+      {
+        type: 'set-cell-text',
+        address: { sheet, row: 0, column: 0 },
+        text: 'committed before callback',
+      },
+      'keyboard',
+    ),
+  ).toThrow(consumerError);
   expect(onError).not.toHaveBeenCalled();
   expect(rendered.runtime.epoch.controller.getCellText({ sheet, row: 0, column: 0 })).toBe(
     'committed before callback',
@@ -179,13 +183,17 @@ it('does not convert a consumer TegoSheetException into a UI command failure', (
 });
 
 it('does not capture paste result matrices without an onPaste callback', () => {
-  const rendered = renderSheet({ defaultValue: [{
-    rows: {
-      len: 4,
-      0: { cells: { 0: { text: 'source' } } },
-    },
-    cols: { len: 2 },
-  }] });
+  const rendered = renderSheet({
+    defaultValue: [
+      {
+        rows: {
+          len: 4,
+          0: { cells: { 0: { text: 'source' } } },
+        },
+        cols: { len: 2 },
+      },
+    ],
+  });
   const controller = rendered.runtime.epoch.controller;
   const sheet = rendered.runtime.epoch.snapshot.sheets[0]!.id;
   const getCellText = vi.spyOn(controller, 'getCellText');
@@ -203,18 +211,28 @@ it('does not capture paste result matrices without an onPaste callback', () => {
   let internalResult: ReturnType<typeof rendered.runtime.dispatchUi> | undefined;
   let externalResult: ReturnType<typeof rendered.runtime.dispatchUi> | undefined;
   act(() => {
-    internalResult = rendered.runtime.dispatchUi({
-      type: 'paste-internal', source, target, mode: 'all', cut: false,
-    }, 'clipboard');
-    externalResult = rendered.runtime.dispatchUi({
-      type: 'paste-external',
-      target: {
-        sheet,
-        range: { start: { row: 3, column: 0 }, end: { row: 3, column: 0 } },
-        active: { row: 3, column: 0 },
+    internalResult = rendered.runtime.dispatchUi(
+      {
+        type: 'paste-internal',
+        source,
+        target,
+        mode: 'all',
+        cut: false,
       },
-      values: [['external']],
-    }, 'clipboard');
+      'clipboard',
+    );
+    externalResult = rendered.runtime.dispatchUi(
+      {
+        type: 'paste-external',
+        target: {
+          sheet,
+          range: { start: { row: 3, column: 0 }, end: { row: 3, column: 0 } },
+          active: { row: 3, column: 0 },
+        },
+        values: [['external']],
+      },
+      'clipboard',
+    );
   });
 
   expect(getCellText).not.toHaveBeenCalled();
@@ -229,41 +247,58 @@ it.each([
     rowCount: Number.MAX_SAFE_INTEGER,
     label: 'MAX_SAFE coordinates',
   },
-])('rejects an oversized internal paste before expanding $label metadata', ({
-  endRow,
-  rowCount,
-}) => {
-  const rendered = renderSheet({ defaultValue: [{
-    rows: { len: rowCount },
-    cols: { len: 1 },
-  }], onPaste: vi.fn() });
-  const controller = rendered.runtime.epoch.controller;
-  const sheet = rendered.runtime.epoch.snapshot.sheets[0]!.id;
-  const getCellText = vi.spyOn(controller, 'getCellText');
-  const source: Selection = {
-    sheet,
-    range: { start: { row: 0, column: 0 }, end: { row: endRow, column: 0 } },
-    active: { row: 0, column: 0 },
-  };
+])(
+  'rejects an oversized internal paste before expanding $label metadata',
+  ({ endRow, rowCount }) => {
+    const rendered = renderSheet({
+      defaultValue: [
+        {
+          rows: { len: rowCount },
+          cols: { len: 1 },
+        },
+      ],
+      onPaste: vi.fn(),
+    });
+    const controller = rendered.runtime.epoch.controller;
+    const sheet = rendered.runtime.epoch.snapshot.sheets[0]!.id;
+    const getCellText = vi.spyOn(controller, 'getCellText');
+    const source: Selection = {
+      sheet,
+      range: { start: { row: 0, column: 0 }, end: { row: endRow, column: 0 } },
+      active: { row: 0, column: 0 },
+    };
 
-  const result = rendered.runtime.dispatchUi({
-    type: 'paste-internal', source, target: source, mode: 'all', cut: false,
-  }, 'clipboard');
+    const result = rendered.runtime.dispatchUi(
+      {
+        type: 'paste-internal',
+        source,
+        target: source,
+        mode: 'all',
+        cut: false,
+      },
+      'clipboard',
+    );
 
-  expect(result.status).toBe('rejected');
-  expect(getCellText).not.toHaveBeenCalled();
-});
+    expect(result.status).toBe('rejected');
+    expect(getCellText).not.toHaveBeenCalled();
+  },
+);
 
 it('uses the committed affected range and pre-cut values for paste callbacks', () => {
   const onPaste = vi.fn();
-  const rendered = renderSheet({ defaultValue: [{
-    rows: {
-      len: 8,
-      0: { cells: { 0: { text: 'a' }, 1: { text: 'b' } } },
-      1: { cells: { 0: { text: 'c' }, 1: { text: 'd' } } },
-    },
-    cols: { len: 4 },
-  }], onPaste });
+  const rendered = renderSheet({
+    defaultValue: [
+      {
+        rows: {
+          len: 8,
+          0: { cells: { 0: { text: 'a' }, 1: { text: 'b' } } },
+          1: { cells: { 0: { text: 'c' }, 1: { text: 'd' } } },
+        },
+        cols: { len: 4 },
+      },
+    ],
+    onPaste,
+  });
   const sheet = rendered.runtime.epoch.snapshot.sheets[0]!.id;
   const source: Selection = {
     sheet,
@@ -277,12 +312,22 @@ it('uses the committed affected range and pre-cut values for paste callbacks', (
   };
 
   act(() => {
-    rendered.runtime.dispatchUi({
-      type: 'paste-internal', source, target, mode: 'all', cut: true,
-    }, 'clipboard');
+    rendered.runtime.dispatchUi(
+      {
+        type: 'paste-internal',
+        source,
+        target,
+        mode: 'all',
+        cut: true,
+      },
+      'clipboard',
+    );
   });
   expect(onPaste.mock.calls[0]![0]).toMatchObject({
-    values: [['a', 'b'], ['c', 'd']],
+    values: [
+      ['a', 'b'],
+      ['c', 'd'],
+    ],
     target: {
       sheet,
       range: { start: { row: 3, column: 0 }, end: { row: 4, column: 1 } },
@@ -291,15 +336,21 @@ it('uses the committed affected range and pre-cut values for paste callbacks', (
   });
 
   act(() => {
-    rendered.runtime.dispatchUi({
-      type: 'paste-external',
-      target: {
-        sheet,
-        range: { start: { row: 5, column: 0 }, end: { row: 5, column: 0 } },
-        active: { row: 5, column: 0 },
+    rendered.runtime.dispatchUi(
+      {
+        type: 'paste-external',
+        target: {
+          sheet,
+          range: { start: { row: 5, column: 0 }, end: { row: 5, column: 0 } },
+          active: { row: 5, column: 0 },
+        },
+        values: [
+          ['1', '2'],
+          ['3', '4'],
+        ],
       },
-      values: [['1', '2'], ['3', '4']],
-    }, 'clipboard');
+      'clipboard',
+    );
   });
   expect(onPaste.mock.calls[1]![0].target).toEqual({
     sheet,
@@ -309,11 +360,13 @@ it('uses the committed affected range and pre-cut values for paste callbacks', (
 });
 
 it('preserves dangerous JSON keys in isolated callback payloads without prototype pollution', () => {
-  const input = JSON.parse('[{"name":"Safe","__proto__":{"polluted":true},"constructor":{"tag":"input"}}]') as WorkbookInput;
+  const input = JSON.parse(
+    '[{"name":"Safe","__proto__":{"polluted":true},"constructor":{"tag":"input"}}]',
+  ) as WorkbookInput;
   let received: unknown;
   const rendered = renderSheet({
     defaultValue: input,
-    onChange: value => {
+    onChange: (value) => {
       received = value;
       const sheet = value[0] as unknown as Record<string, unknown>;
       (sheet.__proto__ as Record<string, unknown>).polluted = false;
@@ -334,7 +387,10 @@ it('preserves dangerous JSON keys in isolated callback payloads without prototyp
   expect(Object.hasOwn(payloadSheet, '__proto__')).toBe(true);
   expect(Object.hasOwn(payloadSheet, 'constructor')).toBe(true);
   expect((Object.prototype as Record<string, unknown>).polluted).toBeUndefined();
-  const controllerSheet = rendered.runtime.epoch.controller.getValue()[0] as Record<string, unknown>;
+  const controllerSheet = rendered.runtime.epoch.controller.getValue()[0] as Record<
+    string,
+    unknown
+  >;
   expect((controllerSheet.__proto__ as Record<string, unknown>).polluted).toBe(true);
   expect((controllerSheet.constructor as unknown as Record<string, unknown>).tag).toBe('input');
 });
@@ -345,12 +401,14 @@ it('clones cyclic Error and DOMException causes without recursion failure', () =
   const cause = new Error('cyclic cause');
   Object.defineProperty(cause, 'cause', { enumerable: true, value: cause });
 
-  expect(() => rendered.runtime.dispatcher.reportUiError({
-    code: 'RENDER_FAILED',
-    message: 'render failed',
-    recoverable: true,
-    cause,
-  })).not.toThrow();
+  expect(() =>
+    rendered.runtime.dispatcher.reportUiError({
+      code: 'RENDER_FAILED',
+      message: 'render failed',
+      recoverable: true,
+      cause,
+    }),
+  ).not.toThrow();
   const clonedCause = onError.mock.calls[0]![0].cause as Error & { cause: unknown };
   expect(clonedCause).not.toBe(cause);
   expect(clonedCause).toMatchObject({ name: 'Error', message: 'cyclic cause' });
@@ -432,11 +490,13 @@ it('does not deliver errors or events through an inactive dispatcher', () => {
     recoverable: true,
   });
   expect(() => dispatcher.emitSelectionChange(selection)).toThrow(/inactive/i);
-  expect(() => dispatcher.emitActiveSheetChange({
-    sheet,
-    index: 0,
-    source: 'ref',
-  })).toThrow(/inactive/i);
+  expect(() =>
+    dispatcher.emitActiveSheetChange({
+      sheet,
+      index: 0,
+      source: 'ref',
+    }),
+  ).toThrow(/inactive/i);
 
   expect(onActiveSheetChange).not.toHaveBeenCalled();
   expect(onChange).not.toHaveBeenCalled();

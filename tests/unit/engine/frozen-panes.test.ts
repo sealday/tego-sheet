@@ -87,12 +87,15 @@ describe('frozen-pane geometry', () => {
       { pane: 'left', left: 60, top: 50, width: 100, height: 25, clipped: true },
       { pane: 'body', left: 160, top: 50, width: 150, height: 25, clipped: true },
     ]);
-    expect(overlayAnchors({
-      start: { row: 0, column: 0 },
-      end: { row: 0, column: 0 },
-    }, metrics)).toEqual([
-      { pane: 'corner', left: 60, top: 25, width: 100, height: 25, clipped: false },
-    ]);
+    expect(
+      overlayAnchors(
+        {
+          start: { row: 0, column: 0 },
+          end: { row: 0, column: 0 },
+        },
+        metrics,
+      ),
+    ).toEqual([{ pane: 'corner', left: 60, top: 25, width: 100, height: 25, clipped: false }]);
   });
 
   it('partitions sorted overlay rows by visual freeze position', () => {
@@ -114,18 +117,27 @@ describe('frozen-pane geometry', () => {
       freeze: { row: 2, column: 0 },
     });
 
-    expect(Array.from({ length: 5 }, (_, visual) => model.logicalRowAtVisualIndex(visual)))
-      .toEqual([0, 2, 1, 3, 4]);
-    expect(overlayAnchors({
-      start: { row: 2, column: 0 },
-      end: { row: 2, column: 0 },
-    }, metrics)).toEqual([
-      { pane: 'top', left: 60, top: 50, width: 100, height: 25, clipped: false },
-    ]);
-    expect(overlayAnchors({
-      start: { row: 1, column: 0 },
-      end: { row: 2, column: 0 },
-    }, metrics)).toEqual([
+    expect(Array.from({ length: 5 }, (_, visual) => model.logicalRowAtVisualIndex(visual))).toEqual(
+      [0, 2, 1, 3, 4],
+    );
+    expect(
+      overlayAnchors(
+        {
+          start: { row: 2, column: 0 },
+          end: { row: 2, column: 0 },
+        },
+        metrics,
+      ),
+    ).toEqual([{ pane: 'top', left: 60, top: 50, width: 100, height: 25, clipped: false }]);
+    expect(
+      overlayAnchors(
+        {
+          start: { row: 1, column: 0 },
+          end: { row: 2, column: 0 },
+        },
+        metrics,
+      ),
+    ).toEqual([
       { pane: 'top', left: 60, top: 50, width: 100, height: 25, clipped: false },
       { pane: 'body', left: 60, top: 75, width: 100, height: 25, clipped: false },
     ]);
@@ -152,12 +164,18 @@ describe('frozen-pane geometry', () => {
       freeze: { row: 2, column: 0 },
     });
 
-    expect(Array.from({ length: 7 }, (_, visual) => model.logicalRowAtVisualIndex(visual)))
-      .toEqual([0, 2, 5, 4, 1, 3, 6]);
-    expect(overlayAnchors({
-      start: { row: 2, column: 0 },
-      end: { row: 4, column: 0 },
-    }, metrics)).toEqual([
+    expect(Array.from({ length: 7 }, (_, visual) => model.logicalRowAtVisualIndex(visual))).toEqual(
+      [0, 2, 5, 4, 1, 3, 6],
+    );
+    expect(
+      overlayAnchors(
+        {
+          start: { row: 2, column: 0 },
+          end: { row: 4, column: 0 },
+        },
+        metrics,
+      ),
+    ).toEqual([
       { pane: 'top', left: 60, top: 50, width: 100, height: 25, clipped: false },
       { pane: 'body', left: 60, top: 100, width: 100, height: 25, clipped: false },
       { pane: 'body', left: 60, top: 150, width: 100, height: 25, clipped: false },

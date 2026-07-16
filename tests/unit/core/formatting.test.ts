@@ -12,9 +12,18 @@ import type { BorderLine, BorderMode, CellBorders, CellStyle } from '../../../sr
 
 describe('legacy formats', () => {
   it('exposes every approved legacy format in stable order', () => {
-    expect(FORMAT_DEFINITIONS.map(format => format.key)).toEqual([
-      'normal', 'text', 'number', 'percent', 'rmb', 'usd', 'eur',
-      'date', 'time', 'datetime', 'duration',
+    expect(FORMAT_DEFINITIONS.map((format) => format.key)).toEqual([
+      'normal',
+      'text',
+      'number',
+      'percent',
+      'rmb',
+      'usd',
+      'eur',
+      'date',
+      'time',
+      'datetime',
+      'duration',
     ]);
   });
 
@@ -83,9 +92,14 @@ describe('formatting commands', () => {
       vendorPatch: '',
     };
 
-    const outcome = controller.dispatch({
-      type: 'set-style', selection: selected(sheet, 0, 0, 0, 1), patch,
-    }, 'toolbar');
+    const outcome = controller.dispatch(
+      {
+        type: 'set-style',
+        selection: selected(sheet, 0, 0, 0, 1),
+        patch,
+      },
+      'toolbar',
+    );
 
     expect(outcome).toMatchObject({
       status: 'committed',
@@ -112,11 +126,14 @@ describe('formatting commands', () => {
     });
     const sheet = controller.getSheetIds()[0]!;
 
-    controller.dispatch({
-      type: 'paint-format',
-      source: selected(sheet, 0, 0),
-      target: selected(sheet, 1, 1, 1, 2),
-    }, 'toolbar');
+    controller.dispatch(
+      {
+        type: 'paint-format',
+        source: selected(sheet, 0, 0),
+        target: selected(sheet, 1, 1, 1, 2),
+      },
+      'toolbar',
+    );
     expect(controller.getValue()[0]!.rows?.['1']).toMatchObject({
       cells: {
         1: { text: 'one', style: 1, vendorCell: false },
@@ -125,9 +142,13 @@ describe('formatting commands', () => {
     });
     expect(controller.getValue()[0]!.styles).toHaveLength(2);
 
-    controller.dispatch({
-      type: 'clear-format', selection: selected(sheet, 1, 1, 1, 2),
-    }, 'toolbar');
+    controller.dispatch(
+      {
+        type: 'clear-format',
+        selection: selected(sheet, 1, 1, 1, 2),
+      },
+      'toolbar',
+    );
     expect(controller.getValue()[0]!.rows?.['1']).toMatchObject({
       cells: { 1: { text: 'one', vendorCell: false }, 2: { text: 'two' } },
     });
@@ -145,9 +166,13 @@ describe('formatting commands', () => {
     });
     const sheet = controller.getSheetIds()[0]!;
 
-    const outcome = controller.dispatch({
-      type: 'clear-format', selection: selected(sheet, 0, 0, 1, 1),
-    }, 'toolbar');
+    const outcome = controller.dispatch(
+      {
+        type: 'clear-format',
+        selection: selected(sheet, 0, 0, 1, 1),
+      },
+      'toolbar',
+    );
 
     expect(outcome).toMatchObject({ status: 'committed', commit: { change: { kind: 'style' } } });
     expect(controller.getValue()[0]!.merges).toEqual([]);
@@ -164,29 +189,41 @@ describe('formatting commands', () => {
       styles: [{ font: { bold: true } }],
       rows: {
         0: { cells: { 0: { text: 'source', style: 0, merge: [1, 1] } } },
-        3: { cells: {
-          3: { text: 'target', vendorCell: false },
-          4: { text: 'keep-e4', vendorCell: { id: 'e4' } },
-        } },
-        4: { cells: {
-          3: { text: 'keep-d5', vendorCell: { id: 'd5' } },
-          4: { text: 'keep-e5', vendorCell: { id: 'e5' } },
-        } },
+        3: {
+          cells: {
+            3: { text: 'target', vendorCell: false },
+            4: { text: 'keep-e4', vendorCell: { id: 'e4' } },
+          },
+        },
+        4: {
+          cells: {
+            3: { text: 'keep-d5', vendorCell: { id: 'd5' } },
+            4: { text: 'keep-e5', vendorCell: { id: 'e5' } },
+          },
+        },
       },
     });
     const sheet = controller.getSheetIds()[0]!;
 
-    const outcome = controller.dispatch({
-      type: 'paint-format',
-      source: selected(sheet, 0, 0, 1, 1),
-      target: selected(sheet, 3, 3),
-    }, 'toolbar');
+    const outcome = controller.dispatch(
+      {
+        type: 'paint-format',
+        source: selected(sheet, 0, 0, 1, 1),
+        target: selected(sheet, 3, 3),
+      },
+      'toolbar',
+    );
 
     expect(outcome).toMatchObject({
       status: 'committed',
-      commit: { change: { range: {
-        start: { row: 3, column: 3 }, end: { row: 4, column: 4 },
-      } } },
+      commit: {
+        change: {
+          range: {
+            start: { row: 3, column: 3 },
+            end: { row: 4, column: 4 },
+          },
+        },
+      },
     });
     expect(controller.getValue()[0]!.merges).toEqual(['A1:B2', 'D4:E5']);
     expect(controller.getValue()[0]!.rows?.['3']).toMatchObject({
@@ -224,8 +261,9 @@ describe('formatting commands', () => {
         target: selected(sheet, 3, 3),
       },
     ] as const) {
-      expect(() => controller.dispatch(command, 'toolbar'))
-        .toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
+      expect(() => controller.dispatch(command, 'toolbar')).toThrowError(
+        expect.objectContaining({ code: 'INVALID_COMMAND' }),
+      );
     }
     expect(controller.getValue()).toEqual(before);
     expect(controller.historySize).toEqual({ undo: 0, redo: 0 });
@@ -233,14 +271,25 @@ describe('formatting commands', () => {
 
   const line = ['thin', '#123'] as const satisfies BorderLine;
   const borderCases: readonly [BorderMode, readonly CellBorders[]][] = [
-    ['all', [
-      { top: line, right: line, bottom: line, left: line },
-      { top: line, right: line, bottom: line, left: line },
-      { top: line, right: line, bottom: line, left: line },
-      { top: line, right: line, bottom: line, left: line },
-    ]],
+    [
+      'all',
+      [
+        { top: line, right: line, bottom: line, left: line },
+        { top: line, right: line, bottom: line, left: line },
+        { top: line, right: line, bottom: line, left: line },
+        { top: line, right: line, bottom: line, left: line },
+      ],
+    ],
     ['inside', [{ right: line, bottom: line }, { bottom: line }, { right: line }, {}]],
-    ['outside', [{ top: line, left: line }, { top: line, right: line }, { bottom: line, left: line }, { right: line, bottom: line }]],
+    [
+      'outside',
+      [
+        { top: line, left: line },
+        { top: line, right: line },
+        { bottom: line, left: line },
+        { right: line, bottom: line },
+      ],
+    ],
     ['horizontal', [{ bottom: line }, { bottom: line }, {}, {}]],
     ['vertical', [{ right: line }, {}, { right: line }, {}]],
     ['top', [{ top: line }, { top: line }, {}, {}]],
@@ -253,20 +302,25 @@ describe('formatting commands', () => {
     const controller = new WorkbookController({ rows: { len: 2 }, cols: { len: 2 } });
     const sheet = controller.getSheetIds()[0]!;
 
-    controller.dispatch({
-      type: 'set-border',
-      selection: selected(sheet, 0, 0, 1, 1),
-      mode,
-      line,
-    }, 'toolbar');
+    controller.dispatch(
+      {
+        type: 'set-border',
+        selection: selected(sheet, 0, 0, 1, 1),
+        mode,
+        line,
+      },
+      'toolbar',
+    );
 
     const value = controller.getValue()[0]!;
     const borderAt = (row: string, column: string): CellBorders => {
-      const rowData = value.rows?.[row] as {
-        readonly cells?: Readonly<Record<string, { readonly style?: number }>>;
-      } | undefined;
+      const rowData = value.rows?.[row] as
+        | {
+            readonly cells?: Readonly<Record<string, { readonly style?: number }>>;
+          }
+        | undefined;
       const style = rowData?.cells?.[column]?.style;
-      return style === undefined ? {} : value.styles?.[style]?.border ?? {};
+      return style === undefined ? {} : (value.styles?.[style]?.border ?? {});
     };
     expect([
       borderAt('0', '0'),
@@ -284,9 +338,14 @@ describe('formatting commands', () => {
     });
     const sheet = controller.getSheetIds()[0]!;
 
-    controller.dispatch({
-      type: 'set-border', selection: selected(sheet, 0, 0), mode: 'none',
-    }, 'toolbar');
+    controller.dispatch(
+      {
+        type: 'set-border',
+        selection: selected(sheet, 0, 0),
+        mode: 'none',
+      },
+      'toolbar',
+    );
 
     const value = controller.getValue()[0]!;
     expect(value.styles?.[1]).toEqual({ color: 'red', vendor: false });
@@ -301,26 +360,39 @@ describe('formatting commands', () => {
     });
     const sheet = controller.getSheetIds()[0]!;
 
-    controller.dispatch({
-      type: 'set-border', selection: selected(sheet, 0, 0, 1, 2), mode: 'outside', line,
-    }, 'toolbar');
+    controller.dispatch(
+      {
+        type: 'set-border',
+        selection: selected(sheet, 0, 0, 1, 2),
+        mode: 'outside',
+        line,
+      },
+      'toolbar',
+    );
 
     const value = controller.getValue()[0]!;
     const row0 = value.rows?.['0'] as {
-      readonly cells?: Readonly<Record<string, { readonly style?: number; readonly merge?: readonly number[] }>>;
+      readonly cells?: Readonly<
+        Record<string, { readonly style?: number; readonly merge?: readonly number[] }>
+      >;
     };
     const row1 = value.rows?.['1'] as {
-      readonly cells?: Readonly<Record<string, { readonly style?: number; readonly merge?: readonly number[] }>>;
+      readonly cells?: Readonly<
+        Record<string, { readonly style?: number; readonly merge?: readonly number[] }>
+      >;
     };
     const anchor = row0.cells?.['0'];
     const topRight = row0.cells?.['2'];
     const bottomRight = row1.cells?.['2'];
     expect(value.styles?.[anchor?.style ?? -1]?.border).toEqual({
-      top: line, bottom: line, left: line,
+      top: line,
+      bottom: line,
+      left: line,
     });
     expect(value.styles?.[topRight?.style ?? -1]?.border).toEqual({ top: line, right: line });
     expect(value.styles?.[bottomRight?.style ?? -1]?.border).toEqual({
-      right: line, bottom: line,
+      right: line,
+      bottom: line,
     });
     expect(row0.cells).not.toHaveProperty('1');
     expect(row1.cells).not.toHaveProperty('0');
@@ -330,7 +402,7 @@ describe('formatting commands', () => {
 
   it.each(['top', 'bottom', 'left', 'right'] as const)(
     'applies legacy %s border to an exact merged selection through its anchor',
-    mode => {
+    (mode) => {
       const controller = new WorkbookController({
         merges: ['A1:B2'],
         rows: { len: 2, 0: { cells: { 0: { merge: [1, 1] } } } },
@@ -338,9 +410,15 @@ describe('formatting commands', () => {
       });
       const sheet = controller.getSheetIds()[0]!;
 
-      controller.dispatch({
-        type: 'set-border', selection: selected(sheet, 0, 0, 1, 1), mode, line,
-      }, 'toolbar');
+      controller.dispatch(
+        {
+          type: 'set-border',
+          selection: selected(sheet, 0, 0, 1, 1),
+          mode,
+          line,
+        },
+        'toolbar',
+      );
 
       const value = controller.getValue()[0]!;
       const row0 = value.rows?.['0'] as {
@@ -363,11 +441,16 @@ describe('formatting commands', () => {
     const subscriber = vi.fn();
     controller.subscribe(subscriber);
 
-    expect(controller.dispatch({
-      type: 'paint-format',
-      source: selected(sheet, 0, 0),
-      target: selected(sheet, 0, 1),
-    }, 'toolbar')).toEqual({ status: 'noop' });
+    expect(
+      controller.dispatch(
+        {
+          type: 'paint-format',
+          source: selected(sheet, 0, 0),
+          target: selected(sheet, 0, 1),
+        },
+        'toolbar',
+      ),
+    ).toEqual({ status: 'noop' });
     expect(controller.getValue()).toEqual(before);
     expect(controller.historySize).toEqual({ undo: 0, redo: 0 });
     expect(subscriber).not.toHaveBeenCalled();
@@ -377,22 +460,30 @@ describe('formatting commands', () => {
     const legal = new WorkbookController({ rows: { len: 200 }, cols: { len: 200 } });
     const legalSheet = legal.getSheetIds()[0]!;
     const started = performance.now();
-    legal.dispatch({
-      type: 'set-style',
-      selection: selected(legalSheet, 0, 0, 199, 199),
-      patch: { textwrap: true },
-    }, 'toolbar');
+    legal.dispatch(
+      {
+        type: 'set-style',
+        selection: selected(legalSheet, 0, 0, 199, 199),
+        patch: { textwrap: true },
+      },
+      'toolbar',
+    );
     const duration = performance.now() - started;
     expect(duration).toBeLessThan(2_000);
     expect(legal.getValue()[0]!.styles).toEqual([{ textwrap: true }]);
 
     const oversized = new WorkbookController({ rows: { len: 1000 }, cols: { len: 1000 } });
     const oversizedSheet = oversized.getSheetIds()[0]!;
-    expect(() => oversized.dispatch({
-      type: 'set-style',
-      selection: selected(oversizedSheet, 0, 0, 999, 999),
-      patch: { textwrap: true },
-    }, 'toolbar')).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
+    expect(() =>
+      oversized.dispatch(
+        {
+          type: 'set-style',
+          selection: selected(oversizedSheet, 0, 0, 999, 999),
+          patch: { textwrap: true },
+        },
+        'toolbar',
+      ),
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
     expect(oversized.historySize).toEqual({ undo: 0, redo: 0 });
   });
 
@@ -404,16 +495,26 @@ describe('formatting commands', () => {
     const sheet = controller.getSheetIds()[0]!;
     const before = controller.getValue();
 
-    expect(controller.dispatch({
-      type: 'set-style',
-      selection: selected(sheet, 0, 0),
-      patch: { font: { bold: true } },
-    }, 'toolbar')).toEqual({ status: 'noop' });
-    expect(() => controller.dispatch({
-      type: 'set-style',
-      selection: selected(sheet, 0, 0),
-      patch: { align: 'diagonal' },
-    } as never, 'toolbar')).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
+    expect(
+      controller.dispatch(
+        {
+          type: 'set-style',
+          selection: selected(sheet, 0, 0),
+          patch: { font: { bold: true } },
+        },
+        'toolbar',
+      ),
+    ).toEqual({ status: 'noop' });
+    expect(() =>
+      controller.dispatch(
+        {
+          type: 'set-style',
+          selection: selected(sheet, 0, 0),
+          patch: { align: 'diagonal' },
+        } as never,
+        'toolbar',
+      ),
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
     expect(controller.getValue()).toEqual(before);
     expect(controller.historySize).toEqual({ undo: 0, redo: 0 });
   });

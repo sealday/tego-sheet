@@ -8,10 +8,7 @@ export function createScrollState(x = 0, y = 0): ScrollState {
   return Object.freeze({ x, y });
 }
 
-export function clampScroll(
-  scroll: Readonly<ScrollState>,
-  viewport: ViewportMetrics,
-): ScrollState {
+export function clampScroll(scroll: Readonly<ScrollState>, viewport: ViewportMetrics): ScrollState {
   const contentWidth = columnOffset(viewport.model.columnCount, viewport.model);
   const contentHeight = rowOffset(viewport.model.rowCount, viewport.model);
   const availableWidth = Math.max(0, viewport.width - viewport.rowHeaderWidth);
@@ -33,10 +30,7 @@ export function scrollBy(
   return clampScroll({ x: scroll.x + delta.x, y: scroll.y + delta.y }, viewport);
 }
 
-export function scrollTo(
-  scroll: Readonly<ScrollState>,
-  viewport: ViewportMetrics,
-): ScrollState {
+export function scrollTo(scroll: Readonly<ScrollState>, viewport: ViewportMetrics): ScrollState {
   const snapAxis = (
     target: number,
     frozen: number,
@@ -53,20 +47,23 @@ export function scrollTo(
     const index = indexAt(start + boundedTarget);
     return index === null ? 0 : Math.max(0, offset(index + 1) - start);
   };
-  return clampScroll({
-    x: snapAxis(
-      scroll.x,
-      viewport.freeze.column,
-      viewport.model.columnOffset(viewport.model.columnCount),
-      viewport.model.columnOffset,
-      viewport.model.columnAt,
-    ),
-    y: snapAxis(
-      scroll.y,
-      viewport.freeze.row,
-      viewport.model.rowOffset(viewport.model.rowCount),
-      viewport.model.rowOffset,
-      viewport.model.rowAt,
-    ),
-  }, viewport);
+  return clampScroll(
+    {
+      x: snapAxis(
+        scroll.x,
+        viewport.freeze.column,
+        viewport.model.columnOffset(viewport.model.columnCount),
+        viewport.model.columnOffset,
+        viewport.model.columnAt,
+      ),
+      y: snapAxis(
+        scroll.y,
+        viewport.freeze.row,
+        viewport.model.rowOffset(viewport.model.rowCount),
+        viewport.model.rowOffset,
+        viewport.model.rowAt,
+      ),
+    },
+    viewport,
+  );
 }

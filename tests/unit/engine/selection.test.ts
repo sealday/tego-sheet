@@ -46,10 +46,12 @@ describe('selection state', () => {
       start: { row: 1, column: 1 },
       end: { row: 2, column: 2 },
     });
-    expect(model.merges).toEqual([{
-      start: { row: 1, column: 1 },
-      end: { row: 2, column: 2 },
-    }]);
+    expect(model.merges).toEqual([
+      {
+        start: { row: 1, column: 1 },
+        end: { row: 2, column: 2 },
+      },
+    ]);
     expect(Object.isFrozen(model.merges[0])).toBe(true);
     expect(Object.isFrozen(model.merges[0]?.start)).toBe(true);
     expect(Object.isFrozen(model.merges[0]?.end)).toBe(true);
@@ -57,10 +59,7 @@ describe('selection state', () => {
 
   it('@parity:selection.normalize-range normalizes a backwards drag while retaining its active focus', () => {
     const model = createSheetGridModel({ rows: { len: 8 }, cols: { len: 8 } });
-    const selection = createSelectionState(
-      { row: 4, column: 5 },
-      { row: 1, column: 2 },
-    );
+    const selection = createSelectionState({ row: 4, column: 5 }, { row: 1, column: 2 });
 
     expect(normalizeSelection(selection, model)).toEqual({
       kind: 'cell',
@@ -80,10 +79,7 @@ describe('selection state', () => {
       cols: { len: 8 },
       merges: ['B2:D2', 'D3:E4'],
     });
-    const selection = createSelectionState(
-      { row: 1, column: 1 },
-      { row: 2, column: 2 },
-    );
+    const selection = createSelectionState({ row: 1, column: 1 }, { row: 2, column: 2 });
 
     expect(normalizeSelection(selection, model)).toEqual({
       kind: 'cell',
@@ -95,10 +91,10 @@ describe('selection state', () => {
         end: { row: 3, column: 4 },
       },
     });
-    expect(normalizeSelection(
-      createSelectionState({ row: 1, column: 2 }),
-      model,
-    ).active).toEqual({ row: 1, column: 1 });
+    expect(normalizeSelection(createSelectionState({ row: 1, column: 2 }), model).active).toEqual({
+      row: 1,
+      column: 1,
+    });
   });
 
   it('clamps extension to the model and moves by index through hidden structure', () => {
@@ -138,10 +134,7 @@ describe('selection state', () => {
       cols: { len: 8 },
       merges: ['A5:C5', 'D3:D5', 'B2:D2'],
     });
-    const selection = createSelectionState(
-      { row: 1, column: 1 },
-      { row: 2, column: 2 },
-    );
+    const selection = createSelectionState({ row: 1, column: 1 }, { row: 2, column: 2 });
 
     expect(normalizeSelection(selection, model).range).toEqual({
       start: { row: 1, column: 1 },
@@ -156,10 +149,7 @@ describe('selection state', () => {
       merges: ['B2:C3', 'C3:D4'],
     });
 
-    expect(normalizeSelection(
-      createSelectionState({ row: 2, column: 2 }),
-      model,
-    )).toEqual({
+    expect(normalizeSelection(createSelectionState({ row: 2, column: 2 }), model)).toEqual({
       kind: 'cell',
       anchor: { row: 2, column: 2 },
       focus: { row: 2, column: 2 },
@@ -173,10 +163,10 @@ describe('selection state', () => {
 
   it('moves non-shift arrows from the anchor of a backwards range', () => {
     const model = createSheetGridModel({ rows: { len: 8 }, cols: { len: 8 } });
-    const backwards = normalizeSelection(createSelectionState(
-      { row: 4, column: 5 },
-      { row: 1, column: 2 },
-    ), model);
+    const backwards = normalizeSelection(
+      createSelectionState({ row: 4, column: 5 }, { row: 1, column: 2 }),
+      model,
+    );
 
     expect(moveSelection(backwards, 'left', model).active).toEqual({ row: 4, column: 4 });
     expect(moveSelection(backwards, 'right', model).active).toEqual({ row: 4, column: 6 });

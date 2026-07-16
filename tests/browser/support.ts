@@ -8,14 +8,14 @@ export async function openHarness(page: Page, query = ''): Promise<void> {
 
 export async function capture(page: Page): Promise<unknown[]> {
   await page.getByRole('button', { name: 'Capture workbook' }).click();
-  return JSON.parse(await page.getByTestId('capture').textContent() ?? '[]') as unknown[];
+  return JSON.parse((await page.getByTestId('capture').textContent()) ?? '[]') as unknown[];
 }
 
 export async function cellPoint(page: Page, row: number, column: number) {
   const canvas = page.locator('.tego-sheet__canvas');
   const box = await canvas.boundingBox();
   if (box === null) throw new Error('canvas has no box');
-  const clientSize = await canvas.evaluate(element => ({
+  const clientSize = await canvas.evaluate((element) => ({
     width: element.clientWidth,
     height: element.clientHeight,
   }));
@@ -56,19 +56,22 @@ export async function dispatchClipboard(
   type: 'copy' | 'cut' | 'paste',
   text?: string,
 ): Promise<void> {
-  await page.evaluate(({ eventType, value }) => {
-    const event = new Event(eventType, { bubbles: true, cancelable: true });
-    if (value !== undefined) {
-      const transfer = new DataTransfer();
-      transfer.setData('text/plain', value);
-      Object.defineProperty(event, 'clipboardData', { value: transfer });
-    }
-    window.dispatchEvent(event);
-  }, { eventType: type, value: text });
+  await page.evaluate(
+    ({ eventType, value }) => {
+      const event = new Event(eventType, { bubbles: true, cancelable: true });
+      if (value !== undefined) {
+        const transfer = new DataTransfer();
+        transfer.setData('text/plain', value);
+        Object.defineProperty(event, 'clipboardData', { value: transfer });
+      }
+      window.dispatchEvent(event);
+    },
+    { eventType: type, value: text },
+  );
 }
 
 export async function selection(page: Page) {
-  return JSON.parse(await page.getByTestId('selection').textContent() ?? 'null') as {
+  return JSON.parse((await page.getByTestId('selection').textContent()) ?? 'null') as {
     active: { row: number; column: number };
     range: { start: { row: number; column: number }; end: { row: number; column: number } };
   } | null;

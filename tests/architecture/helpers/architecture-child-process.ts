@@ -1,7 +1,4 @@
-import {
-  execFileSync,
-  type ExecFileSyncOptionsWithStringEncoding,
-} from 'node:child_process';
+import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from 'node:child_process';
 
 export const ARCHITECTURE_CHILD_TIMEOUT_MS = 20_000;
 export const ARCHITECTURE_CHILD_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
@@ -13,9 +10,8 @@ export type ArchitectureChildExecutor = (
   options: ExecFileSyncOptionsWithStringEncoding,
 ) => string;
 
-const defaultExecutor: ArchitectureChildExecutor = (file, arguments_, options) => (
-  execFileSync(file, arguments_, options)
-);
+const defaultExecutor: ArchitectureChildExecutor = (file, arguments_, options) =>
+  execFileSync(file, arguments_, options);
 
 export function execArchitectureChild(
   file: string,

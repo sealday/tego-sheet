@@ -34,15 +34,22 @@ export function Workbook() {
 ```tsx
 import { TegoSheet, type WorkbookData } from 'tego-sheet';
 
-const initial: WorkbookData = [{
-  name: 'Budget',
-  rows: { 0: { cells: { 0: { text: 'Item' }, 1: { text: 'Amount' } } } },
-}];
+const initial: WorkbookData = [
+  {
+    name: 'Budget',
+    rows: { 0: { cells: { 0: { text: 'Item' }, 1: { text: 'Amount' } } } },
+  },
+];
 
 export function Uncontrolled() {
-  return <TegoSheet defaultValue={initial} onChange={(next, change) => {
-    console.log(change.kind, next);
-  }} />;
+  return (
+    <TegoSheet
+      defaultValue={initial}
+      onChange={(next, change) => {
+        console.log(change.kind, next);
+      }}
+    />
+  );
 }
 ```
 
@@ -72,10 +79,12 @@ import { TegoSheet, type TegoSheetHandle } from 'tego-sheet';
 
 export function WithRef() {
   const sheet = useRef<TegoSheetHandle>(null);
-  return <>
-    <button onClick={() => sheet.current?.undo()}>Undo</button>
-    <TegoSheet ref={sheet} defaultValue={[]} onCellEdit={event => console.log(event.text)} />
-  </>;
+  return (
+    <>
+      <button onClick={() => sheet.current?.undo()}>Undo</button>
+      <TegoSheet ref={sheet} defaultValue={[]} onCellEdit={(event) => console.log(event.text)} />
+    </>
+  );
 }
 ```
 
@@ -86,7 +95,7 @@ Set `toolbar` or `sheetTabs` to `false` to hide that region, use the default by 
 ```tsx
 import { TegoSheet, type ToolbarRenderer } from 'tego-sheet';
 
-const toolbar: ToolbarRenderer = state => (
+const toolbar: ToolbarRenderer = (state) => (
   <button disabled={!state.canUndo} onClick={() => state.execute({ type: 'undo' })}>
     Undo
   </button>

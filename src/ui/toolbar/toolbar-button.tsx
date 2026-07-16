@@ -17,7 +17,10 @@ export type ToolbarIconName =
   | 'validation'
   | 'wrap';
 
-export interface ToolbarButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
+export interface ToolbarButtonProps extends Omit<
+  ButtonHTMLAttributes<HTMLButtonElement>,
+  'children'
+> {
   readonly active?: boolean;
   readonly children: ReactNode;
   readonly icon?: ToolbarIconName;
@@ -31,7 +34,8 @@ const TOOLBAR_ICON_PATHS: Readonly<Record<ToolbarIconName, string>> = {
   italic: 'M10 4h8M6 20h8M15 4 9 20',
   merge: 'M4 7h6V4l4 4-4 4V9H4V7Zm16 10h-6v3l-4-4 4-4v3h6v2Z',
   paint: 'm5 15 9-9 4 4-9 9H5v-4Zm10-10 2-2 4 4-2 2-4-4Z',
-  print: 'M7 9V4h10v5M7 17H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2M7 14h10v6H7v-6Z',
+  print:
+    'M7 9V4h10v5M7 17H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2M7 14h10v6H7v-6Z',
   redo: 'M8 8h7V5l5 5-5 5v-3H8a4 4 0 0 0-4 4',
   sort: 'm8 5-4 4h8L8 5Zm8 14 4-4h-8l4 4Z',
   strike: 'M5 12h14M7 8c0-3 10-3 10 0M8 16c1 3 8 3 9 0',
@@ -60,7 +64,13 @@ function ToolbarIcon({ name }: { readonly name: ToolbarIconName }) {
   );
 }
 
-export function ToolbarButton({ active, children, icon, type = 'button', ...props }: ToolbarButtonProps) {
+export function ToolbarButton({
+  active,
+  children,
+  icon,
+  type = 'button',
+  ...props
+}: ToolbarButtonProps) {
   return (
     <button
       {...props}

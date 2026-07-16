@@ -11,10 +11,6 @@
       "tego-sheet/locales/zh-cn": ["../src/locales/zh-cn.ts"]
     }
   },
-  "include": [
-    "src/**/*.ts",
-    "src/**/*.tsx",
-    "../src/styles.d.ts"
-  ],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../src/styles.d.ts"],
   "exclude": []
 }

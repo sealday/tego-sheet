@@ -207,9 +207,7 @@ it('treats a new reference equal to the acknowledged base as an explicit rollbac
 });
 
 it('replaces genuine external values with new IDs, cleared history, and clipped viewport state', async () => {
-  const value: WorkbookInput = [
-    { name: 'A', rows: { len: 4 }, cols: { len: 4 } },
-  ];
+  const value: WorkbookInput = [{ name: 'A', rows: { len: 4 }, cols: { len: 4 } }];
   const onChange = vi.fn();
   const onCellEdit = vi.fn();
   const onSelectionChange = vi.fn<(selection: Selection) => void>();
@@ -256,7 +254,7 @@ it('replaces genuine external values with new IDs, cleared history, and clipped 
     />,
   );
 
-  expect(ref.current!.getValue().map(sheet => sheet.name)).toEqual(['R', 'S']);
+  expect(ref.current!.getValue().map((sheet) => sheet.name)).toEqual(['R', 'S']);
   expect(onChange).not.toHaveBeenCalled();
   expect(onCellEdit).not.toHaveBeenCalled();
   expect(onSelectionChange).not.toHaveBeenCalled();
@@ -270,11 +268,16 @@ it('replaces genuine external values with new IDs, cleared history, and clipped 
   const clipped = activeSelection(rendered.container, onSelectionChange);
   expect(clipped.sheet).not.toBe(oldSheet);
   expect(clipped.active).toEqual({ row: 1, column: 2 });
-  act(() => ref.current!.setCellText({
-    sheet: clipped.sheet,
-    row: 0,
-    column: 0,
-  }, 'active second sheet'));
+  act(() =>
+    ref.current!.setCellText(
+      {
+        sheet: clipped.sheet,
+        row: 0,
+        column: 0,
+      },
+      'active second sheet',
+    ),
+  );
   expect(ref.current!.getValue()[1]?.rows?.[0]).toMatchObject({
     cells: { 0: { text: 'active second sheet' } },
   });
@@ -313,11 +316,16 @@ it('persists a clipped active index across shrink-expand and empty-expand replac
     />,
   );
   const retained = activeSelection(rendered.container, onSelectionChange);
-  act(() => ref.current!.setCellText({
-    sheet: retained.sheet,
-    row: 0,
-    column: 0,
-  }, 'retained clipped index'));
+  act(() =>
+    ref.current!.setCellText(
+      {
+        sheet: retained.sheet,
+        row: 0,
+        column: 0,
+      },
+      'retained clipped index',
+    ),
+  );
   expect(ref.current!.getValue()[1]?.rows?.[0]).toMatchObject({
     cells: { 0: { text: 'retained clipped index' } },
   });
@@ -340,11 +348,16 @@ it('persists a clipped active index across shrink-expand and empty-expand replac
     />,
   );
   const reset = activeSelection(rendered.container, onSelectionChange);
-  act(() => ref.current!.setCellText({
-    sheet: reset.sheet,
-    row: 0,
-    column: 0,
-  }, 'empty clips to zero'));
+  act(() =>
+    ref.current!.setCellText(
+      {
+        sheet: reset.sheet,
+        row: 0,
+        column: 0,
+      },
+      'empty clips to zero',
+    ),
+  );
   expect(ref.current!.getValue()[0]?.rows?.[0]).toMatchObject({
     cells: { 0: { text: 'empty clips to zero' } },
   });
@@ -365,23 +378,22 @@ it('persists the clipped active index after rollback removes an optimistic sheet
   });
 
   rendered.rerender(
-    <TegoSheet
-      ref={ref}
-      value={structuredClone(base)}
-      onSelectionChange={onSelectionChange}
-    />,
+    <TegoSheet ref={ref} value={structuredClone(base)} onSelectionChange={onSelectionChange} />,
   );
   expect(ref.current!.getValue()).toHaveLength(1);
 
-  rendered.rerender(
-    <TegoSheet ref={ref} value={expanded} onSelectionChange={onSelectionChange} />,
-  );
+  rendered.rerender(<TegoSheet ref={ref} value={expanded} onSelectionChange={onSelectionChange} />);
   const retained = activeSelection(rendered.container, onSelectionChange);
-  act(() => ref.current!.setCellText({
-    sheet: retained.sheet,
-    row: 0,
-    column: 0,
-  }, 'rollback stayed clipped'));
+  act(() =>
+    ref.current!.setCellText(
+      {
+        sheet: retained.sheet,
+        row: 0,
+        column: 0,
+      },
+      'rollback stayed clipped',
+    ),
+  );
   expect(ref.current!.getValue()[0]?.rows?.[0]).toMatchObject({
     cells: { 0: { text: 'rollback stayed clipped' } },
   });
@@ -416,22 +428,19 @@ it('persists the clipped active index after replay truncation removes an optimis
 
   const originalDispatch = WorkbookController.prototype.dispatch;
   let rejectReplay = true;
-  vi.spyOn(WorkbookController.prototype, 'dispatch').mockImplementation(function (
-    this: WorkbookController,
-    command,
-    source,
-    options,
-  ) {
-    if (rejectReplay && options?.notify === false && command.type === 'add-sheet') {
-      rejectReplay = false;
-      throw new TegoSheetException({
-        code: 'INVALID_COMMAND',
-        message: 'injected active-sheet replay truncation',
-        recoverable: true,
-      });
-    }
-    return originalDispatch.call(this, command, source, options) as never;
-  });
+  vi.spyOn(WorkbookController.prototype, 'dispatch').mockImplementation(
+    function (this: WorkbookController, command, source, options) {
+      if (rejectReplay && options?.notify === false && command.type === 'add-sheet') {
+        rejectReplay = false;
+        throw new TegoSheetException({
+          code: 'INVALID_COMMAND',
+          message: 'injected active-sheet replay truncation',
+          recoverable: true,
+        });
+      }
+      return originalDispatch.call(this, command, source, options) as never;
+    },
+  );
 
   rendered.rerender(
     <TegoSheet
@@ -455,11 +464,16 @@ it('persists the clipped active index after replay truncation removes an optimis
     />,
   );
   const retained = activeSelection(rendered.container, onSelectionChange);
-  act(() => ref.current!.setCellText({
-    sheet: retained.sheet,
-    row: 0,
-    column: 0,
-  }, 'truncation stayed clipped'));
+  act(() =>
+    ref.current!.setCellText(
+      {
+        sheet: retained.sheet,
+        row: 0,
+        column: 0,
+      },
+      'truncation stayed clipped',
+    ),
+  );
   expect(ref.current!.getValue()[0]?.rows?.[0]).toMatchObject({
     cells: { 0: { text: 'truncation stayed clipped' } },
   });
@@ -476,10 +490,12 @@ it('does not overwrite an explicit active-sheet decision made in the replacement
   function Host() {
     const [value, setValue] = useState<WorkbookInput>(initial);
     const [selectExplicit, setSelectExplicit] = useState(false);
-    replace = () => {
-      setSelectExplicit(true);
-      setValue(replacement);
-    };
+    useLayoutEffect(() => {
+      replace = () => {
+        setSelectExplicit(true);
+        setValue(replacement);
+      };
+    }, []);
     useLayoutEffect(() => {
       if (!selectExplicit) return;
       const explicit = ref.current!.addSheet('Explicit');
@@ -499,11 +515,16 @@ it('does not overwrite an explicit active-sheet decision made in the replacement
   await waitFor(() => expect(ref.current).not.toBeNull());
   act(replace);
   const explicit = activeSelection(rendered.container, onSelectionChange);
-  act(() => ref.current!.setCellText({
-    sheet: explicit.sheet,
-    row: 0,
-    column: 0,
-  }, 'explicit wins'));
+  act(() =>
+    ref.current!.setCellText(
+      {
+        sheet: explicit.sheet,
+        row: 0,
+        column: 0,
+      },
+      'explicit wins',
+    ),
+  );
   expect(ref.current!.getValue()[2]?.rows?.[0]).toMatchObject({
     cells: { 0: { text: 'explicit wins' } },
   });
@@ -553,36 +574,36 @@ it('rejects an oversized engine selection instead of returning empty copy data',
     end: { row: 250_000, column: 0 },
   };
 
-  expect(() => adapter.readSelection({ sheet, range, active: range.start }))
-    .toThrowError(/clipboard range exceeds the 250000-cell operation limit/);
+  expect(() => adapter.readSelection({ sheet, range, active: range.start })).toThrowError(
+    /clipboard range exceeds the 250000-cell operation limit/,
+  );
   adapter.dispose();
 });
 
 it('uses extension-key semantic equality while preserving sparse index significance', async () => {
-  const value: WorkbookInput = [{
-    name: 'A',
-    metadata: { alpha: 1, beta: 2 },
-    rows: { len: 4, 1: { cells: { 0: { text: 'indexed' } } } },
-  }];
+  const value: WorkbookInput = [
+    {
+      name: 'A',
+      metadata: { alpha: 1, beta: 2 },
+      rows: { len: 4, 1: { cells: { 0: { text: 'indexed' } } } },
+    },
+  ];
   const onChange = vi.fn<(value: WorkbookData) => void>();
   const onSelectionChange = vi.fn<(selection: Selection) => void>();
   const ref = createRef<TegoSheetHandle>();
   const rendered = render(
-    <TegoSheet
-      ref={ref}
-      value={value}
-      onChange={onChange}
-      onSelectionChange={onSelectionChange}
-    />,
+    <TegoSheet ref={ref} value={value} onChange={onChange} onSelectionChange={onSelectionChange} />,
   );
   await waitFor(() => expect(ref.current).not.toBeNull());
   const sheet = activeSelection(rendered.container, onSelectionChange).sheet;
   act(() => ref.current!.setCellText({ sheet, row: 0, column: 0 }, 'pending'));
   const projected = structuredClone(onChange.mock.lastCall![0]);
-  const equivalent = [{
-    ...projected[0],
-    metadata: { beta: 2, alpha: 1 },
-  }] as WorkbookInput;
+  const equivalent = [
+    {
+      ...projected[0],
+      metadata: { beta: 2, alpha: 1 },
+    },
+  ] as WorkbookInput;
   onChange.mockClear();
   rendered.rerender(
     <TegoSheet
@@ -595,11 +616,13 @@ it('uses extension-key semantic equality while preserving sparse index significa
   expect(onChange).not.toHaveBeenCalled();
   expect(() => ref.current!.getCell({ sheet, row: 0, column: 0 })).not.toThrow();
 
-  const sparseReplacement: WorkbookInput = [{
-    name: 'A',
-    metadata: { alpha: 1, beta: 2 },
-    rows: { len: 4, 2: { cells: { 0: { text: 'indexed' } } } },
-  }];
+  const sparseReplacement: WorkbookInput = [
+    {
+      name: 'A',
+      metadata: { alpha: 1, beta: 2 },
+      rows: { len: 4, 2: { cells: { 0: { text: 'indexed' } } } },
+    },
+  ];
   rendered.rerender(
     <TegoSheet
       ref={ref}
@@ -638,9 +661,7 @@ it('replays added sheets with their original IDs before remapping later commands
   expect(() => ref.current!.getCell({ sheet: a, row: 0, column: 0 })).not.toThrow();
   expect(ref.current!.getCell({ sheet: b, row: 0, column: 0 })?.text).toBe('tail');
 
-  rendered.rerender(
-    <TegoSheet ref={ref} value={structuredClone(first)} onChange={onChange} />,
-  );
+  rendered.rerender(<TegoSheet ref={ref} value={structuredClone(first)} onChange={onChange} />);
   expect(ref.current!.getValue()).toEqual(first);
   expect(() => ref.current!.getCell({ sheet: a, row: 0, column: 0 })).not.toThrow();
   expect(() => ref.current!.getCell({ sheet: b, row: 0, column: 0 })).toThrow(/unknown sheet/i);
@@ -726,22 +747,19 @@ it('truncates an actually invalid replay tail once and reports a recoverable com
   act(() => ref.current!.setCellText({ sheet, row: 0, column: 1 }, 'drop me'));
   const originalDispatch = WorkbookController.prototype.dispatch;
   let rejectReplay = true;
-  vi.spyOn(WorkbookController.prototype, 'dispatch').mockImplementation(function (
-    this: WorkbookController,
-    command,
-    source,
-    options,
-  ) {
-    if (rejectReplay && options?.notify === false && command.type === 'set-cell-text') {
-      rejectReplay = false;
-      throw new TegoSheetException({
-        code: 'INVALID_COMMAND',
-        message: 'injected replay invalidation',
-        recoverable: true,
-      });
-    }
-    return originalDispatch.call(this, command, source, options) as never;
-  });
+  vi.spyOn(WorkbookController.prototype, 'dispatch').mockImplementation(
+    function (this: WorkbookController, command, source, options) {
+      if (rejectReplay && options?.notify === false && command.type === 'set-cell-text') {
+        rejectReplay = false;
+        throw new TegoSheetException({
+          code: 'INVALID_COMMAND',
+          message: 'injected replay invalidation',
+          recoverable: true,
+        });
+      }
+      return originalDispatch.call(this, command, source, options) as never;
+    },
+  );
   onChange.mockClear();
   onCellEdit.mockClear();
   onSelectionChange.mockClear();
@@ -762,10 +780,12 @@ it('truncates an actually invalid replay tail once and reports a recoverable com
   expect(onCellEdit).not.toHaveBeenCalled();
   expect(onSelectionChange).not.toHaveBeenCalled();
   expect(onError).toHaveBeenCalledOnce();
-  expect(onError).toHaveBeenCalledWith(expect.objectContaining({
-    code: 'INVALID_COMMAND',
-    recoverable: true,
-  }));
+  expect(onError).toHaveBeenCalledWith(
+    expect.objectContaining({
+      code: 'INVALID_COMMAND',
+      recoverable: true,
+    }),
+  );
 
   act(() => ref.current!.undo());
   expect(ref.current!.getValue()).toEqual(base);
@@ -795,19 +815,16 @@ it('truncates replay when projected JSON matches but runtime sheet IDs drift', a
 
   const originalDispatch = WorkbookController.prototype.dispatch;
   let driftReplayIds = true;
-  vi.spyOn(WorkbookController.prototype, 'dispatch').mockImplementation(function (
-    this: WorkbookController,
-    command,
-    source,
-    options,
-  ) {
-    const outcome = originalDispatch.call(this, command, source, options);
-    if (driftReplayIds && options?.notify === false && outcome.status === 'committed') {
-      driftReplayIds = false;
-      (this as unknown as { state: WorkbookState }).state = WorkbookState.from(this.getValue());
-    }
-    return outcome as never;
-  });
+  vi.spyOn(WorkbookController.prototype, 'dispatch').mockImplementation(
+    function (this: WorkbookController, command, source, options) {
+      const outcome = originalDispatch.call(this, command, source, options);
+      if (driftReplayIds && options?.notify === false && outcome.status === 'committed') {
+        driftReplayIds = false;
+        (this as unknown as { state: WorkbookState }).state = WorkbookState.from(this.getValue());
+      }
+      return outcome as never;
+    },
+  );
   onChange.mockClear();
   onSelectionChange.mockClear();
 
@@ -826,10 +843,12 @@ it('truncates replay when projected JSON matches but runtime sheet IDs drift', a
   expect(onChange).not.toHaveBeenCalled();
   expect(onSelectionChange).not.toHaveBeenCalled();
   expect(onError).toHaveBeenCalledOnce();
-  expect(onError).toHaveBeenCalledWith(expect.objectContaining({
-    code: 'INVALID_COMMAND',
-    recoverable: true,
-  }));
+  expect(onError).toHaveBeenCalledWith(
+    expect.objectContaining({
+      code: 'INVALID_COMMAND',
+      recoverable: true,
+    }),
+  );
 
   rendered.rerender(
     <TegoSheet
@@ -845,7 +864,7 @@ it('truncates replay when projected JSON matches but runtime sheet IDs drift', a
 
 it.each(['rollback', 'replace'] as const)(
   'stops old commit notifications after an onChange flushSync %s decision',
-  async decision => {
+  async (decision) => {
     const base: WorkbookInput = [{ name: 'A' }];
     const replacement: WorkbookInput = [{ name: 'Replacement' }];
     const onChange = vi.fn();
@@ -861,9 +880,9 @@ it.each(['rollback', 'replace'] as const)(
           value={value}
           onChange={() => {
             onChange();
-            flushSync(() => setValue(structuredClone(
-              decision === 'rollback' ? base : replacement,
-            )));
+            flushSync(() =>
+              setValue(structuredClone(decision === 'rollback' ? base : replacement)),
+            );
           }}
           onCellEdit={onCellEdit}
           onSelectionChange={onSelectionChange}
@@ -881,9 +900,7 @@ it.each(['rollback', 'replace'] as const)(
     expect(onChange).toHaveBeenCalledOnce();
     expect(onCellEdit).not.toHaveBeenCalled();
     expect(onSelectionChange).not.toHaveBeenCalled();
-    expect(ref.current!.getValue()[0]?.name).toBe(
-      decision === 'rollback' ? 'A' : 'Replacement',
-    );
+    expect(ref.current!.getValue()[0]?.name).toBe(decision === 'rollback' ? 'A' : 'Replacement');
     expect(ref.current!.getValue()[0]?.rows?.[0]).toBeUndefined();
   },
 );

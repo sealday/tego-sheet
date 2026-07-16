@@ -1,10 +1,7 @@
 import { useLayoutEffect, useRef, type RefObject } from 'react';
 import type { LocaleDefinition, SheetId, SheetOptions } from '../../core';
 import type { ControllerEpoch } from './use-controller-epoch';
-import {
-  createEngineAdapter,
-  type EngineAdapter,
-} from '../adapters/engine-adapter';
+import { createEngineAdapter, type EngineAdapter } from '../adapters/engine-adapter';
 
 export interface UseCanvasEngineOptions {
   readonly activeSheet: SheetId | null;
@@ -88,7 +85,7 @@ export function useCanvasEngine(options: UseCanvasEngineOptions): void {
         canvas,
         sheetOptions,
         locale,
-        onRenderError: cause => {
+        onRenderError: (cause) => {
           const handler = onRenderErrorRef.current;
           if (handler === undefined) throw cause;
           handler(cause);
@@ -96,7 +93,7 @@ export function useCanvasEngine(options: UseCanvasEngineOptions): void {
       });
       engineSlot.set(adapter);
       adapter.refresh(controller.getSnapshot());
-      unsubscribe = controller.subscribe(event => {
+      unsubscribe = controller.subscribe((event) => {
         if (token.active && isActive()) {
           adapter?.refresh(event.snapshot);
         }

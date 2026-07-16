@@ -41,8 +41,8 @@ export default class VitestParityEvidenceReporter implements Reporter {
   private readonly selectedLanes = new Set<VitestEvidenceLane>();
 
   constructor(options: VitestParityEvidenceReporterOptions = {}) {
-    this.enabled = options.releaseOnly !== true
-      || process.env.TEGO_PARITY_RELEASE_CONTEXT !== undefined;
+    this.enabled =
+      options.releaseOnly !== true || process.env.TEGO_PARITY_RELEASE_CONTEXT !== undefined;
     this.root = resolve(options.root ?? process.cwd());
     this.outputPaths = options.outputPaths ?? {
       component: resolve(this.root, parityEvidencePaths.component),
@@ -81,18 +81,21 @@ export default class VitestParityEvidenceReporter implements Reporter {
   ): void {
     if (!this.enabled) return;
     if (reason === 'interrupted' || unhandledErrors.length > 0) return;
-    const evidenceByLane = new Map([...this.selectedLanes].map(lane => [
-      lane,
-      aggregateParityEvidence(
-        this.observations.filter(observation => observation.lane === lane),
-      ),
-    ]));
+    const evidenceByLane = new Map(
+      [...this.selectedLanes].map((lane) => [
+        lane,
+        aggregateParityEvidence(
+          this.observations.filter((observation) => observation.lane === lane),
+        ),
+      ]),
+    );
     if (
-      reason === 'failed'
-      && ![...evidenceByLane.values()].some(evidence => (
-        evidence.some(record => record.status === 'failed')
-      ))
-    ) return;
+      reason === 'failed' &&
+      ![...evidenceByLane.values()].some((evidence) =>
+        evidence.some((record) => record.status === 'failed'),
+      )
+    )
+      return;
     for (const lane of this.selectedLanes) {
       writeEvidenceArtifactAtomically(this.outputPaths[lane], evidenceByLane.get(lane)!);
     }

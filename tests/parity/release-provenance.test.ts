@@ -16,15 +16,20 @@ function write(root: string, path: string, contents: string): void {
 
 function releaseRepository(): string {
   const root = mkdtempSync(join(tmpdir(), 'tego-parity-provenance-'));
-  write(root, 'package.json', JSON.stringify({
-    devDependencies: { '@playwright/test': '1.61.1', vitest: '4.1.10' },
-  }));
+  write(
+    root,
+    'package.json',
+    JSON.stringify({
+      devDependencies: { '@playwright/test': '1.61.1', vitest: '4.1.10' },
+    }),
+  );
   for (const path of [
     'vitest.config.ts',
     'playwright.config.ts',
     'playwright.visual.config.ts',
     'tests/parity/manifest.ts',
-  ]) write(root, path, `${path}\n`);
+  ])
+    write(root, path, `${path}\n`);
   execFileSync('git', ['init', '--quiet'], { cwd: root });
   execFileSync('git', ['config', 'user.email', 'parity@example.invalid'], { cwd: root });
   execFileSync('git', ['config', 'user.name', 'Parity Test'], { cwd: root });
@@ -39,11 +44,9 @@ describe('parity release provenance', () => {
     const now = new Date('2026-07-16T00:00:00.000Z');
     try {
       const context = createParityReleaseContext(root, now);
-      expect(() => assertParityReleaseContextCurrent(
-        { ...context, runId: 'synthetic-release' },
-        root,
-        now,
-      )).toThrow(/run ID.*UUID/i);
+      expect(() =>
+        assertParityReleaseContextCurrent({ ...context, runId: 'synthetic-release' }, root, now),
+      ).toThrow(/run ID.*UUID/i);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

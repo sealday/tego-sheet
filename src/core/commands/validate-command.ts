@@ -3,10 +3,7 @@ import type { WorkbookState } from '../model/workbook-state';
 import { containsCell } from '../coordinates/ranges';
 import { assertStructureCommand, columnCount, rowCount } from '../operations/structure';
 import { assertSheetName } from '../operations/sheet';
-import {
-  assertStyleResourceLimit,
-  paintFormatTargetRange,
-} from '../operations/style';
+import { assertStyleResourceLimit, paintFormatTargetRange } from '../operations/style';
 import {
   assertCellEditable,
   assertMergeEditable,
@@ -74,8 +71,10 @@ function validateSelection(
     assertCellRange(value.range);
     const runtimeSheet = state.get(sheet);
     if (runtimeSheet === null) throw new TypeError('selection sheet does not exist');
-    if (value.range.end.row >= rowCount(runtimeSheet.data)
-      || value.range.end.column >= columnCount(runtimeSheet.data)) {
+    if (
+      value.range.end.row >= rowCount(runtimeSheet.data) ||
+      value.range.end.column >= columnCount(runtimeSheet.data)
+    ) {
       throw new TypeError('selection range exceeds the sheet structure');
     }
     assertCellPoint(value.active);
@@ -93,17 +92,27 @@ function assertNeverCommand(command: never): never {
 }
 
 function validCommandObject(command: unknown): command is WorkbookCommand {
-  return command !== null && typeof command === 'object' && typeof (command as { type?: unknown }).type === 'string';
+  return (
+    command !== null &&
+    typeof command === 'object' &&
+    typeof (command as { type?: unknown }).type === 'string'
+  );
 }
 
-function validateStyleRange(state: WorkbookState, sheet: SheetId, range: {
-  readonly start: { readonly row: number; readonly column: number };
-  readonly end: { readonly row: number; readonly column: number };
-}): void {
+function validateStyleRange(
+  state: WorkbookState,
+  sheet: SheetId,
+  range: {
+    readonly start: { readonly row: number; readonly column: number };
+    readonly end: { readonly row: number; readonly column: number };
+  },
+): void {
   const runtimeSheet = state.get(sheet);
   if (runtimeSheet === null) throw invalidCommand(`Unknown sheet ID: ${sheet}`);
-  if (range.end.row >= rowCount(runtimeSheet.data)
-    || range.end.column >= columnCount(runtimeSheet.data)) {
+  if (
+    range.end.row >= rowCount(runtimeSheet.data) ||
+    range.end.column >= columnCount(runtimeSheet.data)
+  ) {
     throw invalidCommand('format range exceeds the sheet structure');
   }
   try {
@@ -123,12 +132,19 @@ function validateBorderLine(line: BorderLine | undefined): void {
   }
 }
 
-function assertRangeWithinSheet(state: WorkbookState, sheetId: SheetId, range: {
-  readonly end: { readonly row: number; readonly column: number };
-}): void {
+function assertRangeWithinSheet(
+  state: WorkbookState,
+  sheetId: SheetId,
+  range: {
+    readonly end: { readonly row: number; readonly column: number };
+  },
+): void {
   const runtimeSheet = state.get(sheetId);
   if (runtimeSheet === null) throw invalidCommand(`Unknown sheet ID: ${sheetId}`);
-  if (range.end.row >= rowCount(runtimeSheet.data) || range.end.column >= columnCount(runtimeSheet.data)) {
+  if (
+    range.end.row >= rowCount(runtimeSheet.data) ||
+    range.end.column >= columnCount(runtimeSheet.data)
+  ) {
     throw invalidCommand('operation range exceeds the sheet structure');
   }
 }
@@ -174,7 +190,8 @@ export function validateCommand(state: WorkbookState, command: WorkbookCommand):
       if (command.property !== 'editable' && command.property !== 'printable') {
         throw invalidCommand('Cell metadata property must be editable or printable');
       }
-      if (typeof command.value !== 'boolean') throw invalidCommand('Cell metadata value must be boolean');
+      if (typeof command.value !== 'boolean')
+        throw invalidCommand('Cell metadata value must be boolean');
       try {
         assertRangeWithinSheet(state, command.selection.sheet, command.selection.range);
         assertCellMetadataResourceLimit(command);
@@ -184,7 +201,11 @@ export function validateCommand(state: WorkbookState, command: WorkbookCommand):
       return;
     case 'set-style':
       validateSelection(state, command.selection);
-      if (command.patch === null || typeof command.patch !== 'object' || Array.isArray(command.patch)) {
+      if (
+        command.patch === null ||
+        typeof command.patch !== 'object' ||
+        Array.isArray(command.patch)
+      ) {
         throw invalidCommand('Style patch must be an object');
       }
       try {
@@ -196,10 +217,20 @@ export function validateCommand(state: WorkbookState, command: WorkbookCommand):
       return;
     case 'set-border':
       validateSelection(state, command.selection);
-      if (![
-        'none', 'all', 'inside', 'outside', 'horizontal', 'vertical',
-        'top', 'bottom', 'left', 'right',
-      ].includes(command.mode)) {
+      if (
+        ![
+          'none',
+          'all',
+          'inside',
+          'outside',
+          'horizontal',
+          'vertical',
+          'top',
+          'bottom',
+          'left',
+          'right',
+        ].includes(command.mode)
+      ) {
         throw invalidCommand('Border mode is invalid');
       }
       if (command.mode !== 'none') validateBorderLine(command.line);
@@ -335,7 +366,8 @@ export function validateCommand(state: WorkbookState, command: WorkbookCommand):
       validateSelection(state, command.target);
       validatePasteMode(command.mode);
       if (typeof command.cut !== 'boolean') throw invalidCommand('cut must be a boolean');
-      if (command.cut && command.mode !== 'all') throw invalidCommand('cut supports all-cell paste only');
+      if (command.cut && command.mode !== 'all')
+        throw invalidCommand('cut supports all-cell paste only');
       if (command.cut && command.source.sheet !== command.target.sheet) {
         throw invalidCommand('cross-sheet cut is not supported');
       }
@@ -352,7 +384,8 @@ export function validateCommand(state: WorkbookState, command: WorkbookCommand):
           range,
         );
         assertRangeEditable(targetSheet, range);
-        if (command.cut) assertRangeEditable(state.get(command.source.sheet)!.data, command.source.range);
+        if (command.cut)
+          assertRangeEditable(state.get(command.source.sheet)!.data, command.source.range);
       } catch (cause) {
         if (cause instanceof TegoSheetException) throw cause;
         throw invalidCommand('internal paste is not mutable', cause);
@@ -361,9 +394,16 @@ export function validateCommand(state: WorkbookState, command: WorkbookCommand):
     }
     case 'paste-external': {
       validateSelection(state, command.target);
-      if (!Array.isArray(command.values) || command.values.length === 0
-        || command.values.some(row => !Array.isArray(row) || row.length === 0
-          || row.some(value => typeof value !== 'string'))) {
+      if (
+        !Array.isArray(command.values) ||
+        command.values.length === 0 ||
+        command.values.some(
+          (row) =>
+            !Array.isArray(row) ||
+            row.length === 0 ||
+            row.some((value) => typeof value !== 'string'),
+        )
+      ) {
         throw invalidCommand('external paste values must be a non-empty string matrix');
       }
       try {
@@ -402,13 +442,16 @@ export function validateCommand(state: WorkbookState, command: WorkbookCommand):
     }
     case 'set-filter':
       validateSelection(state, command.selection);
-      if (command.filter === null || typeof command.filter !== 'object'
-        || !Number.isSafeInteger(command.filter.column)
-        || command.filter.column < command.selection.range.start.column
-        || command.filter.column > command.selection.range.end.column
-        || (command.filter.operator !== 'all' && command.filter.operator !== 'in')
-        || !Array.isArray(command.filter.value)
-        || command.filter.value.some(value => typeof value !== 'string')) {
+      if (
+        command.filter === null ||
+        typeof command.filter !== 'object' ||
+        !Number.isSafeInteger(command.filter.column) ||
+        command.filter.column < command.selection.range.start.column ||
+        command.filter.column > command.selection.range.end.column ||
+        (command.filter.operator !== 'all' && command.filter.operator !== 'in') ||
+        !Array.isArray(command.filter.value) ||
+        command.filter.value.some((value) => typeof value !== 'string')
+      ) {
         throw invalidCommand('filter definition is invalid or outside its range');
       }
       try {

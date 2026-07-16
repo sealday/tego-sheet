@@ -26,13 +26,15 @@ const env = {
 try {
   runNpm(['exec', '--', 'vitest', 'run'], root, { env, stdio: 'inherit' });
   runNpm(['exec', '--', 'playwright', 'test', 'tests/browser'], root, { env, stdio: 'inherit' });
-  runNpm(['exec', '--', 'playwright', 'test', '--config', 'playwright.visual.config.ts'], root, { env, stdio: 'inherit' });
-  execFileSync(process.execPath, [
-    'scripts/test-parity-gate.mjs',
-    '--context',
-    contextPath,
-    ...defaultParityEvidencePaths,
-  ], { cwd: root, env, stdio: 'inherit' });
+  runNpm(['exec', '--', 'playwright', 'test', '--config', 'playwright.visual.config.ts'], root, {
+    env,
+    stdio: 'inherit',
+  });
+  execFileSync(
+    process.execPath,
+    ['scripts/test-parity-gate.mjs', '--context', contextPath, ...defaultParityEvidencePaths],
+    { cwd: root, env, stdio: 'inherit' },
+  );
 } catch (error) {
   for (const path of defaultParityEvidencePaths) rmSync(resolve(root, path), { force: true });
   throw error;

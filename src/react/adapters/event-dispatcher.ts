@@ -29,9 +29,7 @@ export interface EventDispatcherOptions {
   readonly getCallbacks: () => TegoSheetCallbacks;
   readonly isActive?: () => boolean;
   readonly onUiError?: (error: TegoSheetError) => void;
-  readonly recordControlledCheckpoint?: (
-    commit: CommandCommit<unknown, WorkbookCommand>,
-  ) => void;
+  readonly recordControlledCheckpoint?: (commit: CommandCommit<unknown, WorkbookCommand>) => void;
   readonly schedulePaint?: () => void;
 }
 
@@ -66,9 +64,12 @@ export function printWorkbook(
     try {
       cleanup?.();
     } catch (cause) {
-      failure = failure === undefined
-        ? cause
-        : new AggregateError([failure, cause], 'Print and print cleanup both failed', { cause: failure });
+      failure =
+        failure === undefined
+          ? cause
+          : new AggregateError([failure, cause], 'Print and print cleanup both failed', {
+              cause: failure,
+            });
     }
   }
   if (failure === undefined) return;
@@ -94,9 +95,9 @@ function isDomException(value: object): value is DOMException {
 }
 
 function cloneError<T extends Error>(value: T, seen: WeakMap<object, unknown>): T {
-  const output = (isDomException(value)
-    ? new DOMException(value.message, value.name)
-    : new Error(value.message)) as T;
+  const output = (
+    isDomException(value) ? new DOMException(value.message, value.name) : new Error(value.message)
+  ) as T;
   seen.set(value, output);
   if (!isDomException(output)) {
     output.name = value.name;
@@ -117,7 +118,8 @@ function clone<T>(value: T, seen = new WeakMap<object, unknown>()): T {
   if (cached !== undefined) return cached as T;
   if (value instanceof Error || isDomException(value)) return cloneError(value, seen);
   if (Array.isArray(value)) {
-    const output: unknown[] = new Array(value.length);
+    const output: unknown[] = [];
+    output.length = value.length;
     seen.set(value, output);
     for (const key of Object.keys(value)) {
       define(output, key, clone((value as unknown as Record<string, unknown>)[key], seen));
@@ -160,7 +162,7 @@ function committedTarget(
 }
 
 function pasteValues(result: unknown): readonly (readonly string[])[] {
-  return Array.isArray(result) ? result as readonly (readonly string[])[] : [];
+  return Array.isArray(result) ? (result as readonly (readonly string[])[]) : [];
 }
 
 export function createEventDispatcher(options: EventDispatcherOptions): EventDispatcher {
@@ -186,8 +188,9 @@ export function createEventDispatcher(options: EventDispatcherOptions): EventDis
   ) => {
     if (!isActive()) return;
     const callbacks = options.getCallbacks();
-    const decisionIsCurrent = () => controlledNotificationVersion === undefined
-      || options.getControlledNotificationVersion?.() === controlledNotificationVersion;
+    const decisionIsCurrent = () =>
+      controlledNotificationVersion === undefined ||
+      options.getControlledNotificationVersion?.() === controlledNotificationVersion;
     if (!decisionIsCurrent()) return;
     callbacks.onChange?.(clone(commit.value), clone(commit.change));
     if (!isActive() || !decisionIsCurrent()) return;
@@ -239,12 +242,11 @@ export function createEventDispatcher(options: EventDispatcherOptions): EventDis
     readonly previousText: string | undefined;
   } => {
     ensureActive();
-    const previousText = command.type === 'set-cell-text'
-      ? controller.getCellText(command.address)
-      : undefined;
-    const capturePasteValues = (
-      command.type === 'paste-external' || command.type === 'paste-internal'
-    ) && options.getCallbacks().onPaste !== undefined;
+    const previousText =
+      command.type === 'set-cell-text' ? controller.getCellText(command.address) : undefined;
+    const capturePasteValues =
+      (command.type === 'paste-external' || command.type === 'paste-internal') &&
+      options.getCallbacks().onPaste !== undefined;
     let controlledNotificationVersion: number | undefined;
     const outcome = controller.dispatch(command, source, {
       capturePasteValues,
@@ -252,10 +254,7 @@ export function createEventDispatcher(options: EventDispatcherOptions): EventDis
         options.recordControlledCheckpoint?.(commit);
         controlledNotificationVersion = options.getControlledNotificationVersion?.();
       },
-    }) as CommandOutcome<
-      unknown,
-      WorkbookCommand
-    >;
+    }) as CommandOutcome<unknown, WorkbookCommand>;
     return { controlledNotificationVersion, outcome, previousText };
   };
 

@@ -40,23 +40,18 @@ const callNames = new Map<string, ResourcePrimitive>([
   ['removeChild', 'overlay'],
   ['createPortal', 'portal'],
 ]);
-const propertyOnly = new Set([
-  'createElement',
-  'append',
-  'appendChild',
-  'remove',
-  'removeChild',
-]);
+const propertyOnly = new Set(['createElement', 'append', 'appendChild', 'remove', 'removeChild']);
 
 function expressionName(expression: ts.Expression): string | null {
   if (ts.isIdentifier(expression)) return expression.text;
   if (ts.isPropertyAccessExpression(expression)) return expression.name.text;
   if (
-    ts.isElementAccessExpression(expression)
-    && expression.argumentExpression !== undefined
-    && (ts.isStringLiteral(expression.argumentExpression)
-      || ts.isNoSubstitutionTemplateLiteral(expression.argumentExpression))
-  ) return expression.argumentExpression.text;
+    ts.isElementAccessExpression(expression) &&
+    expression.argumentExpression !== undefined &&
+    (ts.isStringLiteral(expression.argumentExpression) ||
+      ts.isNoSubstitutionTemplateLiteral(expression.argumentExpression))
+  )
+    return expression.argumentExpression.text;
   return null;
 }
 
@@ -69,7 +64,8 @@ function boundTarget(expression: ts.Expression): ts.Expression | null {
 
 function bindingName(name: ts.BindingName | ts.PropertyName | undefined): string | null {
   if (name === undefined) return null;
-  if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) return name.text;
+  if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name))
+    return name.text;
   return null;
 }
 
@@ -86,7 +82,10 @@ interface AliasScope<Alias> {
 interface LexicalAliases<Alias> {
   readonly bindings: Set<AliasBinding<Alias>>;
   readonly lookup: (scope: AliasScope<Alias>, name: string) => AliasBinding<Alias> | undefined;
-  readonly scopeForDeclaration: (node: ts.VariableDeclaration, scope: AliasScope<Alias>) => AliasScope<Alias>;
+  readonly scopeForDeclaration: (
+    node: ts.VariableDeclaration,
+    scope: AliasScope<Alias>,
+  ) => AliasScope<Alias>;
   readonly visit: (visitor: (node: ts.Node, scope: AliasScope<Alias>) => void) => void;
 }
 
@@ -95,21 +94,20 @@ function createLexicalAliases<Alias>(sourceFile: ts.SourceFile): LexicalAliases<
   const scopes = new WeakMap<ts.Node, AliasScope<Alias>>();
   const bindings = new Set<AliasBinding<Alias>>();
   const build = (node: ts.Node, parent: AliasScope<Alias>): void => {
-    const blockScope = ts.isBlock(node)
-      || ts.isCaseBlock(node)
-      || ts.isCatchClause(node)
-      || ts.isForStatement(node)
-      || ts.isForInStatement(node)
-      || ts.isForOfStatement(node)
-      || ts.isClassDeclaration(node)
-      || ts.isClassExpression(node);
+    const blockScope =
+      ts.isBlock(node) ||
+      ts.isCaseBlock(node) ||
+      ts.isCatchClause(node) ||
+      ts.isForStatement(node) ||
+      ts.isForInStatement(node) ||
+      ts.isForOfStatement(node) ||
+      ts.isClassDeclaration(node) ||
+      ts.isClassExpression(node);
     const varScope = ts.isFunctionLike(node) || ts.isClassStaticBlockDeclaration(node);
     const kind = varScope ? 'var' : blockScope ? 'block' : null;
-    const scope: AliasScope<Alias> = kind === null
-      ? parent
-      : { bindings: new Map(), kind, parent };
+    const scope: AliasScope<Alias> = kind === null ? parent : { bindings: new Map(), kind, parent };
     scopes.set(node, scope);
-    ts.forEachChild(node, child => build(child, scope));
+    ts.forEachChild(node, (child) => build(child, scope));
   };
   build(sourceFile, root);
   const visit = (visitor: (node: ts.Node, scope: AliasScope<Alias>) => void): void => {
@@ -120,7 +118,11 @@ function createLexicalAliases<Alias>(sourceFile: ts.SourceFile): LexicalAliases<
     walk(sourceFile);
   };
   const lookup = (scope: AliasScope<Alias>, name: string): AliasBinding<Alias> | undefined => {
-    for (let current: AliasScope<Alias> | null = scope; current !== null; current = current.parent) {
+    for (
+      let current: AliasScope<Alias> | null = scope;
+      current !== null;
+      current = current.parent
+    ) {
       const binding = current.bindings.get(name);
       if (binding !== undefined) return binding;
     }
@@ -132,7 +134,8 @@ function createLexicalAliases<Alias>(sourceFile: ts.SourceFile): LexicalAliases<
   ): AliasScope<Alias> => {
     if (ts.isCatchClause(node.parent)) return scope;
     const declarationList = ts.isVariableDeclarationList(node.parent) ? node.parent : null;
-    if (declarationList !== null && (declarationList.flags & ts.NodeFlags.BlockScoped) !== 0) return scope;
+    if (declarationList !== null && (declarationList.flags & ts.NodeFlags.BlockScoped) !== 0)
+      return scope;
     let owner = scope;
     while (owner.kind === 'block' && owner.parent !== null) owner = owner.parent;
     return owner;
@@ -162,12 +165,12 @@ function createLexicalAliases<Alias>(sourceFile: ts.SourceFile): LexicalAliases<
     } else if (ts.isClassExpression(node) && node.name !== undefined) {
       declare(scope, node.name);
     } else if (
-      (ts.isEnumDeclaration(node)
-        || ts.isImportClause(node)
-        || ts.isImportEqualsDeclaration(node)
-        || ts.isNamespaceImport(node)
-        || ts.isImportSpecifier(node))
-      && node.name !== undefined
+      (ts.isEnumDeclaration(node) ||
+        ts.isImportClause(node) ||
+        ts.isImportEqualsDeclaration(node) ||
+        ts.isNamespaceImport(node) ||
+        ts.isImportSpecifier(node)) &&
+      node.name !== undefined
     ) {
       declare(scope, node.name);
     }
@@ -185,11 +188,7 @@ function addAliases<Alias>(binding: AliasBinding<Alias>, aliases: Iterable<Alias
   return changed;
 }
 
-function runBoundedDataflow(
-  bindingCount: number,
-  aliasCount: number,
-  scan: () => boolean,
-): void {
+function runBoundedDataflow(bindingCount: number, aliasCount: number, scan: () => boolean): void {
   const maximumPasses = Math.max(1, bindingCount * aliasCount + 1);
   for (let pass = 0; pass < maximumPasses; pass += 1) {
     if (!scan()) return;
@@ -199,8 +198,13 @@ function runBoundedDataflow(
 
 function resourcePrimitivesFromSource(source: string, file: string): readonly string[] {
   const primitives: ResourcePrimitive[] = [];
-  const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true,
-    file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const sourceFile = ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
   const lexical = createLexicalAliases<ResourcePrimitive>(sourceFile);
   const references = (
     expression: ts.Expression,
@@ -209,7 +213,9 @@ function resourcePrimitivesFromSource(source: string, file: string): readonly st
     if (ts.isIdentifier(expression)) {
       const binding = lexical.lookup(scope, expression.text);
       if (binding !== undefined) return binding.aliases;
-      const primitive = propertyOnly.has(expression.text) ? undefined : callNames.get(expression.text);
+      const primitive = propertyOnly.has(expression.text)
+        ? undefined
+        : callNames.get(expression.text);
       return primitive === undefined ? new Set() : new Set([primitive]);
     }
     if (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) {
@@ -226,8 +232,11 @@ function resourcePrimitivesFromSource(source: string, file: string): readonly st
       if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
         const declarationScope = lexical.scopeForDeclaration(node, scope);
         if (ts.isIdentifier(node.name)) {
-          changed = addAliases(declarationScope.bindings.get(node.name.text)!, references(node.initializer, scope))
-            || changed;
+          changed =
+            addAliases(
+              declarationScope.bindings.get(node.name.text)!,
+              references(node.initializer, scope),
+            ) || changed;
         } else if (ts.isObjectBindingPattern(node.name)) {
           for (const element of node.name.elements) {
             const name = bindingName(element.name);
@@ -239,12 +248,13 @@ function resourcePrimitivesFromSource(source: string, file: string): readonly st
           }
         }
       } else if (
-        ts.isBinaryExpression(node)
-        && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
-        && ts.isIdentifier(node.left)
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isIdentifier(node.left)
       ) {
         const binding = lexical.lookup(scope, node.left.text);
-        if (binding !== undefined) changed = addAliases(binding, references(node.right, scope)) || changed;
+        if (binding !== undefined)
+          changed = addAliases(binding, references(node.right, scope)) || changed;
       }
     });
     return changed;
@@ -268,7 +278,10 @@ const registryOwnershipMethods = new Map<string, ResourcePrimitive>([
 type OwnerObject = 'canvas-options' | 'controller-object' | 'epoch-object' | 'registry-object';
 type OwnerAlias = OwnerObject | ResourcePrimitive;
 
-function ownershipMember(owner: OwnerAlias | undefined, method: string | null): OwnerAlias | undefined {
+function ownershipMember(
+  owner: OwnerAlias | undefined,
+  method: string | null,
+): OwnerAlias | undefined {
   if (owner === 'registry-object' && method !== null) return registryOwnershipMethods.get(method);
   if (owner === 'controller-object' && method === 'subscribe') return 'subscription';
   if (owner === 'canvas-options' && method === 'epoch') return 'epoch-object';
@@ -276,8 +289,13 @@ function ownershipMember(owner: OwnerAlias | undefined, method: string | null): 
 }
 
 function lifetimeResourcesFromSource(source: string, file: string): readonly ResourcePrimitive[] {
-  const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true,
-    file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const sourceFile = ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
   const lexical = createLexicalAliases<OwnerAlias>(sourceFile);
   lexical.visit((node, scope) => {
     if (ts.isParameter(node)) {
@@ -288,14 +306,16 @@ function lifetimeResourcesFromSource(source: string, file: string): readonly Res
       if (/\bUseCanvasEngineOptions\b/.test(type)) binding.aliases.add('canvas-options');
     }
   });
-  const aliasesFor = (expression: ts.Expression, scope: AliasScope<OwnerAlias>): ReadonlySet<OwnerAlias> => {
-    if (ts.isIdentifier(expression)) return lexical.lookup(scope, expression.text)?.aliases ?? new Set();
+  const aliasesFor = (
+    expression: ts.Expression,
+    scope: AliasScope<OwnerAlias>,
+  ): ReadonlySet<OwnerAlias> => {
+    if (ts.isIdentifier(expression))
+      return lexical.lookup(scope, expression.text)?.aliases ?? new Set();
     if (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) {
       const property = expressionName(expression);
-      if (
-        expression.expression.kind === ts.SyntaxKind.ThisKeyword
-        && property === 'registry'
-      ) return new Set(['registry-object']);
+      if (expression.expression.kind === ts.SyntaxKind.ThisKeyword && property === 'registry')
+        return new Set(['registry-object']);
       const aliases = new Set<OwnerAlias>();
       for (const owner of aliasesFor(expression.expression, scope)) {
         const alias = ownershipMember(owner, property);
@@ -306,47 +326,56 @@ function lifetimeResourcesFromSource(source: string, file: string): readonly Res
     const target = boundTarget(expression);
     return target === null ? new Set() : aliasesFor(target, scope);
   };
-  runBoundedDataflow(lexical.bindings.size, new Set<OwnerAlias>([
-    ...callNames.values(),
-    'canvas-options',
-    'controller-object',
-    'epoch-object',
-    'registry-object',
-  ]).size, () => {
-    let changed = false;
-    lexical.visit((node, scope) => {
-      if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
-        const declarationScope = lexical.scopeForDeclaration(node, scope);
-        if (ts.isIdentifier(node.name)) {
-          changed = addAliases(
-            declarationScope.bindings.get(node.name.text)!,
-            aliasesFor(node.initializer, scope),
-          ) || changed;
-          return;
-        }
-        if (!ts.isObjectBindingPattern(node.name)) return;
-        const owners = aliasesFor(node.initializer, scope);
-        for (const element of node.name.elements) {
-          const name = bindingName(element.name);
-          if (name === null) continue;
-          const aliases = new Set<OwnerAlias>();
-          for (const owner of owners) {
-            const alias = ownershipMember(owner, bindingName(element.propertyName ?? element.name));
-            if (alias !== undefined) aliases.add(alias);
+  runBoundedDataflow(
+    lexical.bindings.size,
+    new Set<OwnerAlias>([
+      ...callNames.values(),
+      'canvas-options',
+      'controller-object',
+      'epoch-object',
+      'registry-object',
+    ]).size,
+    () => {
+      let changed = false;
+      lexical.visit((node, scope) => {
+        if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
+          const declarationScope = lexical.scopeForDeclaration(node, scope);
+          if (ts.isIdentifier(node.name)) {
+            changed =
+              addAliases(
+                declarationScope.bindings.get(node.name.text)!,
+                aliasesFor(node.initializer, scope),
+              ) || changed;
+            return;
           }
-          changed = addAliases(declarationScope.bindings.get(name)!, aliases) || changed;
+          if (!ts.isObjectBindingPattern(node.name)) return;
+          const owners = aliasesFor(node.initializer, scope);
+          for (const element of node.name.elements) {
+            const name = bindingName(element.name);
+            if (name === null) continue;
+            const aliases = new Set<OwnerAlias>();
+            for (const owner of owners) {
+              const alias = ownershipMember(
+                owner,
+                bindingName(element.propertyName ?? element.name),
+              );
+              if (alias !== undefined) aliases.add(alias);
+            }
+            changed = addAliases(declarationScope.bindings.get(name)!, aliases) || changed;
+          }
+        } else if (
+          ts.isBinaryExpression(node) &&
+          node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+          ts.isIdentifier(node.left)
+        ) {
+          const binding = lexical.lookup(scope, node.left.text);
+          if (binding !== undefined)
+            changed = addAliases(binding, aliasesFor(node.right, scope)) || changed;
         }
-      } else if (
-        ts.isBinaryExpression(node)
-        && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
-        && ts.isIdentifier(node.left)
-      ) {
-        const binding = lexical.lookup(scope, node.left.text);
-        if (binding !== undefined) changed = addAliases(binding, aliasesFor(node.right, scope)) || changed;
-      }
-    });
-    return changed;
-  });
+      });
+      return changed;
+    },
+  );
   const primitives: ResourcePrimitive[] = [];
   lexical.visit((node, scope) => {
     if (!ts.isCallExpression(node)) return;
@@ -393,7 +422,9 @@ it('classifies bound and destructured resource aliases as acquisitions', () => {
 });
 
 it('keeps lifetime-owner wrapper calls visible through ordinary aliases', () => {
-  expect(lifetimeResourcesFromSource(`
+  expect(
+    lifetimeResourcesFromSource(
+      `
     const ownListener = this.registry.listen.bind(this.registry);
     const { timer: ownTimer } = this.registry;
     ownListener(root, 'click', listener);
@@ -402,11 +433,16 @@ it('keeps lifetime-owner wrapper calls visible through ordinary aliases', () => 
       const { subscribe: connect } = controller;
       connect(publish);
     }
-  `, 'probe.ts')).toEqual(['listener', 'timer', 'subscription']);
+  `,
+      'probe.ts',
+    ),
+  ).toEqual(['listener', 'timer', 'subscription']);
 });
 
 it('resolves owner-object aliases without trusting unrelated receiver names', () => {
-  expect(lifetimeResourcesFromSource(`
+  expect(
+    lifetimeResourcesFromSource(
+      `
     const resources = this.registry;
     const chained = resources;
     let assigned;
@@ -425,11 +461,16 @@ it('resolves owner-object aliases without trusting unrelated receiver names', ()
       const source = realController;
       source.subscribe(listener);
     }
-  `, 'probe.ts')).toEqual(['listener', 'timer', 'subscription']);
+  `,
+      'probe.ts',
+    ),
+  ).toEqual(['listener', 'timer', 'subscription']);
 });
 
 it('terminates and conservatively tracks conflicting resource aliases per lexical binding', () => {
-  expect(resourcePrimitivesFromSource(`
+  expect(
+    resourcePrimitivesFromSource(
+      `
     let acquire = addEventListener;
     acquire = setTimeout;
     {
@@ -437,9 +478,14 @@ it('terminates and conservatively tracks conflicting resource aliases per lexica
       acquire(timer);
     }
     acquire(target, 'click', listener);
-  `, 'resource-conflict.ts')).toEqual(['timer', 'listener', 'timer']);
+  `,
+      'resource-conflict.ts',
+    ),
+  ).toEqual(['timer', 'listener', 'timer']);
 
-  expect(lifetimeResourcesFromSource(`
+  expect(
+    lifetimeResourcesFromSource(
+      `
     let own = this.registry.listen;
     own = this.registry.timer;
     {
@@ -454,20 +500,30 @@ it('terminates and conservatively tracks conflicting resource aliases per lexica
       resources.listen(target, 'fake', listener);
     }
     resources.listen(target, 'real', listener);
-  `, 'owner-conflict.ts')).toEqual(['observer', 'listener', 'timer', 'listener']);
+  `,
+      'owner-conflict.ts',
+    ),
+  ).toEqual(['observer', 'listener', 'timer', 'listener']);
 
-  expect(resourcePrimitivesFromSource(`
+  expect(
+    resourcePrimitivesFromSource(
+      `
     function addEventListener() {}
     {
       const setTimeout = localTimer;
       setTimeout();
     }
     addEventListener();
-  `, 'declaration-shadows.ts')).toEqual([]);
+  `,
+      'declaration-shadows.ts',
+    ),
+  ).toEqual([]);
 });
 
 it('keeps static-block vars and named class expressions in their own resource scopes', () => {
-  expect(resourcePrimitivesFromSource(`
+  expect(
+    resourcePrimitivesFromSource(
+      `
     class StaticShadow {
       static {
         var setTimeout = localTimer;
@@ -475,14 +531,22 @@ it('keeps static-block vars and named class expressions in their own resource sc
       }
     }
     setTimeout(callback, 1);
-  `, 'static-block-var.ts')).toEqual(['timer']);
+  `,
+      'static-block-var.ts',
+    ),
+  ).toEqual(['timer']);
 
-  expect(resourcePrimitivesFromSource(`
+  expect(
+    resourcePrimitivesFromSource(
+      `
     const LocalClass = class setTimeout {
       static run() { setTimeout(); }
     };
     setTimeout(callback, 1);
-  `, 'named-class-expression.ts')).toEqual(['timer']);
+  `,
+      'named-class-expression.ts',
+    ),
+  ).toEqual(['timer']);
 });
 
 it('[ARCH-5] gives each browser resource one idempotent registry disposal', async () => {
@@ -542,8 +606,8 @@ it('[ARCH-5] cancels the renderer schedule during idempotent engine disposal', (
         previousVisibleRow: () => null,
         previousVisibleColumn: () => null,
         mergeAt: () => null,
-        logicalRowAtVisualIndex: value => value,
-        visualIndexOfRow: value => value,
+        logicalRowAtVisualIndex: (value) => value,
+        visualIndexOfRow: (value) => value,
         visualRowRange: (start, end) => [start, end],
         visualRowRuns: (start, end) => [[start, end]],
         logicalRowRange: (start, end) => [start, end],
@@ -596,70 +660,80 @@ it('[ARCH-5] separates browser API implementations from section 6.6 lifetime own
     }
   }
   const implementationSites = new Map<string, ReadonlySet<string>>([
-    ['listener', new Set([
-      'src/engine/interaction/resource-registry.ts',
-      'src/react/adapters/interaction-adapter.ts',
-    ])],
-    ['observer', new Set([
-      'src/react/adapters/interaction-adapter.ts',
-    ])],
-    ['animation-frame', new Set([
-      'src/engine/canvas/render-scheduler.ts',
-    ])],
-    ['timer', new Set([
-      'src/react/adapters/interaction-adapter.ts',
-    ])],
-    ['subscription', new Set([
-      'src/core/controller/workbook-controller.ts',
-      'src/react/adapters/controller-external-store.ts',
-      'src/react/hooks/use-canvas-engine.ts',
-    ])],
-    ['overlay', new Set([
-      'src/ui/print-workbook.ts',
-    ])],
+    [
+      'listener',
+      new Set([
+        'src/engine/interaction/resource-registry.ts',
+        'src/react/adapters/interaction-adapter.ts',
+      ]),
+    ],
+    ['observer', new Set(['src/react/adapters/interaction-adapter.ts'])],
+    ['animation-frame', new Set(['src/engine/canvas/render-scheduler.ts'])],
+    ['timer', new Set(['src/react/adapters/interaction-adapter.ts'])],
+    [
+      'subscription',
+      new Set([
+        'src/core/controller/workbook-controller.ts',
+        'src/react/adapters/controller-external-store.ts',
+        'src/react/hooks/use-canvas-engine.ts',
+      ]),
+    ],
+    ['overlay', new Set(['src/ui/print-workbook.ts'])],
     ['portal', new Set()],
   ]);
   for (const [primitive, allowed] of implementationSites) {
-    expect(apiImplementations.get(primitive) ?? new Set(), `${primitive} API sites`).toEqual(allowed);
+    expect(apiImplementations.get(primitive) ?? new Set(), `${primitive} API sites`).toEqual(
+      allowed,
+    );
   }
   const ownership = new Map<string, ReadonlySet<string>>([
     ['listener', new Set(['src/engine/interaction/interaction-manager.ts'])],
     ['observer', new Set(['src/engine/interaction/interaction-manager.ts'])],
     ['animation-frame', new Set(['src/engine/canvas/render-scheduler.ts'])],
     ['timer', new Set(['src/engine/interaction/interaction-manager.ts'])],
-    ['subscription', new Set([
-      'src/react/adapters/controller-external-store.ts',
-      'src/react/hooks/use-canvas-engine.ts',
-    ])],
+    [
+      'subscription',
+      new Set([
+        'src/react/adapters/controller-external-store.ts',
+        'src/react/hooks/use-canvas-engine.ts',
+      ]),
+    ],
     ['overlay', new Set(['src/ui/print-workbook.ts'])],
     ['portal', new Set()],
   ]);
   for (const [primitive, allowed] of ownership) {
-    expect(lifetimeOwners.get(primitive) ?? new Set(), `${primitive} lifetime owners`).toEqual(allowed);
+    expect(lifetimeOwners.get(primitive) ?? new Set(), `${primitive} lifetime owners`).toEqual(
+      allowed,
+    );
   }
-  expect([...(lifetimeOwners.get('subscription') ?? [])].every(file => file.startsWith('src/react/')))
-    .toBe(true);
+  expect(
+    [...(lifetimeOwners.get('subscription') ?? [])].every((file) => file.startsWith('src/react/')),
+  ).toBe(true);
 });
 
-it('[ARCH-5] keeps the React disposal cascade ordered and executes the Strict Mode cleanup probe', () => {
-  const component = readFileSync(resolve(root, 'src/react/tego-sheet.tsx'), 'utf8');
-  expect(component.indexOf('useInteractionManager({')).toBeLessThan(component.indexOf('useCanvasEngine({'));
+it(
+  '[ARCH-5] keeps the React disposal cascade ordered and executes the Strict Mode cleanup probe',
+  () => {
+    const component = readFileSync(resolve(root, 'src/react/tego-sheet.tsx'), 'utf8');
+    expect(component.indexOf('useInteractionManager({')).toBeLessThan(
+      component.indexOf('useCanvasEngine({'),
+    );
 
-  const engineHook = readFileSync(resolve(root, 'src/react/hooks/use-canvas-engine.ts'), 'utf8');
-  expect(engineHook.indexOf('append(errors, unsubscribe)')).toBeLessThan(
-    engineHook.indexOf('append(errors, adapter.dispose)'),
-  );
+    const engineHook = readFileSync(resolve(root, 'src/react/hooks/use-canvas-engine.ts'), 'utf8');
+    expect(engineHook.indexOf('append(errors, unsubscribe)')).toBeLessThan(
+      engineHook.indexOf('append(errors, adapter.dispose)'),
+    );
 
-  const cli = resolve(root, 'node_modules/vitest/vitest.mjs');
-  const output = execArchitectureChild(process.execPath, [
-    cli,
-    'run',
-    '--project',
-    'component',
-    'tests/component/strict-mode-cleanup.test.tsx',
-  ], {
-    cwd: root,
-    env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
-  });
-  expect(output).toMatch(/Tests\s+4 passed/);
-}, ARCHITECTURE_TEST_TIMEOUT_MS);
+    const cli = resolve(root, 'node_modules/vitest/vitest.mjs');
+    const output = execArchitectureChild(
+      process.execPath,
+      [cli, 'run', '--project', 'component', 'tests/component/strict-mode-cleanup.test.tsx'],
+      {
+        cwd: root,
+        env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+      },
+    );
+    expect(output).toMatch(/Tests\s+4 passed/);
+  },
+  ARCHITECTURE_TEST_TIMEOUT_MS,
+);

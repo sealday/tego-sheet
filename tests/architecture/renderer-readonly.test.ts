@@ -6,12 +6,14 @@ import { buildStyledWorkbook } from '../helpers/workbook-builders';
 
 it('[ARCH-4] renders a deeply frozen snapshot without mutating workbook or viewport state', () => {
   const sheet = deepFreeze(buildStyledWorkbook());
-  const viewport = deepFreeze(createViewportMetrics(createSheetGridModel(sheet), {
-    width: 640,
-    height: 320,
-    freeze: { row: 1, column: 1 },
-    scroll: { x: 25, y: 20 },
-  }));
+  const viewport = deepFreeze(
+    createViewportMetrics(createSheetGridModel(sheet), {
+      width: 640,
+      height: 320,
+      freeze: { row: 1, column: 1 },
+      scroll: { x: 25, y: 20 },
+    }),
+  );
   const snapshot = deepFreeze({
     sheet,
     viewport,
@@ -31,6 +33,6 @@ it('[ARCH-4] renders a deeply frozen snapshot without mutating workbook or viewp
   harness.animationFrame.flush();
 
   expect(JSON.stringify(snapshot)).toBe(before);
-  expect(harness.operations.some(operation => operation.name === 'fillText')).toBe(true);
+  expect(harness.operations.some((operation) => operation.name === 'fillText')).toBe(true);
   engine.dispose();
 });

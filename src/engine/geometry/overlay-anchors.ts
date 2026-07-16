@@ -41,9 +41,7 @@ function intersect(first: CssRect, second: CssRect): CssRect | null {
     finiteCssSum(first.top, first.height, 'overlay bottom edge'),
     finiteCssSum(second.top, second.height, 'overlay bottom edge'),
   );
-  return right > left && bottom > top
-    ? createCssRect(left, top, right - left, bottom - top)
-    : null;
+  return right > left && bottom > top ? createCssRect(left, top, right - left, bottom - top) : null;
 }
 
 function paneKind(rowFrozen: boolean, columnFrozen: boolean): FrozenQuadrantKind {
@@ -53,16 +51,15 @@ function paneKind(rowFrozen: boolean, columnFrozen: boolean): FrozenQuadrantKind
   return 'body';
 }
 
-function segmentRect(
-  rows: AxisSegment,
-  columns: AxisSegment,
-  viewport: ViewportMetrics,
-): CssRect {
+function segmentRect(rows: AxisSegment, columns: AxisSegment, viewport: ViewportMetrics): CssRect {
   const logicalRow = viewport.model.logicalRowAtVisualIndex(rows.start);
-  const columnRect = rangeRect({
-    start: { row: logicalRow, column: columns.start },
-    end: { row: logicalRow, column: columns.end },
-  }, viewport);
+  const columnRect = rangeRect(
+    {
+      start: { row: logicalRow, column: columns.start },
+      end: { row: logicalRow, column: columns.end },
+    },
+    viewport,
+  );
   const scroll = rows.frozen ? 0 : viewport.scroll.y;
   const top = finiteCssSum(
     viewport.columnHeaderHeight,
@@ -84,11 +81,11 @@ export function overlayAnchors(
 ): readonly PaneOverlayAnchor[] {
   const normalized = normalizeCellRange(range);
   const panes = new Map(
-    frozenQuadrants(viewport.freeze, viewport).map(pane => [pane.kind, pane]),
+    frozenQuadrants(viewport.freeze, viewport).map((pane) => [pane.kind, pane]),
   );
   const rowSegments = viewport.model
     .visualRowRuns(normalized.start.row, normalized.end.row)
-    .flatMap(rows => axisSegments(rows[0], rows[1], viewport.freeze.row));
+    .flatMap((rows) => axisSegments(rows[0], rows[1], viewport.freeze.row));
   const columnSegments = axisSegments(
     normalized.start.column,
     normalized.end.column,
@@ -106,32 +103,34 @@ export function overlayAnchors(
       anchors.push({
         pane,
         ...clipped,
-        clipped: clipped.left !== source.left
-          || clipped.top !== source.top
-          || clipped.width !== source.width
-          || clipped.height !== source.height,
+        clipped:
+          clipped.left !== source.left ||
+          clipped.top !== source.top ||
+          clipped.width !== source.width ||
+          clipped.height !== source.height,
       });
     }
   }
   return anchors;
 }
 
-export function overlayAnchor(
-  range: CellRange,
-  viewport: ViewportMetrics,
-): OverlayAnchor | null {
+export function overlayAnchor(range: CellRange, viewport: ViewportMetrics): OverlayAnchor | null {
   const fragments = overlayAnchors(range, viewport);
   if (fragments.length === 0) return null;
-  const left = Math.min(...fragments.map(fragment => fragment.left));
-  const top = Math.min(...fragments.map(fragment => fragment.top));
-  const right = Math.max(...fragments.map(fragment => (
-    finiteCssSum(fragment.left, fragment.width, 'overlay right edge')
-  )));
-  const bottom = Math.max(...fragments.map(fragment => (
-    finiteCssSum(fragment.top, fragment.height, 'overlay bottom edge')
-  )));
+  const left = Math.min(...fragments.map((fragment) => fragment.left));
+  const top = Math.min(...fragments.map((fragment) => fragment.top));
+  const right = Math.max(
+    ...fragments.map((fragment) =>
+      finiteCssSum(fragment.left, fragment.width, 'overlay right edge'),
+    ),
+  );
+  const bottom = Math.max(
+    ...fragments.map((fragment) =>
+      finiteCssSum(fragment.top, fragment.height, 'overlay bottom edge'),
+    ),
+  );
   return {
     ...createCssRect(left, top, right - left, bottom - top),
-    clipped: fragments.some(fragment => fragment.clipped),
+    clipped: fragments.some((fragment) => fragment.clipped),
   };
 }

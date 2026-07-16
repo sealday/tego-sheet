@@ -8,18 +8,32 @@ import type { ParityEvidenceRecord, ParityLane } from './manifest-types.ts';
 
 const lanes = ['unit', 'component', 'browser', 'visual'] as const;
 
-function completeEvidence(): Array<Omit<ParityEvidenceRecord, 'runId' | 'revision' | 'treeHash' | 'manifestHash' | 'runner' | 'configHash' | 'startedAt' | 'observedAt'>> {
-  return parityManifest.flatMap(row => lanes.flatMap((lane: ParityLane) => {
-    const declaration = row[lane];
-    return 'assertions' in declaration
-      ? declaration.assertions.map(id => ({
-        lane,
-        status: 'passed' as const,
-        title: `@parity:${id} release evidence`,
-        source: `tests/${lane}/${id}.test.ts`,
-      }))
-      : [];
-  }));
+function completeEvidence(): Array<
+  Omit<
+    ParityEvidenceRecord,
+    | 'runId'
+    | 'revision'
+    | 'treeHash'
+    | 'manifestHash'
+    | 'runner'
+    | 'configHash'
+    | 'startedAt'
+    | 'observedAt'
+  >
+> {
+  return parityManifest.flatMap((row) =>
+    lanes.flatMap((lane: ParityLane) => {
+      const declaration = row[lane];
+      return 'assertions' in declaration
+        ? declaration.assertions.map((id) => ({
+            lane,
+            status: 'passed' as const,
+            title: `@parity:${id} release evidence`,
+            source: `tests/${lane}/${id}.test.ts`,
+          }))
+        : [];
+    }),
+  );
 }
 
 function runGate(path: string) {
@@ -36,12 +50,21 @@ test('release parity gate rejects synthetic evidence without a release context',
     const completePath = join(directory, 'complete.ndjson');
     const missingPath = join(directory, 'missing.ndjson');
     const failedPath = join(directory, 'failed.ndjson');
-    writeFileSync(completePath, complete.map(record => JSON.stringify(record)).join('\n'));
-    writeFileSync(missingPath, complete.slice(1).map(record => JSON.stringify(record)).join('\n'));
-    writeFileSync(failedPath, [
-      JSON.stringify({ ...complete[0], status: 'failed' }),
-      ...complete.slice(1).map(record => JSON.stringify(record)),
-    ].join('\n'));
+    writeFileSync(completePath, complete.map((record) => JSON.stringify(record)).join('\n'));
+    writeFileSync(
+      missingPath,
+      complete
+        .slice(1)
+        .map((record) => JSON.stringify(record))
+        .join('\n'),
+    );
+    writeFileSync(
+      failedPath,
+      [
+        JSON.stringify({ ...complete[0], status: 'failed' }),
+        ...complete.slice(1).map((record) => JSON.stringify(record)),
+      ].join('\n'),
+    );
 
     const accepted = runGate(completePath);
     expect(accepted.status).not.toBe(0);

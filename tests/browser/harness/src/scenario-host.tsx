@@ -38,56 +38,87 @@ declare global {
   }
 }
 
-const rows = Object.fromEntries(Array.from({ length: 60 }, (_, row) => [String(row), {
-  cells: Object.fromEntries(Array.from({ length: 12 }, (_, column) => [String(column), {
-    text: row === 0
-      ? ['Name', 'Score', 'Double', 'Kind'][column] ?? `H${column + 1}`
-      : column === 0 ? (row % 2 === 0 ? 'even' : 'odd')
-        : column === 1 ? String(row)
-          : column === 2 ? `=B${row + 1}*2`
-            : column === 3 ? (row % 2 === 0 ? 'even' : 'odd')
-              : '',
-  }])),
-}])) as WorkbookData[number]['rows'];
+const rows = Object.fromEntries(
+  Array.from({ length: 60 }, (_, row) => [
+    String(row),
+    {
+      cells: Object.fromEntries(
+        Array.from({ length: 12 }, (_, column) => [
+          String(column),
+          {
+            text:
+              row === 0
+                ? (['Name', 'Score', 'Double', 'Kind'][column] ?? `H${column + 1}`)
+                : column === 0
+                  ? row % 2 === 0
+                    ? 'even'
+                    : 'odd'
+                  : column === 1
+                    ? String(row)
+                    : column === 2
+                      ? `=B${row + 1}*2`
+                      : column === 3
+                        ? row % 2 === 0
+                          ? 'even'
+                          : 'odd'
+                        : '',
+          },
+        ]),
+      ),
+    },
+  ]),
+) as WorkbookData[number]['rows'];
 
-const workbook: WorkbookData = [{
-  name: 'Browser',
-  rows: { len: 60, ...rows },
-  cols: { len: 12 },
-  autofilter: { ref: 'A1:D60' },
-}];
-
-const alternateWorkbook: WorkbookData = [{
-  name: 'Alternate',
-  rows: { len: 2, 0: { cells: { 0: { text: 'alternate-only' } } } },
-  cols: { len: 2 },
-}];
-
-const printWorkbook: WorkbookData = [{
-  name: 'Print',
-  styles: [{ bgcolor: '#ffeecc', border: { bottom: ['thick', '#ff0000'] } }],
-  merges: ['A1:B2'],
-  rows: {
-    len: 2,
-    0: { height: 30, cells: { 0: { text: 'secret-never-print', printable: false, style: 0, merge: [1, 1] } } },
-    1: { height: 40 },
+const workbook: WorkbookData = [
+  {
+    name: 'Browser',
+    rows: { len: 60, ...rows },
+    cols: { len: 12 },
+    autofilter: { ref: 'A1:D60' },
   },
-  cols: { len: 2, 0: { width: 80 }, 1: { width: 120 } },
-}];
+];
+
+const alternateWorkbook: WorkbookData = [
+  {
+    name: 'Alternate',
+    rows: { len: 2, 0: { cells: { 0: { text: 'alternate-only' } } } },
+    cols: { len: 2 },
+  },
+];
+
+const printWorkbook: WorkbookData = [
+  {
+    name: 'Print',
+    styles: [{ bgcolor: '#ffeecc', border: { bottom: ['thick', '#ff0000'] } }],
+    merges: ['A1:B2'],
+    rows: {
+      len: 2,
+      0: {
+        height: 30,
+        cells: { 0: { text: 'secret-never-print', printable: false, style: 0, merge: [1, 1] } },
+      },
+      1: { height: 40 },
+    },
+    cols: { len: 2, 0: { width: 80 }, 1: { width: 120 } },
+  },
+];
 
 function installClipboard(mode: string | null): void {
   const state = { reads: 0, writes: [] as string[] };
   window.__tegoClipboard = state;
   const denied = () => Promise.reject(new DOMException('clipboard blocked', 'NotAllowedError'));
-  const bridge = mode === 'deny' ? { readText: denied, writeText: denied } : {
-    readText: async () => {
-      state.reads += 1;
-      return 'pasted\tfrom-browser';
-    },
-    writeText: async (text: string) => {
-      state.writes.push(text);
-    },
-  };
+  const bridge =
+    mode === 'deny'
+      ? { readText: denied, writeText: denied }
+      : {
+          readText: async () => {
+            state.reads += 1;
+            return 'pasted\tfrom-browser';
+          },
+          writeText: async (text: string) => {
+            state.writes.push(text);
+          },
+        };
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: bridge });
 }
 
@@ -106,16 +137,16 @@ function installPrintProbe(): void {
   const nativeFillText = prototype.fillText;
   const nativeFillRect = prototype.fillRect;
   const nativeStroke = prototype.stroke;
-  prototype.fillText = function(text, x, y, maxWidth) {
+  prototype.fillText = function (text, x, y, maxWidth) {
     texts.push({ canvas: this.canvas, text });
     if (maxWidth === undefined) nativeFillText.call(this, text, x, y);
     else nativeFillText.call(this, text, x, y, maxWidth);
   };
-  prototype.fillRect = function(x, y, width, height) {
+  prototype.fillRect = function (x, y, width, height) {
     fills.push({ canvas: this.canvas, color: String(this.fillStyle), height, width, x, y });
     nativeFillRect.call(this, x, y, width, height);
   };
-  prototype.stroke = function(this: CanvasRenderingContext2D, path?: Path2D) {
+  prototype.stroke = function (this: CanvasRenderingContext2D, path?: Path2D) {
     strokes.push(this.canvas);
     Reflect.apply(nativeStroke, this, path === undefined ? [] : [path]);
   } as CanvasRenderingContext2D['stroke'];
@@ -127,16 +158,18 @@ function installPrintProbe(): void {
     window.__tegoPrintSnapshot = {
       css: document.querySelector('[data-tego-print-style]')?.textContent ?? '',
       pages: canvases.length,
-      canvases: canvases.map(canvas => ({ height: canvas.height, width: canvas.width })),
-      texts: texts.filter(item => active.has(item.canvas)).map(item => item.text),
-      fills: fills.filter(item => active.has(item.canvas)).map(item => ({
-        color: item.color,
-        height: item.height,
-        width: item.width,
-        x: item.x,
-        y: item.y,
-      })),
-      strokes: strokes.filter(canvas => active.has(canvas)).length,
+      canvases: canvases.map((canvas) => ({ height: canvas.height, width: canvas.width })),
+      texts: texts.filter((item) => active.has(item.canvas)).map((item) => item.text),
+      fills: fills
+        .filter((item) => active.has(item.canvas))
+        .map((item) => ({
+          color: item.color,
+          height: item.height,
+          width: item.width,
+          x: item.x,
+          y: item.y,
+        })),
+      strokes: strokes.filter((canvas) => active.has(canvas)).length,
     };
   };
 }
@@ -170,14 +203,17 @@ export function ScenarioHost() {
       unmount: () => setMounted(false),
       setCellText: (row, column, text) => {
         const sheetId = selectionRef.current?.sheet;
-        if (sheetId !== undefined) sheet.current?.setCellText({ sheet: sheetId, row, column }, text);
+        if (sheetId !== undefined)
+          sheet.current?.setCellText({ sheet: sheetId, row, column }, text);
       },
       recalculateLayout: () => sheet.current?.recalculateLayout(),
     };
   }, [takeSnapshot]);
 
   const download = () => {
-    const blob = new Blob([JSON.stringify(sheet.current?.getValue() ?? [])], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(sheet.current?.getValue() ?? [])], {
+      type: 'application/json',
+    });
     const link = document.createElement('a');
     link.download = 'workbook.json';
     link.href = URL.createObjectURL(blob);
@@ -188,20 +224,45 @@ export function ScenarioHost() {
   return (
     <main>
       <nav aria-label="Harness controls">
-        <button type="button" onClick={() => setValue(structuredClone(workbook))}>Import workbook</button>
-        <button type="button" onClick={() => setValue(structuredClone(alternateWorkbook))}>Load alternate workbook</button>
-        <button type="button" onClick={() => setValue(structuredClone(printWorkbook))}>Load print fixture</button>
-        <button type="button" onClick={takeSnapshot}>Capture workbook</button>
-        <button type="button" onClick={() => setValidation(sheet.current?.validate() ?? null)}>Validate workbook</button>
-        <button type="button" onClick={download}>Download workbook</button>
-        <button type="button" onClick={() => {
-          setZoom(current => current === 1 ? 1.25 : 1);
-          requestAnimationFrame(() => sheet.current?.recalculateLayout());
-        }}>Toggle zoom</button>
-        <button type="button" onClick={() => setReadOnly(current => !current)}>Toggle read only</button>
-        <button type="button" onClick={() => setShowGrid(current => !current)}>Toggle grid</button>
-        <button type="button" onClick={() => setMounted(false)}>Unmount sheet</button>
-        <button type="button" onClick={() => setMounted(true)}>Mount sheet</button>
+        <button type="button" onClick={() => setValue(structuredClone(workbook))}>
+          Import workbook
+        </button>
+        <button type="button" onClick={() => setValue(structuredClone(alternateWorkbook))}>
+          Load alternate workbook
+        </button>
+        <button type="button" onClick={() => setValue(structuredClone(printWorkbook))}>
+          Load print fixture
+        </button>
+        <button type="button" onClick={takeSnapshot}>
+          Capture workbook
+        </button>
+        <button type="button" onClick={() => setValidation(sheet.current?.validate() ?? null)}>
+          Validate workbook
+        </button>
+        <button type="button" onClick={download}>
+          Download workbook
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setZoom((current) => (current === 1 ? 1.25 : 1));
+            requestAnimationFrame(() => sheet.current?.recalculateLayout());
+          }}
+        >
+          Toggle zoom
+        </button>
+        <button type="button" onClick={() => setReadOnly((current) => !current)}>
+          Toggle read only
+        </button>
+        <button type="button" onClick={() => setShowGrid((current) => !current)}>
+          Toggle grid
+        </button>
+        <button type="button" onClick={() => setMounted(false)}>
+          Unmount sheet
+        </button>
+        <button type="button" onClick={() => setMounted(true)}>
+          Mount sheet
+        </button>
       </nav>
       <section data-testid="sheet-frame" style={{ height: 620, zoom }}>
         {mounted ? (
@@ -210,8 +271,8 @@ export function ScenarioHost() {
             value={value}
             readOnly={readOnly}
             options={{ showGrid }}
-            onChange={next => setValue(next)}
-            onSelectionChange={next => {
+            onChange={(next) => setValue(next)}
+            onSelectionChange={(next) => {
               selectionRef.current = next;
               setSelection(next);
             }}

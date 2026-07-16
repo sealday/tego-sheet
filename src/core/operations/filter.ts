@@ -15,7 +15,9 @@ export function assertDataToolResourceLimit(range: CellRange, columns = 1): void
   if (rows < 0n) throw new RangeError('data-tool range must be normalized');
   const limit = BigInt(MAX_DATA_TOOL_CELLS);
   if (BigInt(columns) > limit || rows * BigInt(columns) > limit) {
-    throw new RangeError(`data-tool workload exceeds the ${MAX_DATA_TOOL_CELLS}-cell operation limit`);
+    throw new RangeError(
+      `data-tool workload exceeds the ${MAX_DATA_TOOL_CELLS}-cell operation limit`,
+    );
   }
 }
 
@@ -40,9 +42,9 @@ interface CompiledFilter {
 }
 
 function compileFilters(filters: readonly AutoFilterItemData[]): readonly CompiledFilter[] {
-  return filters.map(item => item.operator === 'in'
-    ? { item, values: new Set(item.value ?? []) }
-    : { item });
+  return filters.map((item) =>
+    item.operator === 'in' ? { item, values: new Set(item.value ?? []) } : { item },
+  );
 }
 
 function includes(filter: CompiledFilter, value: string): boolean {
@@ -56,12 +58,10 @@ function filtersForRange(
   range: CellRange,
   filter: FilterDefinition,
 ): readonly AutoFilterItemData[] {
-  const filters = (sheet.autofilter?.filters ?? []).filter(item => (
-    item.ci !== undefined
-    && item.ci >= range.start.column
-    && item.ci <= range.end.column
-  ));
-  const index = filters.findIndex(item => item.ci === filter.column);
+  const filters = (sheet.autofilter?.filters ?? []).filter(
+    (item) => item.ci !== undefined && item.ci >= range.start.column && item.ci <= range.end.column,
+  );
+  const index = filters.findIndex((item) => item.ci === filter.column);
   const replacement: AutoFilterItemData = {
     ...(index < 0 ? {} : filters[index]),
     ci: filter.column,
@@ -91,7 +91,7 @@ export function filterItems(
   for (let row = range.start.row + 1; row <= range.end.row; row += 1) {
     const source = getCellData(sheet, row, column)?.text ?? '';
     const text = /^\s*$/.test(source) ? '' : source;
-    const count = Object.hasOwn(output, text) ? output[text] as number : 0;
+    const count = Object.hasOwn(output, text) ? (output[text] as number) : 0;
     Object.defineProperty(output, text, {
       configurable: true,
       enumerable: true,
@@ -112,20 +112,15 @@ export function filteredRows(sheet: SheetData): readonly number[] {
   const compiled = compileFilters(filters);
   const excluded: number[] = [];
   for (let row = range.start.row + 1; row <= range.end.row; row += 1) {
-    const accepted = compiled.every(filter => includes(
-      filter,
-      getCellData(sheet, row, filter.item.ci ?? range.start.column)?.text ?? '',
-    ));
+    const accepted = compiled.every((filter) =>
+      includes(filter, getCellData(sheet, row, filter.item.ci ?? range.start.column)?.text ?? ''),
+    );
     if (!accepted) excluded.push(row);
   }
   return excluded;
 }
 
-export function setFilter(
-  sheet: SheetData,
-  range: CellRange,
-  filter: FilterDefinition,
-): SheetData {
+export function setFilter(sheet: SheetData, range: CellRange, filter: FilterDefinition): SheetData {
   const filters = filtersForRange(sheet, range, filter);
   assertFilterResourceLimit(range, filters);
   const next = cloneSheet(sheet);
@@ -134,11 +129,12 @@ export function setFilter(
     ...previous,
     ref: renderA1Range(range),
     filters: structuredClone(filters),
-    sort: previous.sort?.ci !== undefined
-      && previous.sort.ci >= range.start.column
-      && previous.sort.ci <= range.end.column
-      ? previous.sort
-      : null,
+    sort:
+      previous.sort?.ci !== undefined &&
+      previous.sort.ci >= range.start.column &&
+      previous.sort.ci <= range.end.column
+        ? previous.sort
+        : null,
   };
   return semanticEqual(next, sheet) ? sheet : next;
 }

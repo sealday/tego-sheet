@@ -58,7 +58,11 @@ export function createCanvasHarness(): CanvasHarness {
           record('translate', x, y);
         };
       }
-      if (['fillText', 'fillRect', 'strokeRect', 'clearRect', 'moveTo', 'lineTo', 'rect'].includes(String(property))) {
+      if (
+        ['fillText', 'fillRect', 'strokeRect', 'clearRect', 'moveTo', 'lineTo', 'rect'].includes(
+          String(property),
+        )
+      ) {
         return (...args: unknown[]) => {
           const output = [...args];
           const offset = property === 'fillText' ? 1 : 0;

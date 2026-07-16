@@ -57,7 +57,8 @@ export function applyCommand(
     switch (command.type) {
       case 'set-cell-text': {
         const runtimeSheet = state.get(command.address.sheet);
-        if (runtimeSheet === null) throw new RangeError(`Unknown sheet ID: ${command.address.sheet}`);
+        if (runtimeSheet === null)
+          throw new RangeError(`Unknown sheet ID: ${command.address.sheet}`);
         const previousText = selectCellText(
           runtimeSheet.data,
           command.address.row,
@@ -78,7 +79,8 @@ export function applyCommand(
       }
       case 'clear-contents': {
         const runtimeSheet = state.get(command.selection.sheet);
-        if (runtimeSheet === null) throw new RangeError(`Unknown sheet ID: ${command.selection.sheet}`);
+        if (runtimeSheet === null)
+          throw new RangeError(`Unknown sheet ID: ${command.selection.sheet}`);
         const next = clearContents(runtimeSheet.data, command);
         if (next === runtimeSheet.data) return null;
         return {
@@ -92,7 +94,8 @@ export function applyCommand(
       }
       case 'set-cell-metadata': {
         const runtimeSheet = state.get(command.selection.sheet);
-        if (runtimeSheet === null) throw new RangeError(`Unknown sheet ID: ${command.selection.sheet}`);
+        if (runtimeSheet === null)
+          throw new RangeError(`Unknown sheet ID: ${command.selection.sheet}`);
         const next = setCellMetadata(runtimeSheet.data, command);
         if (next === runtimeSheet.data) return null;
         return {
@@ -108,7 +111,8 @@ export function applyCommand(
       case 'set-border':
       case 'clear-format': {
         const runtimeSheet = state.get(command.selection.sheet);
-        if (runtimeSheet === null) throw new RangeError(`Unknown sheet ID: ${command.selection.sheet}`);
+        if (runtimeSheet === null)
+          throw new RangeError(`Unknown sheet ID: ${command.selection.sheet}`);
         const next = applyStyleOperation(runtimeSheet.data, command);
         if (next === runtimeSheet.data) return null;
         return {
@@ -123,7 +127,8 @@ export function applyCommand(
       case 'paint-format': {
         const source = state.get(command.source.sheet);
         const target = state.get(command.target.sheet);
-        if (source === null || target === null) throw new RangeError('Unknown paint-format sheet ID');
+        if (source === null || target === null)
+          throw new RangeError('Unknown paint-format sheet ID');
         const range = paintFormatTargetRange(command);
         const next = applyStyleOperation(target.data, command, source.data);
         if (next === target.data) return null;
@@ -161,7 +166,8 @@ export function applyCommand(
       case 'merge':
       case 'unmerge': {
         const runtimeSheet = state.get(command.selection.sheet);
-        if (runtimeSheet === null) throw new RangeError(`Unknown sheet ID: ${command.selection.sheet}`);
+        if (runtimeSheet === null)
+          throw new RangeError(`Unknown sheet ID: ${command.selection.sheet}`);
         const next = applyMergeOperation(runtimeSheet.data, command);
         if (next === runtimeSheet.data) return null;
         return {
@@ -243,7 +249,8 @@ export function applyCommand(
       }
       case 'autofill': {
         const runtimeSheet = state.get(command.target.sheet);
-        if (runtimeSheet === null) throw new RangeError(`Unknown sheet ID: ${command.target.sheet}`);
+        if (runtimeSheet === null)
+          throw new RangeError(`Unknown sheet ID: ${command.target.sheet}`);
         const transformed = autofillRange(
           runtimeSheet.data,
           command.source.range,
@@ -262,7 +269,8 @@ export function applyCommand(
       }
       case 'set-filter': {
         const runtimeSheet = state.get(command.selection.sheet);
-        if (runtimeSheet === null) throw new RangeError(`Unknown sheet ID: ${command.selection.sheet}`);
+        if (runtimeSheet === null)
+          throw new RangeError(`Unknown sheet ID: ${command.selection.sheet}`);
         const next = setFilter(runtimeSheet.data, command.selection.range, command.filter);
         if (next === runtimeSheet.data) return null;
         return {
@@ -277,9 +285,10 @@ export function applyCommand(
       case 'clear-filter': {
         const runtimeSheet = state.get(command.sheet);
         if (runtimeSheet === null) throw new RangeError(`Unknown sheet ID: ${command.sheet}`);
-        const range = runtimeSheet.data.autofilter?.ref === undefined
-          ? undefined
-          : parseA1Range(runtimeSheet.data.autofilter.ref);
+        const range =
+          runtimeSheet.data.autofilter?.ref === undefined
+            ? undefined
+            : parseA1Range(runtimeSheet.data.autofilter.ref);
         const next = clearFilter(runtimeSheet.data);
         if (next === runtimeSheet.data) return null;
         return {
@@ -309,10 +318,12 @@ export function applyCommand(
       case 'set-validation':
       case 'remove-validation': {
         const runtimeSheet = state.get(command.selection.sheet);
-        if (runtimeSheet === null) throw new RangeError(`Unknown sheet ID: ${command.selection.sheet}`);
-        const next = command.type === 'set-validation'
-          ? setValidation(runtimeSheet.data, command.selection.range, command.rule)
-          : removeValidation(runtimeSheet.data, command.selection.range);
+        if (runtimeSheet === null)
+          throw new RangeError(`Unknown sheet ID: ${command.selection.sheet}`);
+        const next =
+          command.type === 'set-validation'
+            ? setValidation(runtimeSheet.data, command.selection.range, command.rule)
+            : removeValidation(runtimeSheet.data, command.selection.range);
         if (next === runtimeSheet.data) return null;
         return {
           state: state.update(command.selection.sheet, () => next),

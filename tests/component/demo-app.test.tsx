@@ -18,11 +18,14 @@ vi.mock('tego-sheet', async () => {
   const React = await import('react');
 
   const MockTegoSheet = React.forwardRef<unknown, SheetProps>((props, ref) => {
-    sheetMock.currentProps = props;
     const workbook = props.value ?? props.defaultValue ?? [];
     const sheets = Array.isArray(workbook) ? workbook : [workbook];
     const delayRef = React.useRef(sheetMock.delayNextRef).current;
     const [refReady, setRefReady] = React.useState(!delayRef);
+
+    React.useLayoutEffect(() => {
+      sheetMock.currentProps = props;
+    }, [props]);
 
     React.useEffect(() => {
       sheetMock.mounts += 1;
@@ -40,7 +43,7 @@ vi.mock('tego-sheet', async () => {
       getValue: () => sheetMock.handleValue ?? sheets,
     }));
 
-    if (sheets.some(sheet => typeof Reflect.get(sheet.rows ?? {}, 'len') === 'string')) {
+    if (sheets.some((sheet) => typeof Reflect.get(sheet.rows ?? {}, 'len') === 'string')) {
       throw new TypeError('Workbook data is invalid: rows.len must be a number.');
     }
 
@@ -94,10 +97,14 @@ describe('demo workbench', () => {
     expect(currentSheetProps().value).toBeUndefined();
     expect(sheetMock.mounts).toBe(1);
 
-    act(() => currentSheetProps().onChange?.(
-      [{ name: 'Uncontrolled internal update' }],
-      { id: 'change-0', kind: 'cell', source: 'keyboard', sheet: 'sheet-1' as never },
-    ));
+    act(() =>
+      currentSheetProps().onChange?.([{ name: 'Uncontrolled internal update' }], {
+        id: 'change-0',
+        kind: 'cell',
+        source: 'keyboard',
+        sheet: 'sheet-1' as never,
+      }),
+    );
     expect(currentSheetProps().defaultValue).toEqual([{ name: 'Uncontrolled internal update' }]);
     expect(currentSheetProps().value).toBeUndefined();
     expect(rendered.getByText(/workbook: uncontrolled internal update/i)).toBeTruthy();
@@ -112,11 +119,17 @@ describe('demo workbench', () => {
     expect(currentSheetProps().defaultValue).toBeUndefined();
     expect(sheetMock.mounts).toBe(2);
 
-    act(() => currentSheetProps().onChange?.(
-      [{ name: 'Controlled update' }],
-      { id: 'change-1', kind: 'cell', source: 'keyboard', sheet: 'sheet-1' as never },
-    ));
-    expect(workbookFromBoundary(rendered.getByTestId('tego-sheet'))).toEqual([{ name: 'Controlled update' }]);
+    act(() =>
+      currentSheetProps().onChange?.([{ name: 'Controlled update' }], {
+        id: 'change-1',
+        kind: 'cell',
+        source: 'keyboard',
+        sheet: 'sheet-1' as never,
+      }),
+    );
+    expect(workbookFromBoundary(rendered.getByTestId('tego-sheet'))).toEqual([
+      { name: 'Controlled update' },
+    ]);
   });
 
   it('passes read-only and locale selections through public props', () => {
@@ -171,7 +184,9 @@ describe('demo workbench', () => {
 
     sheetMock.handleValue = [{ name: 'From handle', rows: { len: 1 } }];
     fireEvent.click(rendered.getByRole('button', { name: 'Export JSON' }));
-    expect((json as HTMLTextAreaElement).value).toBe('[\n  {\n    "name": "From handle",\n    "rows": {\n      "len": 1\n    }\n  }\n]');
+    expect((json as HTMLTextAreaElement).value).toBe(
+      '[\n  {\n    "name": "From handle",\n    "rows": {\n      "len": 1\n    }\n  }\n]',
+    );
   });
 
   it('records callback events newest-first and bounds the event log', () => {
@@ -179,18 +194,28 @@ describe('demo workbench', () => {
 
     act(() => {
       for (let index = 0; index < PREVIEW_EVENT_LIMIT; index += 1) {
-        currentSheetProps().onChange?.(
-          [{ name: `Change ${index}` }],
-          { id: `change-${index}`, kind: 'cell', source: 'keyboard', sheet: 'sheet-1' as never },
-        );
+        currentSheetProps().onChange?.([{ name: `Change ${index}` }], {
+          id: `change-${index}`,
+          kind: 'cell',
+          source: 'keyboard',
+          sheet: 'sheet-1' as never,
+        });
       }
-      currentSheetProps().onActiveSheetChange?.({ sheet: 'sheet-2' as never, index: 1, source: 'sheet-tabs' });
+      currentSheetProps().onActiveSheetChange?.({
+        sheet: 'sheet-2' as never,
+        index: 1,
+        source: 'sheet-tabs',
+      });
       currentSheetProps().onSelectionChange?.({
         sheet: 'sheet-2' as never,
         range: { start: { row: 0, column: 0 }, end: { row: 1, column: 1 } },
         active: { row: 1, column: 1 },
       });
-      currentSheetProps().onError?.({ code: 'RENDER_FAILED', message: 'Canvas unavailable', recoverable: true });
+      currentSheetProps().onError?.({
+        code: 'RENDER_FAILED',
+        message: 'Canvas unavailable',
+        recoverable: true,
+      });
     });
 
     fireEvent.click(rendered.getByRole('button', { name: 'Show events' }));
@@ -207,11 +232,13 @@ describe('demo workbench', () => {
 
   it('clears callback events when the example workbook is reset', () => {
     const rendered = render(<App />);
-    act(() => currentSheetProps().onError?.({
-      code: 'RENDER_FAILED',
-      message: 'Temporary render warning',
-      recoverable: true,
-    }));
+    act(() =>
+      currentSheetProps().onError?.({
+        code: 'RENDER_FAILED',
+        message: 'Temporary render warning',
+        recoverable: true,
+      }),
+    );
 
     fireEvent.click(rendered.getByRole('button', { name: 'Reset workbook' }));
     fireEvent.click(rendered.getByRole('button', { name: 'Show events' }));
@@ -221,11 +248,13 @@ describe('demo workbench', () => {
 
   it('keeps sheet callback errors visible when controls are collapsed', () => {
     const rendered = render(<App />);
-    act(() => currentSheetProps().onError?.({
-      code: 'RENDER_FAILED',
-      message: 'Canvas unavailable',
-      recoverable: true,
-    }));
+    act(() =>
+      currentSheetProps().onError?.({
+        code: 'RENDER_FAILED',
+        message: 'Canvas unavailable',
+        recoverable: true,
+      }),
+    );
 
     expect(rendered.getByRole('alert').textContent).toMatch(/canvas unavailable/i);
     fireEvent.click(rendered.getByRole('button', { name: 'Collapse controls' }));
@@ -251,7 +280,9 @@ describe('demo workbench', () => {
     fireEvent.click(rendered.getByRole('button', { name: 'Import JSON' }));
 
     await waitFor(() => {
-      expect(workbookFromBoundary(rendered.getByTestId('tego-sheet'))).toEqual([{ name: 'Last good' }]);
+      expect(workbookFromBoundary(rendered.getByTestId('tego-sheet'))).toEqual([
+        { name: 'Last good' },
+      ]);
     });
     expect(rendered.getByText(/mode: controlled/i)).toBeTruthy();
     expect(rendered.getByText(/workbook: last good/i)).toBeTruthy();
@@ -275,17 +306,23 @@ describe('demo workbench', () => {
     expect(collapse.getAttribute('aria-expanded')).toBe('true');
 
     fireEvent.click(jsonDisclosure);
-    expect(rendered.getByRole('button', { name: 'Hide JSON' }).getAttribute('aria-expanded')).toBe('true');
+    expect(rendered.getByRole('button', { name: 'Hide JSON' }).getAttribute('aria-expanded')).toBe(
+      'true',
+    );
     fireEvent.click(rendered.getByRole('button', { name: 'Hide JSON' }));
     fireEvent.click(eventDisclosure);
-    expect(rendered.getByRole('button', { name: 'Hide events' }).getAttribute('aria-expanded')).toBe('true');
+    expect(
+      rendered.getByRole('button', { name: 'Hide events' }).getAttribute('aria-expanded'),
+    ).toBe('true');
     fireEvent.click(rendered.getByRole('button', { name: 'Hide events' }));
     fireEvent.click(collapse);
 
     expect(rendered.getByRole('heading', { name: /tego-sheet workbench/i })).toBeTruthy();
     expect(rendered.getByText(/mode: uncontrolled/i)).toBeTruthy();
     expect(rendered.getByText(/workbook: budget/i)).toBeTruthy();
-    expect(rendered.getByRole('button', { name: 'Expand controls' }).getAttribute('aria-expanded')).toBe('false');
+    expect(
+      rendered.getByRole('button', { name: 'Expand controls' }).getAttribute('aria-expanded'),
+    ).toBe('false');
     expect(rendered.queryByRole('combobox', { name: 'Mode' })).toBeNull();
     expect(rendered.queryByRole('button', { name: 'Reset workbook' })).toBeNull();
   });
@@ -321,6 +358,8 @@ describe('demo workbench', () => {
     expect(rendered.container.querySelector(`#${secondaryControlsId}`)).toBeTruthy();
 
     fireEvent.click(collapseDisclosure);
-    expect(rendered.getByRole('button', { name: 'Expand controls' }).getAttribute('aria-expanded')).toBe('false');
+    expect(
+      rendered.getByRole('button', { name: 'Expand controls' }).getAttribute('aria-expanded'),
+    ).toBe('false');
   });
 });

@@ -54,7 +54,7 @@ export function getColumnData(sheet: SheetData, column: number): ColumnData | nu
   assertIndex(column, 'column');
   const value = sheet.cols?.[String(column)];
   return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as ColumnData
+    ? (value as ColumnData)
     : null;
 }
 
@@ -75,11 +75,11 @@ export function setColumnWidth(sheet: SheetData, column: number, width: number):
   if (!Number.isFinite(width) || width < 0) {
     throw new RangeError('column width must be a non-negative finite number');
   }
-  return updateColumn(sheet, column, value => ({ ...value, width }));
+  return updateColumn(sheet, column, (value) => ({ ...value, width }));
 }
 
 export function setColumnHidden(sheet: SheetData, column: number, hidden: boolean): SheetData {
-  return updateColumn(sheet, column, value => {
+  return updateColumn(sheet, column, (value) => {
     const next = { ...value } as Record<string, unknown>;
     if (hidden) next.hide = true;
     else delete next.hide;
@@ -110,14 +110,18 @@ function transformRowCells(
     const destination = shouldShift
       ? (delta > 0 ? numeric + shift : numeric - shift).toString()
       : key;
-    define(output, destination, shouldShift
-      ? shiftCellFormula(
-        value as CellData,
-        'column',
-        endKey === null ? start : (end as number) + 1,
-        delta,
-      )
-      : value);
+    define(
+      output,
+      destination,
+      shouldShift
+        ? shiftCellFormula(
+            value as CellData,
+            'column',
+            endKey === null ? start : (end as number) + 1,
+            delta,
+          )
+        : value,
+    );
   }
   return { ...row, cells: output as CellsData } as unknown as RowData;
 }
@@ -130,8 +134,12 @@ function transformAllRows(
 ): RowsData {
   const output = { ...rows } as Record<string, unknown>;
   for (const [key, value] of Object.entries(output)) {
-    if (canonicalSparseIndex(key) === null
-      || value === null || typeof value !== 'object' || Array.isArray(value)) {
+    if (
+      canonicalSparseIndex(key) === null ||
+      value === null ||
+      typeof value !== 'object' ||
+      Array.isArray(value)
+    ) {
       continue;
     }
     output[key] = transformRowCells(value as RowData, start, end, delta);

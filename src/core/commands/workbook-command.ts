@@ -208,8 +208,8 @@ export type WorkbookCommand =
   | UndoCommand
   | RedoCommand;
 
-export type CommandResult<Command extends WorkbookCommand> =
-  Command extends AddSheetCommand ? SheetId
-    : Command extends PasteInternalCommand | PasteExternalCommand
-      ? readonly (readonly string[])[]
-      : void;
+export type CommandResult<Command extends WorkbookCommand> = Command extends AddSheetCommand
+  ? SheetId
+  : Command extends PasteInternalCommand | PasteExternalCommand
+    ? readonly (readonly string[])[]
+    : void;

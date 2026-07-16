@@ -15,9 +15,7 @@ describe('sheet identities', () => {
     expect(sheetId('sheet-1')).toBe('sheet-1');
     expect(() => sheetId('')).toThrow('sheet id must be a non-empty string');
     expect(() => sheetId('   ')).toThrow('sheet id must be a non-empty string');
-    expect(() => sheetId(1 as unknown as string)).toThrow(
-      'sheet id must be a non-empty string',
-    );
+    expect(() => sheetId(1 as unknown as string)).toThrow('sheet id must be a non-empty string');
   });
 });
 
@@ -81,9 +79,9 @@ describe('coordinate guards', () => {
     expect(() => assertCellRange({ start: null, end: { row: 0, column: 0 } })).toThrow(
       'range start must be a cell point',
     );
-    expect(() =>
-      assertCellRange({ start: { row: 0, column: 0 }, end: null }),
-    ).toThrow('range end must be a cell point');
+    expect(() => assertCellRange({ start: { row: 0, column: 0 }, end: null })).toThrow(
+      'range end must be a cell point',
+    );
     expect(() =>
       assertCellRange({ start: { row: 0, column: 0 }, end: { row: -1, column: 0 } }),
     ).toThrow('row must be a non-negative integer');

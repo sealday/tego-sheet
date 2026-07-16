@@ -29,12 +29,23 @@ The repository will pin the following development tools and record their exact t
 - `oxlint@1.74.0`
 - `oxfmt@0.59.0`
 - `husky@9.1.7`
-- `@commitlint/cli@21.2.1`
-- `@commitlint/config-conventional@21.2.0`
+- `@commitlint/cli@20.5.3`
+- `@commitlint/config-conventional@20.5.3`
+
+Commitlint 20.5.3 is the newest release line compatible with the declared Node 20 floor; Commitlint 21.x requires Node 22.12.0 or newer.
 
 The ESLint configuration and the `@eslint/js`, `eslint`, `eslint-plugin-react-hooks`, `eslint-plugin-react-refresh`, and `typescript-eslint` dependencies will be removed completely.
 
 `.oxlintrc.json` will be generated from the existing flat ESLint configuration and reviewed so the enabled rules cover the current JavaScript/TypeScript recommendations plus React Hooks and React Refresh constraints. `lint` will run Oxlint with warnings denied, and `lint:fix` will apply only safe Oxlint fixes.
+
+The migration is an explicit preset mapping rather than a bare category switch:
+
+- `@eslint/js` recommended contributes 65 rules. Oxlint's native `correctness` category covers 53; the JavaScript override adds the 10 supported rules that the category omits. Oxlint 1.74.0 has no named `no-dupe-args` or `no-octal` rule. The explicit `no-redeclare` rule still rejects duplicate parameters, while legacy octal literals are the one unsupported named-rule gap.
+- `typescript-eslint` recommended contributes 24 effective core and TypeScript rules. Twelve are native `correctness` coverage and twelve are explicit in the TypeScript override. Oxlint does not expose TypeScript-prefixed `no-array-constructor`, `no-unused-expressions`, or `no-unused-vars`; their core Oxlint equivalents provide the same repository coverage.
+- `eslint-plugin-react-hooks` recommended contributes `rules-of-hooks`, `exhaustive-deps`, and fourteen React Compiler diagnostics. Oxlint exposes the first two individually and the compiler diagnostics through the native `react/react-compiler` aggregate, which is enabled for React source and tests.
+- The Vite React Refresh preset maps to `react/only-export-components` with `allowConstantExport: true`, scoped only to `src/**/*.tsx`.
+
+The compiler aggregate can report a broader diagnostic at a single source line than the granular ESLint rules. Any necessary exception must therefore remain line-local and explain the timing invariant it preserves; the aggregate is not disabled by file or configuration override.
 
 `.oxfmtrc.json` will use single quotes for JavaScript/TypeScript, a 100-column print width, and repository-wide formatting. It will exclude immutable or historical evidence under `docs/superpowers`, `tests/parity/fixtures`, `tests/parity/legacy`, `tests/visual/__snapshots__`, and `tests/visual/fonts`. `format` writes changes; `format:check` is read-only and is the CI and hook gate. Oxfmt, not Oxlint, owns formatting.
 

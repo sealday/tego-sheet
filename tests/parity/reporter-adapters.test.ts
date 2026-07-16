@@ -1,7 +1,10 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { TestCase as PlaywrightTestCase, TestResult as PlaywrightTestResult } from '@playwright/test/reporter';
+import type {
+  TestCase as PlaywrightTestCase,
+  TestResult as PlaywrightTestResult,
+} from '@playwright/test/reporter';
 import type { Reporter as VitestReporter } from 'vitest/reporters';
 import { describe, expect, it, vi } from 'vitest';
 import PlaywrightParityEvidenceReporter from '../../scripts/reporters/playwright-parity-evidence.ts';
@@ -12,7 +15,10 @@ type VitestTestCase = Parameters<NonNullable<VitestReporter['onTestCaseResult']>
 type TestSpecification = Parameters<NonNullable<VitestReporter['onTestRunStart']>>[0][number];
 
 function readEvidence(path: string): ParityEvidenceRecord[] {
-  return readFileSync(path, 'utf8').trim().split(/\r?\n/).map(line => JSON.parse(line) as ParityEvidenceRecord);
+  return readFileSync(path, 'utf8')
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => JSON.parse(line) as ParityEvidenceRecord);
 }
 
 function vitestSpecification(project: string): TestSpecification {
@@ -89,13 +95,15 @@ describe('Vitest parity evidence reporter', () => {
       reporter.onTestCaseResult(vitestCase(directory, 'unit', 'passed'));
       reporter.onTestRunEnd([], [], 'passed');
 
-      expect(readEvidence(unit)).toEqual([expect.objectContaining({
-        lane: 'unit',
-        project: 'unit',
-        source: 'tests/unit/runner.test.ts',
-        status: 'passed',
-        title: '@parity:workbook.runner-adapter runs through Vitest',
-      })]);
+      expect(readEvidence(unit)).toEqual([
+        expect.objectContaining({
+          lane: 'unit',
+          project: 'unit',
+          source: 'tests/unit/runner.test.ts',
+          status: 'passed',
+          title: '@parity:workbook.runner-adapter runs through Vitest',
+        }),
+      ]);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -178,7 +186,10 @@ describe('Playwright parity evidence reporter', () => {
       reporter.onBegin();
       expect(readFileSync(artifact, 'utf8')).toBe('stale');
 
-      reporter.onTestEnd(playwrightCase(directory, 'chromium-desktop'), playwrightResult('skipped'));
+      reporter.onTestEnd(
+        playwrightCase(directory, 'chromium-desktop'),
+        playwrightResult('skipped'),
+      );
       reporter.onTestEnd(playwrightCase(directory, 'chromium-touch'), playwrightResult('passed'));
       reporter.onTestEnd(playwrightCase(directory, 'firefox-touch'), playwrightResult('failed'));
       reporter.onEnd({ status: 'failed' });

@@ -26,7 +26,7 @@ export const visualFixtures: readonly VisualFixture[] = [
 ];
 
 export function visualFixture(name: string): VisualFixture {
-  const fixture = visualFixtures.find(candidate => candidate.name === name);
+  const fixture = visualFixtures.find((candidate) => candidate.name === name);
   if (fixture === undefined) throw new Error(`Unknown visual fixture: ${name}`);
   return fixture;
 }

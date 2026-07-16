@@ -66,13 +66,19 @@ function referencePoint(reference: A1Reference): CellPoint {
   return { row: reference.row, column: reference.column };
 }
 
-function binary(operator: BinaryOperator, left: FormulaScalar, right: FormulaScalar): RenderedValue {
+function binary(
+  operator: BinaryOperator,
+  left: FormulaScalar,
+  right: FormulaScalar,
+): RenderedValue {
   if (operator === '&') return `${left}${right}`;
-  if (operator === '=') return Number.isNaN(Number(left)) || Number.isNaN(Number(right))
-    ? left === right
-    : Number(left) === Number(right);
-  if (operator === '==' ) return left === right || Number(left) === Number(right);
-  if (operator === '<>' || operator === '!=') return !(left === right || Number(left) === Number(right));
+  if (operator === '=')
+    return Number.isNaN(Number(left)) || Number.isNaN(Number(right))
+      ? left === right
+      : Number(left) === Number(right);
+  if (operator === '==') return left === right || Number(left) === Number(right);
+  if (operator === '<>' || operator === '!=')
+    return !(left === right || Number(left) === Number(right));
   if (operator === '>' || operator === '>=' || operator === '<' || operator === '<=') {
     const a = Number.isNaN(Number(left)) ? String(left) : Number(left);
     const b = Number.isNaN(Number(right)) ? String(right) : Number(right);
@@ -86,7 +92,8 @@ function binary(operator: BinaryOperator, left: FormulaScalar, right: FormulaSca
 
 function evaluate(expression: FormulaExpression, context: EvaluationContext): EvaluationValue {
   if (expression.kind === 'number' || expression.kind === 'string') return expression.value;
-  if (expression.kind === 'reference') return evaluatePoint(referencePoint(expression.reference), context);
+  if (expression.kind === 'reference')
+    return evaluatePoint(referencePoint(expression.reference), context);
   if (expression.kind === 'range') {
     const startRow = Math.min(expression.start.row, expression.end.row);
     const endRow = Math.max(expression.start.row, expression.end.row);
@@ -135,7 +142,7 @@ function evaluateSource(source: string, context: EvaluationContext): RenderedVal
   if (!source.startsWith('=')) return source;
   try {
     const value = evaluate(parseFormula(source), context);
-    return Array.isArray(value) ? '#ERROR!' : value as RenderedValue;
+    return Array.isArray(value) ? '#ERROR!' : (value as RenderedValue);
   } catch (cause) {
     if (cause instanceof FormulaEvaluationLimitError) throw cause;
     return '#ERROR!';

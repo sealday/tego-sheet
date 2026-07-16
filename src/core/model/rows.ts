@@ -78,14 +78,17 @@ function shiftFormula(
         if (boundaryBefore && boundaryAfter) {
           const reference = parseA1Reference(word.toUpperCase());
           const coordinate = axis === 'row' ? reference.row : reference.column;
-          let rendered = coordinate < threshold
-            ? word
-            : renderA1Reference(axis === 'row'
-              ? { ...reference, row: reference.row + delta }
-              : { ...reference, column: reference.column + delta });
+          let rendered =
+            coordinate < threshold
+              ? word
+              : renderA1Reference(
+                  axis === 'row'
+                    ? { ...reference, row: reference.row + delta }
+                    : { ...reference, column: reference.column + delta },
+                );
           const column = match[2] as string;
           if (coordinate >= threshold && column === column.toLowerCase()) {
-            rendered = rendered.replace(/[A-Z]+/, letters => letters.toLowerCase());
+            rendered = rendered.replace(/[A-Z]+/, (letters) => letters.toLowerCase());
           }
           output += rendered;
           index += word.length;
@@ -124,8 +127,12 @@ export function shiftRowFormulas(
   if (row.cells === undefined) return row;
   const cells = { ...row.cells } as Record<string, unknown>;
   for (const [key, value] of Object.entries(cells)) {
-    if (canonicalSparseIndex(key) === null
-      || value === null || typeof value !== 'object' || Array.isArray(value)) {
+    if (
+      canonicalSparseIndex(key) === null ||
+      value === null ||
+      typeof value !== 'object' ||
+      Array.isArray(value)
+    ) {
       continue;
     }
     const cell = value as CellData;
@@ -138,15 +145,11 @@ export function getRowData(sheet: SheetData, row: number): RowData | null {
   assertIndex(row, 'row');
   const value = sheet.rows?.[String(row)];
   return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as RowData
+    ? (value as RowData)
     : null;
 }
 
-function updateRow(
-  sheet: SheetData,
-  row: number,
-  updater: (value: RowData) => RowData,
-): SheetData {
+function updateRow(sheet: SheetData, row: number, updater: (value: RowData) => RowData): SheetData {
   assertIndex(row, 'row');
   const next = cloneSheet(sheet);
   const rows = { ...(next.rows ?? { len: 100 }) } as Record<string, unknown>;
@@ -159,11 +162,11 @@ export function setRowHeight(sheet: SheetData, row: number, height: number): She
   if (!Number.isFinite(height) || height < 0) {
     throw new RangeError('row height must be a non-negative finite number');
   }
-  return updateRow(sheet, row, value => ({ ...value, height }) as unknown as RowData);
+  return updateRow(sheet, row, (value) => ({ ...value, height }) as unknown as RowData);
 }
 
 export function setRowHidden(sheet: SheetData, row: number, hidden: boolean): SheetData {
-  return updateRow(sheet, row, value => {
+  return updateRow(sheet, row, (value) => {
     const next = { ...value } as Record<string, unknown>;
     if (hidden) next.hide = true;
     else delete next.hide;
@@ -191,9 +194,11 @@ export function insertRows(sheet: SheetData, index: number, count = 1): SheetDat
     if (value === null || typeof value !== 'object' || Array.isArray(value)) continue;
     const shifted = numeric >= boundary;
     const destination = shifted ? (numeric + delta).toString() : key;
-    define(output, destination, shifted
-      ? shiftRowFormulas(value as RowData, 'row', index, count)
-      : value);
+    define(
+      output,
+      destination,
+      shifted ? shiftRowFormulas(value as RowData, 'row', index, count) : value,
+    );
   }
   if (!Object.hasOwn(output, 'len')) output.len = length;
   return transformMergesForInsert(
@@ -227,9 +232,11 @@ export function deleteRows(sheet: SheetData, start: number, end: number): SheetD
     if (value === null || typeof value !== 'object' || Array.isArray(value)) continue;
     const shifted = numeric > endKey;
     const destination = shifted ? (numeric - delta).toString() : key;
-    define(output, destination, shifted
-      ? shiftRowFormulas(value as RowData, 'row', end + 1, -count)
-      : value);
+    define(
+      output,
+      destination,
+      shifted ? shiftRowFormulas(value as RowData, 'row', end + 1, -count) : value,
+    );
   }
   if (!Object.hasOwn(output, 'len')) output.len = length;
   return transformMergesForDelete(

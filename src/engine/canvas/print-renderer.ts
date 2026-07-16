@@ -18,7 +18,7 @@ const MAX_PRINT_PAGES = 10_000;
 
 function isolated<T>(value: T): T {
   if (Array.isArray(value)) {
-    return Object.freeze(value.map(item => isolated(item))) as T;
+    return Object.freeze(value.map((item) => isolated(item))) as T;
   }
   if (value !== null && typeof value === 'object') {
     const output: Record<string, unknown> = {};
@@ -37,7 +37,7 @@ export const PAPER_SIZES = Object.freeze({
   A3: Object.freeze({ width: Math.floor(96 * 11.69), height: Math.floor(96 * 16.54) }),
   A4: Object.freeze({ width: Math.floor(96 * 8.27), height: Math.floor(96 * 11.69) }),
   A5: Object.freeze({ width: Math.floor(96 * 5.83), height: Math.floor(96 * 8.27) }),
-  B4: Object.freeze({ width: Math.floor(96 * 9.84), height: Math.floor(96 * 13.90) }),
+  B4: Object.freeze({ width: Math.floor(96 * 9.84), height: Math.floor(96 * 13.9) }),
   B5: Object.freeze({ width: Math.floor(96 * 6.93), height: Math.floor(96 * 9.84) }),
 });
 
@@ -125,12 +125,17 @@ function sparseIndex(key: string, count: number): number | null {
   return Number.isSafeInteger(index) && index >= 0 && index < count ? index : null;
 }
 
-function usedEnd(sheet: Readonly<SheetData>, rowCount: number, columnCount: number): CellPoint | null {
+function usedEnd(
+  sheet: Readonly<SheetData>,
+  rowCount: number,
+  columnCount: number,
+): CellPoint | null {
   if (rowCount === 0 || columnCount === 0) return null;
   const rows: Array<{ readonly row: number; readonly cells: object }> = [];
   for (const [rowKey, rawRow] of Object.entries(sheet.rows ?? {})) {
     const row = sparseIndex(rowKey, rowCount);
-    if (row === null || rawRow === null || typeof rawRow !== 'object' || Array.isArray(rawRow)) continue;
+    if (row === null || rawRow === null || typeof rawRow !== 'object' || Array.isArray(rawRow))
+      continue;
     const cells = (rawRow as { readonly cells?: unknown }).cells;
     if (cells === null || typeof cells !== 'object' || Array.isArray(cells)) continue;
     rows.push({ row, cells });
@@ -138,7 +143,7 @@ function usedEnd(sheet: Readonly<SheetData>, rowCount: number, columnCount: numb
   const lastRow = rows.sort((first, second) => first.row - second.row).at(-1);
   if (lastRow === undefined) return { row: 0, column: 0 };
   const columns = Object.keys(lastRow.cells)
-    .map(key => sparseIndex(key, columnCount))
+    .map((key) => sparseIndex(key, columnCount))
     .filter((column): column is number => column !== null)
     .sort((first, second) => first - second);
   return { row: lastRow.row, column: columns.at(-1) ?? 0 };
@@ -179,8 +184,7 @@ function pageRows(
 }
 
 function mergeInterior(point: CellPoint, merge: CellRange | null): boolean {
-  return merge !== null
-    && (point.row !== merge.start.row || point.column !== merge.start.column);
+  return merge !== null && (point.row !== merge.start.row || point.column !== merge.start.column);
 }
 
 function logicalRect(
@@ -258,13 +262,15 @@ export function createPrintLayout(
       contentWidth: 0,
       contentHeight: 0,
       contentLeft: printPaper.padding + printPaper.innerWidth / 2,
-      pages: [{
-        index: 0,
-        rowStart: 0,
-        rowEnd: -1,
-        contentTop: 0,
-        cells: [],
-      }],
+      pages: [
+        {
+          index: 0,
+          rowStart: 0,
+          rowEnd: -1,
+          contentTop: 0,
+          cells: [],
+        },
+      ],
     });
   }
   const cellCount = BigInt(end.row + 1) * BigInt(end.column + 1);
@@ -275,23 +281,26 @@ export function createPrintLayout(
   const contentHeight = model.rowOffset(end.row + 1);
   const rawScale = contentWidth > 0 ? printPaper.innerWidth / contentWidth : 1;
   const scale = Math.min(1, rawScale);
-  const contentLeft = printPaper.padding + (rawScale > 1
-    ? (printPaper.innerWidth - contentWidth) / 2
-    : 0);
+  const contentLeft =
+    printPaper.padding + (rawScale > 1 ? (printPaper.innerWidth - contentWidth) / 2 : 0);
   const pageCount = Math.floor(contentHeight / printPaper.innerHeight) + 1;
   if (!Number.isSafeInteger(pageCount) || pageCount > MAX_PRINT_PAGES) {
     throw new RangeError(`print layout exceeds the ${MAX_PRINT_PAGES}-page limit`);
   }
   const rows = pageRows(sheet, end.row, printPaper.innerHeight, pageCount);
-  const invalidCells = new Set((options.invalidCells ?? []).map(point => `${point.row}:${point.column}`));
+  const invalidCells = new Set(
+    (options.invalidCells ?? []).map((point) => `${point.row}:${point.column}`),
+  );
   const defaultStyle = configuredCellDefaultStyle(options.defaultStyle);
-  const pages = rows.map((range, index) => Object.freeze({
-    index,
-    rowStart: range.start,
-    rowEnd: range.end,
-    contentTop: model.rowOffset(Math.min(range.start, model.rowCount)),
-    cells: Object.freeze(buildPageCells(sheet, range, end.column, invalidCells, defaultStyle)),
-  }));
+  const pages = rows.map((range, index) =>
+    Object.freeze({
+      index,
+      rowStart: range.start,
+      rowEnd: range.end,
+      contentTop: model.rowOffset(Math.min(range.start, model.rowCount)),
+      cells: Object.freeze(buildPageCells(sheet, range, end.column, invalidCells, defaultStyle)),
+    }),
+  );
   return isolated({
     paper: printPaper,
     scale,
@@ -323,11 +332,14 @@ function printPresentation(cell: PrintCellLayout): CellPresentation {
 function printMarker(draw: DrawContext, rect: CssRect, color: string, scale: number): void {
   const right = rect.left + rect.width - scale;
   const top = rect.top - scale;
-  draw.triangle([
-    { x: right - 8 * scale, y: top },
-    { x: right, y: top },
-    { x: right, y: top + 8 * scale },
-  ], color);
+  draw.triangle(
+    [
+      { x: right - 8 * scale, y: top },
+      { x: right, y: top },
+      { x: right, y: top + 8 * scale },
+    ],
+    color,
+  );
 }
 
 export function renderPrintPage(
@@ -345,26 +357,32 @@ export function renderPrintPage(
   );
   draw.resize(layout.paper.width, layout.paper.height);
   draw.clear(layout.paper.width, layout.paper.height);
-  draw.fillRect({ left: 0, top: 0, width: layout.paper.width, height: layout.paper.height }, '#ffffff');
-  draw.withClip({
-    left: layout.paper.padding,
-    top: layout.paper.padding,
-    width: layout.paper.innerWidth,
-    height: layout.paper.innerHeight,
-  }, () => {
-    for (const cell of page.cells) {
-      const rect = {
-        left: layout.contentLeft + cell.rect.left * layout.scale,
-        top: layout.paper.padding + (cell.rect.top - page.contentTop) * layout.scale,
-        width: cell.rect.width * layout.scale,
-        height: cell.rect.height * layout.scale,
-      };
-      paintCellAppearance(draw, rect, printPresentation(cell), layout.scale, () => {
-        if (cell.invalid) printMarker(draw, rect, 'rgba(255, 0, 0, .65)', layout.scale);
-        if (!cell.editable) printMarker(draw, rect, 'rgba(0, 255, 0, .85)', layout.scale);
-      });
-    }
-  });
+  draw.fillRect(
+    { left: 0, top: 0, width: layout.paper.width, height: layout.paper.height },
+    '#ffffff',
+  );
+  draw.withClip(
+    {
+      left: layout.paper.padding,
+      top: layout.paper.padding,
+      width: layout.paper.innerWidth,
+      height: layout.paper.innerHeight,
+    },
+    () => {
+      for (const cell of page.cells) {
+        const rect = {
+          left: layout.contentLeft + cell.rect.left * layout.scale,
+          top: layout.paper.padding + (cell.rect.top - page.contentTop) * layout.scale,
+          width: cell.rect.width * layout.scale,
+          height: cell.rect.height * layout.scale,
+        };
+        paintCellAppearance(draw, rect, printPresentation(cell), layout.scale, () => {
+          if (cell.invalid) printMarker(draw, rect, 'rgba(255, 0, 0, .65)', layout.scale);
+          if (!cell.editable) printMarker(draw, rect, 'rgba(0, 255, 0, .85)', layout.scale);
+        });
+      }
+    },
+  );
 }
 
 export class PrintRenderer {

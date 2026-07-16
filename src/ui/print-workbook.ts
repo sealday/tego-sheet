@@ -108,9 +108,6 @@ export function mountPrintPages(
     );
   }
   return () => {
-    throwCleanupErrors([
-      ...removePrintNodes(host, style),
-      ...restorePrintSiblings(hiddenSiblings),
-    ]);
+    throwCleanupErrors([...removePrintNodes(host, style), ...restorePrintSiblings(hiddenSiblings)]);
   };
 }

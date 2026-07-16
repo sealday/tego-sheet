@@ -1,11 +1,5 @@
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
-import {
-  createRef,
-  startTransition,
-  Suspense,
-  useLayoutEffect,
-  useState,
-} from 'react';
+import { createRef, startTransition, Suspense, useLayoutEffect, useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { TegoSheet } from '../../src';
 import type { TegoSheetHandle, WorkbookInput } from '../../src';
@@ -34,21 +28,18 @@ afterEach(() => {
 });
 
 it('keeps optimistic state across same-reference renders without mutating value', async () => {
-  const value: WorkbookInput = [{
-    name: 'Controlled',
-    extension: { nested: ['caller', false, 0] },
-  }];
+  const value: WorkbookInput = [
+    {
+      name: 'Controlled',
+      extension: { nested: ['caller', false, 0] },
+    },
+  ];
   const before = structuredClone(value);
   const onChange = vi.fn();
   const onSelectionChange = vi.fn();
   const ref = createRef<TegoSheetHandle>();
   const rendered = render(
-    <TegoSheet
-      ref={ref}
-      value={value}
-      onChange={onChange}
-      onSelectionChange={onSelectionChange}
-    />,
+    <TegoSheet ref={ref} value={value} onChange={onChange} onSelectionChange={onSelectionChange} />,
   );
   await waitFor(() => expect(ref.current).not.toBeNull());
   const captured = ref.current!;
@@ -63,12 +54,7 @@ it('keeps optimistic state across same-reference renders without mutating value'
   });
 
   rendered.rerender(
-    <TegoSheet
-      ref={ref}
-      value={value}
-      onChange={onChange}
-      onSelectionChange={onSelectionChange}
-    />,
+    <TegoSheet ref={ref} value={value} onChange={onChange} onSelectionChange={onSelectionChange} />,
   );
 
   expect(ref.current).toBe(captured);
@@ -94,10 +80,12 @@ it('retains the last valid controlled document and reports each invalid referenc
 
   expect(ref.current!.getValue()[0]?.name).toBe('Valid');
   expect(onError).toHaveBeenCalledOnce();
-  expect(onError).toHaveBeenCalledWith(expect.objectContaining({
-    code: 'INVALID_DATA',
-    recoverable: true,
-  }));
+  expect(onError).toHaveBeenCalledWith(
+    expect.objectContaining({
+      code: 'INVALID_DATA',
+      recoverable: true,
+    }),
+  );
 
   const anotherInvalid = { rows: { len: -1 } } as unknown as WorkbookInput;
   rendered.rerender(<TegoSheet ref={ref} value={anotherInvalid} onError={onError} />);
@@ -122,6 +110,9 @@ it('reconciles a value replacement committed before the controller epoch activat
 
   function Host() {
     const [value, setValue] = useState(initial);
+    // This test requires the replacement to commit in the parent layout phase,
+    // before the controller epoch's activation layout effect.
+    // oxlint-disable-next-line react/react-compiler
     useLayoutEffect(() => setValue(replacement), []);
     return <TegoSheet ref={ref} value={value} />;
   }
@@ -139,6 +130,9 @@ it('reports an invalid value committed before the controller epoch activates onc
 
   function Host() {
     const [value, setValue] = useState(initial);
+    // This test requires the invalid replacement to commit in the parent layout
+    // phase, before the controller epoch's activation layout effect.
+    // oxlint-disable-next-line react/react-compiler
     useLayoutEffect(() => setValue(invalid), []);
     return <TegoSheet ref={ref} value={value} onError={onError} />;
   }

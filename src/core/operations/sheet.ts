@@ -12,7 +12,7 @@ import type { SheetData } from '../types/workbook';
 export type SheetCommand = AddSheetCommand | DeleteSheetCommand | RenameSheetCommand;
 
 function names(state: WorkbookState): readonly string[] {
-  return state.sheets.map(sheet => sheet.data.name ?? '');
+  return state.sheets.map((sheet) => sheet.data.name ?? '');
 }
 
 export function nextSheetName(state: WorkbookState): string {
@@ -22,13 +22,9 @@ export function nextSheetName(state: WorkbookState): string {
   return `sheet${index}`;
 }
 
-export function assertSheetName(
-  state: WorkbookState,
-  value: string,
-  current?: SheetId,
-): void {
+export function assertSheetName(state: WorkbookState, value: string, current?: SheetId): void {
   if (value.trim().length === 0) throw new RangeError('sheet name must not be blank');
-  if (state.sheets.some(sheet => sheet.id !== current && sheet.data.name === value)) {
+  if (state.sheets.some((sheet) => sheet.id !== current && sheet.data.name === value)) {
     throw new RangeError(`sheet name already exists: ${value}`);
   }
 }
@@ -37,7 +33,11 @@ export function applySheetOperation(
   state: WorkbookState,
   command: SheetCommand,
   addSheetId?: SheetId,
-): { readonly state: WorkbookState; readonly sheet: SheetId; readonly result: SheetId | undefined } {
+): {
+  readonly state: WorkbookState;
+  readonly sheet: SheetId;
+  readonly result: SheetId | undefined;
+} {
   switch (command.type) {
     case 'add-sheet': {
       const name = command.name ?? nextSheetName(state);
@@ -58,12 +58,13 @@ export function applySheetOperation(
   }
 }
 
-export function applyFreezeOperation(state: WorkbookState, command: SetFreezeCommand): WorkbookState {
+export function applyFreezeOperation(
+  state: WorkbookState,
+  command: SetFreezeCommand,
+): WorkbookState {
   const freeze = renderA1({ row: command.row, column: command.column });
   const current = state.get(command.sheet);
   if (current === null) throw new RangeError(`Unknown sheet ID: ${command.sheet}`);
   if (current.data.freeze === freeze) return state;
-  return state.update(command.sheet, sheet => (
-    { ...sheet, freeze } as unknown as SheetData
-  ));
+  return state.update(command.sheet, (sheet) => ({ ...sheet, freeze }) as unknown as SheetData);
 }

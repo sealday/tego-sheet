@@ -24,26 +24,14 @@ import {
   type ValidationRule,
 } from '../core';
 import type { WorkbookCommand } from '../core/commands/workbook-command';
-import {
-  createEventDispatcher,
-  printWorkbook,
-} from './adapters/event-dispatcher';
+import { createEventDispatcher, printWorkbook } from './adapters/event-dispatcher';
 import { deletionSplitsMerge } from '../core/operations/structure';
-import {
-  createEngineAdapterSlot,
-  useCanvasEngine,
-} from './hooks/use-canvas-engine';
-import {
-  useControllerEpoch,
-  type ControllerEpoch,
-} from './hooks/use-controller-epoch';
+import { createEngineAdapterSlot, useCanvasEngine } from './hooks/use-canvas-engine';
+import { useControllerEpoch, type ControllerEpoch } from './hooks/use-controller-epoch';
 import { useInteractionManager } from './hooks/use-interaction-manager';
 import type { InteractionManager } from '../engine';
 import { useSheetChromeState } from './hooks/use-sheet-chrome-state';
-import {
-  useCellEditorRuntime,
-  type ActiveCellEditor,
-} from './hooks/use-cell-editor-runtime';
+import { useCellEditorRuntime, type ActiveCellEditor } from './hooks/use-cell-editor-runtime';
 import {
   useTegoSheetHandle,
   type TegoSheetHandleRuntime,
@@ -57,20 +45,12 @@ import {
   useControlledWorkbook,
   type ControlledWorkbookRuntime,
 } from './hooks/use-controlled-workbook';
-import type {
-  TegoSheetCallbacks,
-  TegoSheetHandle,
-  TegoSheetProps,
-} from './tego-sheet.types';
+import type { TegoSheetCallbacks, TegoSheetHandle, TegoSheetProps } from './tego-sheet.types';
 import { EmptyWorkbook } from '../ui/empty-workbook';
-import {
-  SheetChrome,
-} from '../ui/sheet-chrome';
+import { SheetChrome } from '../ui/sheet-chrome';
 import type { ContextMenuAction } from '../ui/menus/context-menu';
 import { createTranslator } from '../ui/translate';
-import {
-  type PrintWorkbookOptions,
-} from '../ui/print-workbook';
+import { type PrintWorkbookOptions } from '../ui/print-workbook';
 import {
   activeSheetData,
   filterCommandSelection,
@@ -115,9 +95,7 @@ function clonePublic<T>(value: T): T {
 }
 
 function classNames(value: string | undefined): string {
-  return value === undefined || value.trim().length === 0
-    ? 'tego-sheet'
-    : `tego-sheet ${value}`;
+  return value === undefined || value.trim().length === 0 ? 'tego-sheet' : `tego-sheet ${value}`;
 }
 
 function contractViolation(message: string): TegoSheetException {
@@ -129,18 +107,51 @@ function contractViolation(message: string): TegoSheetException {
 }
 
 const MUTATING_ACTIONS = new Set<ToolbarAction['type']>([
-  'undo', 'redo', 'paint-format', 'clear-format', 'set-style', 'set-border',
-  'merge', 'unmerge', 'freeze', 'unfreeze', 'insert-row', 'delete-row',
-  'hide-row', 'unhide-row', 'insert-column', 'delete-column', 'hide-column',
-  'unhide-column', 'set-validation', 'remove-validation', 'set-filter',
-  'clear-filter', 'sort',
+  'undo',
+  'redo',
+  'paint-format',
+  'clear-format',
+  'set-style',
+  'set-border',
+  'merge',
+  'unmerge',
+  'freeze',
+  'unfreeze',
+  'insert-row',
+  'delete-row',
+  'hide-row',
+  'unhide-row',
+  'insert-column',
+  'delete-column',
+  'hide-column',
+  'unhide-column',
+  'set-validation',
+  'remove-validation',
+  'set-filter',
+  'clear-filter',
+  'sort',
 ]);
 
 const SELECTION_ACTIONS = new Set<ToolbarAction['type']>([
-  'paint-format', 'clear-format', 'set-style', 'set-border', 'merge', 'unmerge',
-  'freeze', 'insert-row', 'delete-row', 'hide-row', 'unhide-row',
-  'insert-column', 'delete-column', 'hide-column', 'unhide-column',
-  'set-validation', 'remove-validation', 'set-filter', 'sort',
+  'paint-format',
+  'clear-format',
+  'set-style',
+  'set-border',
+  'merge',
+  'unmerge',
+  'freeze',
+  'insert-row',
+  'delete-row',
+  'hide-row',
+  'unhide-row',
+  'insert-column',
+  'delete-column',
+  'hide-column',
+  'unhide-column',
+  'set-validation',
+  'remove-validation',
+  'set-filter',
+  'sort',
 ]);
 
 interface SlotRuntime extends TegoSheetHandleRuntime {
@@ -177,8 +188,10 @@ function runtimeMerges(runtime: SlotRuntime) {
 
 function mergedSelection(runtime: SlotRuntime): boolean {
   const selection = runtime.selection;
-  return selection !== null
-    && runtimeMerges(runtime).some(merge => rangesIntersect(merge, selection.range));
+  return (
+    selection !== null &&
+    runtimeMerges(runtime).some((merge) => rangesIntersect(merge, selection.range))
+  );
 }
 
 function frozenSheet(runtime: SlotRuntime): boolean {
@@ -206,9 +219,10 @@ function disabledToolbarActions(runtime: SlotRuntime): Set<ToolbarAction['type']
     disabled.add('unfreeze');
   }
   const merged = mergedSelection(runtime);
-  const singleCell = selection !== null
-    && selection.range.start.row === selection.range.end.row
-    && selection.range.start.column === selection.range.end.column;
+  const singleCell =
+    selection !== null &&
+    selection.range.start.row === selection.range.end.row &&
+    selection.range.start.column === selection.range.end.column;
   if (merged || singleCell) disabled.add('merge');
   if (!merged) disabled.add('unmerge');
   const frozen = frozenSheet(runtime);
@@ -229,24 +243,19 @@ function disabledToolbarActions(runtime: SlotRuntime): Set<ToolbarAction['type']
     disabled.add('clear-filter');
     disabled.add('sort');
   } else if (
-    selection === null
-    || selection.active.column < filterRange.start.column
-    || selection.active.column > filterRange.end.column
-  ) disabled.add('sort');
+    selection === null ||
+    selection.active.column < filterRange.start.column ||
+    selection.active.column > filterRange.end.column
+  )
+    disabled.add('sort');
 
   if (selection !== null && sheet !== null) {
-    if (deletionSplitsMerge(
-      sheet,
-      'row',
-      selection.range.start.row,
-      selection.range.end.row,
-    )) disabled.add('delete-row');
-    if (deletionSplitsMerge(
-      sheet,
-      'column',
-      selection.range.start.column,
-      selection.range.end.column,
-    )) disabled.add('delete-column');
+    if (deletionSplitsMerge(sheet, 'row', selection.range.start.row, selection.range.end.row))
+      disabled.add('delete-row');
+    if (
+      deletionSplitsMerge(sheet, 'column', selection.range.start.column, selection.range.end.column)
+    )
+      disabled.add('delete-column');
   }
   return disabled;
 }
@@ -258,10 +267,13 @@ function readonlySet<Value>(source: ReadonlySet<Value>): ReadonlySet<Value> {
       return values.length;
     },
     has: (value: Value) => source.has(value),
-    entries: () => values.map(value => [value, value] as [Value, Value]).values(),
+    entries: () => values.map((value) => [value, value] as [Value, Value]).values(),
     keys: () => values.values(),
     values: () => values.values(),
-    forEach(callback: (value: Value, key: Value, set: ReadonlySet<Value>) => void, thisArg?: unknown) {
+    forEach(
+      callback: (value: Value, key: Value, set: ReadonlySet<Value>) => void,
+      thisArg?: unknown,
+    ) {
       for (const value of values) callback.call(thisArg, value, value, this);
     },
     [Symbol.iterator]: () => values.values(),
@@ -303,10 +315,20 @@ function toolbarCommand(runtime: SlotRuntime, action: ToolbarAction): WorkbookCo
       return { type: 'set-freeze', sheet, row: active.row, column: active.column };
     case 'insert-row':
     case 'delete-row':
-      return { type: action.type, sheet, index: range.start.row, count: range.end.row - range.start.row + 1 };
+      return {
+        type: action.type,
+        sheet,
+        index: range.start.row,
+        count: range.end.row - range.start.row + 1,
+      };
     case 'insert-column':
     case 'delete-column':
-      return { type: action.type, sheet, index: range.start.column, count: range.end.column - range.start.column + 1 };
+      return {
+        type: action.type,
+        sheet,
+        index: range.start.column,
+        count: range.end.column - range.start.column + 1,
+      };
     case 'hide-row':
     case 'unhide-row':
       return {
@@ -348,11 +370,15 @@ function executeAction(
   source: 'toolbar' | 'context-menu',
   selection: Selection | null = runtime.selection,
 ): void {
-  const actionRuntime = selection === runtime.selection
-    ? runtime
-    : { ...runtime, activeSheet: selection?.sheet ?? runtime.activeSheet, selection };
+  const actionRuntime =
+    selection === runtime.selection
+      ? runtime
+      : { ...runtime, activeSheet: selection?.sheet ?? runtime.activeSheet, selection };
   if (disabledToolbarActions(actionRuntime).has(action.type)) {
-    uiError(runtime, `${source === 'toolbar' ? 'Toolbar' : 'Context-menu'} action "${action.type}" is unavailable`);
+    uiError(
+      runtime,
+      `${source === 'toolbar' ? 'Toolbar' : 'Context-menu'} action "${action.type}" is unavailable`,
+    );
     return;
   }
   if (action.type === 'print') {
@@ -361,7 +387,10 @@ function executeAction(
   }
   const command = toolbarCommand(actionRuntime, action);
   if (command === null) {
-    uiError(runtime, `${source === 'toolbar' ? 'Toolbar' : 'Context-menu'} action "${action.type}" cannot run in the current view`);
+    uiError(
+      runtime,
+      `${source === 'toolbar' ? 'Toolbar' : 'Context-menu'} action "${action.type}" cannot run in the current view`,
+    );
     return;
   }
   runtime.dispatcher.dispatchUi(command, source);
@@ -372,12 +401,16 @@ function printRuntime(runtime: SlotRuntime, options: PrintWorkbookOptions): void
     uiError(runtime, 'Print is unavailable without an active sheet');
     return;
   }
-  printWorkbook(runtime.dispatcher, () => mountActiveSheetPrint(
-    runtime.controller.getSnapshot(),
-    runtime.activeSheet,
-    options,
-    runtime.defaultStyle,
-  ) ?? (() => undefined));
+  printWorkbook(
+    runtime.dispatcher,
+    () =>
+      mountActiveSheetPrint(
+        runtime.controller.getSnapshot(),
+        runtime.activeSheet,
+        options,
+        runtime.defaultStyle,
+      ) ?? (() => undefined),
+  );
 }
 
 function addSheetFromTabs(authority: SlotRuntimeAuthority, name?: string): void {
@@ -392,11 +425,8 @@ function addSheetFromTabs(authority: SlotRuntimeAuthority, name?: string): void 
     name === undefined ? { type: 'add-sheet' } : { type: 'add-sheet', name },
     'sheet-tabs',
   );
-  if (
-    wasEmpty
-    && outcome.status === 'committed'
-    && typeof outcome.commit.result === 'string'
-  ) authority.compareAndSetActiveSheet(capture, outcome.commit.result as SheetId);
+  if (wasEmpty && outcome.status === 'committed' && typeof outcome.commit.result === 'string')
+    authority.compareAndSetActiveSheet(capture, outcome.commit.result as SheetId);
 }
 
 function deleteSheetFromTabs(authority: SlotRuntimeAuthority, sheet: SheetId): void {
@@ -407,7 +437,7 @@ function deleteSheetFromTabs(authority: SlotRuntimeAuthority, sheet: SheetId): v
     return;
   }
   const before = runtime.controller.getSnapshot();
-  const removedIndex = before.sheets.findIndex(item => item.id === sheet);
+  const removedIndex = before.sheets.findIndex((item) => item.id === sheet);
   const outcome = runtime.dispatcher.dispatchUi({ type: 'delete-sheet', sheet }, 'sheet-tabs');
   if (outcome.status !== 'committed' || runtime.activeSheet !== sheet) return;
   const after = runtime.controller.getSnapshot();
@@ -432,7 +462,7 @@ function activateSheetFromTabs(
   sheet: SheetId,
 ): void {
   const snapshot = runtime.controller.getSnapshot();
-  const index = snapshot.sheets.findIndex(item => item.id === sheet);
+  const index = snapshot.sheets.findIndex((item) => item.id === sheet);
   if (index < 0) {
     uiError(runtime, `Unknown sheet ID: ${sheet}`);
     return;
@@ -456,10 +486,7 @@ interface RuntimeProps extends TegoSheetProps {
   readonly mountActiveSheetIndex: number | undefined;
 }
 
-function Runtime(
-  props: RuntimeProps,
-  forwardedRef: ForwardedRef<TegoSheetHandle>,
-) {
+function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle>) {
   const rootRef = useRef<HTMLDivElement>(null);
   const focusingSurfaceRef = useRef(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -480,11 +507,12 @@ function Runtime(
   const requestSurfaceFocus = useCallback(() => {
     const root = rootRef.current;
     if (
-      !isActive()
-      || root === null
-      || root.ownerDocument.activeElement === root
-      || focusingSurfaceRef.current
-    ) return;
+      !isActive() ||
+      root === null ||
+      root.ownerDocument.activeElement === root ||
+      focusingSurfaceRef.current
+    )
+      return;
     focusingSurfaceRef.current = true;
     try {
       root.focus({ preventScroll: true });
@@ -519,56 +547,69 @@ function Runtime(
   const runtimeAuthority = useTegoSheetHandle<SlotRuntime>(forwardedRef);
 
   const sheets = props.epoch.snapshot.sheets;
-  const setActiveSheet = useCallback((sheet: SheetId | null) => {
-    setActiveRequest(current => {
-      const index = sheet === null
-        ? current.index
-        : props.epoch.controller.getSheetIds().findIndex(candidate => candidate === sheet);
-      const nextIndex = index < 0 ? current.index : index;
-      if (current.sheet === sheet && current.index === nextIndex) return current;
-      return { index: nextIndex, sheet };
-    });
-  }, [props.epoch.controller]);
-  const activeSheet = sheets.length === 0
-    ? null
-    : sheets.some(sheet => sheet.id === activeRequest.sheet)
-      ? activeRequest.sheet
-      : sheets[Math.min(activeRequest.index, sheets.length - 1)]?.id ?? sheets[0]!.id;
-  const clippedActiveIndex = activeSheet === null
-    ? 0
-    : Math.max(0, sheets.findIndex(sheet => sheet.id === activeSheet));
-
-  const dispatcher = useMemo(() => createEventDispatcher({
-    controller,
-    getCallbacks: callbackStore.get,
-    getControlledNotificationVersion: props.controlled.getNotificationVersion,
-    isActive,
-    onUiError: error => {
-      if (isActive()) setNotification(error);
+  const setActiveSheet = useCallback(
+    (sheet: SheetId | null) => {
+      setActiveRequest((current) => {
+        const index =
+          sheet === null
+            ? current.index
+            : props.epoch.controller.getSheetIds().findIndex((candidate) => candidate === sheet);
+        const nextIndex = index < 0 ? current.index : index;
+        if (current.sheet === sheet && current.index === nextIndex) return current;
+        return { index: nextIndex, sheet };
+      });
     },
-    recordControlledCheckpoint: props.controlled.recordCheckpoint,
-    schedulePaint: () => engineSlot.get()?.render(
-      controller.getSnapshot(),
+    [props.epoch.controller],
+  );
+  const activeSheet =
+    sheets.length === 0
+      ? null
+      : sheets.some((sheet) => sheet.id === activeRequest.sheet)
+        ? activeRequest.sheet
+        : (sheets[Math.min(activeRequest.index, sheets.length - 1)]?.id ?? sheets[0]!.id);
+  const clippedActiveIndex =
+    activeSheet === null
+      ? 0
+      : Math.max(
+          0,
+          sheets.findIndex((sheet) => sheet.id === activeSheet),
+        );
+
+  const dispatcher = useMemo(
+    () =>
+      createEventDispatcher({
+        controller,
+        getCallbacks: callbackStore.get,
+        getControlledNotificationVersion: props.controlled.getNotificationVersion,
+        isActive,
+        onUiError: (error) => {
+          if (isActive()) setNotification(error);
+        },
+        recordControlledCheckpoint: props.controlled.recordCheckpoint,
+        schedulePaint: () => engineSlot.get()?.render(controller.getSnapshot(), activeSheet),
+      }),
+    [
       activeSheet,
-    ),
-  }), [
-    activeSheet,
-    callbackStore,
-    controller,
-    engineSlot,
-    isActive,
-    props.controlled.getNotificationVersion,
-    props.controlled.recordCheckpoint,
-    setNotification,
-  ]);
-  const reportRenderError = useCallback((cause: unknown) => {
-    dispatcher.reportUiError({
-      code: 'RENDER_FAILED',
-      message: 'Rendering the workbook failed',
-      recoverable: true,
-      cause,
-    });
-  }, [dispatcher]);
+      callbackStore,
+      controller,
+      engineSlot,
+      isActive,
+      props.controlled.getNotificationVersion,
+      props.controlled.recordCheckpoint,
+      setNotification,
+    ],
+  );
+  const reportRenderError = useCallback(
+    (cause: unknown) => {
+      dispatcher.reportUiError({
+        code: 'RENDER_FAILED',
+        message: 'Rendering the workbook failed',
+        recoverable: true,
+        cause,
+      });
+    },
+    [dispatcher],
+  );
 
   const renderRuntime: SlotRuntime = {
     activeSheet,
@@ -606,20 +647,21 @@ function Runtime(
     engineSlot.get()?.updateReadOnly(renderRuntime.readOnly);
     runtimeAuthority.commit(renderToken, { ...renderRuntime, root: rootRef.current });
   };
-  const rootCallback = useCallback((node: HTMLDivElement | null) => {
-    rootRef.current = node;
-    if (node === null) runtimeAuthority.deactivate();
-    else runtimeAuthority.patchRoot(node);
-  }, [runtimeAuthority]);
+  const rootCallback = useCallback(
+    (node: HTMLDivElement | null) => {
+      rootRef.current = node;
+      if (node === null) runtimeAuthority.deactivate();
+      else runtimeAuthority.patchRoot(node);
+    },
+    [runtimeAuthority],
+  );
 
   if (
-    !initialWorkbookWasEmpty
-    && initialSheetCount > 0
-    && (
-      !Number.isSafeInteger(initialActiveSheetIndex)
-      || initialActiveSheetIndex < 0
-      || initialActiveSheetIndex >= initialSheetCount
-    )
+    !initialWorkbookWasEmpty &&
+    initialSheetCount > 0 &&
+    (!Number.isSafeInteger(initialActiveSheetIndex) ||
+      initialActiveSheetIndex < 0 ||
+      initialActiveSheetIndex >= initialSheetCount)
   ) {
     throw contractViolation('initialActiveSheetIndex must refer to an initial sheet');
   }
@@ -631,51 +673,63 @@ function Runtime(
     runtimeAuthority,
     setSelection,
   });
-  const requestDelete = useCallback((target: Selection, source: ChangeSource) => {
-    if (!isActive()) return;
-    runtimeAuthority.require().dispatcher.dispatchUi({
-      type: 'clear-contents',
-      selection: target,
-    }, source);
-  }, [isActive, runtimeAuthority]);
-  const requestFormat = useCallback((format: 'bold' | 'italic' | 'underline') => {
-    if (!isActive()) return;
-    const runtime = runtimeAuthority.require();
-    if (runtime.selection === null) return;
-    const sheet = runtimeSheet(runtime);
-    const current = sheet === null ? {} : selectCellStyle(
-      sheet,
-      runtime.selection.active.row,
-      runtime.selection.active.column,
-      runtime.defaultStyle,
-    );
-    runtime.dispatcher.dispatchUi({
-      type: 'set-style',
-      selection: runtime.selection,
-      patch: format === 'underline'
-        ? { underline: current.underline !== true }
-        : { font: { ...(current.font ?? {}), [format]: current.font?.[format] !== true } },
-    }, 'keyboard');
-  }, [isActive, runtimeAuthority]);
+  const requestDelete = useCallback(
+    (target: Selection, source: ChangeSource) => {
+      if (!isActive()) return;
+      runtimeAuthority.require().dispatcher.dispatchUi(
+        {
+          type: 'clear-contents',
+          selection: target,
+        },
+        source,
+      );
+    },
+    [isActive, runtimeAuthority],
+  );
+  const requestFormat = useCallback(
+    (format: 'bold' | 'italic' | 'underline') => {
+      if (!isActive()) return;
+      const runtime = runtimeAuthority.require();
+      if (runtime.selection === null) return;
+      const sheet = runtimeSheet(runtime);
+      const current =
+        sheet === null
+          ? {}
+          : selectCellStyle(
+              sheet,
+              runtime.selection.active.row,
+              runtime.selection.active.column,
+              runtime.defaultStyle,
+            );
+      runtime.dispatcher.dispatchUi(
+        {
+          type: 'set-style',
+          selection: runtime.selection,
+          patch:
+            format === 'underline'
+              ? { underline: current.underline !== true }
+              : { font: { ...current.font, [format]: current.font?.[format] !== true } },
+        },
+        'keyboard',
+      );
+    },
+    [isActive, runtimeAuthority],
+  );
 
   useLayoutEffect(() => {
     if (
-      !props.epoch.isActive()
-      || (activeRequest.sheet === activeSheet && activeRequest.index === clippedActiveIndex)
-    ) return;
+      !props.epoch.isActive() ||
+      (activeRequest.sheet === activeSheet && activeRequest.index === clippedActiveIndex)
+    )
+      return;
     const capturedRequest = activeRequest;
     // The controller's committed sheet set is external state; identity CAS prevents
     // this synchronization from overwriting a newer explicit active-sheet decision.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setActiveRequest(current => current !== capturedRequest
-      ? current
-      : { index: clippedActiveIndex, sheet: activeSheet });
-  }, [
-    activeRequest,
-    activeSheet,
-    clippedActiveIndex,
-    props.epoch,
-  ]);
+    // oxlint-disable-next-line react/react-compiler
+    setActiveRequest((current) =>
+      current !== capturedRequest ? current : { index: clippedActiveIndex, sheet: activeSheet },
+    );
+  }, [activeRequest, activeSheet, clippedActiveIndex, props.epoch]);
 
   // Register this layout cleanup before the canvas cleanup so browser listeners
   // are always released before the engine subscription and render scheduler.
@@ -729,21 +783,25 @@ function Runtime(
       reconciliationVersion,
     };
     if (
-      renderRuntime.readOnly
-      || previous.activeSheet !== activeSheet
-      || previous.reconciliationVersion !== reconciliationVersion
-    ) cancelTransient();
+      renderRuntime.readOnly ||
+      previous.activeSheet !== activeSheet ||
+      previous.reconciliationVersion !== reconciliationVersion
+    )
+      cancelTransient();
   }, [activeSheet, cancelTransient, reconciliationVersion, renderRuntime.readOnly]);
 
   useLayoutEffect(() => {
     if (selection === null || !isActive()) return;
     const source = consumePaintSource(selection);
     if (source === null) return;
-    runtimeAuthority.require().dispatcher.dispatchUi({
-      type: 'paint-format',
-      source,
-      target: selection,
-    }, 'toolbar');
+    runtimeAuthority.require().dispatcher.dispatchUi(
+      {
+        type: 'paint-format',
+        source,
+        target: selection,
+      },
+      'toolbar',
+    );
   }, [consumePaintSource, isActive, runtimeAuthority, selection]);
 
   useLayoutEffect(() => {
@@ -780,19 +838,30 @@ function Runtime(
       case 'paste-value':
       case 'paste-format':
         if (manager === null) uiError(runtime, 'Context-menu paste is unavailable');
-        else void manager.paste(
-          undefined,
-          action.type === 'paste' ? 'all' : action.type === 'paste-value' ? 'value' : 'format',
-          'context-menu',
-        );
+        else
+          void manager.paste(
+            undefined,
+            action.type === 'paste' ? 'all' : action.type === 'paste-value' ? 'value' : 'format',
+            'context-menu',
+          );
         return;
       case 'clear-contents':
-        if (runtime.selection === null) uiError(runtime, 'Context-menu clear contents is unavailable');
-        else runtime.dispatcher.dispatchUi({ type: 'clear-contents', selection: runtime.selection }, 'context-menu');
+        if (runtime.selection === null)
+          uiError(runtime, 'Context-menu clear contents is unavailable');
+        else
+          runtime.dispatcher.dispatchUi(
+            { type: 'clear-contents', selection: runtime.selection },
+            'context-menu',
+          );
         return;
       case 'set-cell-metadata':
-        if (runtime.selection === null) uiError(runtime, 'Context-menu cell metadata is unavailable');
-        else runtime.dispatcher.dispatchUi({ ...action, selection: runtime.selection }, 'context-menu');
+        if (runtime.selection === null)
+          uiError(runtime, 'Context-menu cell metadata is unavailable');
+        else
+          runtime.dispatcher.dispatchUi(
+            { ...action, selection: runtime.selection },
+            'context-menu',
+          );
         return;
       default:
         executeAction(runtime, action, 'context-menu');
@@ -802,10 +871,12 @@ function Runtime(
   const validationAuthorityRef = useRef<DialogAuthority | null>(null);
   const captureDialogAuthority = (source: DialogAuthority['source']): DialogAuthority | null => {
     const runtime = runtimeAuthority.committed(renderToken);
-    return runtime === null ? null : {
-      source,
-      selection: runtime.selection === null ? null : clonePublic(runtime.selection),
-    };
+    return runtime === null
+      ? null
+      : {
+          source,
+          selection: runtime.selection === null ? null : clonePublic(runtime.selection),
+        };
   };
   const openFilterFor = (source: DialogAuthority['source']) => {
     const authority = captureDialogAuthority(source);
@@ -863,14 +934,15 @@ function Runtime(
   };
   const addFirstSheet = () => tabActions.add();
   const activeData = runtimeSheet(renderRuntime);
-  const activeStyle = selection === null || activeData === null
-    ? initialOptions.defaultStyle ?? {}
-    : selectCellStyle(
-      activeData,
-      selection.active.row,
-      selection.active.column,
-      initialOptions.defaultStyle,
-    );
+  const activeStyle =
+    selection === null || activeData === null
+      ? (initialOptions.defaultStyle ?? {})
+      : selectCellStyle(
+          activeData,
+          selection.active.row,
+          selection.active.column,
+          initialOptions.defaultStyle,
+        );
   const toolbarProps = Object.freeze<ToolbarRenderProps>({
     selection: selection === null ? null : clonePublic(selection),
     activeStyle: clonePublic(activeStyle),
@@ -883,11 +955,15 @@ function Runtime(
     execute,
   });
   const sheetTabsProps = Object.freeze<SheetTabsRenderProps>({
-    sheets: Object.freeze(props.epoch.snapshot.sheets.map(sheet => Object.freeze({
-      id: sheet.id,
-      index: sheet.index,
-      name: sheet.name,
-    }))),
+    sheets: Object.freeze(
+      props.epoch.snapshot.sheets.map((sheet) =>
+        Object.freeze({
+          id: sheet.id,
+          index: sheet.index,
+          name: sheet.name,
+        }),
+      ),
+    ),
     activeSheet,
     readOnly: props.readOnly ?? false,
     ...tabActions,
@@ -938,7 +1014,12 @@ function Runtime(
           closeFilter();
           const runtime = runtimeAuthority.committed(renderToken);
           if (runtime !== null && authority !== null) {
-            executeAction(runtime, { type: 'set-filter', filter }, authority.source, authority.selection);
+            executeAction(
+              runtime,
+              { type: 'set-filter', filter },
+              authority.source,
+              authority.selection,
+            );
           }
         }}
         onOpenFilter={openToolbarFilter}
@@ -956,7 +1037,12 @@ function Runtime(
           closeValidation();
           const runtime = runtimeAuthority.committed(renderToken);
           if (runtime !== null && authority !== null) {
-            executeAction(runtime, { type: 'remove-validation' }, authority.source, authority.selection);
+            executeAction(
+              runtime,
+              { type: 'remove-validation' },
+              authority.source,
+              authority.selection,
+            );
           }
         }}
         onValidation={(rule: ValidationRule) => {
@@ -964,17 +1050,20 @@ function Runtime(
           closeValidation();
           const runtime = runtimeAuthority.committed(renderToken);
           if (runtime !== null && authority !== null) {
-            executeAction(runtime, { type: 'set-validation', rule }, authority.source, authority.selection);
+            executeAction(
+              runtime,
+              { type: 'set-validation', rule },
+              authority.source,
+              authority.selection,
+            );
           }
         }}
       >
         {sheets.length === 0 ? (
-          <EmptyWorkbook
-            readOnly={renderRuntime.readOnly}
-            onAddSheet={addFirstSheet}
-            t={t}
-          />
-        ) : <canvas ref={canvasRef} className="tego-sheet__canvas" />}
+          <EmptyWorkbook readOnly={renderRuntime.readOnly} onAddSheet={addFirstSheet} t={t} />
+        ) : (
+          <canvas ref={canvasRef} className="tego-sheet__canvas" />
+        )}
       </SheetChrome>
     </div>
   );
@@ -982,38 +1071,37 @@ function Runtime(
 
 const ForwardedRuntime = forwardRef(Runtime);
 
-export const TegoSheet = forwardRef<TegoSheetHandle, TegoSheetProps>(function TegoSheet(
-  props,
-  ref,
-) {
-  const mountOptions = useMountOptionWarnings(props.initialActiveSheetIndex, props.options);
-  const [mountActiveSheetIndex] = useState(() => props.initialActiveSheetIndex);
-  const epoch = useControllerEpoch(props);
-  const controlled = useControlledWorkbook({
-    epoch,
-    value: props.value,
-    onError: props.onError,
-  });
-  if (epoch === null) {
+export const TegoSheet = forwardRef<TegoSheetHandle, TegoSheetProps>(
+  function TegoSheet(props, ref) {
+    const mountOptions = useMountOptionWarnings(props.initialActiveSheetIndex, props.options);
+    const [mountActiveSheetIndex] = useState(() => props.initialActiveSheetIndex);
+    const epoch = useControllerEpoch(props);
+    const controlled = useControlledWorkbook({
+      epoch,
+      value: props.value,
+      onError: props.onError,
+    });
+    if (epoch === null) {
+      return (
+        <div
+          className={classNames(props.className)}
+          style={props.style}
+          data-tego-sheet=""
+          data-mode="initializing"
+        />
+      );
+    }
     return (
-      <div
-        className={classNames(props.className)}
-        style={props.style}
-        data-tego-sheet=""
-        data-mode="initializing"
+      <ForwardedRuntime
+        {...props}
+        controlled={controlled}
+        epoch={epoch}
+        mountOptions={mountOptions}
+        mountActiveSheetIndex={mountActiveSheetIndex}
+        ref={ref}
       />
     );
-  }
-  return (
-    <ForwardedRuntime
-      {...props}
-      controlled={controlled}
-      epoch={epoch}
-      mountOptions={mountOptions}
-      mountActiveSheetIndex={mountActiveSheetIndex}
-      ref={ref}
-    />
-  );
-});
+  },
+);
 
 TegoSheet.displayName = 'TegoSheet';

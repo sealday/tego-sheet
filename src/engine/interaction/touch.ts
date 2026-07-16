@@ -57,10 +57,11 @@ export class TouchGesture {
     if (!this.moved) {
       const now = this.callbacks.now();
       const previous = this.lastTap;
-      const double = previous !== null
-        && now - previous.at <= 300
-        && Math.abs(previous.point.clientX - point.clientX) <= 10
-        && Math.abs(previous.point.clientY - point.clientY) <= 10;
+      const double =
+        previous !== null &&
+        now - previous.at <= 300 &&
+        Math.abs(previous.point.clientX - point.clientX) <= 10 &&
+        Math.abs(previous.point.clientY - point.clientY) <= 10;
       this.callbacks.tap(point, double);
       this.cancelTapTimer?.();
       this.cancelTapTimer = null;

@@ -4,11 +4,14 @@ import { classifyValueUpdate } from '../../../src/react/control/classify-value-u
 
 describe('classifyValueUpdate', () => {
   it('preserves the canonicalization exception and its original cause for invalid values', () => {
-    const update = classifyValueUpdate({
-      observedValue: null,
-      acknowledgedKey: '[]',
-      pending: [],
-    }, { rows: { len: -1 } } as unknown as WorkbookInput);
+    const update = classifyValueUpdate(
+      {
+        observedValue: null,
+        acknowledgedKey: '[]',
+        pending: [],
+      },
+      { rows: { len: -1 } } as unknown as WorkbookInput,
+    );
 
     expect(update.kind).toBe('invalid');
     if (update.kind !== 'invalid') return;

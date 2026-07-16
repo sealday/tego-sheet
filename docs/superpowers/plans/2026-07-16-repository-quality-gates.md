@@ -6,7 +6,7 @@
 
 **Architecture:** Repository policy is locked by a dependency-free Node test before configuration changes. Local enforcement uses pinned Oxc tools plus Husky/Commitlint, while one GitHub Actions workflow separates fast pull-request gates from the indivisible main/manual parity release. Documentation changes are isolated from runtime source so the React API and workbook behavior remain unchanged.
 
-**Tech Stack:** npm, Node.js 20/22/24, Oxlint 1.74.0, Oxfmt 0.59.0, Husky 9.1.7, Commitlint 21.2.x, GitHub Actions, Vitest, Playwright, Vite 8.
+**Tech Stack:** npm, Node.js 20/22/24, Oxlint 1.74.0, Oxfmt 0.59.0, Husky 9.1.7, Commitlint 20.5.3, GitHub Actions, Vitest, Playwright, Vite 8. Commitlint 20.5.3 is the newest release line compatible with the declared Node 20 floor; Commitlint 21.x requires Node 22.12.0 or newer.
 
 ---
 
@@ -42,8 +42,8 @@ assert.equal(existsSync(new URL('eslint.config.js', root)), false);
 assert.equal(pkg.devDependencies.oxlint, '1.74.0');
 assert.equal(pkg.devDependencies.oxfmt, '0.59.0');
 assert.equal(pkg.devDependencies.husky, '9.1.7');
-assert.equal(pkg.devDependencies['@commitlint/cli'], '21.2.1');
-assert.equal(pkg.devDependencies['@commitlint/config-conventional'], '21.2.0');
+assert.equal(pkg.devDependencies['@commitlint/cli'], '20.5.3');
+assert.equal(pkg.devDependencies['@commitlint/config-conventional'], '20.5.3');
 assert.equal(pkg.packageManager, 'npm@11.13.0');
 assert.equal(pkg.engines.node, '>=20.19.0');
 assert.equal(pkg.scripts.lint, 'oxlint --deny-warnings .');
@@ -57,9 +57,16 @@ Parse `.oxlintrc.json` and `.oxfmtrc.json`, then assert the React rules and immu
 
 ```js
 assert.deepEqual(oxlint.plugins, ['eslint', 'typescript', 'unicorn', 'oxc', 'react']);
-assert.equal(oxlint.rules['react/rules-of-hooks'], 'error');
-assert.equal(oxlint.rules['react/exhaustive-deps'], 'error');
-assert.deepEqual(oxlint.rules['react/only-export-components'], [
+assert.equal(oxlint.categories.correctness, 'error');
+assert.deepEqual(javaScriptOverride.files, ['**/*.{js,mjs,cjs}']);
+assert.equal(javaScriptOverride.env.node, true);
+assert.deepEqual(typeScriptOverride.files, ['**/*.{ts,tsx}']);
+assert.deepEqual(reactOverride.files, ['src/**/*.{ts,tsx}', 'tests/**/*.{ts,tsx}']);
+assert.equal(reactOverride.rules['react/rules-of-hooks'], 'error');
+assert.equal(reactOverride.rules['react/exhaustive-deps'], 'error');
+assert.equal(reactOverride.rules['react/react-compiler'], 'error');
+assert.deepEqual(refreshOverride.files, ['src/**/*.tsx']);
+assert.deepEqual(refreshOverride.rules['react/only-export-components'], [
   'error',
   { allowConstantExport: true },
 ]);
@@ -130,7 +137,7 @@ Run:
 
 ```bash
 npm uninstall @eslint/js eslint eslint-plugin-react-hooks eslint-plugin-react-refresh typescript-eslint
-npm install --save-dev --save-exact oxlint@1.74.0 oxfmt@0.59.0 husky@9.1.7 @commitlint/cli@21.2.1 @commitlint/config-conventional@21.2.0
+npm install --save-dev --save-exact oxlint@1.74.0 oxfmt@0.59.0 husky@9.1.7 @commitlint/cli@20.5.3 @commitlint/config-conventional@20.5.3
 ```
 
 - [ ] **Step 2: Add package scripts and runtime metadata**
@@ -166,11 +173,55 @@ Create `.oxlintrc.json`:
   "categories": {
     "correctness": "error"
   },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/exhaustive-deps": "error",
-    "react/only-export-components": ["error", { "allowConstantExport": true }]
-  },
+  "overrides": [
+    {
+      "files": ["**/*.{js,mjs,cjs}"],
+      "env": { "node": true },
+      "rules": {
+        "no-case-declarations": "error",
+        "no-empty": "error",
+        "no-fallthrough": "error",
+        "no-prototype-builtins": "error",
+        "no-redeclare": "error",
+        "no-regex-spaces": "error",
+        "no-undef": "error",
+        "no-unexpected-multiline": "error",
+        "no-useless-assignment": "error",
+        "preserve-caught-error": "error"
+      }
+    },
+    {
+      "files": ["**/*.{ts,tsx}"],
+      "rules": {
+        "no-var": "error",
+        "prefer-const": "error",
+        "prefer-rest-params": "error",
+        "prefer-spread": "error",
+        "no-array-constructor": "error",
+        "typescript/ban-ts-comment": "error",
+        "typescript/no-empty-object-type": "error",
+        "typescript/no-explicit-any": "error",
+        "typescript/no-namespace": "error",
+        "typescript/no-require-imports": "error",
+        "typescript/no-unnecessary-type-constraint": "error",
+        "typescript/no-unsafe-function-type": "error"
+      }
+    },
+    {
+      "files": ["src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}"],
+      "rules": {
+        "react/rules-of-hooks": "error",
+        "react/exhaustive-deps": "error",
+        "react/react-compiler": "error"
+      }
+    },
+    {
+      "files": ["src/**/*.tsx"],
+      "rules": {
+        "react/only-export-components": ["error", { "allowConstantExport": true }]
+      }
+    }
+  ],
   "ignorePatterns": [
     ".nyc_output/**",
     ".worktrees/**",
@@ -184,6 +235,8 @@ Create `.oxlintrc.json`:
   ]
 }
 ```
+
+This configuration maps the removed presets explicitly: 53 of 65 `@eslint/js` recommended rules and 12 of 24 effective TypeScript recommended rules are native `correctness` coverage; the overrides add 10 JavaScript and 12 TypeScript rules. Oxlint has no named `no-dupe-args` or `no-octal` rule (`no-redeclare` covers duplicate parameters, while legacy octal literals remain unsupported). The TypeScript-prefixed `no-array-constructor`, `no-unused-expressions`, and `no-unused-vars` rules map to core Oxlint equivalents. React Hooks' fourteen compiler diagnostics map to the native `react/react-compiler` aggregate because Oxlint does not expose them individually.
 
 - [ ] **Step 4: Add the Oxfmt configuration**
 

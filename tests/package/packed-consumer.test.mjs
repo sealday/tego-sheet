@@ -52,7 +52,10 @@ test('React stays peer-only and package files are publishable outputs', () => {
 
   const germanBundle = readFileSync(join(installedRoot, 'dist/locales/de.js'), 'utf8');
   assert.match(germanBundle, /Rückgängig/);
-  assert.doesNotMatch(germanBundle, /Spreadsheet toolbar|电子表格工具栏|Werkbalk voor spreadsheets/);
+  assert.doesNotMatch(
+    germanBundle,
+    /Spreadsheet toolbar|电子表格工具栏|Werkbalk voor spreadsheets/,
+  );
 
   const files = JSON.parse(process.env.TEGO_SHEET_PACK_FILES ?? '[]');
   assert.equal(files.includes('dist/styles.css'), true);
@@ -60,5 +63,8 @@ test('React stays peer-only and package files are publishable outputs', () => {
   assert.equal(files.includes('package.json'), true);
   assert.equal(files.includes('readme.md'), true);
   assert.equal(files.includes('docs/migration-from-x-data-spreadsheet.md'), true);
-  assert.equal(files.some(file => file.startsWith('src/') || file.startsWith('legacy/')), false);
+  assert.equal(
+    files.some((file) => file.startsWith('src/') || file.startsWith('legacy/')),
+    false,
+  );
 });

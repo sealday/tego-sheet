@@ -8,11 +8,7 @@ import { semanticEqual } from '../serialization/semantic-equal';
 
 const NUMERIC_SUFFIX = /[\\.\d]+$/;
 
-export function autofillText(
-  text: string,
-  step: number,
-  delta: CellPoint,
-): string {
+export function autofillText(text: string, step: number, delta: CellPoint): string {
   if (text.startsWith('=')) return shiftFormulaReferences(text, delta);
   const match = NUMERIC_SUFFIX.exec(text);
   if (match === null) return text;
@@ -23,17 +19,21 @@ export function autofillText(
 function incrementsNumericSuffix(source: CellRange, target: CellRange): boolean {
   const [sourceRows, sourceColumns] = rangeSize(source);
   const vertical = target.start.row > source.end.row || target.end.row < source.start.row;
-  const horizontal = target.start.column > source.end.column || target.end.column < source.start.column;
-  return (sourceRows <= 1 && sourceColumns > 1 && vertical)
-    || (sourceColumns <= 1 && sourceRows > 1 && horizontal)
-    || (sourceRows <= 1 && sourceColumns <= 1);
+  const horizontal =
+    target.start.column > source.end.column || target.end.column < source.start.column;
+  return (
+    (sourceRows <= 1 && sourceColumns > 1 && vertical) ||
+    (sourceColumns <= 1 && sourceRows > 1 && horizontal) ||
+    (sourceRows <= 1 && sourceColumns <= 1)
+  );
 }
 
 function fillStep(source: CellRange, target: CellRange, row: number, column: number): number {
   const [sourceRows, sourceColumns] = rangeSize(source);
   const [targetRows, targetColumns] = rangeSize(target);
   const tileRowOffset = Math.floor((row - target.start.row) / sourceRows) * sourceRows;
-  const tileColumnOffset = Math.floor((column - target.start.column) / sourceColumns) * sourceColumns;
+  const tileColumnOffset =
+    Math.floor((column - target.start.column) / sourceColumns) * sourceColumns;
   const offset = tileRowOffset + tileColumnOffset;
   if (target.end.row < source.start.row) return offset - targetRows;
   if (target.end.column < source.start.column) return offset - targetColumns;
@@ -76,14 +76,14 @@ export function autofillRange(
   for (let row = pasted.range.start.row; row <= pasted.range.end.row; row += 1) {
     for (let column = pasted.range.start.column; column <= pasted.range.end.column; column += 1) {
       const sourceRow = source.start.row + ((row - pasted.range.start.row) % sourceRows);
-      const sourceColumn = source.start.column + ((column - pasted.range.start.column) % sourceColumns);
+      const sourceColumn =
+        source.start.column + ((column - pasted.range.start.column) % sourceColumns);
       const sourceCell: CellData | null = getCellData(sheet, sourceRow, sourceColumn);
       if (sourceCell?.text === undefined || sourceCell.text.length === 0) continue;
       const cell = mutableCell(next, row, column);
       const step = fillStep(source, target, row, column);
-      const delta = source.start.row === target.start.row
-        ? { row: 0, column: step }
-        : { row: step, column: 0 };
+      const delta =
+        source.start.row === target.start.row ? { row: 0, column: step } : { row: step, column: 0 };
       cell.text = sourceCell.text.startsWith('=')
         ? autofillText(sourceCell.text, 0, delta)
         : incrementsNumericSuffix(source, target)
@@ -97,14 +97,16 @@ export function autofillRange(
     range: pasted.range,
     values: Array.from(
       { length: pasted.range.end.row - pasted.range.start.row + 1 },
-      (_, rowOffset) => Array.from(
-        { length: pasted.range.end.column - pasted.range.start.column + 1 },
-        (_, columnOffset) => getCellData(
-          next,
-          pasted.range.start.row + rowOffset,
-          pasted.range.start.column + columnOffset,
-        )?.text ?? '',
-      ),
+      (_, rowOffset) =>
+        Array.from(
+          { length: pasted.range.end.column - pasted.range.start.column + 1 },
+          (_, columnOffset) =>
+            getCellData(
+              next,
+              pasted.range.start.row + rowOffset,
+              pasted.range.start.column + columnOffset,
+            )?.text ?? '',
+        ),
     ),
   };
 }

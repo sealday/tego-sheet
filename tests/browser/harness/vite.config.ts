@@ -9,7 +9,10 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: [
-      { find: 'tego-sheet/styles.css', replacement: resolve(projectRoot, 'src/ui/styles/index.less') },
+      {
+        find: 'tego-sheet/styles.css',
+        replacement: resolve(projectRoot, 'src/ui/styles/index.less'),
+      },
       { find: 'tego-sheet', replacement: resolve(projectRoot, 'src/index.ts') },
     ],
   },

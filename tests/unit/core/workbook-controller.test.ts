@@ -21,10 +21,11 @@ describe('WorkbookController command boundary', () => {
     const controller = new WorkbookController({ rows: { 0: { cells: { 0: { text: '' } } } } });
     const address = firstAddress(controller);
     const events: ControllerEvent[] = [];
-    controller.subscribe(event => events.push(event));
+    controller.subscribe((event) => events.push(event));
 
-    expect(controller.dispatch({ type: 'set-cell-text', address, text: '' }, 'ref'))
-      .toEqual({ status: 'noop' });
+    expect(controller.dispatch({ type: 'set-cell-text', address, text: '' }, 'ref')).toEqual({
+      status: 'noop',
+    });
     expect(controller.historySize).toEqual({ undo: 0, redo: 0 });
     expect(events).toHaveLength(0);
   });
@@ -33,7 +34,7 @@ describe('WorkbookController command boundary', () => {
     const controller = new WorkbookController({ name: 'A' });
     const address = firstAddress(controller, 2, 3);
     const seen: string[] = [];
-    controller.subscribe(event => {
+    controller.subscribe((event) => {
       const value = event.snapshot.value as unknown as Array<{
         rows?: Record<string, { cells?: Record<string, { text?: string }> }>;
       }>;
@@ -62,16 +63,18 @@ describe('WorkbookController command boundary', () => {
     const forced = createSheetId();
     const before = controller.getSnapshot();
 
-    expect(() => controller.dispatch(
-      { type: 'add-sheet', name: 'Published' },
-      'ref',
-      { replayAddSheetId: forced },
-    )).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
-    expect(() => controller.dispatch(
-      { type: 'set-cell-text', address: firstAddress(controller), text: 'wrong command' },
-      'ref',
-      { notify: false, replayAddSheetId: forced },
-    )).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
+    expect(() =>
+      controller.dispatch({ type: 'add-sheet', name: 'Published' }, 'ref', {
+        replayAddSheetId: forced,
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
+    expect(() =>
+      controller.dispatch(
+        { type: 'set-cell-text', address: firstAddress(controller), text: 'wrong command' },
+        'ref',
+        { notify: false, replayAddSheetId: forced },
+      ),
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
     expect(controller.getSnapshot()).toEqual(before);
 
     const ordinary = controller.dispatch({ type: 'add-sheet', name: 'Ordinary' }, 'ref', {
@@ -96,11 +99,13 @@ describe('WorkbookController command boundary', () => {
     const subscriber = vi.fn();
     controller.subscribe(subscriber);
 
-    expect(() => controller.dispatch(
-      { type: 'set-cell-text', address, text: 'rolled back' },
-      'ref',
-      { beforeNotify: () => { throw observerError; } },
-    )).toThrow(observerError);
+    expect(() =>
+      controller.dispatch({ type: 'set-cell-text', address, text: 'rolled back' }, 'ref', {
+        beforeNotify: () => {
+          throw observerError;
+        },
+      }),
+    ).toThrow(observerError);
     expect(controller.getSnapshot()).toEqual(before);
     expect(controller.historySize).toEqual({ undo: 0, redo: 0 });
     expect(subscriber).not.toHaveBeenCalled();
@@ -126,9 +131,13 @@ describe('WorkbookController command boundary', () => {
     const subscriber = vi.fn();
     controller.subscribe(subscriber);
 
-    expect(() => controller.undo('ref', {
-      beforeNotify: () => { throw observerError; },
-    })).toThrow(observerError);
+    expect(() =>
+      controller.undo('ref', {
+        beforeNotify: () => {
+          throw observerError;
+        },
+      }),
+    ).toThrow(observerError);
     expect(controller.getSnapshot()).toEqual(beforeUndo);
     expect(controller.historySize).toEqual({ undo: 1, redo: 0 });
     expect(subscriber).not.toHaveBeenCalled();
@@ -139,9 +148,13 @@ describe('WorkbookController command boundary', () => {
       commit: { change: { id: expect.stringMatching(/-2$/) } },
     });
     const beforeRedo = controller.getSnapshot();
-    expect(() => controller.redo('ref', {
-      beforeNotify: () => { throw observerError; },
-    })).toThrow(observerError);
+    expect(() =>
+      controller.redo('ref', {
+        beforeNotify: () => {
+          throw observerError;
+        },
+      }),
+    ).toThrow(observerError);
     expect(controller.getSnapshot()).toEqual(beforeRedo);
     expect(controller.historySize).toEqual({ undo: 0, redo: 1 });
     expect(subscriber).not.toHaveBeenCalled();
@@ -157,7 +170,7 @@ describe('WorkbookController command boundary', () => {
     const controller = new WorkbookController({ rows: { 0: { cells: { 0: { text: 'A' } } } } });
     const address = firstAddress(controller);
     const kinds: string[] = [];
-    controller.subscribe(event => kinds.push(event.commit.change.kind));
+    controller.subscribe((event) => kinds.push(event.commit.change.kind));
 
     controller.dispatch({ type: 'set-cell-text', address, text: 'B' }, 'keyboard');
     expect(controller.undo('keyboard').status).toBe('committed');
@@ -181,8 +194,9 @@ describe('WorkbookController command boundary', () => {
     const subscriber = vi.fn();
     controller.subscribe(subscriber);
 
-    expect(() => controller.dispatch({ type: 'set-cell-text', address, text: 'blocked' }, 'ref'))
-      .toThrowError(TegoSheetException);
+    expect(() =>
+      controller.dispatch({ type: 'set-cell-text', address, text: 'blocked' }, 'ref'),
+    ).toThrowError(TegoSheetException);
     expect(() => controller.undo('ref')).toThrowError(
       expect.objectContaining({ code: 'INVALID_COMMAND' }),
     );
@@ -203,7 +217,9 @@ describe('WorkbookController command boundary', () => {
     };
 
     value[0]!.name = 'mutated';
-    expect(() => { snapshot.value[0]!.name = 'also-mutated'; }).toThrow();
+    expect(() => {
+      snapshot.value[0]!.name = 'also-mutated';
+    }).toThrow();
 
     expect(controller.getValue()[0]?.name).toBe('A');
     expect(controller.getCellText(firstAddress(controller))).toBe('safe');
@@ -217,7 +233,9 @@ describe('WorkbookController command boundary', () => {
     const subscriber = vi.fn();
     controller.subscribe(subscriber);
 
-    controller.dispatch({ type: 'set-cell-text', address, text: 'pending' }, 'ref', { notify: false });
+    controller.dispatch({ type: 'set-cell-text', address, text: 'pending' }, 'ref', {
+      notify: false,
+    });
     expect(controller.getCellText(address)).toBe('pending');
     expect(subscriber).not.toHaveBeenCalled();
 
@@ -226,7 +244,9 @@ describe('WorkbookController command boundary', () => {
     expect(controller.historySize).toEqual({ undo: 0, redo: 0 });
     expect(subscriber).not.toHaveBeenCalled();
 
-    controller.dispatch({ type: 'set-cell-text', address, text: 'discarded' }, 'ref', { notify: false });
+    controller.dispatch({ type: 'set-cell-text', address, text: 'discarded' }, 'ref', {
+      notify: false,
+    });
     expect(controller.historySize).toEqual({ undo: 1, redo: 0 });
     controller.replace([{ name: 'A' }]);
     expect(controller.getSheetIds()[0]).not.toBe(originalId);
@@ -257,12 +277,15 @@ describe('WorkbookController command boundary', () => {
     const subscriber = vi.fn();
     second.subscribe(subscriber);
 
-    expect(() => second.restore(foreign))
-      .toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
-    expect(() => second.restore(forged))
-      .toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
-    expect(() => second.restore(tokenCopied))
-      .toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
+    expect(() => second.restore(foreign)).toThrowError(
+      expect.objectContaining({ code: 'INVALID_COMMAND' }),
+    );
+    expect(() => second.restore(forged)).toThrowError(
+      expect.objectContaining({ code: 'INVALID_COMMAND' }),
+    );
+    expect(() => second.restore(tokenCopied)).toThrowError(
+      expect.objectContaining({ code: 'INVALID_COMMAND' }),
+    );
 
     expect(second.getSheetIds()).toEqual(before.ids);
     expect(second.getValue()).toEqual(before.value);
@@ -307,8 +330,9 @@ describe('WorkbookController command boundary', () => {
     const subscriber = vi.fn();
     controller.subscribe(subscriber);
 
-    expect(() => controller.restore(oldCheckpoint))
-      .toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
+    expect(() => controller.restore(oldCheckpoint)).toThrowError(
+      expect.objectContaining({ code: 'INVALID_COMMAND' }),
+    );
     expect(controller.getSheetIds()).toEqual(replacement.ids);
     expect(controller.getValue()).toEqual(replacement.value);
     expect(controller.historySize).toEqual(replacement.history);
@@ -317,9 +341,13 @@ describe('WorkbookController command boundary', () => {
 
     const replacementCheckpoint = controller.checkpoint();
     const afterAddress = firstAddress(controller);
-    controller.dispatch({ type: 'set-cell-text', address: afterAddress, text: 'temporary' }, 'ref', {
-      notify: false,
-    });
+    controller.dispatch(
+      { type: 'set-cell-text', address: afterAddress, text: 'temporary' },
+      'ref',
+      {
+        notify: false,
+      },
+    );
     controller.restore(replacementCheckpoint);
     expect(controller.getValue()).toEqual(replacement.value);
     expect(controller.getSheetIds()).toEqual(replacement.ids);
@@ -345,16 +373,26 @@ describe('WorkbookController command boundary', () => {
     expect(() => {
       (entry.metadata as unknown as { command: unknown }).command = { type: 'undo' };
     }).toThrow();
-    expect(() => { metadata.command.text = 'forged'; }).toThrow();
-    expect(() => { metadata.command.address.row = 99; }).toThrow();
-    expect(() => { metadata.change.kind = 'sheet'; }).toThrow();
-    expect(() => { metadata.change.range.start.row = 99; }).toThrow();
+    expect(() => {
+      metadata.command.text = 'forged';
+    }).toThrow();
+    expect(() => {
+      metadata.command.address.row = 99;
+    }).toThrow();
+    expect(() => {
+      metadata.change.kind = 'sheet';
+    }).toThrow();
+    expect(() => {
+      metadata.change.range.start.row = 99;
+    }).toThrow();
 
     const changes: Array<{ kind: string; row: number | undefined }> = [];
-    controller.subscribe(event => changes.push({
-      kind: event.commit.change.kind,
-      row: event.commit.change.range?.start.row,
-    }));
+    controller.subscribe((event) =>
+      changes.push({
+        kind: event.commit.change.kind,
+        row: event.commit.change.range?.start.row,
+      }),
+    );
     controller.undo('ref');
     controller.redo('ref');
 
@@ -395,25 +433,19 @@ describe('WorkbookController command boundary', () => {
     const calls: string[] = [];
     let nested = false;
 
-    controller.subscribe(event => {
+    controller.subscribe((event) => {
       calls.push(`first:${event.snapshot.revision}`);
       if (!nested) {
         nested = true;
         controller.dispatch({ type: 'set-cell-text', address, text: 'nested' }, 'ref');
-        controller.subscribe(queued => calls.push(`added:${queued.snapshot.revision}`));
+        controller.subscribe((queued) => calls.push(`added:${queued.snapshot.revision}`));
       }
     });
-    controller.subscribe(event => calls.push(`second:${event.snapshot.revision}`));
+    controller.subscribe((event) => calls.push(`second:${event.snapshot.revision}`));
 
     controller.dispatch({ type: 'set-cell-text', address, text: 'outer' }, 'ref');
 
-    expect(calls).toEqual([
-      'first:1',
-      'second:1',
-      'first:2',
-      'second:2',
-      'added:2',
-    ]);
+    expect(calls).toEqual(['first:1', 'second:1', 'first:2', 'second:2', 'added:2']);
   });
 
   it('drains current and queued subscribers before propagating the first original exception', () => {
@@ -423,7 +455,7 @@ describe('WorkbookController command boundary', () => {
     const laterError = new Error('later callback also failed');
     const calls: string[] = [];
     let nested = false;
-    controller.subscribe(event => {
+    controller.subscribe((event) => {
       calls.push(`throwing:${event.snapshot.revision}`);
       if (!nested) {
         nested = true;
@@ -431,7 +463,7 @@ describe('WorkbookController command boundary', () => {
         throw callbackError;
       }
     });
-    controller.subscribe(event => {
+    controller.subscribe((event) => {
       calls.push(`later:${event.snapshot.revision}`);
       if (event.snapshot.revision === 1) throw laterError;
     });
@@ -482,13 +514,19 @@ describe('WorkbookController command boundary', () => {
     const subscriber = vi.fn();
     controller.subscribe(subscriber);
     const ownKeysError = new Error('ownKeys failed');
-    const undo = new Proxy({ type: 'undo' as const }, {
-      ownKeys() { throw ownKeysError; },
-    });
+    const undo = new Proxy(
+      { type: 'undo' as const },
+      {
+        ownKeys() {
+          throw ownKeysError;
+        },
+      },
+    );
     const beforeUndo = controller.getSnapshot();
 
-    expect(() => controller.dispatch(undo, 'ref'))
-      .toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND', cause: ownKeysError }));
+    expect(() => controller.dispatch(undo, 'ref')).toThrowError(
+      expect.objectContaining({ code: 'INVALID_COMMAND', cause: ownKeysError }),
+    );
     expect(controller.getValue()).toEqual(beforeUndo.value);
     expect(controller.historySize).toEqual({ undo: 1, redo: 0 });
     expect(controller.getSnapshot().revision).toBe(beforeUndo.revision);
@@ -498,12 +536,15 @@ describe('WorkbookController command boundary', () => {
     const getterError = new Error('type getter failed');
     const redo = Object.defineProperty({}, 'type', {
       enumerable: true,
-      get() { throw getterError; },
+      get() {
+        throw getterError;
+      },
     }) as { readonly type: 'redo' };
     const beforeRedo = controller.getSnapshot();
 
-    expect(() => controller.dispatch(redo, 'ref'))
-      .toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND', cause: getterError }));
+    expect(() => controller.dispatch(redo, 'ref')).toThrowError(
+      expect.objectContaining({ code: 'INVALID_COMMAND', cause: getterError }),
+    );
     expect(controller.getValue()).toEqual(beforeRedo.value);
     expect(controller.historySize).toEqual({ undo: 0, redo: 1 });
     expect(controller.getSnapshot().revision).toBe(beforeRedo.revision);
@@ -518,7 +559,8 @@ describe('WorkbookController command boundary', () => {
 
     const outcome = controller.dispatch({ type: 'rename-sheet', sheet, name: 'B' }, 'ref');
     expect(outcome).toMatchObject({
-      status: 'committed', commit: { change: { kind: 'sheet', sheet, source: 'ref' } },
+      status: 'committed',
+      commit: { change: { kind: 'sheet', sheet, source: 'ref' } },
     });
     expect(controller.getValue()[0]?.name).toBe('B');
     expect(controller.historySize).toEqual({ undo: 1, redo: 0 });
@@ -530,58 +572,87 @@ describe('WorkbookController command boundary', () => {
     const controller = new WorkbookController({ name: 'A' });
     const unknown = { type: 'future-command', payload: true } as never;
 
-    expect(() => validateCommand(state, unknown))
-      .toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
-    expect(() => applyCommand(state, unknown))
-      .toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
-    expect(() => controller.dispatch(unknown, 'ref'))
-      .toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
+    expect(() => validateCommand(state, unknown)).toThrowError(
+      expect.objectContaining({ code: 'INVALID_COMMAND' }),
+    );
+    expect(() => applyCommand(state, unknown)).toThrowError(
+      expect.objectContaining({ code: 'INVALID_COMMAND' }),
+    );
+    expect(() => controller.dispatch(unknown, 'ref')).toThrowError(
+      expect.objectContaining({ code: 'INVALID_COMMAND' }),
+    );
     expect(controller.historySize).toEqual({ undo: 0, redo: 0 });
   });
 
   it.each([
-    ['set-style without selection', (sheet: SheetId) => {
-      void sheet;
-      return { type: 'set-style', patch: { color: 'red' } };
-    }],
-    ['set-border with null selection', (sheet: SheetId) => {
-      void sheet;
-      return { type: 'set-border', selection: null, mode: 'top', line: ['thin', '#000'] };
-    }],
-    ['clear-format with array selection', (sheet: SheetId) => {
-      void sheet;
-      return { type: 'clear-format', selection: [] };
-    }],
-    ['clear-contents without selection', (sheet: SheetId) => {
-      void sheet;
-      return { type: 'clear-contents' };
-    }],
-    ['merge without an active point', (sheet: SheetId) => ({
-      type: 'merge', selection: {
-        sheet,
-        range: { start: { row: 0, column: 0 }, end: { row: 1, column: 1 } },
+    [
+      'set-style without selection',
+      (sheet: SheetId) => {
+        void sheet;
+        return { type: 'set-style', patch: { color: 'red' } };
       },
-    })],
-    ['unmerge with a null range', (sheet: SheetId) => ({
-      type: 'unmerge', selection: { sheet, range: null, active: { row: 0, column: 0 } },
-    })],
-    ['paint-format without source', (sheet: SheetId) => ({
-      type: 'paint-format',
-      target: {
-        sheet,
-        range: { start: { row: 0, column: 0 }, end: { row: 0, column: 0 } },
-        active: { row: 0, column: 0 },
+    ],
+    [
+      'set-border with null selection',
+      (sheet: SheetId) => {
+        void sheet;
+        return { type: 'set-border', selection: null, mode: 'top', line: ['thin', '#000'] };
       },
-    })],
-    ['paint-format with null target', (sheet: SheetId) => ({
-      type: 'paint-format',
-      source: {
-        sheet,
-        range: { start: { row: 0, column: 0 }, end: { row: 0, column: 0 } },
-        active: { row: 0, column: 0 },
+    ],
+    [
+      'clear-format with array selection',
+      (sheet: SheetId) => {
+        void sheet;
+        return { type: 'clear-format', selection: [] };
       },
-      target: null,
-    })],
+    ],
+    [
+      'clear-contents without selection',
+      (sheet: SheetId) => {
+        void sheet;
+        return { type: 'clear-contents' };
+      },
+    ],
+    [
+      'merge without an active point',
+      (sheet: SheetId) => ({
+        type: 'merge',
+        selection: {
+          sheet,
+          range: { start: { row: 0, column: 0 }, end: { row: 1, column: 1 } },
+        },
+      }),
+    ],
+    [
+      'unmerge with a null range',
+      (sheet: SheetId) => ({
+        type: 'unmerge',
+        selection: { sheet, range: null, active: { row: 0, column: 0 } },
+      }),
+    ],
+    [
+      'paint-format without source',
+      (sheet: SheetId) => ({
+        type: 'paint-format',
+        target: {
+          sheet,
+          range: { start: { row: 0, column: 0 }, end: { row: 0, column: 0 } },
+          active: { row: 0, column: 0 },
+        },
+      }),
+    ],
+    [
+      'paint-format with null target',
+      (sheet: SheetId) => ({
+        type: 'paint-format',
+        source: {
+          sheet,
+          range: { start: { row: 0, column: 0 }, end: { row: 0, column: 0 } },
+          active: { row: 0, column: 0 },
+        },
+        target: null,
+      }),
+    ],
   ] as const)('rejects malformed runtime selection: %s', (_label, buildCommand) => {
     const controller = new WorkbookController({
       vendorSheet: { keep: true },
@@ -606,8 +677,9 @@ describe('WorkbookController command boundary', () => {
     const id = controller.getSheetIds()[0]!;
     const checkpoint = controller.checkpoint();
 
-    expect(() => controller.replace({ rows: { len: -1 } } as never))
-      .toThrowError(expect.objectContaining({ code: 'INVALID_DATA' }));
+    expect(() => controller.replace({ rows: { len: -1 } } as never)).toThrowError(
+      expect.objectContaining({ code: 'INVALID_DATA' }),
+    );
 
     expect(controller.getValue()[0]?.name).toBe('valid');
     expect(controller.getSheetIds()).toEqual([id]);
@@ -625,12 +697,15 @@ describe('WorkbookController command boundary', () => {
     controller.dispose();
     expect(unsubscribe).not.toThrow();
 
-    expect(() => controller.subscribe(subscriber))
-      .toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
-    expect(() => controller.dispatch({ type: 'set-cell-text', address, text: 'late' }, 'ref'))
-      .toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
-    expect(() => controller.restore(checkpoint))
-      .toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
+    expect(() => controller.subscribe(subscriber)).toThrowError(
+      expect.objectContaining({ code: 'INVALID_COMMAND' }),
+    );
+    expect(() =>
+      controller.dispatch({ type: 'set-cell-text', address, text: 'late' }, 'ref'),
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
+    expect(() => controller.restore(checkpoint)).toThrowError(
+      expect.objectContaining({ code: 'INVALID_COMMAND' }),
+    );
     expect(subscriber).not.toHaveBeenCalled();
   });
 });

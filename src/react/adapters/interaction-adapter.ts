@@ -1,11 +1,6 @@
 import type { WorkbookController } from '../../core/controller/workbook-controller';
 import type { WorkbookCommand } from '../../core/commands/workbook-command';
-import {
-  TegoSheetException,
-  type CellPoint,
-  type ChangeSource,
-  type Selection,
-} from '../../core';
+import { TegoSheetException, type CellPoint, type ChangeSource, type Selection } from '../../core';
 import {
   createInteractionManager,
   type ClipboardPort,
@@ -30,9 +25,16 @@ export interface InteractionAdapterOptions {
   readonly onViewportChange?: () => void;
   readonly commitEditor?: (selectionAfterCommit?: EditorSelectionTarget) => EditorCommitResult;
   readonly requestCancelTransient?: () => void;
-  readonly requestContextMenu?: (point: Readonly<{ readonly x: number; readonly y: number }>, selection: Selection) => void;
+  readonly requestContextMenu?: (
+    point: Readonly<{ readonly x: number; readonly y: number }>,
+    selection: Selection,
+  ) => void;
   readonly requestDelete?: (selection: Selection, source: ChangeSource) => void;
-  readonly requestEdit?: (point: CellPoint, initialText: string | undefined, source: ChangeSource) => void;
+  readonly requestEdit?: (
+    point: CellPoint,
+    initialText: string | undefined,
+    source: ChangeSource,
+  ) => void;
   readonly requestFormat?: (format: 'bold' | 'italic' | 'underline') => void;
   readonly requestSurfaceFocus?: () => void;
 }
@@ -54,17 +56,19 @@ function rootPort(root: HTMLElement, surface: HTMLElement): InteractionRootPort 
       : root;
   };
   return {
-    addEventListener: (type, listener, options) => root.addEventListener(
-      type,
-      listener as EventListener,
-      options as boolean | AddEventListenerOptions | undefined,
-    ),
-    removeEventListener: (type, listener, options) => root.removeEventListener(
-      type,
-      listener as EventListener,
-      options as boolean | EventListenerOptions | undefined,
-    ),
-    contains: target => contains(root, target),
+    addEventListener: (type, listener, options) =>
+      root.addEventListener(
+        type,
+        listener as EventListener,
+        options as boolean | AddEventListenerOptions | undefined,
+      ),
+    removeEventListener: (type, listener, options) =>
+      root.removeEventListener(
+        type,
+        listener as EventListener,
+        options as boolean | EventListenerOptions | undefined,
+      ),
+    contains: (target) => contains(root, target),
     getBoundingClientRect: () => metricsElement().getBoundingClientRect(),
     getClientSize: () => {
       const element = metricsElement();
@@ -87,7 +91,7 @@ function clipboardPort(): ClipboardPort | undefined {
   if (clipboard === undefined) return undefined;
   return {
     readText: () => clipboard.readText(),
-    writeText: text => clipboard.writeText(text),
+    writeText: (text) => clipboard.writeText(text),
   };
 }
 
@@ -152,20 +156,20 @@ export function createInteractionAdapter(
           options.dispatcher.emitSelectionChange(current);
         }
       },
-      setScroll: scroll => {
+      setScroll: (scroll) => {
         options.engine.setScroll(scroll);
         options.onViewportChange?.();
       },
-      dispatch: (command: WorkbookCommand, source) => committed(
-        options.dispatcher.dispatchUi(command, source),
-      ),
+      dispatch: (command: WorkbookCommand, source) =>
+        committed(options.dispatcher.dispatchUi(command, source)),
       readSelection: (selection: Selection) => options.engine.readSelection(selection),
-      commitEditor: selection => {
+      commitEditor: (selection) => {
         const next = selection === undefined ? undefined : selectionTarget(selection);
         const result = options.commitEditor?.(next) ?? { allow: true };
         return result.allow;
       },
-      requestEdit: (point, initialText, source) => options.requestEdit?.(point, initialText, source),
+      requestEdit: (point, initialText, source) =>
+        options.requestEdit?.(point, initialText, source),
       requestDelete: (selection, source) => options.requestDelete?.(selection, source),
       requestContextMenu: (point, selection) => options.requestContextMenu?.(point, selection),
       requestSurfaceFocus: () => {
@@ -180,7 +184,7 @@ export function createInteractionAdapter(
       requestResizePreview() {
         // Resize preview is transient React chrome state.
       },
-      requestFormat: format => options.requestFormat?.(format),
+      requestFormat: (format) => options.requestFormat?.(format),
       requestError: report,
       requestCancelTransient: () => options.requestCancelTransient?.(),
       requestViewportResize: () => {
@@ -194,9 +198,11 @@ export function createInteractionAdapter(
         return contains(options.surface, target) ? 'surface' : 'chrome';
       },
       minColumnWidth: options.minimumColumnWidth,
-      ...(typeof ResizeObserver === 'undefined' ? {} : {
-        observeRoot: (callback: () => void) => observeRoot(options.surface, callback),
-      }),
+      ...(typeof ResizeObserver === 'undefined'
+        ? {}
+        : {
+            observeRoot: (callback: () => void) => observeRoot(options.surface, callback),
+          }),
       setTimer(callback, delay) {
         const id = options.globalTarget.setTimeout(callback, delay);
         return () => options.globalTarget.clearTimeout(id);

@@ -17,11 +17,7 @@ import type {
 } from '../commands/workbook-command';
 import type { CellRange } from '../types/coordinates';
 import type { JsonValue } from '../types/json';
-import type {
-  CellBorders,
-  CellStyle,
-  SheetData,
-} from '../types/workbook';
+import type { CellBorders, CellStyle, SheetData } from '../types/workbook';
 
 type StyleCommand = SetStyleCommand | SetBorderCommand | ClearFormatCommand | PaintFormatCommand;
 
@@ -53,8 +49,10 @@ function mergeStyleValue(base: JsonValue, patch: JsonValue): JsonValue {
 }
 
 function area(range: CellRange): bigint {
-  return (BigInt(range.end.row) - BigInt(range.start.row) + 1n)
-    * (BigInt(range.end.column) - BigInt(range.start.column) + 1n);
+  return (
+    (BigInt(range.end.row) - BigInt(range.start.row) + 1n) *
+    (BigInt(range.end.column) - BigInt(range.start.column) + 1n)
+  );
 }
 
 export function assertStyleResourceLimit(range: CellRange): void {
@@ -88,10 +86,7 @@ export function paintFormatTargetRange(command: PaintFormatCommand): CellRange {
   };
 }
 
-function streamRange(
-  range: CellRange,
-  visit: (row: number, column: number) => void,
-): void {
+function streamRange(range: CellRange, visit: (row: number, column: number) => void): void {
   for (let row = range.start.row; row <= range.end.row; row += 1) {
     for (let column = range.start.column; column <= range.end.column; column += 1) {
       visit(row, column);
@@ -101,7 +96,7 @@ function streamRange(
 
 function directStyle(sheet: SheetData, row: number, column: number): CellStyle | null {
   const index = getCellData(sheet, row, column)?.style;
-  return index === undefined ? null : sheet.styles?.[index] ?? null;
+  return index === undefined ? null : (sheet.styles?.[index] ?? null);
 }
 
 class StyleBatch {
@@ -124,7 +119,7 @@ class StyleBatch {
 
   styleAt(row: number, column: number): CellStyle | null {
     const index = this.cell(row, column, false)?.style;
-    return typeof index === 'number' ? this.styles[index] ?? null : null;
+    return typeof index === 'number' ? (this.styles[index] ?? null) : null;
   }
 
   assign(row: number, column: number, style: CellStyle | null): void {
@@ -161,10 +156,7 @@ class StyleBatch {
 
   addMerge(range: CellRange): void {
     const anchor = this.cell(range.start.row, range.start.column, true) as Record<string, unknown>;
-    anchor.merge = [
-      range.end.row - range.start.row,
-      range.end.column - range.start.column,
-    ];
+    anchor.merge = [range.end.row - range.start.row, range.end.column - range.start.column];
     this.changed = true;
   }
 
@@ -265,9 +257,10 @@ function coveringMerge(
   row: number,
   column: number,
 ): CellRange | null {
-  return merges.get(row)?.find(merge => (
-    merge.start.column <= column && column <= merge.end.column
-  )) ?? null;
+  return (
+    merges.get(row)?.find((merge) => merge.start.column <= column && column <= merge.end.column) ??
+    null
+  );
 }
 
 function borderPatch(
@@ -288,7 +281,10 @@ function borderPatch(
   const right = endColumn === range.end.column;
   switch (command.mode) {
     case 'all':
-      border.top = value; border.right = value; border.bottom = value; border.left = value;
+      border.top = value;
+      border.right = value;
+      border.bottom = value;
+      border.left = value;
       break;
     case 'inside':
       if (endColumn < range.end.column) border.right = value;
@@ -337,13 +333,7 @@ function setBorder(sheet: SheetData, command: SetBorderCommand): SheetData {
     }
     const merge = coveringMerge(merges, row, column);
     if (merge !== null && (row !== merge.start.row || column !== merge.start.column)) return;
-    const border = borderPatch(
-      command,
-      row,
-      column,
-      merge?.end.row,
-      merge?.end.column,
-    );
+    const border = borderPatch(command, row, column, merge?.end.row, merge?.end.column);
     if (Object.keys(border).length === 0) return;
     batch.assign(
       row,
@@ -377,7 +367,7 @@ function paintFormat(
   const target = paintFormatTargetRange(command);
   assertRangeEditable(targetSheet, target);
   assertStyleResourceLimit(target);
-  if ((targetSheet.merges ?? []).some(value => rangesIntersect(parseA1Range(value), target))) {
+  if ((targetSheet.merges ?? []).some((value) => rangesIntersect(parseA1Range(value), target))) {
     throw new RangeError('paint-format target intersects an existing merge');
   }
 
@@ -408,7 +398,11 @@ function paintFormat(
     const columnOffset = sourceMerge.start.column - command.source.range.start.column;
     const rowSpan = sourceMerge.end.row - sourceMerge.start.row;
     const columnSpan = sourceMerge.end.column - sourceMerge.start.column;
-    for (let row = target.start.row + rowOffset; row + rowSpan <= target.end.row; row += sourceRows) {
+    for (
+      let row = target.start.row + rowOffset;
+      row + rowSpan <= target.end.row;
+      row += sourceRows
+    ) {
       for (
         let column = target.start.column + columnOffset;
         column + columnSpan <= target.end.column;
@@ -442,9 +436,13 @@ export function applyStyleOperation(
   sourceSheet: SheetData = sheet,
 ): SheetData {
   switch (command.type) {
-    case 'set-style': return setStyle(sheet, command);
-    case 'set-border': return setBorder(sheet, command);
-    case 'clear-format': return clearFormat(sheet, command);
-    case 'paint-format': return paintFormat(sourceSheet, sheet, command);
+    case 'set-style':
+      return setStyle(sheet, command);
+    case 'set-border':
+      return setBorder(sheet, command);
+    case 'clear-format':
+      return clearFormat(sheet, command);
+    case 'paint-format':
+      return paintFormat(sourceSheet, sheet, command);
   }
 }

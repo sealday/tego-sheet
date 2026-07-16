@@ -32,7 +32,11 @@ export function CellEditor(props: CellEditorProps) {
   };
   const commitBlur = () => props.onCommit();
   return (
-    <div className="tego-sheet__editor" style={style} data-clipped={props.anchor.clipped ? 'true' : 'false'}>
+    <div
+      className="tego-sheet__editor"
+      style={style}
+      data-clipped={props.anchor.clipped ? 'true' : 'false'}
+    >
       {props.date ? (
         <DateEditor
           value={props.value}
@@ -46,17 +50,23 @@ export function CellEditor(props: CellEditorProps) {
           ref={ref}
           aria-label="Cell editor"
           value={props.value}
-          onChange={event => props.onChange(event.currentTarget.value)}
+          onChange={(event) => props.onChange(event.currentTarget.value)}
           onBlur={commitBlur}
-          onKeyDown={event => {
+          onKeyDown={(event) => {
             if (event.key === 'Escape') {
               event.preventDefault();
               props.onCancel();
             } else if (event.key === 'Enter' || event.key === 'Tab') {
               event.preventDefault();
-              props.onCommit(event.key === 'Tab'
-                ? event.shiftKey ? 'left' : 'right'
-                : event.shiftKey ? 'up' : 'down');
+              props.onCommit(
+                event.key === 'Tab'
+                  ? event.shiftKey
+                    ? 'left'
+                    : 'right'
+                  : event.shiftKey
+                    ? 'up'
+                    : 'down',
+              );
             }
           }}
         />

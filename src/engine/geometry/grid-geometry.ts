@@ -11,7 +11,7 @@ function adjacentFloat(value: number, direction: -1 | 1): number {
   if (value === 0) return direction < 0 ? -Number.MIN_VALUE : Number.MIN_VALUE;
   floatBits.setFloat64(0, value);
   const bits = floatBits.getBigUint64(0);
-  const nextBits = (value > 0) === (direction > 0) ? bits + 1n : bits - 1n;
+  const nextBits = value > 0 === direction > 0 ? bits + 1n : bits - 1n;
   floatBits.setBigUint64(0, nextBits);
   return floatBits.getFloat64(0);
 }
@@ -24,12 +24,7 @@ export function finiteCssSum(left: number, right: number, label: string): number
   return value;
 }
 
-export function createCssRect(
-  left: number,
-  top: number,
-  width: number,
-  height: number,
-): CssRect {
+export function createCssRect(left: number, top: number, width: number, height: number): CssRect {
   if (![left, top, width, height].every(Number.isFinite) || width < 0 || height < 0) {
     throw new RangeError('CSS rectangle must have finite coordinates and dimensions');
   }
@@ -71,11 +66,12 @@ function axisRangeBounds(
   if (axis === 'row') {
     const [firstVisualRow, lastVisualRow] = viewport.model.visualRowRange(start, end);
     const frozen = viewport.freeze.row;
-    const position = (visualRow: number): number => finiteCssSum(
-      viewport.columnHeaderHeight,
-      viewport.model.rowOffset(visualRow) - (visualRow < frozen ? 0 : viewport.scroll.y),
-      'CSS axis position',
-    );
+    const position = (visualRow: number): number =>
+      finiteCssSum(
+        viewport.columnHeaderHeight,
+        viewport.model.rowOffset(visualRow) - (visualRow < frozen ? 0 : viewport.scroll.y),
+        'CSS axis position',
+      );
     const segments: Array<readonly [number, number]> = [];
     if (firstVisualRow < frozen) {
       segments.push([firstVisualRow, Math.min(lastVisualRow, frozen - 1)]);
@@ -95,8 +91,8 @@ function axisRangeBounds(
       ] as const;
     });
     return [
-      Math.min(...bounds.flatMap(value => value)),
-      Math.max(...bounds.flatMap(value => value)),
+      Math.min(...bounds.flatMap((value) => value)),
+      Math.max(...bounds.flatMap((value) => value)),
     ];
   }
   const frozen = viewport.freeze.column;
@@ -115,8 +111,8 @@ function axisRangeBounds(
     ] as const;
   });
   return [
-    Math.min(...bounds.flatMap(value => value)),
-    Math.max(...bounds.flatMap(value => value)),
+    Math.min(...bounds.flatMap((value) => value)),
+    Math.max(...bounds.flatMap((value) => value)),
   ];
 }
 
@@ -128,12 +124,7 @@ function rangeRectRaw(range: CellRange, viewport: ViewportMetrics): CssRect {
     'column',
     viewport,
   );
-  const [top, bottom] = axisRangeBounds(
-    normalized.start.row,
-    normalized.end.row,
-    'row',
-    viewport,
-  );
+  const [top, bottom] = axisRangeBounds(normalized.start.row, normalized.end.row, 'row', viewport);
   return createCssRect(left, top, right - left, bottom - top);
 }
 
@@ -169,15 +160,10 @@ function intersectRect(first: CssRect, second: CssRect): CssRect | null {
     finiteCssSum(first.top, first.height, 'CSS rectangle bottom edge'),
     finiteCssSum(second.top, second.height, 'CSS rectangle bottom edge'),
   );
-  return right > left && bottom > top
-    ? createCssRect(left, top, right - left, bottom - top)
-    : null;
+  return right > left && bottom > top ? createCssRect(left, top, right - left, bottom - top) : null;
 }
 
-export function clipToDataViewport(
-  rect: CssRect,
-  viewport: ViewportMetrics,
-): CssRect | null {
+export function clipToDataViewport(rect: CssRect, viewport: ViewportMetrics): CssRect | null {
   return intersectRect(rect, dataViewportRect(viewport));
 }
 
@@ -193,9 +179,10 @@ function visibleAxisBounds(
   const scroll = axis === 'row' ? viewport.scroll.y : viewport.scroll.x;
   const boundedScroll = Math.min(scroll, totalExtent);
   const startCoordinate = frozenExtent > 0 ? 0 : boundedScroll;
-  const endCoordinate = frozenExtent > 0 && localEnd <= frozenExtent
-    ? localEnd
-    : boundedScroll + Math.min(localEnd, totalExtent - boundedScroll);
+  const endCoordinate =
+    frozenExtent > 0 && localEnd <= frozenExtent
+      ? localEnd
+      : boundedScroll + Math.min(localEnd, totalExtent - boundedScroll);
   const start = findAxisIndex(startCoordinate, axis, viewport.model);
   const end = findAxisIndex(endCoordinate, axis, viewport.model);
   return start === null || end === null ? null : [start, end];
@@ -203,8 +190,11 @@ function visibleAxisBounds(
 
 export function visibleCellRange(viewport: ViewportMetrics): CellRange | null {
   if (viewport.model.rowCount === 0 || viewport.model.columnCount === 0) return null;
-  if (viewport.model.rowOffset(viewport.model.rowCount) === 0
-    || viewport.model.columnOffset(viewport.model.columnCount) === 0) return null;
+  if (
+    viewport.model.rowOffset(viewport.model.rowCount) === 0 ||
+    viewport.model.columnOffset(viewport.model.columnCount) === 0
+  )
+    return null;
   const { width, height } = dataViewportRect(viewport);
   if (width === 0 || height === 0) return null;
   const rows = visibleAxisBounds(
@@ -257,8 +247,13 @@ export function findCellAtViewportPoint(
   point: Readonly<{ x: number; y: number }>,
   viewport: ViewportMetrics,
 ): CellPoint | null {
-  if (point.x < viewport.rowHeaderWidth || point.x >= viewport.width
-    || point.y < viewport.columnHeaderHeight || point.y >= viewport.height) return null;
+  if (
+    point.x < viewport.rowHeaderWidth ||
+    point.x >= viewport.width ||
+    point.y < viewport.columnHeaderHeight ||
+    point.y >= viewport.height
+  )
+    return null;
   const column = findColumnAtViewportX(point.x, viewport);
   const row = findRowAtViewportY(point.y, viewport);
   return row === null || column === null ? null : { row, column };

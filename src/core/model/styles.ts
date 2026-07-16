@@ -40,7 +40,7 @@ export function stylesEqual(left: CellStyle, right: CellStyle): boolean {
 
 export function addStyle(styles: readonly CellStyle[], style: CellStyle): AddStyleResult {
   const normalized = normalizeStyle(style);
-  const index = styles.findIndex(existing => stylesEqual(existing, normalized));
+  const index = styles.findIndex((existing) => stylesEqual(existing, normalized));
   if (index >= 0) return { styles, index, added: false };
   return { styles: [...styles, normalized], index: styles.length, added: true };
 }

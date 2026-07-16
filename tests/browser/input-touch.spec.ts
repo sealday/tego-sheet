@@ -1,8 +1,13 @@
 import { expect, test } from '@playwright/test';
 import { capture, cellPoint, openHarness, selection } from './support';
 
-test('@parity:input.touch-gestures supports tap, double-tap editing, and swipe scrolling', async ({ page }, testInfo) => {
-  test.skip(!testInfo.project.name.endsWith('-touch'), 'Touch behavior runs in the three touch projects.');
+test('@parity:input.touch-gestures supports tap, double-tap editing, and swipe scrolling', async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    !testInfo.project.name.endsWith('-touch'),
+    'Touch behavior runs in the three touch projects.',
+  );
   await openHarness(page);
   const before = await capture(page);
   const point = await cellPoint(page, 1, 0);

@@ -1,8 +1,5 @@
 import type { WorkbookData, WorkbookInput } from '../types/workbook';
-import {
-  canonicalizeWorkbook,
-  type WorkbookInitializationDefaults,
-} from './canonicalize-workbook';
+import { canonicalizeWorkbook, type WorkbookInitializationDefaults } from './canonicalize-workbook';
 
 export function parseWorkbook(
   input: WorkbookInput,

@@ -20,11 +20,11 @@ export function createPendingCheckpoint(
   commit: CommandCommit<unknown, WorkbookCommand>,
   original?: PendingCheckpoint,
 ): PendingCheckpoint {
-  const addedSheetId = original?.addedSheetId ?? (
-    commit.command.type === 'add-sheet' && typeof commit.result === 'string'
-      ? commit.result as SheetId
-      : undefined
-  );
+  const addedSheetId =
+    original?.addedSheetId ??
+    (commit.command.type === 'add-sheet' && typeof commit.result === 'string'
+      ? (commit.result as SheetId)
+      : undefined);
   return Object.freeze({
     command: original?.command ?? commit.command,
     source: original?.source ?? commit.change.source,

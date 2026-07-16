@@ -54,10 +54,8 @@ export interface ControllerEpochSlot {
 
 const pendingSubscribe = () => () => undefined;
 const pendingSnapshot = () => null;
-const defaultCreateController = (
-  input: WorkbookInput,
-  options: WorkbookControllerOptions,
-) => new WorkbookController(input, options);
+const defaultCreateController = (input: WorkbookInput, options: WorkbookControllerOptions) =>
+  new WorkbookController(input, options);
 
 export function createControllerEpochSlot(): ControllerEpochSlot {
   let snapshot: ActiveEpoch | null = null;
@@ -65,7 +63,7 @@ export function createControllerEpochSlot(): ControllerEpochSlot {
   const publish = () => {
     let firstError: unknown;
     let failed = false;
-    for (const listener of [...listeners]) {
+    for (const listener of Array.from(listeners)) {
       if (!listeners.has(listener)) continue;
       try {
         listener();
@@ -154,16 +152,10 @@ export function useControllerEpoch(
   const createController = runtime.createController ?? defaultCreateController;
 
   if (currentMode !== initial.mode) {
-    throw contractViolation(
-      `TegoSheet cannot switch from ${initial.mode} to ${currentMode} mode`,
-    );
+    throw contractViolation(`TegoSheet cannot switch from ${initial.mode} to ${currentMode} mode`);
   }
 
-  const active = useSyncExternalStore(
-    slot.subscribe,
-    slot.getSnapshot,
-    slot.getSnapshot,
-  );
+  const active = useSyncExternalStore(slot.subscribe, slot.getSnapshot, slot.getSnapshot);
 
   useEffect(() => {
     let activeFlag = true;

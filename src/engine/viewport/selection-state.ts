@@ -42,16 +42,8 @@ function frozenSelection(
   });
 }
 
-export function createSelectionState(
-  anchor: CellPoint,
-  focus: CellPoint = anchor,
-): SelectionState {
-  return frozenSelection(
-    anchor,
-    focus,
-    focus,
-    normalizeCellRange({ start: anchor, end: focus }),
-  );
+export function createSelectionState(anchor: CellPoint, focus: CellPoint = anchor): SelectionState {
+  return frozenSelection(anchor, focus, focus, normalizeCellRange({ start: anchor, end: focus }));
 }
 
 export function createRangeSelection(
@@ -116,9 +108,10 @@ export function normalizeSelection(
   const focusMerge = model.mergeAt(focus);
   const active = focusMerge?.start ?? focus;
   const singlePoint = anchor.row === focus.row && anchor.column === focus.column;
-  const range = singlePoint && focusMerge !== null
-    ? focusMerge
-    : expandMerges(normalizeCellRange({ start: anchor, end: focus }), model);
+  const range =
+    singlePoint && focusMerge !== null
+      ? focusMerge
+      : expandMerges(normalizeCellRange({ start: anchor, end: focus }), model);
   return frozenSelection(anchor, focus, active, range, kind);
 }
 

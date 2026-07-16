@@ -89,9 +89,7 @@ function overrideSize(value: number | undefined, fallback: number, label: string
 }
 
 function indexedObject<T>(value: unknown): T | null {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as T
-    : null;
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as T) : null;
 }
 
 function assertIndex(index: number, count: number, label: string): void {
@@ -125,8 +123,8 @@ function identityRowOrder(count: number): RowOrder {
     return row;
   };
   return {
-    logicalAtVisual: row => assertRow(row, 'visual row'),
-    visualOfLogical: row => assertRow(row, 'logical row'),
+    logicalAtVisual: (row) => assertRow(row, 'visual row'),
+    visualOfLogical: (row) => assertRow(row, 'logical row'),
     visualRange(logicalStart, logicalEnd) {
       assertRow(logicalStart, 'logical row range start');
       assertRow(logicalEnd, 'logical row range end');
@@ -242,8 +240,9 @@ function createRowOrder(
     const included = new Set(sorted);
     const order = [
       ...sorted,
-      ...Array.from({ length: end - start + 1 }, (_, index) => start + index)
-        .filter(row => !included.has(row)),
+      ...Array.from({ length: end - start + 1 }, (_, index) => start + index).filter(
+        (row) => !included.has(row),
+      ),
     ];
     const visualByLogical = new Map(order.map((row, index) => [row, start + index]));
     return {
@@ -251,7 +250,7 @@ function createRowOrder(
         assertIndex(visualRow, count, 'visual row');
         return visualRow < start || visualRow > end
           ? visualRow
-          : order[visualRow - start] as number;
+          : (order[visualRow - start] as number);
       },
       visualOfLogical(logicalRow) {
         assertIndex(logicalRow, count, 'logical row');
@@ -264,7 +263,7 @@ function createRowOrder(
           count,
           start,
           end,
-          logicalRow => visualByLogical.get(logicalRow) ?? logicalRow,
+          (logicalRow) => visualByLogical.get(logicalRow) ?? logicalRow,
           'logical row',
         );
       },
@@ -275,7 +274,7 @@ function createRowOrder(
           count,
           start,
           end,
-          logicalRow => visualByLogical.get(logicalRow) ?? logicalRow,
+          (logicalRow) => visualByLogical.get(logicalRow) ?? logicalRow,
           'logical row',
         );
       },
@@ -286,7 +285,7 @@ function createRowOrder(
           count,
           start,
           end,
-          visualRow => order[visualRow - start] ?? visualRow,
+          (visualRow) => order[visualRow - start] ?? visualRow,
           'visual row',
         );
       },
@@ -303,10 +302,12 @@ function remapRows(
   order: RowOrder,
 ): Readonly<Record<string, unknown>> | undefined {
   if (!order.reordered || rows === undefined) return rows;
-  return Object.fromEntries(Object.entries(rows).map(([key, value]) => {
-    const logical = sparseIndex(key, count);
-    return logical === null ? [key, value] : [String(order.visualOfLogical(logical)), value];
-  }));
+  return Object.fromEntries(
+    Object.entries(rows).map(([key, value]) => {
+      const logical = sparseIndex(key, count);
+      return logical === null ? [key, value] : [String(order.visualOfLogical(logical)), value];
+    }),
+  );
 }
 
 interface SparseAxis {
@@ -356,9 +357,7 @@ function createSparseAxis<T extends { readonly hide?: boolean }>(
     const index = sparseIndex(key, count);
     const data = indexedObject<T>(value);
     if (index === null || data === null) continue;
-    const size = data.hide === true
-      ? 0
-      : overrideSize(sizeOf(data), fallback, `${label} size`);
+    const size = data.hide === true ? 0 : overrideSize(sizeOf(data), fallback, `${label} size`);
     if (size !== fallback) overrideSizes.set(index, size);
   }
   for (const index of forcedHidden) {
@@ -370,7 +369,7 @@ function createSparseAxis<T extends { readonly hide?: boolean }>(
   let overrideSizeSum = 0;
   let previousOverrideIndex = -1;
   let lastVisible: number | null = null;
-  const overrides = rawOverrides.map(value => {
+  const overrides = rawOverrides.map((value) => {
     if (fallback > 0 && value.index > previousOverrideIndex + 1) {
       lastVisible = value.index - 1;
     }
@@ -390,9 +389,7 @@ function createSparseAxis<T extends { readonly hide?: boolean }>(
       throw new RangeError(`${label} boundary is outside the grid`);
     }
     const position = upperBound(overrides, boundary);
-    const prefixSizeSum = position === 0
-      ? 0
-      : overrides[position - 1]?.prefixSizeSum ?? 0;
+    const prefixSizeSum = position === 0 ? 0 : (overrides[position - 1]?.prefixSizeSum ?? 0);
     return (boundary - position) * fallback + prefixSizeSum;
   };
   const size = (index: number): number => {
@@ -428,7 +425,7 @@ function createSparseAxis<T extends { readonly hide?: boolean }>(
       return override.size > 0 ? candidate : override.previousVisible;
     }
     if (fallback > 0) return candidate;
-    return override?.size === 0 ? override.previousVisible : override?.index ?? null;
+    return override?.size === 0 ? override.previousVisible : (override?.index ?? null);
   };
   return { size, offset, indexAt, previousVisible };
 }
@@ -449,9 +446,9 @@ export function createSheetGridModel(
     DEFAULT_COLUMN_WIDTH,
     'default column width',
   );
-  const merges = Object.freeze((sheet.merges ?? []).map(value => (
-    frozenRange(parseA1Range(value))
-  )));
+  const merges = Object.freeze(
+    (sheet.merges ?? []).map((value) => frozenRange(parseA1Range(value))),
+  );
   const order = createRowOrder(sheet, rowCount, sizing.locale ?? { id: 'en', messages: {} });
   let filtered: readonly number[] = [];
   try {
@@ -463,7 +460,7 @@ export function createSheetGridModel(
     remapRows(sheet.rows, rowCount, order),
     rowCount,
     defaultRowHeight,
-    data => data.height,
+    (data) => data.height,
     'row',
     defaultRowHeight > 0 ? 'last' : 'none',
     filtered.map(order.visualOfLogical),
@@ -472,7 +469,7 @@ export function createSheetGridModel(
     sheet.cols,
     columnCount,
     defaultColumnWidth,
-    data => data.width,
+    (data) => data.width,
     'column',
     'last',
   );
@@ -492,9 +489,8 @@ export function createSheetGridModel(
       return visual === null ? null : order.logicalAtVisual(visual);
     },
     previousVisibleColumn: columns.previousVisible,
-    mergeAt: (point: CellPoint): CellRange | null => (
-      merges.find(merge => containsCell(merge, point)) ?? null
-    ),
+    mergeAt: (point: CellPoint): CellRange | null =>
+      merges.find((merge) => containsCell(merge, point)) ?? null,
     logicalRowAtVisualIndex: order.logicalAtVisual,
     visualIndexOfRow: order.visualOfLogical,
     visualRowRange: order.visualRange,

@@ -1,9 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-  CanvasEngine,
-  createSheetGridModel,
-  createViewportMetrics,
-} from '../../../src/engine';
+import { CanvasEngine, createSheetGridModel, createViewportMetrics } from '../../../src/engine';
 import type { SheetData } from '../../../src/core';
 import {
   hasVisibleRowInRange,
@@ -22,11 +18,13 @@ describe('read-only Canvas rendering', () => {
 
   it('renders grid, formatted text, borders, merges, headers, and marks without mutating input', () => {
     const sheet = deepFreeze(buildStyledWorkbook());
-    const viewport = deepFreeze(createViewportMetrics(createSheetGridModel(sheet), {
-      width: 640,
-      height: 320,
-      freeze: { row: 1, column: 1 },
-    }));
+    const viewport = deepFreeze(
+      createViewportMetrics(createSheetGridModel(sheet), {
+        width: 640,
+        height: 320,
+        freeze: { row: 1, column: 1 },
+      }),
+    );
     const snapshot = deepFreeze({
       sheet,
       viewport,
@@ -65,9 +63,9 @@ describe('read-only Canvas rendering', () => {
     expect(harness.canvas.height).toBe(640);
     expect(harness.canvas.style).toEqual({ width: '640px', height: '320px' });
     const paneRects = harness.operations
-      .filter(operation => operation.name === 'rect')
-      .map(operation => operation.args)
-      .filter(args => args[0] === 60 || args[0] === 150);
+      .filter((operation) => operation.name === 'rect')
+      .map((operation) => operation.args)
+      .filter((args) => args[0] === 60 || args[0] === 150);
     expect(paneRects).toEqual([
       [60, 25, 90, 30],
       [150, 25, 490, 30],
@@ -75,29 +73,44 @@ describe('read-only Canvas rendering', () => {
       [150, 55, 490, 265],
     ]);
     expect(harness.operations).toContainEqual({ name: 'fillText', args: ['1,234.00', 145, 40] });
-    expect(harness.operations.some(operation => (
-      operation.name === 'fillText' && operation.args[0] === '1235'
-    ))).toBe(false);
-    expect(harness.operations.some(operation => (
-      operation.name === 'fillText' && operation.args[0] === 'screen-only'
-    ))).toBe(true);
-    expect(harness.operations.some(operation => operation.name === 'stroke')).toBe(true);
-    expect(harness.operations).toContainEqual({ name: 'set:fillStyle', args: ['rgba(255, 0, 0, .65)'] });
-    expect(harness.operations).toContainEqual({ name: 'set:fillStyle', args: ['rgba(0, 255, 0, .85)'] });
-    expect(harness.operations).toContainEqual({ name: 'set:fillStyle', args: ['rgba(0, 0, 0, .45)'] });
+    expect(
+      harness.operations.some(
+        (operation) => operation.name === 'fillText' && operation.args[0] === '1235',
+      ),
+    ).toBe(false);
+    expect(
+      harness.operations.some(
+        (operation) => operation.name === 'fillText' && operation.args[0] === 'screen-only',
+      ),
+    ).toBe(true);
+    expect(harness.operations.some((operation) => operation.name === 'stroke')).toBe(true);
+    expect(harness.operations).toContainEqual({
+      name: 'set:fillStyle',
+      args: ['rgba(255, 0, 0, .65)'],
+    });
+    expect(harness.operations).toContainEqual({
+      name: 'set:fillStyle',
+      args: ['rgba(0, 255, 0, .85)'],
+    });
+    expect(harness.operations).toContainEqual({
+      name: 'set:fillStyle',
+      args: ['rgba(0, 0, 0, .45)'],
+    });
     expect(harness.operations).toContainEqual({ name: 'set:strokeStyle', args: ['#4b89ff'] });
-    expect(harness.operations.some(operation => operation.name === 'strokeRect')).toBe(true);
-    expect(harness.operations.filter(operation => operation.name === 'save')).toHaveLength(
-      harness.operations.filter(operation => operation.name === 'restore').length,
+    expect(harness.operations.some((operation) => operation.name === 'strokeRect')).toBe(true);
+    expect(harness.operations.filter((operation) => operation.name === 'save')).toHaveLength(
+      harness.operations.filter((operation) => operation.name === 'restore').length,
     );
   });
 
   it('coalesces renders to one frame, uses the latest snapshot, and disposes idempotently', () => {
     const firstSheet = buildStyledWorkbook();
     const secondSheet = structuredClone(firstSheet);
-    const firstRow = secondSheet.rows?.['0'] as {
-      cells?: Record<string, { text?: string }>;
-    } | undefined;
+    const firstRow = secondSheet.rows?.['0'] as
+      | {
+          cells?: Record<string, { text?: string }>;
+        }
+      | undefined;
     const firstCell = firstRow?.cells?.['0'];
     if (firstCell !== undefined) firstCell.text = '999';
     const harness = createCanvasHarness();
@@ -114,20 +127,24 @@ describe('read-only Canvas rendering', () => {
     engine.render({ sheet: secondSheet, viewport });
     expect(harness.animationFrame.pending).toBe(1);
     harness.animationFrame.flush();
-    expect(harness.operations.some(operation => (
-      operation.name === 'fillText' && operation.args[0] === '999.00'
-    ))).toBe(true);
-    expect(harness.operations.some(operation => (
-      operation.name === 'fillText' && operation.args[0] === '1,234.00'
-    ))).toBe(false);
+    expect(
+      harness.operations.some(
+        (operation) => operation.name === 'fillText' && operation.args[0] === '999.00',
+      ),
+    ).toBe(true);
+    expect(
+      harness.operations.some(
+        (operation) => operation.name === 'fillText' && operation.args[0] === '1,234.00',
+      ),
+    ).toBe(false);
 
     engine.render({ sheet: secondSheet, viewport });
     harness.animationFrame.flush();
-    expect(harness.operations.filter(operation => operation.name === 'setTransform')).toEqual([
+    expect(harness.operations.filter((operation) => operation.name === 'setTransform')).toEqual([
       { name: 'setTransform', args: [1, 0, 0, 1, 0, 0] },
       { name: 'setTransform', args: [1, 0, 0, 1, 0, 0] },
     ]);
-    expect(harness.operations.some(operation => operation.name === 'scale')).toBe(false);
+    expect(harness.operations.some((operation) => operation.name === 'scale')).toBe(false);
 
     engine.render({ sheet: firstSheet, viewport });
     expect(harness.animationFrame.pending).toBe(1);
@@ -160,7 +177,7 @@ describe('read-only Canvas rendering', () => {
 
     expect(harness.operations).toContainEqual({ name: 'fillText', args: ['1,234.00', 145, 40] });
     expect(harness.operations).not.toContainEqual({ name: 'fillText', args: ['1235', 105, 44] });
-    expect(harness.operations.filter(operation => operation.name === 'translate')).toEqual([
+    expect(harness.operations.filter((operation) => operation.name === 'translate')).toEqual([
       { name: 'translate', args: [60, 25] },
       { name: 'translate', args: [10, 25] },
       { name: 'translate', args: [60, 0] },
@@ -169,7 +186,7 @@ describe('read-only Canvas rendering', () => {
   });
 
   it('suppresses grid strokes and supports every legacy border line style', () => {
-    const styles = ['thin', 'medium', 'thick', 'dashed', 'dotted', 'double'].map(style => ({
+    const styles = ['thin', 'medium', 'thick', 'dashed', 'dotted', 'double'].map((style) => ({
       border: { bottom: [style, '#112233'] as const },
     }));
     const sheet: SheetData = {
@@ -177,7 +194,9 @@ describe('read-only Canvas rendering', () => {
       rows: {
         len: 1,
         0: {
-          cells: Object.fromEntries(styles.map((_, column) => [column, { text: String(column), style: column }])),
+          cells: Object.fromEntries(
+            styles.map((_, column) => [column, { text: String(column), style: column }]),
+          ),
         },
       },
       cols: { len: 6 },
@@ -214,8 +233,8 @@ describe('read-only Canvas rendering', () => {
       cols: { len: 6 },
     };
     const withoutBorderOperations = render(false, withoutBorders);
-    expect(withGrid.filter(operation => operation.name === 'stroke').length).toBeGreaterThan(
-      withoutGrid.filter(operation => operation.name === 'stroke').length,
+    expect(withGrid.filter((operation) => operation.name === 'stroke').length).toBeGreaterThan(
+      withoutGrid.filter((operation) => operation.name === 'stroke').length,
     );
     expect(withoutGrid).toContainEqual({ name: 'set:lineWidth', args: [0.5] });
     expect(withoutGrid).toContainEqual({ name: 'set:lineWidth', args: [1.5] });
@@ -224,8 +243,8 @@ describe('read-only Canvas rendering', () => {
     expect(withoutGrid).toContainEqual({ name: 'setLineDash', args: [[1, 1]] });
     expect(withoutGrid).toContainEqual({ name: 'setLineDash', args: [[2, 0]] });
     expect(
-      withoutGrid.filter(operation => operation.name === 'stroke').length
-      - withoutBorderOperations.filter(operation => operation.name === 'stroke').length,
+      withoutGrid.filter((operation) => operation.name === 'stroke').length -
+        withoutBorderOperations.filter((operation) => operation.name === 'stroke').length,
     ).toBe(6);
   });
 
@@ -262,21 +281,28 @@ describe('read-only Canvas rendering', () => {
     harness.animationFrame.flush();
 
     const clips = harness.operations
-      .filter(operation => operation.name === 'rect')
-      .map(operation => operation.args);
+      .filter((operation) => operation.name === 'rect')
+      .map((operation) => operation.args);
     expect(clips).toContainEqual([0.5, 0.5, 28, 23]);
     expect(clips).toContainEqual([30.5, 0.5, 58, 23]);
-    const longText = harness.operations.findIndex(operation => (
-      operation.name === 'fillText' && operation.args[0] === 'a very long unwrapped value'
-    ));
-    const redMark = harness.operations.findIndex(operation => (
-      operation.name === 'set:fillStyle' && operation.args[0] === 'rgba(255, 0, 0, .65)'
-    ));
-    expect(longText).toBeGreaterThan(harness.operations.findIndex(operation => (
-      operation.name === 'rect' && operation.args[0] === 0.5 && operation.args[1] === 0.5
-    )));
+    const longText = harness.operations.findIndex(
+      (operation) =>
+        operation.name === 'fillText' && operation.args[0] === 'a very long unwrapped value',
+    );
+    const redMark = harness.operations.findIndex(
+      (operation) =>
+        operation.name === 'set:fillStyle' && operation.args[0] === 'rgba(255, 0, 0, .65)',
+    );
+    expect(longText).toBeGreaterThan(
+      harness.operations.findIndex(
+        (operation) =>
+          operation.name === 'rect' && operation.args[0] === 0.5 && operation.args[1] === 0.5,
+      ),
+    );
     expect(redMark).toBeGreaterThan(longText);
-    expect(harness.operations.slice(redMark).some(operation => operation.name === 'restore')).toBe(true);
+    expect(
+      harness.operations.slice(redMark).some((operation) => operation.name === 'restore'),
+    ).toBe(true);
   });
 
   it('threads configured defaults beneath column, row, and cell styles', () => {
@@ -324,10 +350,7 @@ describe('read-only Canvas rendering', () => {
 
   it('skips absent coordinates but paints explicit empty cells', () => {
     const sheet: SheetData = {
-      styles: [
-        { bgcolor: '#column-only' },
-        { bgcolor: '#explicit-row' },
-      ],
+      styles: [{ bgcolor: '#column-only' }, { bgcolor: '#explicit-row' }],
       merges: ['A1:B1'],
       rows: { len: 1, 0: { style: 1, cells: { 2: {} } } },
       cols: { len: 3, 0: { width: 30, style: 0 }, 1: { width: 30 }, 2: { width: 30 } },
@@ -350,9 +373,18 @@ describe('read-only Canvas rendering', () => {
     });
     harness.animationFrame.flush();
 
-    expect(harness.operations.filter(operation => operation.name === 'rect').map(operation => operation.args))
-      .toEqual([[0, 0, 90, 25], [60.5, 0.5, 28, 23]]);
-    expect(harness.operations).not.toContainEqual({ name: 'set:fillStyle', args: ['#column-only'] });
+    expect(
+      harness.operations
+        .filter((operation) => operation.name === 'rect')
+        .map((operation) => operation.args),
+    ).toEqual([
+      [0, 0, 90, 25],
+      [60.5, 0.5, 28, 23],
+    ]);
+    expect(harness.operations).not.toContainEqual({
+      name: 'set:fillStyle',
+      args: ['#column-only'],
+    });
     expect(harness.operations).toContainEqual({ name: 'set:fillStyle', args: ['#explicit-row'] });
   });
 
@@ -367,32 +399,42 @@ describe('read-only Canvas rendering', () => {
 
     engine.render({
       sheet,
-      viewport: createViewportMetrics(createSheetGridModel(sheet, {
-        defaultColumnWidth: 16,
-        defaultRowHeight: 16,
-      }), {
-        width: 8_000,
-        height: 8_000,
-        rowHeaderWidth: 0,
-        columnHeaderHeight: 0,
-      }),
+      viewport: createViewportMetrics(
+        createSheetGridModel(sheet, {
+          defaultColumnWidth: 16,
+          defaultRowHeight: 16,
+        }),
+        {
+          width: 8_000,
+          height: 8_000,
+          rowHeaderWidth: 0,
+          columnHeaderHeight: 0,
+        },
+      ),
     });
     expect(() => harness.animationFrame.flush()).not.toThrow();
 
-    expect(harness.operations.filter(operation => operation.name === 'stroke').length)
-      .toBeLessThanOrEqual(2_004);
-    expect(harness.operations.filter(operation => operation.name === 'rect').map(operation => operation.args))
-      .toEqual([[0, 0, 8_000, 8_000]]);
+    expect(
+      harness.operations.filter((operation) => operation.name === 'stroke').length,
+    ).toBeLessThanOrEqual(2_004);
+    expect(
+      harness.operations
+        .filter((operation) => operation.name === 'rect')
+        .map((operation) => operation.args),
+    ).toEqual([[0, 0, 8_000, 8_000]]);
   });
 
   it('returns only materialized cells from a large empty sparse pane', () => {
     let numericRowLookups = 0;
-    const rows = new Proxy({ len: 500 }, {
-      get(target, key, receiver) {
-        if (/^(0|[1-9]\d*)$/.test(String(key))) numericRowLookups += 1;
-        return Reflect.get(target, key, receiver);
+    const rows = new Proxy(
+      { len: 500 },
+      {
+        get(target, key, receiver) {
+          if (/^(0|[1-9]\d*)$/.test(String(key))) numericRowLookups += 1;
+          return Reflect.get(target, key, receiver);
+        },
       },
-    });
+    );
     const sheet = { rows, cols: { len: 500 } } as unknown as SheetData;
     const viewport = createViewportMetrics(createSheetGridModel(sheet), {
       width: 50_000,
@@ -441,9 +483,11 @@ describe('read-only Canvas rendering', () => {
 
     expect(() => harness.animationFrame.flush()).not.toThrow();
     expect(onRenderError).toHaveBeenCalledOnce();
-    expect(onRenderError.mock.calls[0]![0]).toEqual(expect.objectContaining({
-      message: 'visible canvas sparse cell scan exceeds the 250000-entry limit',
-    }));
+    expect(onRenderError.mock.calls[0]![0]).toEqual(
+      expect.objectContaining({
+        message: 'visible canvas sparse cell scan exceeds the 250000-entry limit',
+      }),
+    );
     expect(harness.animationFrame.pending).toBe(0);
   });
 
@@ -453,14 +497,16 @@ describe('read-only Canvas rendering', () => {
     const harness = createCanvasHarness();
     Object.defineProperty(harness.canvas.getContext('2d')!, 'clearRect', {
       configurable: true,
-      value: () => { throw paintFailure; },
+      value: () => {
+        throw paintFailure;
+      },
     });
     const sheet = { rows: { len: 1 }, cols: { len: 1 } } as SheetData;
     const engine = new CanvasEngine(harness.canvas, {
       animationFrame: harness.animationFrame,
       devicePixelRatio: 1,
       measurement: harness.measurement,
-      onRenderError: cause => {
+      onRenderError: (cause) => {
         expect(cause).toBe(paintFailure);
         throw consumerFailure;
       },
@@ -529,8 +575,9 @@ describe('read-only Canvas rendering', () => {
       columnHeaderHeight: 0,
       freeze: { row: 0, column: 1 },
     });
-    const pane = frozenQuadrants(viewport.freeze, viewport)
-      .find(candidate => candidate.kind === 'body');
+    const pane = frozenQuadrants(viewport.freeze, viewport).find(
+      (candidate) => candidate.kind === 'body',
+    );
     expect(pane).toBeDefined();
     if (pane === undefined) return;
     const indexes = paneGridIndexes(pane, viewport);
@@ -568,14 +615,17 @@ describe('read-only Canvas rendering', () => {
       rows: { len: 50_000 },
       cols: { len: 1 },
     };
-    const viewport = createViewportMetrics(createSheetGridModel(sheet, {
-      defaultRowHeight: 0.01,
-    }), {
-      width: 100,
-      height: 500,
-      rowHeaderWidth: 0,
-      columnHeaderHeight: 0,
-    });
+    const viewport = createViewportMetrics(
+      createSheetGridModel(sheet, {
+        defaultRowHeight: 0.01,
+      }),
+      {
+        width: 100,
+        height: 500,
+        rowHeaderWidth: 0,
+        columnHeaderHeight: 0,
+      },
+    );
     const pane = frozenQuadrants(viewport.freeze, viewport)[0];
     expect(pane).toBeDefined();
     if (pane === undefined) return;
@@ -616,21 +666,23 @@ describe('read-only Canvas rendering', () => {
     });
     harness.animationFrame.flush();
 
-    expect(harness.operations
-      .filter(operation => operation.name === 'strokeRect')
-      .map(operation => operation.args)).toEqual([
+    expect(
+      harness.operations
+        .filter((operation) => operation.name === 'strokeRect')
+        .map((operation) => operation.args),
+    ).toEqual([
       [60, 50, 100, 25],
       [60, 100, 100, 25],
       [60, 150, 100, 25],
     ]);
     expect(harness.operations).toContainEqual({ name: 'fillRect', args: [155.5, 170.5, 8, 8] });
-    const headerHighlights = harness.operations.flatMap((operation, index) => (
-      operation.name === 'set:fillStyle'
-      && operation.args[0] === 'rgba(75, 137, 255, 0.08)'
-      && harness.operations[index + 1]?.name === 'fillRect'
+    const headerHighlights = harness.operations.flatMap((operation, index) =>
+      operation.name === 'set:fillStyle' &&
+      operation.args[0] === 'rgba(75, 137, 255, 0.08)' &&
+      harness.operations[index + 1]?.name === 'fillRect'
         ? [harness.operations[index + 1]!.args]
-        : []
-    ));
+        : [],
+    );
     expect(headerHighlights).toEqual([
       [-0.5, 49.5, 60, 25],
       [-0.5, 99.5, 60, 25],
@@ -662,8 +714,9 @@ describe('read-only Canvas rendering', () => {
     });
 
     expect(() => harness.animationFrame.flush()).not.toThrow();
-    expect(harness.operations.filter(operation => operation.name === 'stroke').length)
-      .toBeLessThanOrEqual(20);
+    expect(
+      harness.operations.filter((operation) => operation.name === 'stroke').length,
+    ).toBeLessThanOrEqual(20);
   });
 
   it('rejects a visible frozen axis over its explicit enumeration budget', () => {
@@ -676,15 +729,18 @@ describe('read-only Canvas rendering', () => {
 
     engine.render({
       sheet,
-      viewport: createViewportMetrics(createSheetGridModel(sheet, {
-        defaultRowHeight: 1 / 250_001,
-      }), {
-        width: 100,
-        height: 1,
-        rowHeaderWidth: 0,
-        columnHeaderHeight: 0,
-        freeze: { row: 250_001, column: 0 },
-      }),
+      viewport: createViewportMetrics(
+        createSheetGridModel(sheet, {
+          defaultRowHeight: 1 / 250_001,
+        }),
+        {
+          width: 100,
+          height: 1,
+          rowHeaderWidth: 0,
+          columnHeaderHeight: 0,
+          freeze: { row: 250_001, column: 0 },
+        },
+      ),
     });
 
     expect(() => harness.animationFrame.flush()).toThrow(
@@ -721,15 +777,18 @@ describe('read-only Canvas rendering', () => {
 
     engine.render({
       sheet: oversizedSheet,
-      viewport: createViewportMetrics(createSheetGridModel(oversizedSheet, {
-        defaultRowHeight: 1 / 250_001,
-      }), {
-        width: 100,
-        height: 1,
-        rowHeaderWidth: 0,
-        columnHeaderHeight: 0,
-        freeze: { row: 250_001, column: 0 },
-      }),
+      viewport: createViewportMetrics(
+        createSheetGridModel(oversizedSheet, {
+          defaultRowHeight: 1 / 250_001,
+        }),
+        {
+          width: 100,
+          height: 1,
+          rowHeaderWidth: 0,
+          columnHeaderHeight: 0,
+          freeze: { row: 250_001, column: 0 },
+        },
+      ),
     });
 
     expect(() => harness.animationFrame.flush()).toThrow(
@@ -835,11 +894,20 @@ describe('read-only Canvas rendering', () => {
     });
     harness.animationFrame.flush();
 
-    expect(harness.operations.filter(operation => (
-      operation.name === 'set:fillStyle' && operation.args[0] === 'rgba(0, 0, 0, .45)'
-    ))).toHaveLength(3);
-    expect(harness.operations.filter(operation => operation.name === 'rect').map(operation => operation.args))
-      .toEqual([[0, 0, 90, 25], [0.5, 0.5, 28, 23]]);
+    expect(
+      harness.operations.filter(
+        (operation) =>
+          operation.name === 'set:fillStyle' && operation.args[0] === 'rgba(0, 0, 0, .45)',
+      ),
+    ).toHaveLength(3);
+    expect(
+      harness.operations
+        .filter((operation) => operation.name === 'rect')
+        .map((operation) => operation.args),
+    ).toEqual([
+      [0, 0, 90, 25],
+      [0.5, 0.5, 28, 23],
+    ]);
   });
 
   it('uses legacy point sizes, character wrapping, and multiline vertical origins', () => {
@@ -881,7 +949,7 @@ describe('read-only Canvas rendering', () => {
     harness.animationFrame.flush();
 
     expect(harness.operations).toContainEqual({ name: 'set:font', args: ['16px Arial'] });
-    expect(harness.operations.filter(operation => operation.name === 'fillText')).toEqual([
+    expect(harness.operations.filter((operation) => operation.name === 'fillText')).toEqual([
       { name: 'fillText', args: ['ABC', 5, 5] },
       { name: 'fillText', args: ['D', 5, 23] },
       { name: 'fillText', args: ['ABC', 35, 21] },
@@ -918,10 +986,9 @@ describe('read-only Canvas rendering', () => {
         len: 1,
         0: {
           height: 40,
-          cells: Object.fromEntries(Array.from({ length: 6 }, (_, column) => [
-            column,
-            { text: 'A', style: column },
-          ])),
+          cells: Object.fromEntries(
+            Array.from({ length: 6 }, (_, column) => [column, { text: 'A', style: column }]),
+          ),
         },
       },
       cols: {
@@ -945,21 +1012,44 @@ describe('read-only Canvas rendering', () => {
     });
     harness.animationFrame.flush();
 
-    const decorationLines = (color: string) => harness.operations.flatMap((operation, index) => {
-      if (operation.name !== 'set:strokeStyle' || operation.args[0] !== color) return [];
-      const move = harness.operations.slice(index).find(candidate => candidate.name === 'moveTo');
-      const line = harness.operations.slice(index).find(candidate => candidate.name === 'lineTo');
-      return move === undefined || line === undefined ? [] : [[move.args, line.args]];
-    });
+    const decorationLines = (color: string) =>
+      harness.operations.flatMap((operation, index) => {
+        if (operation.name !== 'set:strokeStyle' || operation.args[0] !== color) return [];
+        const move = harness.operations
+          .slice(index)
+          .find((candidate) => candidate.name === 'moveTo');
+        const line = harness.operations
+          .slice(index)
+          .find((candidate) => candidate.name === 'lineTo');
+        return move === undefined || line === undefined ? [] : [[move.args, line.args]];
+      });
     expect(decorationLines('#aa0000')).toEqual([
-      [[4.5, 22.5], [11.5, 22.5]],
-      [[34.5, 27.5], [41.5, 27.5]],
-      [[64.5, 34.5], [71.5, 34.5]],
+      [
+        [4.5, 22.5],
+        [11.5, 22.5],
+      ],
+      [
+        [34.5, 27.5],
+        [41.5, 27.5],
+      ],
+      [
+        [64.5, 34.5],
+        [71.5, 34.5],
+      ],
     ]);
     expect(decorationLines('#00aa00')).toEqual([
-      [[94.5, 14.5], [101.5, 14.5]],
-      [[124.5, 19.5], [131.5, 19.5]],
-      [[154.5, 26.5], [161.5, 26.5]],
+      [
+        [94.5, 14.5],
+        [101.5, 14.5],
+      ],
+      [
+        [124.5, 19.5],
+        [131.5, 19.5],
+      ],
+      [
+        [154.5, 26.5],
+        [161.5, 26.5],
+      ],
     ]);
   });
 
@@ -967,12 +1057,18 @@ describe('read-only Canvas rendering', () => {
     {
       label: 'rows',
       selection: { start: { row: 0, column: 0 }, end: { row: 1, column: 0 } },
-      rects: [[60, 25, 100, 25], [60, 50, 100, 25]],
+      rects: [
+        [60, 25, 100, 25],
+        [60, 50, 100, 25],
+      ],
     },
     {
       label: 'columns',
       selection: { start: { row: 0, column: 0 }, end: { row: 0, column: 1 } },
-      rects: [[60, 25, 100, 25], [160, 25, 100, 25]],
+      rects: [
+        [60, 25, 100, 25],
+        [160, 25, 100, 25],
+      ],
     },
     {
       label: 'both axes',
@@ -1002,13 +1098,22 @@ describe('read-only Canvas rendering', () => {
     });
     harness.animationFrame.flush();
 
-    expect(harness.operations.filter(operation => operation.name === 'strokeRect').map(operation => operation.args)).toEqual(rects);
-    expect(harness.operations.filter(operation => (
-      operation.name === 'set:fillStyle' && operation.args[0] === 'rgba(75, 137, 255, 0.1)'
-    ))).toHaveLength(rects.length);
-    expect(harness.operations.filter(operation => (
-      operation.name === 'set:lineWidth' && operation.args[0] === 2
-    )).length).toBeGreaterThanOrEqual(rects.length);
+    expect(
+      harness.operations
+        .filter((operation) => operation.name === 'strokeRect')
+        .map((operation) => operation.args),
+    ).toEqual(rects);
+    expect(
+      harness.operations.filter(
+        (operation) =>
+          operation.name === 'set:fillStyle' && operation.args[0] === 'rgba(75, 137, 255, 0.1)',
+      ),
+    ).toHaveLength(rects.length);
+    expect(
+      harness.operations.filter(
+        (operation) => operation.name === 'set:lineWidth' && operation.args[0] === 2,
+      ).length,
+    ).toBeGreaterThanOrEqual(rects.length);
   });
 
   it('draws gray header hints after hidden rows and columns', () => {
@@ -1030,9 +1135,11 @@ describe('read-only Canvas rendering', () => {
     });
     harness.animationFrame.flush();
 
-    expect(harness.operations.filter(operation => (
-      operation.name === 'set:strokeStyle' && operation.args[0] === '#c6c6c6'
-    ))).toHaveLength(2);
+    expect(
+      harness.operations.filter(
+        (operation) => operation.name === 'set:strokeStyle' && operation.args[0] === '#c6c6c6',
+      ),
+    ).toHaveLength(2);
     expect(harness.operations).toContainEqual({ name: 'moveTo', args: [4.5, 29.5] });
     expect(harness.operations).toContainEqual({ name: 'lineTo', args: [54.5, 29.5] });
     expect(harness.operations).toContainEqual({ name: 'moveTo', args: [64.5, 4.5] });
@@ -1067,11 +1174,11 @@ describe('read-only Canvas rendering', () => {
 
     expect(harness.canvas.width).toBe(257 * devicePixelRatio);
     expect(harness.canvas.height).toBe(129 * devicePixelRatio);
-    expect(harness.operations.filter(operation => operation.name === 'setTransform')).toEqual([
+    expect(harness.operations.filter((operation) => operation.name === 'setTransform')).toEqual([
       { name: 'setTransform', args: [devicePixelRatio, 0, 0, devicePixelRatio, 0, 0] },
       { name: 'setTransform', args: [devicePixelRatio, 0, 0, devicePixelRatio, 0, 0] },
     ]);
-    expect(harness.operations.some(operation => operation.name === 'scale')).toBe(false);
+    expect(harness.operations.some((operation) => operation.name === 'scale')).toBe(false);
   });
 
   it.each([
@@ -1089,44 +1196,47 @@ describe('read-only Canvas rendering', () => {
       end: [29.75, 24.75],
       contentRect: [0.75, 0.75, 28, 23],
     },
-  ])('aligns thin lines to physical pixels at DPR $dpr', ({
-    dpr,
-    width,
-    start,
-    end,
-    contentRect,
-  }) => {
-    const sheet: SheetData = {
-      styles: [{ border: { bottom: ['thin', '#135790'] } }],
-      rows: { len: 1, 0: { cells: { 0: { style: 0 } } } },
-      cols: { len: 1, 0: { width: 30 } },
-    };
-    const harness = createCanvasHarness();
-    const engine = new CanvasEngine(harness.canvas, {
-      animationFrame: harness.animationFrame,
-      devicePixelRatio: dpr,
-      measurement: harness.measurement,
-    });
-    engine.render({
-      sheet,
-      showGrid: false,
-      viewport: createViewportMetrics(createSheetGridModel(sheet), {
-        width: 30,
-        height: 25,
-        rowHeaderWidth: 0,
-        columnHeaderHeight: 0,
-      }),
-    });
-    harness.animationFrame.flush();
+  ])(
+    'aligns thin lines to physical pixels at DPR $dpr',
+    ({ dpr, width, start, end, contentRect }) => {
+      const sheet: SheetData = {
+        styles: [{ border: { bottom: ['thin', '#135790'] } }],
+        rows: { len: 1, 0: { cells: { 0: { style: 0 } } } },
+        cols: { len: 1, 0: { width: 30 } },
+      };
+      const harness = createCanvasHarness();
+      const engine = new CanvasEngine(harness.canvas, {
+        animationFrame: harness.animationFrame,
+        devicePixelRatio: dpr,
+        measurement: harness.measurement,
+      });
+      engine.render({
+        sheet,
+        showGrid: false,
+        viewport: createViewportMetrics(createSheetGridModel(sheet), {
+          width: 30,
+          height: 25,
+          rowHeaderWidth: 0,
+          columnHeaderHeight: 0,
+        }),
+      });
+      harness.animationFrame.flush();
 
-    const border = harness.operations.findIndex(operation => (
-      operation.name === 'set:strokeStyle' && operation.args[0] === '#135790'
-    ));
-    expect(harness.operations.slice(border)).toContainEqual({ name: 'set:lineWidth', args: [width] });
-    expect(harness.operations.slice(border)).toContainEqual({ name: 'moveTo', args: start });
-    expect(harness.operations.slice(border)).toContainEqual({ name: 'lineTo', args: end });
-    expect(harness.operations).toContainEqual({ name: 'rect', args: contentRect });
-    expect(harness.operations).toContainEqual({ name: 'fillRect', args: contentRect });
-    expect(harness.operations).toContainEqual({ name: 'setTransform', args: [dpr, 0, 0, dpr, 0, 0] });
-  });
+      const border = harness.operations.findIndex(
+        (operation) => operation.name === 'set:strokeStyle' && operation.args[0] === '#135790',
+      );
+      expect(harness.operations.slice(border)).toContainEqual({
+        name: 'set:lineWidth',
+        args: [width],
+      });
+      expect(harness.operations.slice(border)).toContainEqual({ name: 'moveTo', args: start });
+      expect(harness.operations.slice(border)).toContainEqual({ name: 'lineTo', args: end });
+      expect(harness.operations).toContainEqual({ name: 'rect', args: contentRect });
+      expect(harness.operations).toContainEqual({ name: 'fillRect', args: contentRect });
+      expect(harness.operations).toContainEqual({
+        name: 'setTransform',
+        args: [dpr, 0, 0, dpr, 0, 0],
+      });
+    },
+  );
 });

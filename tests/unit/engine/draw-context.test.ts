@@ -15,26 +15,21 @@ describe('DrawContext', () => {
       height: Number.MAX_SAFE_INTEGER,
       message: 'canvas backing height must be a non-negative safe integer',
     },
-  ])(
-    'rejects an unsafe $message before mutating the canvas',
-    ({ width, height, message }) => {
-      const harness = createCanvasHarness();
-      const draw = new DrawContext(harness.canvas, 2, harness.measurement);
-      const initialCanvas = {
-        width: harness.canvas.width,
-        height: harness.canvas.height,
-        style: { ...harness.canvas.style },
-      };
+  ])('rejects an unsafe $message before mutating the canvas', ({ width, height, message }) => {
+    const harness = createCanvasHarness();
+    const draw = new DrawContext(harness.canvas, 2, harness.measurement);
+    const initialCanvas = {
+      width: harness.canvas.width,
+      height: harness.canvas.height,
+      style: { ...harness.canvas.style },
+    };
 
-      expect(() => draw.resize(width, height)).toThrowError(
-        new RangeError(message),
-      );
-      expect(harness.canvas.width).toBe(initialCanvas.width);
-      expect(harness.canvas.height).toBe(initialCanvas.height);
-      expect(harness.canvas.style).toEqual(initialCanvas.style);
-      expect(harness.operations).toEqual([]);
-    },
-  );
+    expect(() => draw.resize(width, height)).toThrowError(new RangeError(message));
+    expect(harness.canvas.width).toBe(initialCanvas.width);
+    expect(harness.canvas.height).toBe(initialCanvas.height);
+    expect(harness.canvas.style).toEqual(initialCanvas.style);
+    expect(harness.operations).toEqual([]);
+  });
 
   it('rejects a backing dimension above the 16384-pixel limit atomically', () => {
     const harness = createCanvasHarness();

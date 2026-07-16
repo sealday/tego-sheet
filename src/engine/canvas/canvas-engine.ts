@@ -3,31 +3,16 @@ import type { CellPoint, CellRange } from '../../core/types/coordinates';
 import type { CellStyle, SheetData } from '../../core/types/workbook';
 import { frozenQuadrants } from '../geometry/frozen-pane-geometry';
 import type { ViewportMetrics } from '../ports';
-import {
-  configuredCellDefaultStyle,
-  paintCells,
-  paintFilterOverlays,
-} from './cell-painter';
+import { configuredCellDefaultStyle, paintCells, paintFilterOverlays } from './cell-painter';
 import { currentDevicePixelRatio, DrawContext } from './draw-context';
-import type {
-  CanvasSurfacePort,
-  TextMeasurementPort,
-} from './draw-context';
-import {
-  createSparseCellScanBudget,
-  paintGrid,
-  paneCells,
-  paneGridIndexes,
-} from './grid-painter';
+import type { CanvasSurfacePort, TextMeasurementPort } from './draw-context';
+import { createSparseCellScanBudget, paintGrid, paneCells, paneGridIndexes } from './grid-painter';
 import { paintHeaders } from './header-painter';
 import { RenderScheduler } from './render-scheduler';
 import type { AnimationFramePort } from './render-scheduler';
 import { paintSelection } from './selection-painter';
 
-export type {
-  CanvasSurfacePort,
-  TextMeasurementPort,
-} from './draw-context';
+export type { CanvasSurfacePort, TextMeasurementPort } from './draw-context';
 export type { AnimationFramePort } from './render-scheduler';
 
 export interface CanvasRenderSnapshot {
@@ -102,7 +87,7 @@ export class CanvasEngine {
     const visibleRows = new Set<number>();
     const visibleColumns = new Set<number>();
     const scanBudget = createSparseCellScanBudget();
-    const plans = frozenQuadrants(viewport.freeze, viewport).map(pane => {
+    const plans = frozenQuadrants(viewport.freeze, viewport).map((pane) => {
       const indexes = paneGridIndexes(pane, viewport);
       const cells = paneCells(viewport, indexes, snapshot.sheet, scanBudget);
       for (const row of indexes.rows) visibleRows.add(row);
@@ -113,17 +98,23 @@ export class CanvasEngine {
     this.draw.clear(viewport.width, viewport.height);
     const formulaBudget = createFormulaEvaluationBudget(250_000);
     for (const { pane, indexes, cells } of plans) {
-      this.draw.withClip(pane, () => {
-        if (snapshot.showGrid !== false) paintGrid(this.draw, indexes, viewport);
-        paintCells(this.draw, snapshot, cells, formulaBudget, this.defaultStyle);
-        paintFilterOverlays(this.draw, snapshot, indexes.rows, indexes.columns);
-        paintSelection(this.draw, snapshot.selection, viewport, pane.kind);
-      }, {
-        x: viewport.rowHeaderWidth
-          - (pane.kind === 'top' || pane.kind === 'body' ? viewport.scroll.x : 0),
-        y: viewport.columnHeaderHeight
-          - (pane.kind === 'left' || pane.kind === 'body' ? viewport.scroll.y : 0),
-      });
+      this.draw.withClip(
+        pane,
+        () => {
+          if (snapshot.showGrid !== false) paintGrid(this.draw, indexes, viewport);
+          paintCells(this.draw, snapshot, cells, formulaBudget, this.defaultStyle);
+          paintFilterOverlays(this.draw, snapshot, indexes.rows, indexes.columns);
+          paintSelection(this.draw, snapshot.selection, viewport, pane.kind);
+        },
+        {
+          x:
+            viewport.rowHeaderWidth -
+            (pane.kind === 'top' || pane.kind === 'body' ? viewport.scroll.x : 0),
+          y:
+            viewport.columnHeaderHeight -
+            (pane.kind === 'left' || pane.kind === 'body' ? viewport.scroll.y : 0),
+        },
+      );
     }
     paintHeaders(
       this.draw,

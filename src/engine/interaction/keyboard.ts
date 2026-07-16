@@ -22,25 +22,36 @@ export function isEditableEventTarget(event: KeyboardEventLike): boolean {
   if (event.isComposing === true || event.keyCode === 229) return true;
   const target = event.target as EditableTargetLike | undefined;
   const kind = String(event.targetKind ?? target?.tagName ?? target?.nodeName ?? '').toLowerCase();
-  return kind === 'input' || kind === 'textarea' || kind === 'select'
-    || target?.isContentEditable === true
-    || target?.getAttribute?.('contenteditable') === 'true';
+  return (
+    kind === 'input' ||
+    kind === 'textarea' ||
+    kind === 'select' ||
+    target?.isContentEditable === true ||
+    target?.getAttribute?.('contenteditable') === 'true'
+  );
 }
 
 export function navigationKey(key: string): NavigationKey | null {
   switch (key) {
-    case 'ArrowUp': return 'up';
-    case 'ArrowDown': return 'down';
-    case 'ArrowLeft': return 'left';
-    case 'ArrowRight': return 'right';
-    default: return null;
+    case 'ArrowUp':
+      return 'up';
+    case 'ArrowDown':
+      return 'down';
+    case 'ArrowLeft':
+      return 'left';
+    case 'ArrowRight':
+      return 'right';
+    default:
+      return null;
   }
 }
 
 export function isPrintableKey(event: KeyboardEventLike): boolean {
-  return typeof event.key === 'string'
-    && event.key.length === 1
-    && !event.ctrlKey
-    && !event.metaKey
-    && !event.altKey;
+  return (
+    typeof event.key === 'string' &&
+    event.key.length === 1 &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.altKey
+  );
 }

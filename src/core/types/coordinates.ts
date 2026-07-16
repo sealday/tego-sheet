@@ -87,9 +87,10 @@ export function assertCellRange(value: unknown): asserts value is CellRange {
   }
 }
 
-export function normalizeCellRange(
-  value: { readonly start: CellPoint; readonly end: CellPoint },
-): CellRange {
+export function normalizeCellRange(value: {
+  readonly start: CellPoint;
+  readonly end: CellPoint;
+}): CellRange {
   assertRangePoints(value);
 
   return {

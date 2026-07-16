@@ -8,14 +8,18 @@ const consumer = buildAndInstallPackedConsumer(repositoryRoot);
 
 try {
   runNodeTests(repositoryRoot, ['tests/ssr/public-entrypoints.test.mjs'], consumer);
-  execFileSync(process.execPath, [
-    resolve(repositoryRoot, 'node_modules/vitest/vitest.mjs'),
-    'run',
-    'tests/ssr/controller-epoch.test.tsx',
-  ], {
-    cwd: repositoryRoot,
-    stdio: 'inherit',
-  });
+  execFileSync(
+    process.execPath,
+    [
+      resolve(repositoryRoot, 'node_modules/vitest/vitest.mjs'),
+      'run',
+      'tests/ssr/controller-epoch.test.tsx',
+    ],
+    {
+      cwd: repositoryRoot,
+      stdio: 'inherit',
+    },
+  );
 } finally {
   consumer.cleanup();
 }

@@ -31,7 +31,7 @@ describe('A1 coordinates', () => {
     expect(renderA1(expected)).toBe(input);
   });
 
-  it.each(['', 'A0', '0A', 'A-1', 'A1x', '$A1', 'a1'])('rejects malformed point %j', input => {
+  it.each(['', 'A0', '0A', 'A-1', 'A1x', '$A1', 'a1'])('rejects malformed point %j', (input) => {
     expect(() => parseA1(input)).toThrow(TypeError);
   });
 
@@ -63,15 +63,13 @@ describe('A1 coordinates', () => {
     expect(() => shiftA1('A1', { row: -1, column: 0 })).toThrow(RangeError);
   });
 
-  it.each([
-    -1,
-    0.5,
-    Number.POSITIVE_INFINITY,
-    Number.MAX_SAFE_INTEGER + 1,
-  ])('rejects non-safe row and column coordinates: %s', coordinate => {
-    expect(() => assertCellPoint({ row: coordinate, column: 0 })).toThrow(TypeError);
-    expect(() => assertCellPoint({ row: 0, column: coordinate })).toThrow(TypeError);
-  });
+  it.each([-1, 0.5, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects non-safe row and column coordinates: %s',
+    (coordinate) => {
+      expect(() => assertCellPoint({ row: coordinate, column: 0 })).toThrow(TypeError);
+      expect(() => assertCellPoint({ row: 0, column: coordinate })).toThrow(TypeError);
+    },
+  );
 });
 
 describe('A1 ranges', () => {
@@ -81,8 +79,11 @@ describe('A1 ranges', () => {
     ['D5:B3', { start: { row: 2, column: 1 }, end: { row: 4, column: 3 } }],
   ])('parses and normalizes %s', (input, expected) => {
     expect(parseA1Range(input)).toEqual(expected);
-    expect(renderA1Range(expected)).toBe(expected.start.row === expected.end.row
-      && expected.start.column === expected.end.column ? 'A1' : 'B3:D5');
+    expect(renderA1Range(expected)).toBe(
+      expected.start.row === expected.end.row && expected.start.column === expected.end.column
+        ? 'A1'
+        : 'B3:D5',
+    );
   });
 
   it('normalizes, contains, intersects, unions, and iterates without mutation', () => {
@@ -135,7 +136,7 @@ describe('A1 ranges', () => {
 
   it.each([normalizeRange, iterateRange, rangeSize])(
     'rejects unsafe coordinates before range work in %s',
-    operation => {
+    (operation) => {
       const unsafe = {
         start: { row: 0, column: 0 },
         end: { row: Number.MAX_SAFE_INTEGER + 1, column: 0 },

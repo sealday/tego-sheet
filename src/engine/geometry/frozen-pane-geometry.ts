@@ -22,8 +22,12 @@ export function frozenQuadrants(
   freeze: FreezeState,
   viewport: ViewportMetrics,
 ): readonly FrozenQuadrant[] {
-  if (!Number.isSafeInteger(freeze.row) || freeze.row < 0
-    || !Number.isSafeInteger(freeze.column) || freeze.column < 0) {
+  if (
+    !Number.isSafeInteger(freeze.row) ||
+    freeze.row < 0 ||
+    !Number.isSafeInteger(freeze.column) ||
+    freeze.column < 0
+  ) {
     throw new RangeError('freeze indexes must be non-negative safe integers');
   }
   const data = dataViewportRect(viewport);

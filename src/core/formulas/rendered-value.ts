@@ -31,9 +31,7 @@ export const FORMAT_DEFINITIONS: readonly FormatDefinition[] = Object.freeze([
 ]);
 
 export function isFormulaError(value: unknown): value is FormulaErrorValue {
-  return value === '#CYCLE!'
-    || value === '#ERROR!'
-    || value === '#NAME?';
+  return value === '#CYCLE!' || value === '#ERROR!' || value === '#NAME?';
 }
 
 export function renderFormulaValue(value: RenderedValue | null | undefined): string {

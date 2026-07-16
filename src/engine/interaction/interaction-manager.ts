@@ -83,14 +83,24 @@ export interface InteractionManagerPorts {
   readonly globalTarget: EventTargetPort;
   readonly clipboard?: ClipboardPort;
   readonly getSnapshot: () => InteractionSnapshot;
-  readonly setSelection: (selection: SelectionState, source: 'keyboard' | 'pointer' | 'touch') => void;
+  readonly setSelection: (
+    selection: SelectionState,
+    source: 'keyboard' | 'pointer' | 'touch',
+  ) => void;
   readonly setScroll: (scroll: ScrollState, source: 'pointer' | 'touch') => void;
   readonly dispatch: (command: WorkbookCommand, source: ChangeSource) => InteractionDispatchOutcome;
   readonly readSelection: (selection: Selection) => readonly (readonly string[])[];
   readonly commitEditor: (selectionAfterCommit?: SelectionState) => boolean;
-  readonly requestEdit: (point: CellPoint, initialText: string | undefined, source: 'keyboard' | 'pointer' | 'touch') => void;
+  readonly requestEdit: (
+    point: CellPoint,
+    initialText: string | undefined,
+    source: 'keyboard' | 'pointer' | 'touch',
+  ) => void;
   readonly requestDelete: (selection: Selection, source: 'keyboard') => void;
-  readonly requestContextMenu: (point: Readonly<{ x: number; y: number }>, selection: Selection) => void;
+  readonly requestContextMenu: (
+    point: Readonly<{ x: number; y: number }>,
+    selection: Selection,
+  ) => void;
   readonly requestSurfaceFocus: () => void;
   readonly requestEnsureVisible: (point: CellPoint) => void;
   readonly requestResizePreview: (preview: ResizePreview | null) => void;
@@ -165,12 +175,14 @@ function samePoint(left: CellPoint, right: CellPoint): boolean {
 }
 
 function sameSelection(left: SelectionState, right: SelectionState): boolean {
-  return left.kind === right.kind
-    && samePoint(left.anchor, right.anchor)
-    && samePoint(left.focus, right.focus)
-    && samePoint(left.active, right.active)
-    && samePoint(left.range.start, right.range.start)
-    && samePoint(left.range.end, right.range.end);
+  return (
+    left.kind === right.kind &&
+    samePoint(left.anchor, right.anchor) &&
+    samePoint(left.focus, right.focus) &&
+    samePoint(left.active, right.active) &&
+    samePoint(left.range.start, right.range.start) &&
+    samePoint(left.range.end, right.range.end)
+  );
 }
 
 function publicSelection(snapshot: InteractionSnapshot): Selection {
@@ -216,7 +228,10 @@ function previousFloat(value: number): number {
   return floatBits.getFloat64(0);
 }
 
-function fillHandleHit(point: Readonly<{ x: number; y: number }>, snapshot: InteractionSnapshot): boolean {
+function fillHandleHit(
+  point: Readonly<{ x: number; y: number }>,
+  snapshot: InteractionSnapshot,
+): boolean {
   const anchor = overlayAnchor(snapshot.selection.range, snapshot.viewport);
   if (anchor === null) return false;
   const right = anchor.left + anchor.width;
@@ -266,12 +281,13 @@ export class InteractionManager {
     this.touch = new TouchGesture({
       now: this.ports.now ?? (() => Date.now()),
       tap: (point, double) => this.tap(point, double),
-      swipe: delta => this.scrollContinuous(localDelta(delta, this.ports.root), 'touch'),
-      ...(this.ports.setTimer === undefined ? {} : {
-        schedule: (callback: () => void, delay: number): (() => void) => (
-          this.scheduleTimer(callback, delay)
-        ),
-      }),
+      swipe: (delta) => this.scrollContinuous(localDelta(delta, this.ports.root), 'touch'),
+      ...(this.ports.setTimer === undefined
+        ? {}
+        : {
+            schedule: (callback: () => void, delay: number): (() => void) =>
+              this.scheduleTimer(callback, delay),
+          }),
     });
     try {
       this.bind();
@@ -354,13 +370,16 @@ export class InteractionManager {
     }
     if (this.internalClipboard !== null) {
       const state = this.internalClipboard;
-      const outcome = this.ports.dispatch({
-        type: 'paste-internal',
-        source: state.selection,
-        target,
-        mode: state.cut ? 'all' : mode,
-        cut: state.cut,
-      }, source);
+      const outcome = this.ports.dispatch(
+        {
+          type: 'paste-internal',
+          source: state.selection,
+          target,
+          mode: state.cut ? 'all' : mode,
+          cut: state.cut,
+        },
+        source,
+      );
       if (state.cut && outcome.status === 'committed') this.internalClipboard = null;
       return true;
     }
@@ -390,28 +409,37 @@ export class InteractionManager {
     const snapshot = this.ports.getSnapshot();
     if (snapshot.readOnly) return false;
     const { selection, viewport, sheet } = snapshot;
-    if (selection.kind === 'row'
-      || (selection.range.start.column === 0
-        && selection.range.end.column === viewport.model.columnCount - 1)) {
-      this.ports.dispatch({
-        type: 'set-row-hidden',
-        sheet,
-        row: selection.range.start.row,
-        count: selection.range.end.row - selection.range.start.row + 1,
-        hidden: true,
-      }, 'pointer');
+    if (
+      selection.kind === 'row' ||
+      (selection.range.start.column === 0 &&
+        selection.range.end.column === viewport.model.columnCount - 1)
+    ) {
+      this.ports.dispatch(
+        {
+          type: 'set-row-hidden',
+          sheet,
+          row: selection.range.start.row,
+          count: selection.range.end.row - selection.range.start.row + 1,
+          hidden: true,
+        },
+        'pointer',
+      );
       return true;
     }
-    if (selection.kind === 'column'
-      || (selection.range.start.row === 0
-        && selection.range.end.row === viewport.model.rowCount - 1)) {
-      this.ports.dispatch({
-        type: 'set-column-hidden',
-        sheet,
-        column: selection.range.start.column,
-        count: selection.range.end.column - selection.range.start.column + 1,
-        hidden: true,
-      }, 'pointer');
+    if (
+      selection.kind === 'column' ||
+      (selection.range.start.row === 0 && selection.range.end.row === viewport.model.rowCount - 1)
+    ) {
+      this.ports.dispatch(
+        {
+          type: 'set-column-hidden',
+          sheet,
+          column: selection.range.start.column,
+          count: selection.range.end.column - selection.range.start.column + 1,
+          hidden: true,
+        },
+        'pointer',
+      );
       return true;
     }
     return false;
@@ -425,16 +453,31 @@ export class InteractionManager {
     if (run === null) return false;
     const [start, count] = run;
     if (count > MAX_STRUCTURE_AXIS_CHANGES) {
-      this.ports.requestError(invalidCommand(
-        `structure workload exceeds the ${MAX_STRUCTURE_AXIS_CHANGES}-index operation limit`,
-      ));
+      this.ports.requestError(
+        invalidCommand(
+          `structure workload exceeds the ${MAX_STRUCTURE_AXIS_CHANGES}-index operation limit`,
+        ),
+      );
       return false;
     }
-    this.ports.dispatch(axis === 'row' ? {
-      type: 'set-row-hidden', sheet: snapshot.sheet, row: start, count, hidden: false,
-    } : {
-      type: 'set-column-hidden', sheet: snapshot.sheet, column: start, count, hidden: false,
-    }, 'pointer');
+    this.ports.dispatch(
+      axis === 'row'
+        ? {
+            type: 'set-row-hidden',
+            sheet: snapshot.sheet,
+            row: start,
+            count,
+            hidden: false,
+          }
+        : {
+            type: 'set-column-hidden',
+            sheet: snapshot.sheet,
+            column: start,
+            count,
+            hidden: false,
+          },
+      'pointer',
+    );
     return true;
   }
 
@@ -466,50 +509,88 @@ export class InteractionManager {
       const event = eventLike(value);
       if (this.isInteractionSurfaceEvent(event)) handler(event);
     };
-    this.registry.listen(root, 'focusin', value => {
+    this.registry.listen(root, 'focusin', (value) => {
       const event = eventLike(value);
       if (this.isInteractionSurfaceEvent(event)) this.focused = true;
       else if (this.isChromeEvent(event)) this.relinquishToChrome();
       else this.blur();
     });
-    this.registry.listen(root, 'focusout', value => {
+    this.registry.listen(root, 'focusout', (value) => {
       const event = eventLike(value);
       if (!targetInside(root, event.relatedTarget)) this.blur();
     });
-    this.registry.listen(root, 'pointerdown', surface(event => this.pointerDown(event)));
-    this.registry.listen(root, 'dblclick', surface(event => this.doubleClick(event)));
-    this.registry.listen(root, 'contextmenu', surface(event => this.contextMenu(event)));
-    this.registry.listen(root, 'wheel', surface(event => this.wheel(event)));
-    this.registry.listen(root, 'touchstart', surface(event => {
-      this.focused = true;
-      this.touch.startGesture(event.touches ?? []);
-    }));
-    this.registry.listen(root, 'touchmove', surface(event => {
-      if (this.touch.moveGesture(event.touches ?? []) === true) event.preventDefault?.();
-    }));
-    this.registry.listen(root, 'touchend', surface(event => {
-      this.touch.endGesture(event.changedTouches ?? [], event.touches ?? []);
-    }));
-    this.registry.listen(root, 'touchcancel', surface(() => this.touch.cancel()));
-    this.registry.listen(globalTarget, 'pointerdown', value => {
+    this.registry.listen(
+      root,
+      'pointerdown',
+      surface((event) => this.pointerDown(event)),
+    );
+    this.registry.listen(
+      root,
+      'dblclick',
+      surface((event) => this.doubleClick(event)),
+    );
+    this.registry.listen(
+      root,
+      'contextmenu',
+      surface((event) => this.contextMenu(event)),
+    );
+    this.registry.listen(
+      root,
+      'wheel',
+      surface((event) => this.wheel(event)),
+    );
+    this.registry.listen(
+      root,
+      'touchstart',
+      surface((event) => {
+        this.focused = true;
+        this.touch.startGesture(event.touches ?? []);
+      }),
+    );
+    this.registry.listen(
+      root,
+      'touchmove',
+      surface((event) => {
+        if (this.touch.moveGesture(event.touches ?? []) === true) event.preventDefault?.();
+      }),
+    );
+    this.registry.listen(
+      root,
+      'touchend',
+      surface((event) => {
+        this.touch.endGesture(event.changedTouches ?? [], event.touches ?? []);
+      }),
+    );
+    this.registry.listen(
+      root,
+      'touchcancel',
+      surface(() => this.touch.cancel()),
+    );
+    this.registry.listen(globalTarget, 'pointerdown', (value) => {
       const event = eventLike(value);
       if (this.isChromeEvent(event)) this.relinquishToChrome();
       else if (!this.isInteractionSurfaceEvent(event)) this.blur();
     });
-    this.registry.listen(globalTarget, 'touchstart', value => {
+    this.registry.listen(globalTarget, 'touchstart', (value) => {
       const event = eventLike(value);
       if (this.isChromeEvent(event)) this.relinquishToChrome();
       else if (!this.isInteractionSurfaceEvent(event)) this.blur();
     });
-    this.registry.listen(globalTarget, 'pointermove', event => this.pointerMove(eventLike(event)));
+    this.registry.listen(globalTarget, 'pointermove', (event) =>
+      this.pointerMove(eventLike(event)),
+    );
     this.registry.listen(globalTarget, 'pointerup', () => this.pointerUp());
     this.registry.listen(globalTarget, 'pointercancel', () => this.cancelDrag());
     this.registry.listen(globalTarget, 'blur', () => this.blur());
     this.registry.listen(globalTarget, 'resize', () => this.ports.requestViewportResize?.());
-    this.registry.listen(globalTarget, 'keydown', event => this.keyDown(eventLike(event)));
-    this.registry.listen(globalTarget, 'copy', event => this.clipboardEvent(eventLike(event), false));
-    this.registry.listen(globalTarget, 'cut', event => this.clipboardEvent(eventLike(event), true));
-    this.registry.listen(globalTarget, 'paste', event => this.pasteEvent(eventLike(event)));
+    this.registry.listen(globalTarget, 'keydown', (event) => this.keyDown(eventLike(event)));
+    this.registry.listen(globalTarget, 'copy', (event) =>
+      this.clipboardEvent(eventLike(event), false),
+    );
+    this.registry.listen(globalTarget, 'cut', (event) =>
+      this.clipboardEvent(eventLike(event), true),
+    );
+    this.registry.listen(globalTarget, 'paste', (event) => this.pasteEvent(eventLike(event)));
   }
 
   private isInteractionSurfaceEvent(event: InteractionEventLike): boolean {
@@ -521,8 +602,10 @@ export class InteractionManager {
   }
 
   private classifyInteractionTarget(event: InteractionEventLike): InteractionTargetKind {
-    return this.ports.classifyInteractionTarget?.(event.target)
-      ?? (currentTargetInside(this.ports.root, event) ? 'surface' : 'outside');
+    return (
+      this.ports.classifyInteractionTarget?.(event.target) ??
+      (currentTargetInside(this.ports.root, event) ? 'surface' : 'outside')
+    );
   }
 
   private relinquishToChrome(): void {
@@ -530,7 +613,10 @@ export class InteractionManager {
     this.cancelDrag(false);
   }
 
-  private setSelection(selection: SelectionState, source: 'keyboard' | 'pointer' | 'touch'): boolean {
+  private setSelection(
+    selection: SelectionState,
+    source: 'keyboard' | 'pointer' | 'touch',
+  ): boolean {
     if (!this.active) return false;
     const current = this.ports.getSnapshot().selection;
     if (sameSelection(current, selection)) return false;
@@ -561,9 +647,11 @@ export class InteractionManager {
       this.ports.requestSurfaceFocus();
       const range = resizeRange(handle, snapshot.selection);
       if (range[1] > MAX_STRUCTURE_AXIS_CHANGES) {
-        this.ports.requestError(invalidCommand(
-          `structure workload exceeds the ${MAX_STRUCTURE_AXIS_CHANGES}-index operation limit`,
-        ));
+        this.ports.requestError(
+          invalidCommand(
+            `structure workload exceeds the ${MAX_STRUCTURE_AXIS_CHANGES}-index operation limit`,
+          ),
+        );
         return;
       }
       this.drag = {
@@ -578,9 +666,10 @@ export class InteractionManager {
     }
     const region = regionAtClientPoint(event, this.ports.root, snapshot.viewport);
     if (region === null) return;
-    const selection = event.shiftKey === true
-      ? extendToRegion(snapshot.selection, region, snapshot.viewport)
-      : selectionForRegion(region, snapshot.viewport);
+    const selection =
+      event.shiftKey === true
+        ? extendToRegion(snapshot.selection, region, snapshot.viewport)
+        : selectionForRegion(region, snapshot.viewport);
     if (!this.ports.commitEditor(selection)) return;
     this.ports.requestSurfaceFocus();
     this.setSelection(selection, 'pointer');
@@ -607,9 +696,10 @@ export class InteractionManager {
     }
     const point = localPoint(event, this.ports.root);
     const position = this.drag.handle.axis === 'row' ? point.y : point.x;
-    const minimum = this.drag.handle.axis === 'row'
-      ? this.ports.minRowHeight ?? 5
-      : this.ports.minColumnWidth ?? 20;
+    const minimum =
+      this.drag.handle.axis === 'row'
+        ? (this.ports.minRowHeight ?? 5)
+        : (this.ports.minColumnWidth ?? 20);
     this.drag.size = Math.max(minimum, this.drag.handle.size + position - this.drag.start);
     const [start, count] = this.drag.range;
     this.ports.requestResizePreview({
@@ -627,16 +717,19 @@ export class InteractionManager {
       if (drag.target === null) return;
       const snapshot = this.ports.getSnapshot();
       if (snapshot.readOnly) return;
-      this.ports.dispatch({
-        type: 'autofill',
-        source: drag.source,
-        target: {
-          sheet: drag.source.sheet,
-          range: drag.target,
-          active: drag.target.end,
+      this.ports.dispatch(
+        {
+          type: 'autofill',
+          source: drag.source,
+          target: {
+            sheet: drag.source.sheet,
+            range: drag.target,
+            active: drag.target.end,
+          },
+          mode: 'all',
         },
-        mode: 'all',
-      }, 'pointer');
+        'pointer',
+      );
       return;
     }
     if (this.drag?.mode !== 'resize') {
@@ -649,11 +742,24 @@ export class InteractionManager {
     const snapshot = this.ports.getSnapshot();
     if (snapshot.readOnly) return;
     const [start, count] = drag.range;
-    this.ports.dispatch(drag.handle.axis === 'row' ? {
-      type: 'set-row-height', sheet: snapshot.sheet, row: start, count, height: drag.size,
-    } : {
-      type: 'set-column-width', sheet: snapshot.sheet, column: start, count, width: drag.size,
-    }, 'pointer');
+    this.ports.dispatch(
+      drag.handle.axis === 'row'
+        ? {
+            type: 'set-row-height',
+            sheet: snapshot.sheet,
+            row: start,
+            count,
+            height: drag.size,
+          }
+        : {
+            type: 'set-column-width',
+            sheet: snapshot.sheet,
+            column: start,
+            count,
+            width: drag.size,
+          },
+      'pointer',
+    );
   }
 
   private cancelDrag(cancelTransient = true): void {
@@ -675,7 +781,8 @@ export class InteractionManager {
         errors.push(error);
       }
     }
-    if (errors.length > 0) throw new AggregateError(errors, 'Failed to cancel transient interactions');
+    if (errors.length > 0)
+      throw new AggregateError(errors, 'Failed to cancel transient interactions');
   }
 
   private doubleClick(event: InteractionEventLike): void {
@@ -703,9 +810,10 @@ export class InteractionManager {
     const snapshot = this.ports.getSnapshot();
     const region = regionAtClientPoint(event, this.ports.root, snapshot.viewport);
     if (region === null) return;
-    const selection = region.kind === 'cell' && selectionContains(snapshot.selection, region.cell)
-      ? snapshot.selection
-      : selectionForRegion(region, snapshot.viewport);
+    const selection =
+      region.kind === 'cell' && selectionContains(snapshot.selection, region.cell)
+        ? snapshot.selection
+        : selectionForRegion(region, snapshot.viewport);
     if (!this.ports.commitEditor(selection)) return;
     if (region.kind === 'cell' && !selectionContains(snapshot.selection, region.cell)) {
       this.setSelection(selection, 'pointer');
@@ -730,27 +838,46 @@ export class InteractionManager {
       const next = modifier
         ? this.edgeSelection(snapshot, direction, event.shiftKey === true)
         : event.shiftKey === true
-          ? extendSelection(snapshot.selection, this.adjacentFocus(snapshot, direction), snapshot.viewport.model)
+          ? extendSelection(
+              snapshot.selection,
+              this.adjacentFocus(snapshot, direction),
+              snapshot.viewport.model,
+            )
           : moveSelection(snapshot.selection, direction, snapshot.viewport.model);
       if (this.ports.commitEditor(next)) {
         handled = this.setSelection(next, 'keyboard');
       }
     } else if (modifier && key === ' ') {
       const active = snapshot.selection.active;
-      handled = this.setSelection(createRangeSelection(active, active, {
-        start: { row: 0, column: active.column },
-        end: { row: snapshot.viewport.model.rowCount - 1, column: active.column },
-      }, 'column'), 'keyboard');
+      handled = this.setSelection(
+        createRangeSelection(
+          active,
+          active,
+          {
+            start: { row: 0, column: active.column },
+            end: { row: snapshot.viewport.model.rowCount - 1, column: active.column },
+          },
+          'column',
+        ),
+        'keyboard',
+      );
     } else if (!modifier && event.shiftKey === true && key === ' ') {
       const active = snapshot.selection.active;
-      handled = this.setSelection(createRangeSelection(active, active, {
-        start: { row: active.row, column: 0 },
-        end: { row: active.row, column: snapshot.viewport.model.columnCount - 1 },
-      }, 'row'), 'keyboard');
+      handled = this.setSelection(
+        createRangeSelection(
+          active,
+          active,
+          {
+            start: { row: active.row, column: 0 },
+            end: { row: active.row, column: snapshot.viewport.model.columnCount - 1 },
+          },
+          'row',
+        ),
+        'keyboard',
+      );
     } else if (key === 'Tab' || key === 'Enter') {
-      const move = key === 'Tab'
-        ? event.shiftKey ? 'left' : 'right'
-        : event.shiftKey ? 'up' : 'down';
+      const move =
+        key === 'Tab' ? (event.shiftKey ? 'left' : 'right') : event.shiftKey ? 'up' : 'down';
       const next = moveSelection(snapshot.selection, move, snapshot.viewport.model);
       if (this.ports.commitEditor(next)) {
         handled = this.setSelection(next, 'keyboard');
@@ -763,10 +890,12 @@ export class InteractionManager {
       this.ports.requestCancelTransient();
       handled = true;
     } else if (key === 'F2') {
-      if (!snapshot.readOnly) this.ports.requestEdit(snapshot.selection.active, undefined, 'keyboard');
+      if (!snapshot.readOnly)
+        this.ports.requestEdit(snapshot.selection.active, undefined, 'keyboard');
       handled = !snapshot.readOnly;
     } else if (modifier && lower === 'z') {
-      if (!snapshot.readOnly) this.ports.dispatch({ type: event.shiftKey ? 'redo' : 'undo' }, 'keyboard');
+      if (!snapshot.readOnly)
+        this.ports.dispatch({ type: event.shiftKey ? 'redo' : 'undo' }, 'keyboard');
       handled = !snapshot.readOnly;
     } else if (modifier && lower === 'y') {
       if (!snapshot.readOnly) this.ports.dispatch({ type: 'redo' }, 'keyboard');
@@ -778,13 +907,21 @@ export class InteractionManager {
       handled = !snapshot.readOnly;
     } else if (modifier && lower === 'a') {
       const active = snapshot.selection.active;
-      handled = this.setSelection(createRangeSelection(active, active, {
-        start: { row: 0, column: 0 },
-        end: {
-          row: snapshot.viewport.model.rowCount - 1,
-          column: snapshot.viewport.model.columnCount - 1,
-        },
-      }, 'all'), 'keyboard');
+      handled = this.setSelection(
+        createRangeSelection(
+          active,
+          active,
+          {
+            start: { row: 0, column: 0 },
+            end: {
+              row: snapshot.viewport.model.rowCount - 1,
+              column: snapshot.viewport.model.columnCount - 1,
+            },
+          },
+          'all',
+        ),
+        'keyboard',
+      );
     } else if (isPrintableKey(event)) {
       if (!snapshot.readOnly) this.ports.requestEdit(snapshot.selection.active, key, 'keyboard');
       handled = !snapshot.readOnly;
@@ -792,16 +929,23 @@ export class InteractionManager {
     if (handled) event.preventDefault?.();
   }
 
-  private adjacentFocus(snapshot: InteractionSnapshot, direction: 'up' | 'down' | 'left' | 'right'): CellPoint {
+  private adjacentFocus(
+    snapshot: InteractionSnapshot,
+    direction: 'up' | 'down' | 'left' | 'right',
+  ): CellPoint {
     const focus = snapshot.selection.focus;
     const model = snapshot.viewport.model;
     const visualRow = model.visualIndexOfRow(focus.row);
-    const nextVisualRow = Math.min(model.rowCount - 1, Math.max(0,
-      visualRow + (direction === 'down' ? 1 : direction === 'up' ? -1 : 0)));
+    const nextVisualRow = Math.min(
+      model.rowCount - 1,
+      Math.max(0, visualRow + (direction === 'down' ? 1 : direction === 'up' ? -1 : 0)),
+    );
     return {
       row: model.logicalRowAtVisualIndex(nextVisualRow),
-      column: Math.min(model.columnCount - 1, Math.max(0,
-        focus.column + (direction === 'right' ? 1 : direction === 'left' ? -1 : 0))),
+      column: Math.min(
+        model.columnCount - 1,
+        Math.max(0, focus.column + (direction === 'right' ? 1 : direction === 'left' ? -1 : 0)),
+      ),
     };
   }
 
@@ -812,12 +956,18 @@ export class InteractionManager {
   ): SelectionState {
     const model = snapshot.viewport.model;
     const point = {
-      row: direction === 'up' ? model.logicalRowAtVisualIndex(0)
-        : direction === 'down' ? model.logicalRowAtVisualIndex(model.rowCount - 1)
-          : snapshot.selection.active.row,
-      column: direction === 'left' ? 0
-        : direction === 'right' ? model.columnCount - 1
-          : snapshot.selection.active.column,
+      row:
+        direction === 'up'
+          ? model.logicalRowAtVisualIndex(0)
+          : direction === 'down'
+            ? model.logicalRowAtVisualIndex(model.rowCount - 1)
+            : snapshot.selection.active.row,
+      column:
+        direction === 'left'
+          ? 0
+          : direction === 'right'
+            ? model.columnCount - 1
+            : snapshot.selection.active.column,
     };
     return extend
       ? extendSelection(snapshot.selection, point, model)
@@ -828,9 +978,10 @@ export class InteractionManager {
     const deltaX = Number(event.deltaX ?? 0);
     const deltaY = Number(event.deltaY ?? 0);
     if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) return;
-    const delta = Math.abs(deltaX) > Math.abs(deltaY)
-      ? { x: Math.sign(deltaX), y: 0 }
-      : { x: 0, y: Math.sign(deltaY) };
+    const delta =
+      Math.abs(deltaX) > Math.abs(deltaY)
+        ? { x: Math.sign(deltaX), y: 0 }
+        : { x: 0, y: Math.sign(deltaY) };
     if ((delta.x !== 0 || delta.y !== 0) && this.scrollStep(delta)) event.preventDefault?.();
   }
 
@@ -838,8 +989,14 @@ export class InteractionManager {
     const snapshot = this.ports.getSnapshot();
     const current = snapshot.viewport.scroll;
     const next = {
-      x: direction.x === 0 ? current.x : this.axisStep('column', current.x, direction.x, snapshot.viewport),
-      y: direction.y === 0 ? current.y : this.axisStep('row', current.y, direction.y, snapshot.viewport),
+      x:
+        direction.x === 0
+          ? current.x
+          : this.axisStep('column', current.x, direction.x, snapshot.viewport),
+      y:
+        direction.y === 0
+          ? current.y
+          : this.axisStep('row', current.y, direction.y, snapshot.viewport),
     };
     const clamped = clampScroll(next, snapshot.viewport);
     if (clamped.x === current.x && clamped.y === current.y) return false;
@@ -847,7 +1004,12 @@ export class InteractionManager {
     return true;
   }
 
-  private axisStep(axis: ResizeAxis, scroll: number, direction: number, viewport: ViewportMetrics): number {
+  private axisStep(
+    axis: ResizeAxis,
+    scroll: number,
+    direction: number,
+    viewport: ViewportMetrics,
+  ): number {
     const model = viewport.model;
     const frozen = axis === 'row' ? viewport.freeze.row : viewport.freeze.column;
     const count = axis === 'row' ? model.rowCount : model.columnCount;
@@ -867,7 +1029,8 @@ export class InteractionManager {
   private scrollContinuous(delta: Readonly<{ x: number; y: number }>, source: 'touch'): boolean {
     const snapshot = this.ports.getSnapshot();
     const next = scrollBy(snapshot.viewport.scroll, delta, snapshot.viewport);
-    if (next.x === snapshot.viewport.scroll.x && next.y === snapshot.viewport.scroll.y) return false;
+    if (next.x === snapshot.viewport.scroll.x && next.y === snapshot.viewport.scroll.y)
+      return false;
     this.ports.setScroll(next, source);
     return true;
   }
@@ -899,20 +1062,26 @@ export class InteractionManager {
   }
 
   private dispatchExternalPaste(text: string, target: Selection, source: ChangeSource): void {
-    this.ports.dispatch({
-      type: 'paste-external',
-      target,
-      values: parseClipboardMatrix(text),
-    }, source);
+    this.ports.dispatch(
+      {
+        type: 'paste-external',
+        target,
+        values: parseClipboardMatrix(text),
+      },
+      source,
+    );
   }
 
   private scheduleTimer(callback: () => void, delay: number): () => void {
     if (this.ports.setTimer === undefined) return () => {};
     let release = (): void => {};
-    const cancel = this.ports.setTimer(this.registry.guard(() => {
-      release();
-      callback();
-    }), delay);
+    const cancel = this.ports.setTimer(
+      this.registry.guard(() => {
+        release();
+        callback();
+      }),
+      delay,
+    );
     release = this.registry.timer(cancel);
     return release;
   }

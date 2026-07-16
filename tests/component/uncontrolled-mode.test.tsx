@@ -33,9 +33,7 @@ it('owns uncontrolled state, reads defaultValue once, and isolates every returne
   const initial = [{ name: 'Initial' }];
   const onChange = vi.fn();
   const ref = createRef<TegoSheetHandle>();
-  const rendered = render(
-    <TegoSheet ref={ref} defaultValue={initial} onChange={onChange} />,
-  );
+  const rendered = render(<TegoSheet ref={ref} defaultValue={initial} onChange={onChange} />);
 
   await waitFor(() => expect(ref.current).not.toBeNull());
   const sheet = ref.current!.getValue()[0];
@@ -52,7 +50,7 @@ it('owns uncontrolled state, reads defaultValue once, and isolates every returne
   const firstRead = ref.current!.getValue() as { name?: string }[];
   firstRead[0]!.name = 'Mutated result';
 
-  expect(ref.current!.getValue().map(value => value.name)).toEqual(['Initial', 'Owned']);
+  expect(ref.current!.getValue().map((value) => value.name)).toEqual(['Initial', 'Owned']);
   expect(onChange).toHaveBeenCalledTimes(2);
   expect(onChange.mock.calls[1]![0]).not.toBe(ref.current!.getValue());
 });
@@ -82,8 +80,8 @@ it('keeps two mounted uncontrolled components isolated', async () => {
   });
 
   first.current!.addSheet('First only');
-  expect(first.current!.getValue().map(sheet => sheet.name)).toEqual(['First', 'First only']);
-  expect(second.current!.getValue().map(sheet => sheet.name)).toEqual(['Second']);
+  expect(first.current!.getValue().map((sheet) => sheet.name)).toEqual(['First', 'First only']);
+  expect(second.current!.getValue().map((sheet) => sheet.name)).toEqual(['Second']);
 
   const roots = rendered.container.querySelectorAll<HTMLElement>('[data-tego-sheet]');
   fireEvent.focusIn(roots[0]!);
@@ -96,12 +94,14 @@ it('keeps two mounted uncontrolled components isolated', async () => {
 it('rejects an invalid mount-only active sheet index as a contract error', () => {
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
-  expect(() => render(
-    <TegoSheet defaultValue={[{ name: 'Only' }]} initialActiveSheetIndex={1} />,
-  )).toThrowError(expect.objectContaining({
-    code: 'INVALID_COMMAND',
-    recoverable: false,
-  }));
+  expect(() =>
+    render(<TegoSheet defaultValue={[{ name: 'Only' }]} initialActiveSheetIndex={1} />),
+  ).toThrowError(
+    expect.objectContaining({
+      code: 'INVALID_COMMAND',
+      recoverable: false,
+    }),
+  );
 });
 
 it('validates initialActiveSheetIndex only against the mount workbook', async () => {
@@ -122,7 +122,7 @@ it('validates initialActiveSheetIndex only against the mount workbook', async ()
   const initialB = onSelectionChange.mock.lastCall?.[0].sheet;
 
   expect(() => ref.current!.deleteSheet(initialB)).not.toThrow();
-  expect(ref.current!.getValue().map(sheet => sheet.name)).toEqual(['A']);
+  expect(ref.current!.getValue().map((sheet) => sheet.name)).toEqual(['A']);
 });
 
 it('selects the next sheet after a middle deletion, then the preceding sheet at the tail', async () => {
@@ -214,7 +214,7 @@ it('preserves an active-sheet decision made reentrantly from a delete callback',
 
   expect(ref.current).toBe(captured);
   expect(callbackOrder).toEqual(['change', 'active']);
-  expect(captured.getValue().map(sheet => sheet.name)).toEqual(['A', 'C']);
+  expect(captured.getValue().map((sheet) => sheet.name)).toEqual(['A', 'C']);
   const root = rendered.container.querySelector<HTMLElement>('[data-tego-sheet]')!;
   fireEvent.focusIn(root);
   fireEvent.keyDown(window, { key: 'ArrowRight' });
@@ -253,7 +253,7 @@ it('preserves a nested add-and-activate decision made from the first add callbac
 
   expect(ref.current).toBe(captured);
   expect(callbackOrder).toEqual(['change:sheet', 'change:sheet', 'active']);
-  expect(captured.getValue().map(sheet => sheet.name)).toEqual(['A', 'B']);
+  expect(captured.getValue().map((sheet) => sheet.name)).toEqual(['A', 'B']);
   const root = rendered.container.querySelector<HTMLElement>('[data-tego-sheet]')!;
   fireEvent.focusIn(root);
   fireEvent.keyDown(window, { key: 'ArrowRight' });
@@ -412,7 +412,7 @@ it('can add and delete the first sheet in one imperative batch', async () => {
   expect(ref.current).toBe(captured);
   expect(captured.getValue()).toEqual([]);
   expect(onChange).toHaveBeenCalledTimes(2);
-  expect(onChange.mock.calls.map(call => call[1].kind)).toEqual(['sheet', 'sheet']);
+  expect(onChange.mock.calls.map((call) => call[1].kind)).toEqual(['sheet', 'sheet']);
 });
 
 it('does not let an aborted render overwrite the committed handle runtime', async () => {
@@ -461,9 +461,7 @@ it('keeps one handle object live for the mounted epoch and deactivates captured 
   const firstChange = vi.fn();
   const latestChange = vi.fn();
   const ref = createRef<TegoSheetHandle>();
-  const rendered = render(
-    <TegoSheet ref={ref} defaultValue={[]} onChange={firstChange} />,
-  );
+  const rendered = render(<TegoSheet ref={ref} defaultValue={[]} onChange={firstChange} />);
   await waitFor(() => expect(ref.current).not.toBeNull());
   const captured = ref.current!;
   const a = captured.addSheet('A');
@@ -488,14 +486,12 @@ it('keeps one handle object live for the mounted epoch and deactivates captured 
   captured.deleteSheet(b);
   captured.recalculateLayout();
   expect(ref.current).toBe(captured);
-  expect(captured.getValue().map(sheet => sheet.name)).toEqual(['A']);
+  expect(captured.getValue().map((sheet) => sheet.name)).toEqual(['A']);
 
   const changesBeforeUnmount = latestChange.mock.calls.length;
   rendered.unmount();
   expect(ref.current).toBeNull();
-  expect(() => captured.setCellText({ sheet: a, row: 0, column: 0 }, 'late')).toThrow(
-    /inactive/i,
-  );
+  expect(() => captured.setCellText({ sheet: a, row: 0, column: 0 }, 'late')).toThrow(/inactive/i);
   expect(() => captured.addSheet('late')).toThrow(/inactive/i);
   expect(latestChange).toHaveBeenCalledTimes(changesBeforeUnmount);
 });

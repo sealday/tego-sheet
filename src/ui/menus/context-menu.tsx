@@ -7,10 +7,10 @@ export type ContextMenuAction =
   | ToolbarAction
   | { readonly type: 'copy' | 'cut' | 'paste' | 'paste-value' | 'paste-format' | 'clear-contents' }
   | {
-    readonly type: 'set-cell-metadata';
-    readonly property: 'editable' | 'printable';
-    readonly value: boolean;
-  };
+      readonly type: 'set-cell-metadata';
+      readonly property: 'editable' | 'printable';
+      readonly value: boolean;
+    };
 
 interface ContextMenuItem {
   readonly id: string;
@@ -96,14 +96,14 @@ export function ContextMenu(props: {
       tabIndex={-1}
       className="tego-sheet__context-menu"
       style={{ position: 'absolute', left: props.point.x, top: props.point.y }}
-      onBlur={event => {
+      onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget)) props.onClose();
       }}
-      onKeyDown={event => {
+      onKeyDown={(event) => {
         if (event.key === 'Escape') props.onClose();
       }}
     >
-      {ACTIONS.map(item => (
+      {ACTIONS.map((item) => (
         <button
           key={item.id}
           type="button"
@@ -113,12 +113,24 @@ export function ContextMenu(props: {
             props.execute(item.action);
             props.onClose();
           }}
-        >{props.t(`context.${item.id}`, item.label)}</button>
+        >
+          {props.t(`context.${item.id}`, item.label)}
+        </button>
       ))}
-      <button type="button" role="menuitem" disabled={props.disabled.has('set-validation')} onClick={props.onOpenValidation}>
+      <button
+        type="button"
+        role="menuitem"
+        disabled={props.disabled.has('set-validation')}
+        onClick={props.onOpenValidation}
+      >
         {props.t('toolbar.validation', 'Data validation')}
       </button>
-      <button type="button" role="menuitem" disabled={props.disabled.has('set-filter')} onClick={props.onOpenFilter}>
+      <button
+        type="button"
+        role="menuitem"
+        disabled={props.disabled.has('set-filter')}
+        onClick={props.onOpenFilter}
+      >
         {props.t('toolbar.filter', 'Filter')}
       </button>
     </div>

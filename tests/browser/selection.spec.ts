@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test';
 import { cellPoint, openHarness, selection } from './support';
 
-test('@parity:selection.pointer-drag selects the exact canvas range under browser layout', async ({ page }) => {
+test('@parity:selection.pointer-drag selects the exact canvas range under browser layout', async ({
+  page,
+}) => {
   await openHarness(page);
   const start = await cellPoint(page, 1, 1);
   const end = await cellPoint(page, 3, 2);
@@ -9,19 +11,25 @@ test('@parity:selection.pointer-drag selects the exact canvas range under browse
   await page.mouse.down();
   await page.mouse.move(end.x, end.y);
   await page.mouse.up();
-  await expect.poll(() => selection(page)).toMatchObject({
-    active: { row: 3, column: 2 },
-    range: { start: { row: 1, column: 1 }, end: { row: 3, column: 2 } },
-  });
+  await expect
+    .poll(() => selection(page))
+    .toMatchObject({
+      active: { row: 3, column: 2 },
+      range: { start: { row: 1, column: 1 }, end: { row: 3, column: 2 } },
+    });
   await page.mouse.click(end.x, end.y);
   await page.keyboard.press('ArrowLeft');
-  await expect.poll(() => selection(page)).toMatchObject({
-    active: { row: 3, column: 1 },
-    range: { start: { row: 3, column: 1 }, end: { row: 3, column: 1 } },
-  });
+  await expect
+    .poll(() => selection(page))
+    .toMatchObject({
+      active: { row: 3, column: 1 },
+      range: { start: { row: 3, column: 1 }, end: { row: 3, column: 1 } },
+    });
   await page.keyboard.press('Shift+ArrowUp');
-  await expect.poll(() => selection(page)).toMatchObject({
-    active: { row: 2, column: 1 },
-    range: { start: { row: 2, column: 1 }, end: { row: 3, column: 1 } },
-  });
+  await expect
+    .poll(() => selection(page))
+    .toMatchObject({
+      active: { row: 2, column: 1 },
+      range: { start: { row: 2, column: 1 }, end: { row: 3, column: 1 } },
+    });
 });

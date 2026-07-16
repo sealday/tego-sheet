@@ -1,12 +1,6 @@
 import { expect, it } from 'vitest';
 import type { LocaleDefinition, LocaleMessages } from '../../../src';
-import {
-  de,
-  en,
-  nl,
-  resolveLocale,
-  zhCN,
-} from '../../../src/locales';
+import { de, en, nl, resolveLocale, zhCN } from '../../../src/locales';
 
 function message(messages: LocaleMessages, path: string): string | undefined {
   let current: string | LocaleMessages = messages;

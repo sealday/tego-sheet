@@ -3,7 +3,20 @@ import type { A1Reference } from '../coordinates/a1';
 import { tokenizeFormula } from './tokenizer';
 import type { FormulaToken, FormulaTokenKind } from './tokenizer';
 
-export type BinaryOperator = '+' | '-' | '*' | '/' | '&' | '=' | '==' | '<>' | '!=' | '>' | '>=' | '<' | '<=';
+export type BinaryOperator =
+  | '+'
+  | '-'
+  | '*'
+  | '/'
+  | '&'
+  | '='
+  | '=='
+  | '<>'
+  | '!='
+  | '>'
+  | '>='
+  | '<'
+  | '<=';
 
 export type FormulaExpression =
   | { readonly kind: 'number'; readonly value: number }
@@ -11,14 +24,32 @@ export type FormulaExpression =
   | { readonly kind: 'reference'; readonly reference: A1Reference; readonly source: string }
   | { readonly kind: 'range'; readonly start: A1Reference; readonly end: A1Reference }
   | { readonly kind: 'unary'; readonly operator: '-'; readonly operand: FormulaExpression }
-  | { readonly kind: 'binary'; readonly operator: BinaryOperator; readonly left: FormulaExpression; readonly right: FormulaExpression }
-  | { readonly kind: 'call'; readonly name: string; readonly arguments: readonly FormulaExpression[] };
+  | {
+      readonly kind: 'binary';
+      readonly operator: BinaryOperator;
+      readonly left: FormulaExpression;
+      readonly right: FormulaExpression;
+    }
+  | {
+      readonly kind: 'call';
+      readonly name: string;
+      readonly arguments: readonly FormulaExpression[];
+    };
 
 const PRECEDENCE: Readonly<Record<string, number>> = {
-  '=': 1, '==': 1, '<>': 1, '!=': 1, '>': 1, '>=': 1, '<': 1, '<=': 1,
+  '=': 1,
+  '==': 1,
+  '<>': 1,
+  '!=': 1,
+  '>': 1,
+  '>=': 1,
+  '<': 1,
+  '<=': 1,
   '&': 2,
-  '+': 3, '-': 3,
-  '*': 4, '/': 4,
+  '+': 3,
+  '-': 3,
+  '*': 4,
+  '/': 4,
 };
 
 class Parser {
@@ -89,11 +120,11 @@ class Parser {
       this.consume('left-paren');
       const args: FormulaExpression[] = [];
       if (this.current().kind !== 'right-paren') {
-        do {
-          args.push(this.binary(1));
-          if (this.current().kind !== 'comma') break;
+        args.push(this.binary(1));
+        while (this.current().kind === 'comma') {
           this.index += 1;
-        } while (true);
+          args.push(this.binary(1));
+        }
       }
       this.consume('right-paren');
       return { kind: 'call', name: token.value, arguments: args };
@@ -127,9 +158,9 @@ export function infixToPostfix(source: string): readonly (string | readonly [str
     if (character >= 'a' && character <= 'z') {
       fragments.push(character.toUpperCase());
     } else if (
-      (character >= '0' && character <= '9')
-      || (character >= 'A' && character <= 'Z')
-      || character === '.'
+      (character >= '0' && character <= '9') ||
+      (character >= 'A' && character <= 'Z') ||
+      character === '.'
     ) {
       fragments.push(character);
     } else if (character === '"') {
@@ -149,7 +180,11 @@ export function infixToPostfix(source: string): readonly (string | readonly [str
         if (functionArgumentType === 2) {
           const endSource = output.pop();
           const startSource = output.pop();
-          if (typeof startSource === 'string' && typeof endSource === 'string' && operator !== undefined) {
+          if (
+            typeof startSource === 'string' &&
+            typeof endSource === 'string' &&
+            operator !== undefined
+          ) {
             const start = parseA1(startSource);
             const end = parseA1(endSource);
             let count = 0;

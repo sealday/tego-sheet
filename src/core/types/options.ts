@@ -50,8 +50,8 @@ export type ToolbarAction =
   | { readonly type: 'freeze' | 'unfreeze' }
   | { readonly type: 'insert-row' | 'delete-row' | 'hide-row' | 'unhide-row' }
   | {
-    readonly type: 'insert-column' | 'delete-column' | 'hide-column' | 'unhide-column';
-  }
+      readonly type: 'insert-column' | 'delete-column' | 'hide-column' | 'unhide-column';
+    }
   | { readonly type: 'set-validation'; readonly rule: ValidationRule }
   | { readonly type: 'remove-validation' }
   | { readonly type: 'set-filter'; readonly filter: FilterDefinition }

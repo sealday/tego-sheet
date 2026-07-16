@@ -57,13 +57,15 @@ it('stages the target selection before callbacks and paints only that target sna
     'keyboard',
     {
       selectionAfterCommit: target,
-      beforeSelectionNotify: () => { engine.stageSelection(targetState); },
+      beforeSelectionNotify: () => {
+        engine.stageSelection(targetState);
+      },
     },
   );
   frames.shift()!(1);
 
   expect(order).toEqual(['change', 'cell-edit', 'selection', 'paint']);
-  const selectionStrokes = canvas.operations.filter(operation => operation.name === 'strokeRect');
+  const selectionStrokes = canvas.operations.filter((operation) => operation.name === 'strokeRect');
   expect(selectionStrokes.at(-1)?.args.slice(0, 4)).toEqual([160, 25, 100, 25]);
   engine.dispose();
 });
@@ -118,7 +120,9 @@ it('suppresses repeated paints for a failed controller snapshot and retries on e
   const failure = new Error('paint failed');
   Object.defineProperty(context, 'clearRect', {
     configurable: true,
-    value: () => { throw failure; },
+    value: () => {
+      throw failure;
+    },
   });
   const controller = new WorkbookController({ rows: { len: 2 }, cols: { len: 3 } });
   const sheet = controller.getSheetIds()[0]!;

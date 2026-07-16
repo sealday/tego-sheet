@@ -16,7 +16,10 @@ const sheets = [
   { id: sheetId('sheet-c'), index: 2, name: 'C' },
 ] as const;
 
-function TabsHarness(props: { readonly readOnly?: boolean; readonly onActivate: (sheet: SheetId) => void }) {
+function TabsHarness(props: {
+  readonly readOnly?: boolean;
+  readonly onActivate: (sheet: SheetId) => void;
+}) {
   const [activeSheet, setActiveSheet] = useState<SheetId>(sheets[0].id);
   const tabs: SheetTabsRenderProps = {
     sheets,
@@ -25,7 +28,7 @@ function TabsHarness(props: { readonly readOnly?: boolean; readonly onActivate: 
     add: vi.fn(),
     delete: vi.fn(),
     rename: vi.fn(),
-    activate: sheet => {
+    activate: (sheet) => {
       props.onActivate(sheet);
       setActiveSheet(sheet);
     },
@@ -38,13 +41,13 @@ it('uses a roving tab stop and activates tabs with wrapped arrow, Home and End n
   const rendered = render(<TabsHarness onActivate={activate} />);
   const tabs = rendered.getAllByRole('tab');
 
-  expect(tabs.map(tab => tab.tabIndex)).toEqual([0, -1, -1]);
+  expect(tabs.map((tab) => tab.tabIndex)).toEqual([0, -1, -1]);
   tabs[0]!.focus();
 
   fireEvent.keyDown(tabs[0]!, { key: 'ArrowRight' });
   expect(activate).toHaveBeenLastCalledWith(sheets[1].id);
   expect(document.activeElement).toBe(tabs[1]);
-  expect(tabs.map(tab => tab.tabIndex)).toEqual([-1, 0, -1]);
+  expect(tabs.map((tab) => tab.tabIndex)).toEqual([-1, 0, -1]);
 
   fireEvent.keyDown(tabs[1]!, { key: 'End' });
   expect(activate).toHaveBeenLastCalledWith(sheets[2].id);

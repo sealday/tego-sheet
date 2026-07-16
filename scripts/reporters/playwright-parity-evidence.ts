@@ -1,10 +1,5 @@
 import { relative, resolve, sep } from 'node:path';
-import type {
-  FullResult,
-  Reporter,
-  TestCase,
-  TestResult,
-} from '@playwright/test/reporter';
+import type { FullResult, Reporter, TestCase, TestResult } from '@playwright/test/reporter';
 import type { EvidenceStatus, ParityLane } from '../../tests/parity/manifest-types.ts';
 import {
   aggregateParityEvidence,
@@ -41,8 +36,8 @@ export default class PlaywrightParityEvidenceReporter implements Reporter {
   private readonly root: string;
 
   constructor(options: PlaywrightParityEvidenceReporterOptions) {
-    this.enabled = options.releaseOnly !== true
-      || process.env.TEGO_PARITY_RELEASE_CONTEXT !== undefined;
+    this.enabled =
+      options.releaseOnly !== true || process.env.TEGO_PARITY_RELEASE_CONTEXT !== undefined;
     this.lane = options.lane;
     this.listOnly = options.listOnly ?? process.argv.includes('--list');
     this.outputPath = resolve(options.outputPath);
@@ -77,9 +72,11 @@ export default class PlaywrightParityEvidenceReporter implements Reporter {
   onEnd(result: Pick<FullResult, 'status'>): void {
     if (!this.enabled) return;
     if (!this.hasTestResult) return;
-    if (this.hasGlobalError || result.status === 'interrupted' || result.status === 'timedout') return;
+    if (this.hasGlobalError || result.status === 'interrupted' || result.status === 'timedout')
+      return;
     const evidence = aggregateParityEvidence(this.observations);
-    if (result.status === 'failed' && !evidence.some(record => record.status === 'failed')) return;
+    if (result.status === 'failed' && !evidence.some((record) => record.status === 'failed'))
+      return;
     writeEvidenceArtifactAtomically(this.outputPath, evidence);
   }
 

@@ -20,24 +20,28 @@ export interface TegoSheetMountOptions {
 function clone<T>(value: T): T {
   if (Array.isArray(value)) return value.map(clone) as T;
   if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, clone(item)]),
-    ) as T;
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, clone(item)])) as T;
   }
   return value;
 }
 
 export function captureMountOptions(options: SheetOptions | undefined): TegoSheetMountOptions {
   return clone({
-    rows: options?.rows === undefined ? undefined : {
-      initialCount: options.rows.initialCount,
-      defaultHeight: options.rows.defaultHeight,
-    },
-    columns: options?.columns === undefined ? undefined : {
-      initialCount: options.columns.initialCount,
-      defaultWidth: options.columns.defaultWidth,
-      minimumWidth: options.columns.minimumWidth,
-    },
+    rows:
+      options?.rows === undefined
+        ? undefined
+        : {
+            initialCount: options.rows.initialCount,
+            defaultHeight: options.rows.defaultHeight,
+          },
+    columns:
+      options?.columns === undefined
+        ? undefined
+        : {
+            initialCount: options.columns.initialCount,
+            defaultWidth: options.columns.defaultWidth,
+            minimumWidth: options.columns.minimumWidth,
+          },
     rowHeaderWidth: options?.rowHeaderWidth,
     defaultStyle: options?.defaultStyle,
     autoFocus: options?.autoFocus,
@@ -81,21 +85,23 @@ function same(left: unknown, right: unknown): boolean {
     return false;
   }
   if (Array.isArray(left) || Array.isArray(right)) {
-    return Array.isArray(left)
-      && Array.isArray(right)
-      && left.length === right.length
-      && left.every((item, index) => same(item, right[index]));
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((item, index) => same(item, right[index]))
+    );
   }
   const leftKeys = Object.keys(left as object).sort();
   const rightKeys = Object.keys(right as object).sort();
-  return leftKeys.length === rightKeys.length
-    && leftKeys.every((key, index) => (
-      key === rightKeys[index]
-      && same(
-        (left as Record<string, unknown>)[key],
-        (right as Record<string, unknown>)[key],
-      )
-    ));
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every(
+      (key, index) =>
+        key === rightKeys[index] &&
+        same((left as Record<string, unknown>)[key], (right as Record<string, unknown>)[key]),
+    )
+  );
 }
 
 interface MountLeaf {
@@ -111,13 +117,41 @@ function leaves(
   current: TegoSheetMountOptions,
 ): readonly MountLeaf[] {
   return [
-    { name: 'initialActiveSheetIndex', initial: initialActiveSheetIndex, current: currentActiveSheetIndex },
-    { name: 'options.rows.initialCount', initial: initial.rows?.initialCount, current: current.rows?.initialCount },
-    { name: 'options.rows.defaultHeight', initial: initial.rows?.defaultHeight, current: current.rows?.defaultHeight },
-    { name: 'options.columns.initialCount', initial: initial.columns?.initialCount, current: current.columns?.initialCount },
-    { name: 'options.columns.defaultWidth', initial: initial.columns?.defaultWidth, current: current.columns?.defaultWidth },
-    { name: 'options.columns.minimumWidth', initial: initial.columns?.minimumWidth, current: current.columns?.minimumWidth },
-    { name: 'options.rowHeaderWidth', initial: initial.rowHeaderWidth, current: current.rowHeaderWidth },
+    {
+      name: 'initialActiveSheetIndex',
+      initial: initialActiveSheetIndex,
+      current: currentActiveSheetIndex,
+    },
+    {
+      name: 'options.rows.initialCount',
+      initial: initial.rows?.initialCount,
+      current: current.rows?.initialCount,
+    },
+    {
+      name: 'options.rows.defaultHeight',
+      initial: initial.rows?.defaultHeight,
+      current: current.rows?.defaultHeight,
+    },
+    {
+      name: 'options.columns.initialCount',
+      initial: initial.columns?.initialCount,
+      current: current.columns?.initialCount,
+    },
+    {
+      name: 'options.columns.defaultWidth',
+      initial: initial.columns?.defaultWidth,
+      current: current.columns?.defaultWidth,
+    },
+    {
+      name: 'options.columns.minimumWidth',
+      initial: initial.columns?.minimumWidth,
+      current: current.columns?.minimumWidth,
+    },
+    {
+      name: 'options.rowHeaderWidth',
+      initial: initial.rowHeaderWidth,
+      current: current.rowHeaderWidth,
+    },
     { name: 'options.defaultStyle', initial: initial.defaultStyle, current: current.defaultStyle },
     { name: 'options.autoFocus', initial: initial.autoFocus, current: current.autoFocus },
   ];
@@ -142,9 +176,9 @@ export function useMountOptionWarnings(
   const current = captureMountOptions(options);
 
   useEffect(() => {
-    const production = (
-      import.meta as ImportMeta & { readonly env?: { readonly PROD?: boolean } }
-    ).env?.PROD === true;
+    const production =
+      (import.meta as ImportMeta & { readonly env?: { readonly PROD?: boolean } }).env?.PROD ===
+      true;
     if (production) return;
     for (const leaf of leaves(
       baseline.activeSheetIndex,

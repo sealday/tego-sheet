@@ -15,7 +15,8 @@ describe('merge range operations', () => {
     const controller = new WorkbookController(mergeFixture.before);
     const sheet = controller.getSheetIds()[0]!;
     const selected = selection(sheet, {
-      start: { row: 0, column: 0 }, end: { row: 1, column: 1 },
+      start: { row: 0, column: 0 },
+      end: { row: 1, column: 1 },
     });
 
     const merged = controller.dispatch({ type: 'merge', selection: selected }, 'toolbar');
@@ -37,22 +38,34 @@ describe('merge range operations', () => {
     const subscriber = vi.fn();
     controller.subscribe(subscriber);
 
-    expect(() => controller.dispatch({
-      type: 'merge',
-      selection: selection(sheet, {
-        start: { row: 1, column: 1 }, end: { row: 2, column: 2 },
-      }),
-    }, 'toolbar')).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
+    expect(() =>
+      controller.dispatch(
+        {
+          type: 'merge',
+          selection: selection(sheet, {
+            start: { row: 1, column: 1 },
+            end: { row: 2, column: 2 },
+          }),
+        },
+        'toolbar',
+      ),
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
     expect(controller.getValue()).toEqual(before);
     expect(controller.historySize).toEqual({ undo: 0, redo: 0 });
     expect(subscriber).not.toHaveBeenCalled();
 
-    expect(controller.dispatch({
-      type: 'merge',
-      selection: selection(sheet, {
-        start: { row: 0, column: 0 }, end: { row: 1, column: 1 },
-      }),
-    }, 'toolbar')).toEqual({ status: 'noop' });
+    expect(
+      controller.dispatch(
+        {
+          type: 'merge',
+          selection: selection(sheet, {
+            start: { row: 0, column: 0 },
+            end: { row: 1, column: 1 },
+          }),
+        },
+        'toolbar',
+      ),
+    ).toEqual({ status: 'noop' });
   });
 
   it('rejects a selection outside the serialized grid before mutation', () => {
@@ -60,12 +73,18 @@ describe('merge range operations', () => {
     const sheet = controller.getSheetIds()[0]!;
     const before = controller.getValue();
 
-    expect(() => controller.dispatch({
-      type: 'merge',
-      selection: selection(sheet, {
-        start: { row: 0, column: 0 }, end: { row: 2, column: 1 },
-      }),
-    }, 'toolbar')).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
+    expect(() =>
+      controller.dispatch(
+        {
+          type: 'merge',
+          selection: selection(sheet, {
+            start: { row: 0, column: 0 },
+            end: { row: 2, column: 1 },
+          }),
+        },
+        'toolbar',
+      ),
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
     expect(controller.getValue()).toEqual(before);
   });
 
@@ -77,11 +96,18 @@ describe('merge range operations', () => {
     const sheet = controller.getSheetIds()[0]!;
     const before = controller.getValue();
 
-    expect(() => controller.dispatch({
-      type: 'merge', selection: selection(sheet, {
-        start: { row: 0, column: 0 }, end: { row: 1, column: 1 },
-      }),
-    }, 'toolbar')).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
+    expect(() =>
+      controller.dispatch(
+        {
+          type: 'merge',
+          selection: selection(sheet, {
+            start: { row: 0, column: 0 },
+            end: { row: 1, column: 1 },
+          }),
+        },
+        'toolbar',
+      ),
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
     expect(controller.getValue()).toEqual(before);
     expect(controller.historySize).toEqual({ undo: 0, redo: 0 });
 
@@ -91,11 +117,18 @@ describe('merge range operations', () => {
       cols: { len: 3 },
     });
     const anchorSheet = anchorController.getSheetIds()[0]!;
-    expect(anchorController.dispatch({
-      type: 'unmerge', selection: selection(anchorSheet, {
-        start: { row: 0, column: 0 }, end: { row: 1, column: 1 },
-      }),
-    }, 'toolbar').status).toBe('committed');
+    expect(
+      anchorController.dispatch(
+        {
+          type: 'unmerge',
+          selection: selection(anchorSheet, {
+            start: { row: 0, column: 0 },
+            end: { row: 1, column: 1 },
+          }),
+        },
+        'toolbar',
+      ).status,
+    ).toBe('committed');
     expect(anchorController.getValue()[0]!.merges).toEqual([]);
   });
 });
@@ -112,87 +145,150 @@ describe('autofill range operations', () => {
     const controller = new WorkbookController({
       rows: {
         len: 6,
-        0: { cells: {
-          0: { text: 'Item1', vendor: true },
-          1: { text: '=A1+1' },
-          2: { text: 'plain', style: 0 },
-        } },
+        0: {
+          cells: {
+            0: { text: 'Item1', vendor: true },
+            1: { text: '=A1+1' },
+            2: { text: 'plain', style: 0 },
+          },
+        },
       },
       cols: { len: 4 },
       styles: [{ font: { italic: true } }],
     });
     const sheet = controller.getSheetIds()[0]!;
     const source = selection(sheet, {
-      start: { row: 0, column: 0 }, end: { row: 0, column: 2 },
+      start: { row: 0, column: 0 },
+      end: { row: 0, column: 2 },
     });
     const target = selection(sheet, {
-      start: { row: 1, column: 0 }, end: { row: 3, column: 2 },
+      start: { row: 1, column: 0 },
+      end: { row: 3, column: 2 },
     });
 
-    expect(controller.dispatch({ type: 'autofill', source, target, mode: 'all' }, 'pointer'))
-      .toMatchObject({ status: 'committed', commit: { change: { kind: 'autofill', range: target.range } } });
+    expect(
+      controller.dispatch({ type: 'autofill', source, target, mode: 'all' }, 'pointer'),
+    ).toMatchObject({
+      status: 'committed',
+      commit: { change: { kind: 'autofill', range: target.range } },
+    });
     expect(controller.getValue()[0]).toMatchObject({
       rows: {
-        1: { cells: { 0: { text: 'Item2' }, 1: { text: '=A2+1' }, 2: { text: 'plain', style: 0 } } },
-        2: { cells: { 0: { text: 'Item3' }, 1: { text: '=A3+1' }, 2: { text: 'plain', style: 0 } } },
-        3: { cells: { 0: { text: 'Item4' }, 1: { text: '=A4+1' }, 2: { text: 'plain', style: 0 } } },
+        1: {
+          cells: { 0: { text: 'Item2' }, 1: { text: '=A2+1' }, 2: { text: 'plain', style: 0 } },
+        },
+        2: {
+          cells: { 0: { text: 'Item3' }, 1: { text: '=A3+1' }, 2: { text: 'plain', style: 0 } },
+        },
+        3: {
+          cells: { 0: { text: 'Item4' }, 1: { text: '=A4+1' }, 2: { text: 'plain', style: 0 } },
+        },
       },
     });
   });
 
   it.each([
     {
-      name: 'horizontal forward', source: [[0, 0], [0, 1]], target: [[0, 2], [0, 5]],
-      input: ['Item1', 'Item2'], expected: ['Item1', 'Item2', 'Item1', 'Item2'],
+      name: 'horizontal forward',
+      source: [
+        [0, 0],
+        [0, 1],
+      ],
+      target: [
+        [0, 2],
+        [0, 5],
+      ],
+      input: ['Item1', 'Item2'],
+      expected: ['Item1', 'Item2', 'Item1', 'Item2'],
     },
     {
-      name: 'horizontal reverse', source: [[0, 4], [0, 5]], target: [[0, 0], [0, 3]],
-      input: ['Item1', 'Item2'], expected: ['Item1', 'Item2', 'Item1', 'Item2'],
+      name: 'horizontal reverse',
+      source: [
+        [0, 4],
+        [0, 5],
+      ],
+      target: [
+        [0, 0],
+        [0, 3],
+      ],
+      input: ['Item1', 'Item2'],
+      expected: ['Item1', 'Item2', 'Item1', 'Item2'],
     },
     {
-      name: 'vertical forward', source: [[0, 0], [1, 0]], target: [[2, 0], [5, 0]],
-      input: ['Item1', 'Item2'], expected: ['Item1', 'Item2', 'Item1', 'Item2'],
+      name: 'vertical forward',
+      source: [
+        [0, 0],
+        [1, 0],
+      ],
+      target: [
+        [2, 0],
+        [5, 0],
+      ],
+      input: ['Item1', 'Item2'],
+      expected: ['Item1', 'Item2', 'Item1', 'Item2'],
     },
     {
-      name: 'vertical reverse', source: [[4, 0], [5, 0]], target: [[0, 0], [3, 0]],
-      input: ['Item1', 'Item2'], expected: ['Item1', 'Item2', 'Item1', 'Item2'],
+      name: 'vertical reverse',
+      source: [
+        [4, 0],
+        [5, 0],
+      ],
+      target: [
+        [0, 0],
+        [3, 0],
+      ],
+      input: ['Item1', 'Item2'],
+      expected: ['Item1', 'Item2', 'Item1', 'Item2'],
     },
-  ])('repeats multi-cell numeric suffix sequences for $name same-axis fills', ({ source, target, input, expected }) => {
-    const controller = new WorkbookController({ rows: { len: 8 }, cols: { len: 8 } });
-    const sheet = controller.getSheetIds()[0]!;
-    input.forEach((text, index) => {
-      const horizontal = source[0]![0] === source[1]![0];
-      controller.dispatch({
-        type: 'set-cell-text',
-        address: {
-          sheet,
-          row: source[0]![0] + (horizontal ? 0 : index),
-          column: source[0]![1] + (horizontal ? index : 0),
+  ])(
+    'repeats multi-cell numeric suffix sequences for $name same-axis fills',
+    ({ source, target, input, expected }) => {
+      const controller = new WorkbookController({ rows: { len: 8 }, cols: { len: 8 } });
+      const sheet = controller.getSheetIds()[0]!;
+      input.forEach((text, index) => {
+        const horizontal = source[0]![0] === source[1]![0];
+        controller.dispatch(
+          {
+            type: 'set-cell-text',
+            address: {
+              sheet,
+              row: source[0]![0] + (horizontal ? 0 : index),
+              column: source[0]![1] + (horizontal ? index : 0),
+            },
+            text,
+          },
+          'ref',
+        );
+      });
+      const sourceRange = {
+        start: { row: source[0]![0], column: source[0]![1] },
+        end: { row: source[1]![0], column: source[1]![1] },
+      };
+      const targetRange = {
+        start: { row: target[0]![0], column: target[0]![1] },
+        end: { row: target[1]![0], column: target[1]![1] },
+      };
+      controller.dispatch(
+        {
+          type: 'autofill',
+          source: selection(sheet, sourceRange),
+          target: selection(sheet, targetRange),
+          mode: 'all',
         },
-        text,
-      }, 'ref');
-    });
-    const sourceRange = {
-      start: { row: source[0]![0], column: source[0]![1] },
-      end: { row: source[1]![0], column: source[1]![1] },
-    };
-    const targetRange = {
-      start: { row: target[0]![0], column: target[0]![1] },
-      end: { row: target[1]![0], column: target[1]![1] },
-    };
-    controller.dispatch({
-      type: 'autofill', source: selection(sheet, sourceRange),
-      target: selection(sheet, targetRange), mode: 'all',
-    }, 'pointer');
+        'pointer',
+      );
 
-    const horizontal = targetRange.start.row === targetRange.end.row;
-    const actual = expected.map((_, index) => controller.getCellText({
-      sheet,
-      row: targetRange.start.row + (horizontal ? 0 : index),
-      column: targetRange.start.column + (horizontal ? index : 0),
-    }));
-    expect(actual).toEqual(expected);
-  });
+      const horizontal = targetRange.start.row === targetRange.end.row;
+      const actual = expected.map((_, index) =>
+        controller.getCellText({
+          sheet,
+          row: targetRange.start.row + (horizontal ? 0 : index),
+          column: targetRange.start.column + (horizontal ? index : 0),
+        }),
+      );
+      expect(actual).toEqual(expected);
+    },
+  );
 
   it('increments single-cell suffixes in all four directions and always shifts formulas by coordinates', () => {
     const controller = new WorkbookController({
@@ -205,7 +301,8 @@ describe('autofill range operations', () => {
     });
     const sheet = controller.getSheetIds()[0]!;
     const point = (row: number, column: number): CellRange => ({
-      start: { row, column }, end: { row, column },
+      start: { row, column },
+      end: { row, column },
     });
     const targets: readonly CellRange[] = [
       { start: { row: 4, column: 3 }, end: { row: 5, column: 3 } },
@@ -214,10 +311,15 @@ describe('autofill range operations', () => {
       { start: { row: 3, column: 1 }, end: { row: 3, column: 2 } },
     ];
     for (const target of targets) {
-      controller.dispatch({
-        type: 'autofill', source: selection(sheet, point(3, 3)),
-        target: selection(sheet, target), mode: 'value',
-      }, 'pointer');
+      controller.dispatch(
+        {
+          type: 'autofill',
+          source: selection(sheet, point(3, 3)),
+          target: selection(sheet, target),
+          mode: 'value',
+        },
+        'pointer',
+      );
     }
     expect([
       controller.getCellText({ sheet, row: 4, column: 3 }),
@@ -230,61 +332,117 @@ describe('autofill range operations', () => {
       controller.getCellText({ sheet, row: 3, column: 2 }),
     ]).toEqual(['Item2', 'Item3', 'Item-1', 'Item0', 'Item2', 'Item3', 'Item-1', 'Item0']);
 
-    controller.dispatch({
-      type: 'autofill', source: selection(sheet, point(1, 4)),
-      target: selection(sheet, point(2, 4)), mode: 'value',
-    }, 'pointer');
+    controller.dispatch(
+      {
+        type: 'autofill',
+        source: selection(sheet, point(1, 4)),
+        target: selection(sheet, point(2, 4)),
+        mode: 'value',
+      },
+      'pointer',
+    );
     expect(controller.getCellText({ sheet, row: 2, column: 4 })).toBe('=C4+$A$1');
   });
 
   it.each([
     {
-      name: 'vertical forward', source: [[0, 0], [1, 0]], target: [[2, 0], [3, 0]],
-      formulas: ['=B1', '=B2'], expected: ['=B2', '=B3'],
+      name: 'vertical forward',
+      source: [
+        [0, 0],
+        [1, 0],
+      ],
+      target: [
+        [2, 0],
+        [3, 0],
+      ],
+      formulas: ['=B1', '=B2'],
+      expected: ['=B2', '=B3'],
     },
     {
-      name: 'vertical reverse', source: [[2, 0], [3, 0]], target: [[0, 0], [1, 0]],
-      formulas: ['=B3', '=B4'], expected: ['=B1', '=B2'],
+      name: 'vertical reverse',
+      source: [
+        [2, 0],
+        [3, 0],
+      ],
+      target: [
+        [0, 0],
+        [1, 0],
+      ],
+      formulas: ['=B3', '=B4'],
+      expected: ['=B1', '=B2'],
     },
     {
-      name: 'horizontal forward', source: [[0, 0], [0, 1]], target: [[0, 2], [0, 3]],
-      formulas: ['=A2', '=B2'], expected: ['=B2', '=C2'],
+      name: 'horizontal forward',
+      source: [
+        [0, 0],
+        [0, 1],
+      ],
+      target: [
+        [0, 2],
+        [0, 3],
+      ],
+      formulas: ['=A2', '=B2'],
+      expected: ['=B2', '=C2'],
     },
     {
-      name: 'horizontal reverse', source: [[0, 2], [0, 3]], target: [[0, 0], [0, 1]],
-      formulas: ['=C2', '=D2'], expected: ['=A2', '=B2'],
+      name: 'horizontal reverse',
+      source: [
+        [0, 2],
+        [0, 3],
+      ],
+      target: [
+        [0, 0],
+        [0, 1],
+      ],
+      formulas: ['=C2', '=D2'],
+      expected: ['=A2', '=B2'],
     },
-  ])('uses one legacy tile shift for every formula in a $name multi-cell source', ({
-    source, target, formulas, expected,
-  }) => {
-    const controller = new WorkbookController({ rows: { len: 6 }, cols: { len: 6 } });
-    const sheet = controller.getSheetIds()[0]!;
-    const horizontal = source[0]![0] === source[1]![0];
-    formulas.forEach((text, index) => controller.dispatch({
-      type: 'set-cell-text',
-      address: {
-        sheet,
-        row: source[0]![0] + (horizontal ? 0 : index),
-        column: source[0]![1] + (horizontal ? index : 0),
-      },
-      text,
-    }, 'ref'));
-    const sourceRange: CellRange = {
-      start: { row: source[0]![0], column: source[0]![1] },
-      end: { row: source[1]![0], column: source[1]![1] },
-    };
-    const targetRange: CellRange = {
-      start: { row: target[0]![0], column: target[0]![1] },
-      end: { row: target[1]![0], column: target[1]![1] },
-    };
-    controller.dispatch({
-      type: 'autofill', source: selection(sheet, sourceRange),
-      target: selection(sheet, targetRange), mode: 'value',
-    }, 'pointer');
-    expect(expected.map((_, index) => controller.getCellText({
-      sheet,
-      row: targetRange.start.row + (horizontal ? 0 : index),
-      column: targetRange.start.column + (horizontal ? index : 0),
-    }))).toEqual(expected);
-  });
+  ])(
+    'uses one legacy tile shift for every formula in a $name multi-cell source',
+    ({ source, target, formulas, expected }) => {
+      const controller = new WorkbookController({ rows: { len: 6 }, cols: { len: 6 } });
+      const sheet = controller.getSheetIds()[0]!;
+      const horizontal = source[0]![0] === source[1]![0];
+      formulas.forEach((text, index) =>
+        controller.dispatch(
+          {
+            type: 'set-cell-text',
+            address: {
+              sheet,
+              row: source[0]![0] + (horizontal ? 0 : index),
+              column: source[0]![1] + (horizontal ? index : 0),
+            },
+            text,
+          },
+          'ref',
+        ),
+      );
+      const sourceRange: CellRange = {
+        start: { row: source[0]![0], column: source[0]![1] },
+        end: { row: source[1]![0], column: source[1]![1] },
+      };
+      const targetRange: CellRange = {
+        start: { row: target[0]![0], column: target[0]![1] },
+        end: { row: target[1]![0], column: target[1]![1] },
+      };
+      controller.dispatch(
+        {
+          type: 'autofill',
+          source: selection(sheet, sourceRange),
+          target: selection(sheet, targetRange),
+          mode: 'value',
+        },
+        'pointer',
+      );
+      expect(
+        expected.map((_, index) =>
+          controller.getCellText({
+            sheet,
+            row: targetRange.start.row + (horizontal ? 0 : index),
+            column: targetRange.start.column + (horizontal ? index : 0),
+          }),
+        ),
+      ).toEqual(expected);
+    },
+  );
 });

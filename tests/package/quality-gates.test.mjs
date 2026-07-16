@@ -53,9 +53,10 @@ test('package and SSR orchestration is plain JavaScript for Node 20', () => {
     execFileSync(process.execPath, ['--check', fileURLToPath(new URL(path, repositoryRoot))]);
   }
 
-  const directNodeEntries = Object.values(packageJson.scripts).flatMap(script =>
-    [...script.matchAll(/(?:^|&&|\|\||;)\s*node(?:\s+--test)?\s+([^\s&|;]+)/g)]
-      .map(match => match[1]),
+  const directNodeEntries = Object.values(packageJson.scripts).flatMap((script) =>
+    [...script.matchAll(/(?:^|&&|\|\||;)\s*node(?:\s+--test)?\s+([^\s&|;]+)/g)].map(
+      (match) => match[1],
+    ),
   );
   assert.ok(directNodeEntries.length > 0);
   for (const path of directNodeEntries) {
@@ -66,29 +67,38 @@ test('package and SSR orchestration is plain JavaScript for Node 20', () => {
 });
 
 test('npm commands prefer the active npm CLI and have shell-safe platform fallbacks', () => {
-  assert.deepEqual(resolveNpmInvocation({
-    env: { npm_execpath: '/tools/npm-cli.js' },
-    execPath: '/tools/node',
-    pathExists: () => false,
-    platform: 'win32',
-  }), { command: '/tools/node', args: ['/tools/npm-cli.js'] });
+  assert.deepEqual(
+    resolveNpmInvocation({
+      env: { npm_execpath: '/tools/npm-cli.js' },
+      execPath: '/tools/node',
+      pathExists: () => false,
+      platform: 'win32',
+    }),
+    { command: '/tools/node', args: ['/tools/npm-cli.js'] },
+  );
 
-  assert.deepEqual(resolveNpmInvocation({
-    env: { ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
-    execPath: 'C:\\node\\node.exe',
-    pathExists: () => false,
-    platform: 'win32',
-  }), {
-    command: 'C:\\Windows\\System32\\cmd.exe',
-    args: ['/d', '/s', '/c', 'npm'],
-  });
+  assert.deepEqual(
+    resolveNpmInvocation({
+      env: { ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
+      execPath: 'C:\\node\\node.exe',
+      pathExists: () => false,
+      platform: 'win32',
+    }),
+    {
+      command: 'C:\\Windows\\System32\\cmd.exe',
+      args: ['/d', '/s', '/c', 'npm'],
+    },
+  );
 
-  assert.deepEqual(resolveNpmInvocation({
-    env: {},
-    execPath: '/usr/bin/node',
-    pathExists: () => false,
-    platform: 'linux',
-  }), { command: 'npm', args: [] });
+  assert.deepEqual(
+    resolveNpmInvocation({
+      env: {},
+      execPath: '/usr/bin/node',
+      pathExists: () => false,
+      platform: 'linux',
+    }),
+    { command: 'npm', args: [] },
+  );
 });
 
 test('packed declaration probes cover NodeNext ESM and CommonJS', () => {
@@ -96,7 +106,8 @@ test('packed declaration probes cover NodeNext ESM and CommonJS', () => {
     'tests/package/fixtures/types/index.mts',
     'tests/package/fixtures/types/index.cts',
     'tests/package/fixtures/types/tsconfig.json',
-  ]) assert.equal(existsSync(new URL(path, repositoryRoot)), true, `${path} must exist`);
+  ])
+    assert.equal(existsSync(new URL(path, repositoryRoot)), true, `${path} must exist`);
 });
 
 test('a tracked-source copy builds the demo without library dist output', () => {
@@ -105,18 +116,25 @@ test('a tracked-source copy builds the demo without library dist output', () => 
     const files = execFileSync('git', ['ls-files', '-z'], {
       cwd: repositoryPath,
       encoding: 'utf8',
-    }).split('\0').filter(path => (
-      path === 'package.json'
-      || path === 'tsconfig.json'
-      || path.startsWith('demo/')
-      || path.startsWith('src/')
-    ));
+    })
+      .split('\0')
+      .filter(
+        (path) =>
+          path === 'package.json' ||
+          path === 'tsconfig.json' ||
+          path.startsWith('demo/') ||
+          path.startsWith('src/'),
+      );
     for (const path of files) {
       const target = join(temporaryRoot, path);
       mkdirSync(dirname(target), { recursive: true });
       copyFileSync(join(repositoryPath, path), target);
     }
-    symlinkSync(join(repositoryPath, 'node_modules'), join(temporaryRoot, 'node_modules'), 'junction');
+    symlinkSync(
+      join(repositoryPath, 'node_modules'),
+      join(temporaryRoot, 'node_modules'),
+      'junction',
+    );
     assert.equal(existsSync(join(temporaryRoot, 'dist')), false);
     runNpm(['run', 'build:demo'], temporaryRoot);
     assert.equal(existsSync(join(temporaryRoot, 'demo-dist/index.html')), true);

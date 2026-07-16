@@ -6,7 +6,10 @@ import { createCanvasHarness } from '../helpers/canvas-harness';
 beforeEach(() => {
   const context = createCanvasHarness().canvas.getContext('2d');
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => context);
-  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+  vi.stubGlobal(
+    'requestAnimationFrame',
+    vi.fn(() => 1),
+  );
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
 });
 
@@ -30,17 +33,19 @@ it('reports a recoverable UI failure through the latest callback and default not
   const rendered = render(
     <TegoSheet defaultValue={[{}]} readOnly toolbar={toolbar} onError={first} />,
   );
-  await waitFor(() => expect(rendered.getByRole('button', { name: /force unavailable/i })).toBeTruthy());
-  rendered.rerender(
-    <TegoSheet defaultValue={[{}]} readOnly toolbar={toolbar} onError={latest} />,
+  await waitFor(() =>
+    expect(rendered.getByRole('button', { name: /force unavailable/i })).toBeTruthy(),
   );
+  rendered.rerender(<TegoSheet defaultValue={[{}]} readOnly toolbar={toolbar} onError={latest} />);
 
   fireEvent.click(rendered.getByRole('button', { name: /force unavailable/i }));
   expect(first).not.toHaveBeenCalled();
-  expect(latest).toHaveBeenCalledWith(expect.objectContaining({
-    code: 'INVALID_COMMAND',
-    recoverable: true,
-  }));
+  expect(latest).toHaveBeenCalledWith(
+    expect.objectContaining({
+      code: 'INVALID_COMMAND',
+      recoverable: true,
+    }),
+  );
   expect(rendered.getByRole('status').textContent).toMatch(/unavailable|read-only/i);
 });
 
@@ -49,7 +54,9 @@ it('routes animation-frame render failures through onError and the default notif
   const context = createCanvasHarness().canvas.getContext('2d')!;
   Object.defineProperty(context, 'clearRect', {
     configurable: true,
-    value: () => { throw failure; },
+    value: () => {
+      throw failure;
+    },
   });
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => context);
   let frame: FrameRequestCallback | undefined;
@@ -66,11 +73,13 @@ it('routes animation-frame render failures through onError and the default notif
   });
 
   expect(onError).toHaveBeenCalledOnce();
-  expect(onError).toHaveBeenCalledWith(expect.objectContaining({
-    code: 'RENDER_FAILED',
-    message: 'Rendering the workbook failed',
-    recoverable: true,
-    cause: expect.objectContaining({ message: failure.message }),
-  }));
+  expect(onError).toHaveBeenCalledWith(
+    expect.objectContaining({
+      code: 'RENDER_FAILED',
+      message: 'Rendering the workbook failed',
+      recoverable: true,
+      cause: expect.objectContaining({ message: failure.message }),
+    }),
+  );
   expect(rendered.getByRole('status').getAttribute('data-error-code')).toBe('RENDER_FAILED');
 });

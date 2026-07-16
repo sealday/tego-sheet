@@ -14,7 +14,10 @@ import { createCanvasHarness } from '../helpers/canvas-harness';
 beforeEach(() => {
   const context = createCanvasHarness().canvas.getContext('2d');
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => context);
-  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+  vi.stubGlobal(
+    'requestAnimationFrame',
+    vi.fn(() => 1),
+  );
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
 });
 
@@ -26,7 +29,9 @@ afterEach(() => {
 
 it('@parity:structure.sheet-tabs supports default, hidden and isolated custom sheet-tab hosts', async () => {
   const rendered = render(<TegoSheet defaultValue={[{ name: 'A' }]} />);
-  await waitFor(() => expect(rendered.container.querySelector('[data-tego-sheet-tabs="default"]')).not.toBeNull());
+  await waitFor(() =>
+    expect(rendered.container.querySelector('[data-tego-sheet-tabs="default"]')).not.toBeNull(),
+  );
   rendered.rerender(<TegoSheet defaultValue={[]} sheetTabs={false} />);
   expect(rendered.container.querySelector('[data-tego-sheet-tabs]')).toBeNull();
 
@@ -34,7 +39,7 @@ it('@parity:structure.sheet-tabs supports default, hidden and isolated custom sh
   rendered.rerender(
     <TegoSheet
       defaultValue={[]}
-      sheetTabs={value => {
+      sheetTabs={(value) => {
         props = value;
         return <span>custom tabs</span>;
       }}
@@ -53,12 +58,12 @@ it('@parity:workbook.sheet-lifecycle uses sheet-tab actions for add, rename, act
   const rendered = render(
     <TegoSheet
       defaultValue={[]}
-      sheetTabs={value => {
+      sheetTabs={(value) => {
         props = value;
         return null;
       }}
-      onActiveSheetChange={event => active.push(event.sheet)}
-      onError={error => errors.push(error)}
+      onActiveSheetChange={(event) => active.push(event.sheet)}
+      onError={(error) => errors.push(error)}
     />,
   );
   await waitFor(() => expect(props.sheets).toHaveLength(0));
@@ -76,11 +81,11 @@ it('@parity:workbook.sheet-lifecycle uses sheet-tab actions for add, rename, act
     <TegoSheet
       defaultValue={[]}
       readOnly
-      sheetTabs={value => {
+      sheetTabs={(value) => {
         props = value;
         return null;
       }}
-      onError={error => errors.push(error)}
+      onError={(error) => errors.push(error)}
     />,
   );
   await waitFor(() => expect(props.readOnly).toBe(true));
@@ -95,7 +100,7 @@ it('routes retained stale tab actions to the current onError and makes them iner
   const rendered = render(
     <TegoSheet
       value={[{ name: 'A' }]}
-      sheetTabs={props => {
+      sheetTabs={(props) => {
         retained = props;
         return null;
       }}
@@ -110,7 +115,7 @@ it('routes retained stale tab actions to the current onError and makes them iner
   rendered.rerender(
     <TegoSheet
       value={[{ name: 'Replacement' }]}
-      sheetTabs={props => {
+      sheetTabs={(props) => {
         latest = props;
         return null;
       }}
@@ -136,7 +141,7 @@ it('does not let an outer add overwrite a nested add/delete activation decision'
     <TegoSheet
       ref={ref}
       defaultValue={[]}
-      sheetTabs={props => {
+      sheetTabs={(props) => {
         tabs = props;
         return null;
       }}
@@ -155,7 +160,7 @@ it('does not let an outer add overwrite a nested add/delete activation decision'
   act(() => tabs.add('Outer'));
 
   await waitFor(() => expect(tabs.sheets).toHaveLength(2));
-  const active = tabs.sheets.find(sheet => sheet.id === tabs.activeSheet);
+  const active = tabs.sheets.find((sheet) => sheet.id === tabs.activeSheet);
   expect(active?.name).toBe('Nested winner');
 });
 
@@ -166,7 +171,7 @@ it('does not let an outer delete overwrite a reentrant tab activation', async ()
     <TegoSheet
       defaultValue={[{ name: 'A' }, { name: 'B' }, { name: 'C' }]}
       initialActiveSheetIndex={1}
-      sheetTabs={props => {
+      sheetTabs={(props) => {
         tabs = props;
         return null;
       }}
@@ -183,8 +188,8 @@ it('does not let an outer delete overwrite a reentrant tab activation', async ()
 
   act(() => tabs.delete(b));
 
-  expect(tabs.sheets.map(sheet => sheet.name)).toEqual(['A', 'C']);
-  expect(tabs.sheets.find(sheet => sheet.id === tabs.activeSheet)?.name).toBe('A');
+  expect(tabs.sheets.map((sheet) => sheet.name)).toEqual(['A', 'C']);
+  expect(tabs.sheets.find((sheet) => sheet.id === tabs.activeSheet)?.name).toBe('A');
 });
 
 it('keeps the latest controlled replacement activation during a reentrant delete', async () => {
@@ -197,7 +202,7 @@ it('keeps the latest controlled replacement activation during a reentrant delete
       <TegoSheet
         value={value}
         initialActiveSheetIndex={1}
-        sheetTabs={props => {
+        sheetTabs={(props) => {
           tabs = props;
           return null;
         }}
@@ -216,26 +221,24 @@ it('keeps the latest controlled replacement activation during a reentrant delete
   replace = true;
   act(() => tabs.delete(tabs.sheets[1]!.id));
 
-  await waitFor(() => expect(tabs.sheets.map(sheet => sheet.name)).toEqual(['R1', 'R2', 'R3']));
-  expect(tabs.sheets.find(sheet => sheet.id === tabs.activeSheet)?.name).toBe('R1');
+  await waitFor(() => expect(tabs.sheets.map((sheet) => sheet.name)).toEqual(['R1', 'R2', 'R3']));
+  expect(tabs.sheets.find((sheet) => sheet.id === tabs.activeSheet)?.name).toBe('R1');
 });
 
 it('drops add/delete post-dispatch decisions after synchronous unmount', async () => {
   let tabs!: SheetTabsRenderProps;
-  let hide!: () => void;
   const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
   function Host() {
     const [shown, setShown] = useState(true);
-    hide = () => flushSync(() => setShown(false));
     return shown ? (
       <TegoSheet
         defaultValue={[]}
-        sheetTabs={props => {
+        sheetTabs={(props) => {
           tabs = props;
           return null;
         }}
-        onChange={hide}
+        onChange={() => flushSync(() => setShown(false))}
       />
     ) : null;
   }

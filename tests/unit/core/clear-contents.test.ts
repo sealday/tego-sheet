@@ -25,35 +25,44 @@ describe('clear contents', () => {
     const controller = new WorkbookController({
       styles: [{ color: '#f00' }],
       rows: {
-        0: { cells: {
-          0: { text: 'A', value: 1, style: 0, vendorCell: { keep: true } },
-          1: { text: '=1+1', value: 2, editable: true },
-          2: { text: 'outside', value: 3 },
-        } },
+        0: {
+          cells: {
+            0: { text: 'A', value: 1, style: 0, vendorCell: { keep: true } },
+            1: { text: '=1+1', value: 2, editable: true },
+            2: { text: 'outside', value: 3 },
+          },
+        },
       },
     });
     const before = controller.getValue();
     const events = vi.fn();
     controller.subscribe(events);
 
-    const outcome = controller.dispatch({
-      type: 'clear-contents',
-      selection: selection(controller, 0, 0, 0, 1),
-    }, 'keyboard');
+    const outcome = controller.dispatch(
+      {
+        type: 'clear-contents',
+        selection: selection(controller, 0, 0, 0, 1),
+      },
+      'keyboard',
+    );
 
     expect(outcome.status).toBe('committed');
     expect(outcome.status === 'committed' && outcome.commit.change.kind).toBe('cell');
     expect(controller.getValue()[0]).toMatchObject({
-      rows: { 0: { cells: {
-        0: { style: 0, vendorCell: { keep: true } },
-        1: { editable: true },
-        2: { text: 'outside', value: 3 },
-      } } },
+      rows: {
+        0: {
+          cells: {
+            0: { style: 0, vendorCell: { keep: true } },
+            1: { editable: true },
+            2: { text: 'outside', value: 3 },
+          },
+        },
+      },
     });
-    expect((controller.getValue()[0]!.rows?.['0'] as never)).not.toHaveProperty('cells.0.text');
-    expect((controller.getValue()[0]!.rows?.['0'] as never)).not.toHaveProperty('cells.1.text');
-    expect((controller.getValue()[0]!.rows?.['0'] as never)).not.toHaveProperty('cells.0.value');
-    expect((controller.getValue()[0]!.rows?.['0'] as never)).not.toHaveProperty('cells.1.value');
+    expect(controller.getValue()[0]!.rows?.['0'] as never).not.toHaveProperty('cells.0.text');
+    expect(controller.getValue()[0]!.rows?.['0'] as never).not.toHaveProperty('cells.1.text');
+    expect(controller.getValue()[0]!.rows?.['0'] as never).not.toHaveProperty('cells.0.value');
+    expect(controller.getValue()[0]!.rows?.['0'] as never).not.toHaveProperty('cells.1.value');
     expect(events).toHaveBeenCalledOnce();
     expect(controller.historySize).toEqual({ undo: 1, redo: 0 });
 
@@ -66,10 +75,12 @@ describe('clear contents', () => {
     const controller = new WorkbookController({
       rows: {
         len: 2,
-        0: { cells: {
-          0: { text: '', style: 0 },
-          1: { style: 0, vendorCell: 'metadata-only' },
-        } },
+        0: {
+          cells: {
+            0: { text: '', style: 0 },
+            1: { style: 0, vendorCell: 'metadata-only' },
+          },
+        },
         1: { cells: { 0: { editable: true, printable: false } } },
       },
       cols: { len: 2 },
@@ -79,10 +90,15 @@ describe('clear contents', () => {
     const events = vi.fn();
     controller.subscribe(events);
 
-    expect(controller.dispatch({
-      type: 'clear-contents',
-      selection: selection(controller, 0, 0, 1, 1),
-    }, 'keyboard')).toEqual({ status: 'noop' });
+    expect(
+      controller.dispatch(
+        {
+          type: 'clear-contents',
+          selection: selection(controller, 0, 0, 1, 1),
+        },
+        'keyboard',
+      ),
+    ).toEqual({ status: 'noop' });
     expect(controller.getValue()).toEqual(before);
     expect(controller.historySize).toEqual({ undo: 0, redo: 0 });
     expect(events).not.toHaveBeenCalled();
@@ -90,28 +106,37 @@ describe('clear contents', () => {
 
   it('removes standalone cached representations without introducing empty text', () => {
     const controller = new WorkbookController({
-      rows: { 0: { cells: {
-        0: { value: 0, style: 0, vendorCell: false },
-        1: { text: '', value: false, editable: true },
-      } } },
+      rows: {
+        0: {
+          cells: {
+            0: { value: 0, style: 0, vendorCell: false },
+            1: { text: '', value: false, editable: true },
+          },
+        },
+      },
       styles: [{ color: '#f00' }],
     });
     const before = controller.getValue();
 
-    expect(controller.dispatch({
-      type: 'clear-contents',
-      selection: selection(controller, 0, 0, 0, 1),
-    }, 'keyboard').status).toBe('committed');
+    expect(
+      controller.dispatch(
+        {
+          type: 'clear-contents',
+          selection: selection(controller, 0, 0, 0, 1),
+        },
+        'keyboard',
+      ).status,
+    ).toBe('committed');
     expect(controller.getValue()[0]!.rows?.['0']).toMatchObject({
       cells: {
         0: { style: 0, vendorCell: false },
         1: { editable: true },
       },
     });
-    expect((controller.getValue()[0]!.rows?.['0'] as never)).not.toHaveProperty('cells.0.text');
-    expect((controller.getValue()[0]!.rows?.['0'] as never)).not.toHaveProperty('cells.0.value');
-    expect((controller.getValue()[0]!.rows?.['0'] as never)).not.toHaveProperty('cells.1.text');
-    expect((controller.getValue()[0]!.rows?.['0'] as never)).not.toHaveProperty('cells.1.value');
+    expect(controller.getValue()[0]!.rows?.['0'] as never).not.toHaveProperty('cells.0.text');
+    expect(controller.getValue()[0]!.rows?.['0'] as never).not.toHaveProperty('cells.0.value');
+    expect(controller.getValue()[0]!.rows?.['0'] as never).not.toHaveProperty('cells.1.text');
+    expect(controller.getValue()[0]!.rows?.['0'] as never).not.toHaveProperty('cells.1.value');
 
     expect(controller.undo('keyboard').status).toBe('committed');
     expect(controller.getValue()).toEqual(before);
@@ -119,22 +144,35 @@ describe('clear contents', () => {
 
   it('rejects locked and oversized ranges atomically', () => {
     const locked = new WorkbookController({
-      rows: { len: 2, 0: { cells: { 0: { text: 'safe' }, 1: { text: 'locked', editable: false } } } },
+      rows: {
+        len: 2,
+        0: { cells: { 0: { text: 'safe' }, 1: { text: 'locked', editable: false } } },
+      },
       cols: { len: 2 },
     });
     const lockedBefore = locked.getValue();
-    expect(() => locked.dispatch({
-      type: 'clear-contents',
-      selection: selection(locked, 0, 0, 0, 1),
-    }, 'keyboard')).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
+    expect(() =>
+      locked.dispatch(
+        {
+          type: 'clear-contents',
+          selection: selection(locked, 0, 0, 0, 1),
+        },
+        'keyboard',
+      ),
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
     expect(locked.getValue()).toEqual(lockedBefore);
     expect(locked.historySize).toEqual({ undo: 0, redo: 0 });
 
     const oversized = new WorkbookController({ rows: { len: 501 }, cols: { len: 500 } });
-    expect(() => oversized.dispatch({
-      type: 'clear-contents',
-      selection: selection(oversized, 0, 0, 500, 499),
-    }, 'keyboard')).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
+    expect(() =>
+      oversized.dispatch(
+        {
+          type: 'clear-contents',
+          selection: selection(oversized, 0, 0, 500, 499),
+        },
+        'keyboard',
+      ),
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
     expect(oversized.historySize).toEqual({ undo: 0, redo: 0 });
   });
 });

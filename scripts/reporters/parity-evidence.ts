@@ -18,7 +18,10 @@ import type {
 
 const assertionIdPattern = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$/;
 
-export interface ObservedParityResult extends Omit<ParityEvidenceRecord, keyof ParityEvidenceProvenance> {
+export interface ObservedParityResult extends Omit<
+  ParityEvidenceRecord,
+  keyof ParityEvidenceProvenance
+> {
   readonly project: string;
 }
 
@@ -67,7 +70,7 @@ export interface EvidenceFileSystem {
 
 const nodeFileSystem: EvidenceFileSystem = {
   mkdirSync: (path, options) => nodeMkdirSync(path, options),
-  readdirSync: path => nodeReaddirSync(path),
+  readdirSync: (path) => nodeReaddirSync(path),
   renameSync: (oldPath, newPath) => nodeRenameSync(oldPath, newPath),
   rmSync: (path, options) => nodeRmSync(path, options),
   writeFileSync: (path, contents, encoding) => nodeWriteFileSync(path, contents, encoding),
@@ -75,7 +78,10 @@ const nodeFileSystem: EvidenceFileSystem = {
 
 function parityGroup(title: string): string | null {
   if (!title.includes('@parity:')) return null;
-  const candidates = title.trim().split(/\s+/).filter(token => token.startsWith('@parity:'));
+  const candidates = title
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token.startsWith('@parity:'));
   if (candidates.length === 1) {
     const id = candidates[0]!.slice('@parity:'.length);
     if (assertionIdPattern.test(id)) return `assertion:${id}`;
@@ -95,13 +101,16 @@ export function aggregateParityEvidence(
     observations[0]?.lane ?? 'unit',
   ),
 ): ParityEvidenceRecord[] {
-  const groups = new Map<string, {
-    lane: ParityLane;
-    projects: Set<string>;
-    sources: Set<string>;
-    statuses: Set<EvidenceStatus>;
-    titles: Set<string>;
-  }>();
+  const groups = new Map<
+    string,
+    {
+      lane: ParityLane;
+      projects: Set<string>;
+      sources: Set<string>;
+      statuses: Set<EvidenceStatus>;
+      titles: Set<string>;
+    }
+  >();
 
   for (const observation of observations) {
     const group = parityGroup(observation.title);
@@ -164,9 +173,8 @@ export function writeEvidenceArtifactAtomically(
     directory,
     `${temporaryPrefix(path)}${process.pid}.${randomUUID()}.tmp`,
   );
-  const contents = evidence.length === 0
-    ? '[]'
-    : evidence.map(record => JSON.stringify(record)).join('\n');
+  const contents =
+    evidence.length === 0 ? '[]' : evidence.map((record) => JSON.stringify(record)).join('\n');
   try {
     fileSystem.writeFileSync(temporaryPath, `${contents}\n`, 'utf8');
     fileSystem.renameSync(temporaryPath, path);

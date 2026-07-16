@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test';
 import { openHarness } from './support';
 
-test('@parity:output.export-download crosses the consumer download and library print boundaries', async ({ page }) => {
+test('@parity:output.export-download crosses the consumer download and library print boundaries', async ({
+  page,
+}) => {
   await openHarness(page);
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download workbook' }).click();
@@ -24,13 +26,15 @@ test('@parity:output.export-download crosses the consumer download and library p
   expect(snapshot).toBeDefined();
   expect(snapshot?.css).toContain('@page { size: A5 landscape; }');
   expect(snapshot?.pages).toBeGreaterThanOrEqual(1);
-  expect(snapshot?.canvases.every(canvas => canvas.width > 0 && canvas.height > 0)).toBe(true);
+  expect(snapshot?.canvases.every((canvas) => canvas.width > 0 && canvas.height > 0)).toBe(true);
   expect(snapshot?.texts).not.toContain('secret-never-print');
-  expect(snapshot?.fills).toContainEqual(expect.objectContaining({
-    color: '#ffeecc',
-    width: 198,
-    height: 68,
-  }));
+  expect(snapshot?.fills).toContainEqual(
+    expect.objectContaining({
+      color: '#ffeecc',
+      width: 198,
+      height: 68,
+    }),
+  );
   expect(snapshot?.strokes).toBeGreaterThan(0);
   await expect(page.locator('[data-tego-print-pages]')).toHaveCount(0);
   await expect(page.locator('[data-tego-print-style]')).toHaveCount(0);

@@ -1,8 +1,5 @@
 import { parseA1Range } from '../../core/coordinates/ranges';
-import {
-  createFormulaEvaluationBudget,
-  evaluateCell,
-} from '../../core/formulas/evaluator';
+import { createFormulaEvaluationBudget, evaluateCell } from '../../core/formulas/evaluator';
 import type { FormulaEvaluationBudget } from '../../core/formulas/evaluator';
 import { formatValue, renderFormulaValue } from '../../core/formulas/rendered-value';
 import { getCellData } from '../../core/model/cells';
@@ -49,11 +46,13 @@ export interface CellPresentation {
 
 function isMergeAnchor(point: CellPoint, viewport: ViewportMetrics): boolean {
   const merge = viewport.model.mergeAt(point);
-  return merge === null
-    || (merge.start.row === point.row && merge.start.column === point.column);
+  return merge === null || (merge.start.row === point.row && merge.start.column === point.column);
 }
 
-function cellSource(sheet: Readonly<SheetData>, point: CellPoint): string | number | boolean | null {
+function cellSource(
+  sheet: Readonly<SheetData>,
+  point: CellPoint,
+): string | number | boolean | null {
   return getCellData(sheet, point.row, point.column)?.text ?? null;
 }
 
@@ -70,7 +69,7 @@ export function resolveCellPresentation(
   if (print && !printable) return { cell, style, text: '', printable };
   let rendered;
   try {
-    rendered = evaluateCell(point, candidate => cellSource(sheet, candidate), budget);
+    rendered = evaluateCell(point, (candidate) => cellSource(sheet, candidate), budget);
   } catch {
     rendered = '#ERROR!' as const;
   }
@@ -121,18 +120,21 @@ function textX(rect: CssRect, style: CellStyle, visualScale: number): number {
       : rect.left + padding;
 }
 
-function border(
-  draw: DrawContext,
-  rect: CssRect,
-  style: CellStyle,
-  visualScale: number,
-): void {
+function border(draw: DrawContext, rect: CssRect, style: CellStyle, visualScale: number): void {
   const borders = style.border;
   if (borders === undefined) return;
   const sides = [
     ['top', { x: rect.left, y: rect.top }, { x: rect.left + rect.width, y: rect.top }],
-    ['right', { x: rect.left + rect.width, y: rect.top }, { x: rect.left + rect.width, y: rect.top + rect.height }],
-    ['bottom', { x: rect.left, y: rect.top + rect.height }, { x: rect.left + rect.width, y: rect.top + rect.height }],
+    [
+      'right',
+      { x: rect.left + rect.width, y: rect.top },
+      { x: rect.left + rect.width, y: rect.top + rect.height },
+    ],
+    [
+      'bottom',
+      { x: rect.left, y: rect.top + rect.height },
+      { x: rect.left + rect.width, y: rect.top + rect.height },
+    ],
     ['left', { x: rect.left, y: rect.top }, { x: rect.left, y: rect.top + rect.height }],
   ] as const;
   for (const [side, start, end] of sides) {
@@ -150,21 +152,27 @@ function border(
 function marker(draw: DrawContext, rect: CssRect, color: string): void {
   const right = rect.left + rect.width - 1;
   const top = rect.top - 1;
-  draw.triangle([
-    { x: right - 8, y: top },
-    { x: right, y: top },
-    { x: right, y: top + 8 },
-  ], color);
+  draw.triangle(
+    [
+      { x: right - 8, y: top },
+      { x: right, y: top },
+      { x: right, y: top + 8 },
+    ],
+    color,
+  );
 }
 
 function dropdown(draw: DrawContext, rect: CssRect): void {
   const left = rect.left + rect.width - 15;
   const top = rect.top + rect.height - 15;
-  draw.triangle([
-    { x: left, y: top },
-    { x: left + 8, y: top },
-    { x: left + 4, y: top + 6 },
-  ], 'rgba(0, 0, 0, .45)');
+  draw.triangle(
+    [
+      { x: left, y: top },
+      { x: left + 8, y: top },
+      { x: left + 4, y: top + 6 },
+    ],
+    'rgba(0, 0, 0, .45)',
+  );
 }
 
 function filterHeaderRange(sheet: Readonly<SheetData>): CellRange | null {
@@ -179,9 +187,13 @@ function filterHeaderRange(sheet: Readonly<SheetData>): CellRange | null {
 }
 
 function pointInRange(point: CellPoint, range: CellRange | null): boolean {
-  return range !== null
-    && point.row >= range.start.row && point.row <= range.end.row
-    && point.column >= range.start.column && point.column <= range.end.column;
+  return (
+    range !== null &&
+    point.row >= range.start.row &&
+    point.row <= range.end.row &&
+    point.column >= range.start.column &&
+    point.column <= range.end.column
+  );
 }
 
 function wrapLines(
@@ -248,31 +260,34 @@ function paintCellContent(
   const lineHeight = fontSize + 2 * visualScale;
   const textHeight = (lines.length - 1) * lineHeight;
   const padding = 5 * visualScale;
-  const firstY = style.valign === 'top'
-    ? rect.top + padding
-    : style.valign === 'bottom'
-      ? rect.top + rect.height - padding - textHeight
-      : rect.top + rect.height / 2 - textHeight / 2;
+  const firstY =
+    style.valign === 'top'
+      ? rect.top + padding
+      : style.valign === 'bottom'
+        ? rect.top + rect.height - padding - textHeight
+        : rect.top + rect.height / 2 - textHeight / 2;
   for (const [index, line] of lines.entries()) {
     const y = firstY + index * lineHeight;
-    draw.text(line, { x, y }, {
-      align: style.align ?? 'left',
-      baseline: style.valign ?? 'middle',
-      color: style.color ?? '#0a0a0a',
-      font,
-    });
+    draw.text(
+      line,
+      { x, y },
+      {
+        align: style.align ?? 'left',
+        baseline: style.valign ?? 'middle',
+        color: style.color ?? '#0a0a0a',
+        font,
+      },
+    );
     const width = draw.measurement.measureText(line, font);
-    const startX = style.align === 'center'
-      ? x - width / 2
-      : style.align === 'right'
-        ? x - width
-        : x;
+    const startX =
+      style.align === 'center' ? x - width / 2 : style.align === 'right' ? x - width : x;
     if (style.underline === true) {
-      const underlineY = style.valign === 'top'
-        ? y + fontSize + 2 * visualScale
-        : style.valign === 'bottom'
-          ? y
-          : y + fontSize / 2;
+      const underlineY =
+        style.valign === 'top'
+          ? y + fontSize + 2 * visualScale
+          : style.valign === 'bottom'
+            ? y
+            : y + fontSize / 2;
       draw.line(
         { x: startX, y: underlineY },
         { x: startX + width, y: underlineY },
@@ -280,15 +295,20 @@ function paintCellContent(
       );
     }
     if (style.strike === true) {
-      const strikeY = style.valign === 'top'
-        ? y + fontSize / 2 + 2 * visualScale
-        : style.valign === 'bottom'
-          ? y - fontSize / 2
-          : y;
-      draw.line({ x: startX, y: strikeY }, { x: startX + width, y: strikeY }, {
-        color: style.color ?? '#0a0a0a',
-        scale: visualScale,
-      });
+      const strikeY =
+        style.valign === 'top'
+          ? y + fontSize / 2 + 2 * visualScale
+          : style.valign === 'bottom'
+            ? y - fontSize / 2
+            : y;
+      draw.line(
+        { x: startX, y: strikeY },
+        { x: startX + width, y: strikeY },
+        {
+          color: style.color ?? '#0a0a0a',
+          scale: visualScale,
+        },
+      );
     }
   }
 }
@@ -315,12 +335,20 @@ export function paintCells(
   budget: FormulaEvaluationBudget,
   defaultStyle: CellStyle,
 ): void {
-  const invalid = new Set((snapshot.invalidCells ?? []).map(point => `${point.row}:${point.column}`));
+  const invalid = new Set(
+    (snapshot.invalidCells ?? []).map((point) => `${point.row}:${point.column}`),
+  );
   for (const point of cells) {
     if (getCellData(snapshot.sheet, point.row, point.column) === null) continue;
     if (!isMergeAnchor(point, snapshot.viewport)) continue;
     const rect = cellRect(point, snapshot.viewport);
-    const presentation = resolveCellPresentation(snapshot.sheet, point, false, budget, defaultStyle);
+    const presentation = resolveCellPresentation(
+      snapshot.sheet,
+      point,
+      false,
+      budget,
+      defaultStyle,
+    );
     paintCellAppearance(draw, rect, presentation, 1, () => {
       if (invalid.has(`${point.row}:${point.column}`)) marker(draw, rect, 'rgba(255, 0, 0, .65)');
       if (presentation.cell?.editable === false) marker(draw, rect, 'rgba(0, 255, 0, .85)');

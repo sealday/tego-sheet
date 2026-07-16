@@ -8,7 +8,10 @@ import { createCanvasHarness } from '../helpers/canvas-harness';
 beforeEach(() => {
   const context = createCanvasHarness().canvas.getContext('2d');
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => context);
-  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+  vi.stubGlobal(
+    'requestAnimationFrame',
+    vi.fn(() => 1),
+  );
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
 });
 
@@ -61,9 +64,9 @@ it('@parity:formulas.editor-display keeps typing local, commits once, creates on
   ref.current!.undo();
   expect(ref.current!.getValue()[0]!.rows?.['0']).toMatchObject({ cells: { 0: { text: 'old' } } });
   expect(order).toEqual(['change']);
-  await waitFor(() => expect(
-    rendered.getByRole('button', { name: 'Undo' }).hasAttribute('disabled'),
-  ).toBe(true));
+  await waitFor(() =>
+    expect(rendered.getByRole('button', { name: 'Undo' }).hasAttribute('disabled')).toBe(true),
+  );
   const afterFirstUndo = ref.current!.getValue();
   const notifications = order.length;
   ref.current!.undo();
@@ -104,7 +107,7 @@ it('@parity:input.desktop-editing commits once on Tab and pointer navigation wit
       defaultValue={[{ rows: { len: 2 }, cols: { len: 3 } }]}
       onChange={() => order.push('change')}
       onCellEdit={() => order.push('cell-edit')}
-      onSelectionChange={selection => {
+      onSelectionChange={(selection) => {
         order.push('selection');
         selections.push(selection.active.column);
       }}
@@ -142,8 +145,12 @@ it('preserves selection, scroll, and active editing across controlled acknowledg
   let sheet: Parameters<TegoSheetHandle['setCellText']>[0]['sheet'] | undefined;
   let checkpoint: WorkbookInput | undefined;
   let selectedColumn = -1;
-  const onChange = (next: WorkbookInput) => { checkpoint = next; };
-  const onSelectionChange: NonNullable<Parameters<typeof TegoSheet>[0]['onSelectionChange']> = next => {
+  const onChange = (next: WorkbookInput) => {
+    checkpoint = next;
+  };
+  const onSelectionChange: NonNullable<Parameters<typeof TegoSheet>[0]['onSelectionChange']> = (
+    next,
+  ) => {
     sheet = next.sheet;
     selectedColumn = next.active.column;
   };
@@ -176,7 +183,9 @@ it('preserves selection, scroll, and active editing across controlled acknowledg
       onSelectionChange={onSelectionChange}
     />,
   );
-  const currentEditor = rendered.getByRole('textbox', { name: /cell editor/i }) as HTMLTextAreaElement;
+  const currentEditor = rendered.getByRole('textbox', {
+    name: /cell editor/i,
+  }) as HTMLTextAreaElement;
   const currentEditorHost = currentEditor.closest<HTMLElement>('.tego-sheet__editor')!;
   expect(currentEditor).toBe(editor);
   expect(currentEditor.value).toBe('draft');
@@ -277,12 +286,21 @@ it('does not finish stale Enter selection work after onChange unmounts the sheet
 
 it.each(['onChange', 'onCellEdit'] as const)(
   'closes the editor and preserves the original %s exception after commit',
-  async callback => {
+  async (callback) => {
     const ref = createRef<TegoSheetHandle>();
     const consumerError = new Error(`${callback} failed`);
-    const callbacks = callback === 'onChange'
-      ? { onChange: () => { throw consumerError; } }
-      : { onCellEdit: () => { throw consumerError; } };
+    const callbacks =
+      callback === 'onChange'
+        ? {
+            onChange: () => {
+              throw consumerError;
+            },
+          }
+        : {
+            onCellEdit: () => {
+              throw consumerError;
+            },
+          };
     const rendered = render(<TegoSheet ref={ref} defaultValue={[{}]} {...callbacks} />);
     await waitFor(() => expect(ref.current).not.toBeNull());
     const root = rendered.container.querySelector<HTMLElement>('[data-tego-sheet]')!;

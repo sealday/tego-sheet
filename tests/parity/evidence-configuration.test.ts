@@ -31,7 +31,9 @@ it('connects actual Vitest and Playwright runs to the evidence reporters without
 
   expect(vitest).toMatch(/reporters:\s*\['default',\s*new VitestParityEvidenceReporter/);
   expect(vitest).toContain('releaseOnly: true');
-  expect(browser).toMatch(/reporter:\s*\[[\s\S]*?\['list'\],[\s\S]*?playwright-parity-evidence\.ts/);
+  expect(browser).toMatch(
+    /reporter:\s*\[[\s\S]*?\['list'\],[\s\S]*?playwright-parity-evidence\.ts/,
+  );
   expect(browser).toContain("lane: 'browser'");
   expect(browser).toContain('releaseOnly: true');
   expect(visual).toMatch(/reporter:\s*\[[\s\S]*?\['list'\],[\s\S]*?playwright-parity-evidence\.ts/);

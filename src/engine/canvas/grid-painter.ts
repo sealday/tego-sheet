@@ -45,9 +45,7 @@ function axisPaneExtent(axis: Axis, pane: FrozenQuadrant): number {
 }
 
 function axisAt(axis: Axis, coordinate: number, viewport: ViewportMetrics): number | null {
-  return axis === 'row'
-    ? viewport.model.rowAt(coordinate)
-    : viewport.model.columnAt(coordinate);
+  return axis === 'row' ? viewport.model.rowAt(coordinate) : viewport.model.columnAt(coordinate);
 }
 
 function axisSize(axis: Axis, index: number, viewport: ViewportMetrics): number {
@@ -98,7 +96,7 @@ function paneAxisIndexes(
 ): readonly number[] {
   const indexes = paneVisualAxisIndexes(axis, pane, viewport);
   return axis === 'row'
-    ? indexes.map(index => viewport.model.logicalRowAtVisualIndex(index))
+    ? indexes.map((index) => viewport.model.logicalRowAtVisualIndex(index))
     : indexes;
 }
 
@@ -157,17 +155,17 @@ export function paneCells(
       }
     }
   }
-  const columnRange = columns.length === 0
-    ? null
-    : { start: Math.min(...columns), end: Math.max(...columns) };
+  const columnRange =
+    columns.length === 0 ? null : { start: Math.min(...columns), end: Math.max(...columns) };
   if (columnRange !== null && viewport.model.merges.length > 0) {
     const sortedVisibleRows = [...rows].sort((first, second) => first - second);
     for (const merge of viewport.model.merges) {
       if (
-        hasVisibleRowInRange(sortedVisibleRows, merge.start.row, merge.end.row)
-        && merge.start.column <= columnRange.end
-        && merge.end.column >= columnRange.start
-      ) add(merge.start);
+        hasVisibleRowInRange(sortedVisibleRows, merge.start.row, merge.end.row) &&
+        merge.start.column <= columnRange.end &&
+        merge.end.column >= columnRange.start
+      )
+        add(merge.start);
     }
   }
   return points;
@@ -191,7 +189,7 @@ export function hasVisibleRowInRange(
 
 function indexedObject(value: unknown): Readonly<Record<string, unknown>> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
+    ? (value as Readonly<Record<string, unknown>>)
     : null;
 }
 
@@ -206,10 +204,7 @@ export interface PaneGridIndexes {
   readonly columns: readonly number[];
 }
 
-export function paneGridIndexes(
-  pane: FrozenQuadrant,
-  viewport: ViewportMetrics,
-): PaneGridIndexes {
+export function paneGridIndexes(pane: FrozenQuadrant, viewport: ViewportMetrics): PaneGridIndexes {
   return {
     rows: paneAxisIndexes('row', pane, viewport),
     columns: paneAxisIndexes('column', pane, viewport),
@@ -237,12 +232,12 @@ export function paintGrid(
   const firstRow = indexes.rows[0];
   const firstColumn = indexes.columns[0];
   if (firstRow === undefined || firstColumn === undefined) return;
-  const rowBoundaries = boundaries(indexes.rows, row => {
+  const rowBoundaries = boundaries(indexes.rows, (row) => {
     const point = { row, column: firstColumn };
     const rect = rangeRect({ start: point, end: point }, viewport);
     return { start: rect.top, size: rect.height };
   });
-  const columnBoundaries = boundaries(indexes.columns, column => {
+  const columnBoundaries = boundaries(indexes.columns, (column) => {
     const point = { row: firstRow, column };
     const rect = rangeRect({ start: point, end: point }, viewport);
     return { start: rect.left, size: rect.width };
@@ -251,19 +246,12 @@ export function paintGrid(
   const right = columnBoundaries.at(-1);
   const top = rowBoundaries[0];
   const bottom = rowBoundaries.at(-1);
-  if (left === undefined || right === undefined || top === undefined || bottom === undefined) return;
+  if (left === undefined || right === undefined || top === undefined || bottom === undefined)
+    return;
   for (const y of rowBoundaries) {
-    draw.line(
-      { x: left, y },
-      { x: right, y },
-      { color: '#e6e6e6' },
-    );
+    draw.line({ x: left, y }, { x: right, y }, { color: '#e6e6e6' });
   }
   for (const x of columnBoundaries) {
-    draw.line(
-      { x, y: top },
-      { x, y: bottom },
-      { color: '#e6e6e6' },
-    );
+    draw.line({ x, y: top }, { x, y: bottom }, { color: '#e6e6e6' });
   }
 }

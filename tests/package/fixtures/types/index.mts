@@ -16,7 +16,9 @@ const props: TegoSheetProps = { defaultValue: [] };
 const workbook: WorkbookData = [];
 const locales: readonly LocaleDefinition[] = [en, de, nl, zhCN];
 const exception = new TegoSheetException({
-  code: 'INVALID_COMMAND', message: 'esm declaration probe', recoverable: false,
+  code: 'INVALID_COMMAND',
+  message: 'esm declaration probe',
+  recoverable: false,
 });
 const packageName: string = packageJson.name;
 

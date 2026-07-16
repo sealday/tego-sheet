@@ -1,5 +1,5 @@
 import { cleanup, render, type RenderResult } from '@testing-library/react';
-import { StrictMode, Suspense, useLayoutEffect, useMemo, useRef } from 'react';
+import { StrictMode, Suspense, useLayoutEffect, useMemo, useState } from 'react';
 import { afterEach } from 'vitest';
 import type { WorkbookCommand } from '../../src/core/commands/workbook-command';
 import type { CommandCommit } from '../../src/core/commands/command-result';
@@ -19,9 +19,7 @@ import type { TegoSheetCallbacks, TegoSheetProps } from '../../src/react/tego-sh
 afterEach(cleanup);
 
 export interface RenderSheetOptions {
-  readonly recordControlledCheckpoint?: (
-    commit: CommandCommit<unknown, WorkbookCommand>,
-  ) => void;
+  readonly recordControlledCheckpoint?: (commit: CommandCommit<unknown, WorkbookCommand>) => void;
   readonly schedulePaint?: () => void;
   readonly strict?: boolean;
   readonly createController?: (
@@ -60,6 +58,16 @@ function callbacksFromProps(props: TegoSheetProps): TegoSheetCallbacks {
   };
 }
 
+function createCallbackStore(initial: TegoSheetCallbacks) {
+  let current = initial;
+  return {
+    get: () => current,
+    set(callbacks: TegoSheetCallbacks) {
+      current = callbacks;
+    },
+  };
+}
+
 export function renderSheet(
   initialProps: TegoSheetProps,
   options: RenderSheetOptions = {},
@@ -73,31 +81,44 @@ export function renderSheet(
     });
     const controller = epoch?.controller;
     const isActive = epoch?.isActive;
-    const callbacks = useRef<TegoSheetCallbacks>(callbacksFromProps(props));
+    const [callbacks] = useState(() => createCallbackStore(callbacksFromProps(props)));
     useLayoutEffect(() => {
-      callbacks.current = callbacksFromProps(props);
-    });
+      callbacks.set(callbacksFromProps(props));
+    }, [callbacks, props]);
     const dispatcher = useMemo(
-      () => controller === undefined || isActive === undefined ? null : createEventDispatcher({
-        controller,
-        getCallbacks: () => callbacks.current,
-        isActive,
-        recordControlledCheckpoint: options.recordControlledCheckpoint,
-        schedulePaint: options.schedulePaint,
-      }),
-      [controller, isActive],
+      () =>
+        controller === undefined || isActive === undefined
+          ? null
+          : createEventDispatcher({
+              controller,
+              getCallbacks: callbacks.get,
+              isActive,
+              recordControlledCheckpoint: options.recordControlledCheckpoint,
+              schedulePaint: options.schedulePaint,
+            }),
+      [callbacks, controller, isActive],
     );
 
-    if (epoch !== null && dispatcher !== null) {
-      runtime = {
-        dispatcher,
-        epoch,
-        dispatchUi: dispatcher.dispatchUi,
-        dispatchRef: dispatcher.dispatchRef,
-        dispatchUiWithSelection: (command, source, selection) =>
-          dispatcher.dispatchUi(command, source, { selectionAfterCommit: selection }),
+    const activeRuntime = useMemo<SheetRuntime | null>(
+      () =>
+        epoch === null || dispatcher === null
+          ? null
+          : {
+              dispatcher,
+              epoch,
+              dispatchUi: dispatcher.dispatchUi,
+              dispatchRef: dispatcher.dispatchRef,
+              dispatchUiWithSelection: (command, source, selection) =>
+                dispatcher.dispatchUi(command, source, { selectionAfterCommit: selection }),
+            },
+      [dispatcher, epoch],
+    );
+    useLayoutEffect(() => {
+      runtime = activeRuntime;
+      return () => {
+        if (runtime === activeRuntime) runtime = null;
       };
-    }
+    }, [activeRuntime]);
 
     return (
       <output
@@ -127,9 +148,14 @@ export function renderSheet(
     );
   }
 
-  const boundary = (props: TegoSheetProps) => options.strict
-    ? <StrictMode><ParentBoundary props={props} /></StrictMode>
-    : <ParentBoundary props={props} />;
+  const boundary = (props: TegoSheetProps) =>
+    options.strict ? (
+      <StrictMode>
+        <ParentBoundary props={props} />
+      </StrictMode>
+    ) : (
+      <ParentBoundary props={props} />
+    );
   const result = render(boundary(initialProps));
   const rendered = Object.defineProperty(result, 'runtime', {
     enumerable: true,

@@ -37,13 +37,15 @@ export interface SheetChromeState<Editor extends ChromeEditor> {
 }
 
 function sameSelection(left: Selection, right: Selection): boolean {
-  return left.sheet === right.sheet
-    && left.active.row === right.active.row
-    && left.active.column === right.active.column
-    && left.range.start.row === right.range.start.row
-    && left.range.start.column === right.range.start.column
-    && left.range.end.row === right.range.end.row
-    && left.range.end.column === right.range.end.column;
+  return (
+    left.sheet === right.sheet &&
+    left.active.row === right.active.row &&
+    left.active.column === right.active.column &&
+    left.range.start.row === right.range.start.row &&
+    left.range.start.column === right.range.start.column &&
+    left.range.end.row === right.range.end.row &&
+    left.range.end.column === right.range.end.column
+  );
 }
 
 export function useSheetChromeState<Editor extends ChromeEditor>(
@@ -60,10 +62,13 @@ export function useSheetChromeState<Editor extends ChromeEditor>(
   const [paintSource, setPaintSource] = useState<Selection | null>(null);
   const paintSourceRef = useRef<Selection | null>(null);
 
-  const replaceEditor = useCallback((next: Editor | null) => {
-    editorRef.current = next;
-    if (isActive()) setEditor(next);
-  }, [isActive]);
+  const replaceEditor = useCallback(
+    (next: Editor | null) => {
+      editorRef.current = next;
+      if (isActive()) setEditor(next);
+    },
+    [isActive],
+  );
   const cancelTransient = useCallback(() => {
     replaceEditor(null);
     paintSourceRef.current = null;
@@ -74,12 +79,12 @@ export function useSheetChromeState<Editor extends ChromeEditor>(
     setValidationOpen(false);
     setPrintOpen(false);
   }, [isActive, replaceEditor]);
-  const requestContextMenu = useCallback((
-    point: Readonly<{ readonly x: number; readonly y: number }>,
-    selection: Selection,
-  ) => {
-    if (isActive()) setContextMenu({ point, selection });
-  }, [isActive]);
+  const requestContextMenu = useCallback(
+    (point: Readonly<{ readonly x: number; readonly y: number }>, selection: Selection) => {
+      if (isActive()) setContextMenu({ point, selection });
+    },
+    [isActive],
+  );
   const closeContextMenu = useCallback(() => {
     setContextMenu(null);
     requestSurfaceFocus();
@@ -104,18 +109,24 @@ export function useSheetChromeState<Editor extends ChromeEditor>(
     setContextMenu(null);
     setValidationOpen(true);
   }, []);
-  const togglePaintSource = useCallback((selection: Selection) => {
-    const next = paintSourceRef.current === null ? selection : null;
-    paintSourceRef.current = next;
-    if (isActive()) setPaintSource(next);
-  }, [isActive]);
-  const consumePaintSource = useCallback((selection: Selection): Selection | null => {
-    const source = paintSourceRef.current;
-    if (source === null || sameSelection(source, selection)) return null;
-    paintSourceRef.current = null;
-    if (isActive()) setPaintSource(null);
-    return source;
-  }, [isActive]);
+  const togglePaintSource = useCallback(
+    (selection: Selection) => {
+      const next = paintSourceRef.current === null ? selection : null;
+      paintSourceRef.current = next;
+      if (isActive()) setPaintSource(next);
+    },
+    [isActive],
+  );
+  const consumePaintSource = useCallback(
+    (selection: Selection): Selection | null => {
+      const source = paintSourceRef.current;
+      if (source === null || sameSelection(source, selection)) return null;
+      paintSourceRef.current = null;
+      if (isActive()) setPaintSource(null);
+      return source;
+    },
+    [isActive],
+  );
 
   return {
     editor,

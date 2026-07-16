@@ -10,10 +10,7 @@ import type { WorkbookCommand } from '../../core/commands/workbook-command';
 import type { ControllerCheckpoint } from '../../core/controller/controller-checkpoint';
 import type { WorkbookController } from '../../core/controller/workbook-controller';
 import { classifyValueUpdate } from './classify-value-update';
-import {
-  createPendingCheckpoint,
-  type PendingCheckpoint,
-} from './pending-checkpoint';
+import { createPendingCheckpoint, type PendingCheckpoint } from './pending-checkpoint';
 
 interface AcknowledgedBase {
   readonly key: string;
@@ -45,10 +42,7 @@ function remapSheet(sheet: SheetId, mapping: ReadonlyMap<SheetId, SheetId>): She
   return mapping.get(sheet) ?? sheet;
 }
 
-function remapSelection(
-  selection: Selection,
-  mapping: ReadonlyMap<SheetId, SheetId>,
-): Selection {
+function remapSelection(selection: Selection, mapping: ReadonlyMap<SheetId, SheetId>): Selection {
   return { ...selection, sheet: remapSheet(selection.sheet, mapping) };
 }
 
@@ -62,10 +56,13 @@ export function remapWorkbookCommand(
 ): WorkbookCommand {
   switch (command.type) {
     case 'set-cell-text':
-      return { ...command, address: {
-        ...command.address,
-        sheet: remapSheet(command.address.sheet, mapping),
-      } };
+      return {
+        ...command,
+        address: {
+          ...command.address,
+          sheet: remapSheet(command.address.sheet, mapping),
+        },
+      };
     case 'set-style':
     case 'set-border':
     case 'clear-format':
@@ -126,12 +123,10 @@ function mapSheetIds(
   }
 }
 
-function sameSheetIds(
-  actual: readonly SheetId[],
-  expected: readonly SheetId[],
-): boolean {
-  return actual.length === expected.length
-    && actual.every((sheet, index) => sheet === expected[index]);
+function sameSheetIds(actual: readonly SheetId[], expected: readonly SheetId[]): boolean {
+  return (
+    actual.length === expected.length && actual.every((sheet, index) => sheet === expected[index])
+  );
 }
 
 function reportedReference(
@@ -149,9 +144,7 @@ function reportedReference(
   return false;
 }
 
-export function createControlledReconciler(
-  controller: WorkbookController,
-): ControlledReconciler {
+export function createControlledReconciler(controller: WorkbookController): ControlledReconciler {
   const defaults = controller.getInitializationDefaults();
   const initialWorkbook = canonicalizeWorkbook(controller.getValue(), defaults);
   const neverObserved = Symbol('controlled-value-not-observed');
@@ -166,7 +159,9 @@ export function createControlledReconciler(
   const invalidObjects = new WeakSet<object>();
   const invalidPrimitives = new Set<unknown>();
 
-  const replay = (tail: readonly PendingCheckpoint[]): {
+  const replay = (
+    tail: readonly PendingCheckpoint[],
+  ): {
     readonly pending: PendingCheckpoint[];
     readonly error?: TegoSheetError;
   } => {
@@ -194,9 +189,9 @@ export function createControlledReconciler(
         }
         const replayedSheetIds = controller.getSheetIds();
         if (
-          outcome.status !== 'committed'
-          || JSON.stringify(outcome.commit.value) !== original.projectedKey
-          || !sameSheetIds(replayedSheetIds, original.runtimeSheetIds)
+          outcome.status !== 'committed' ||
+          JSON.stringify(outcome.commit.value) !== original.projectedKey ||
+          !sameSheetIds(replayedSheetIds, original.runtimeSheetIds)
         ) {
           controller.restore(before);
           return { pending: replayed, error: replayError() };
@@ -216,11 +211,15 @@ export function createControlledReconciler(
       pending.push(createPendingCheckpoint(controller, commit));
     },
     reconcile(value) {
-      const update = classifyValueUpdate({
-        observedValue,
-        acknowledgedKey: base.key,
-        pending,
-      }, value, defaults);
+      const update = classifyValueUpdate(
+        {
+          observedValue,
+          acknowledgedKey: base.key,
+          pending,
+        },
+        value,
+        defaults,
+      );
       if (update.kind === 'same-reference') {
         return { refresh: false };
       }

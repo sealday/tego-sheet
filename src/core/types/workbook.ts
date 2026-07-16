@@ -1,8 +1,4 @@
-import type {
-  JsonExtensible,
-  JsonValue,
-  SparseJsonCollection,
-} from './json';
+import type { JsonExtensible, JsonValue, SparseJsonCollection } from './json';
 import type { ValidationOperator, ValidationType } from './validation';
 
 export type HorizontalAlign = 'left' | 'center' | 'right';

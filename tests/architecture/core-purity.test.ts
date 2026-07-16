@@ -26,20 +26,22 @@ const forbiddenGlobals = new Set([
 function coreFiles(): readonly string[] {
   return execFileSync('git', ['ls-files', '-z', 'src/core'], { cwd: root, encoding: 'utf8' })
     .split('\0')
-    .filter(file => file.endsWith('.ts'));
+    .filter((file) => file.endsWith('.ts'));
 }
 
 it('[ARCH-3] keeps every core and controller module independent of React and the browser', () => {
   expect(coreFiles().length).toBeGreaterThan(20);
   for (const file of coreFiles()) {
     const source = readFileSync(resolve(root, file), 'utf8');
-    const imports = ts.preProcessFile(source).importedFiles.map(entry => entry.fileName);
-    expect(imports, file).not.toEqual(expect.arrayContaining([
-      expect.stringMatching(/^(?:react(?:\/|$)|react-dom(?:\/|$))/),
-    ]));
-    expect(imports, file).not.toEqual(expect.arrayContaining([
-      expect.stringMatching(/(?:^|\/)ui(?:\/|$)|(?:^|\/)react(?:\/|$)|(?:^|\/)engine(?:\/|$)/),
-    ]));
+    const imports = ts.preProcessFile(source).importedFiles.map((entry) => entry.fileName);
+    expect(imports, file).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/^(?:react(?:\/|$)|react-dom(?:\/|$))/)]),
+    );
+    expect(imports, file).not.toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/(?:^|\/)ui(?:\/|$)|(?:^|\/)react(?:\/|$)|(?:^|\/)engine(?:\/|$)/),
+      ]),
+    );
 
     const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
     const found = new Set<string>();
@@ -53,16 +55,18 @@ it('[ARCH-3] keeps every core and controller module independent of React and the
 });
 
 it('[ARCH-2][ARCH-6] round-trips legacy JSON without mutating caller-owned input', () => {
-  const input = deepFreeze([{
-    name: 'Legacy',
-    freeze: 'B2',
-    customExtension: { nested: ['kept', 7, true] },
-    rows: {
-      len: 3,
-      0: { cells: { 0: { text: '42', editable: false, printable: false } } },
+  const input = deepFreeze([
+    {
+      name: 'Legacy',
+      freeze: 'B2',
+      customExtension: { nested: ['kept', 7, true] },
+      rows: {
+        len: 3,
+        0: { cells: { 0: { text: '42', editable: false, printable: false } } },
+      },
+      cols: { len: 2, 0: { width: 88 } },
     },
-    cols: { len: 2, 0: { width: 88 } },
-  }] as WorkbookInput);
+  ] as WorkbookInput);
   const before = JSON.stringify(input);
 
   const parsed = parseWorkbook(input);

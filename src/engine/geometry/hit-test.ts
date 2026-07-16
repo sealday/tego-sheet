@@ -18,10 +18,7 @@ export type HitTestRegion =
   | { readonly kind: 'column-header'; readonly column: number }
   | { readonly kind: 'cell'; readonly cell: CellPoint };
 
-export function hitTestRegion(
-  point: CssPoint,
-  viewport: ViewportMetrics,
-): HitTestRegion | null {
+export function hitTestRegion(point: CssPoint, viewport: ViewportMetrics): HitTestRegion | null {
   if (point.x < 0 || point.x >= viewport.width || point.y < 0 || point.y >= viewport.height) {
     return null;
   }

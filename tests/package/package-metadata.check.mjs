@@ -45,15 +45,34 @@ test('published docs cover the complete React API and migration contract', () =>
   );
 
   for (const term of [
-    'controlled', 'uncontrolled', 'onChange', 'onCellEdit', 'TegoSheetHandle',
-    'toolbar', 'sheetTabs', 'styles.css', 'locales/zh-cn', 'x-data-spreadsheet',
-    'upstream', 'adapted', 'design', 'sealday',
-  ]) assert.match(readme, new RegExp(term, 'i'));
+    'controlled',
+    'uncontrolled',
+    'onChange',
+    'onCellEdit',
+    'TegoSheetHandle',
+    'toolbar',
+    'sheetTabs',
+    'styles.css',
+    'locales/zh-cn',
+    'x-data-spreadsheet',
+    'upstream',
+    'adapted',
+    'design',
+    'sealday',
+  ])
+    assert.match(readme, new RegExp(term, 'i'));
 
   for (const term of [
-    'empty workbook', 'all sheets', 'rendered value', 'resource cleanup',
-    'printable', 'constructor', 'global', 'emitter',
-  ]) assert.match(migration, new RegExp(term, 'i'));
+    'empty workbook',
+    'all sheets',
+    'rendered value',
+    'resource cleanup',
+    'printable',
+    'constructor',
+    'global',
+    'emitter',
+  ])
+    assert.match(migration, new RegExp(term, 'i'));
 
   for (const term of [
     'Original work Copyright (c) 2017 myliang',
@@ -67,19 +86,35 @@ test('published docs cover the complete React API and migration contract', () =>
 test('packed files contain publishable outputs but no workspace source or dependencies', () => {
   const files = JSON.parse(process.env.TEGO_SHEET_PACK_FILES ?? '[]');
   for (const required of [
-    'LICENSE', 'package.json', 'readme.md', 'dist/index.d.ts', 'dist/styles.css',
-    'dist/tego-sheet.js', 'dist/tego-sheet.cjs',
-    'dist/locales/en.js', 'dist/locales/en.cjs', 'dist/locales/en.d.ts',
-    'dist/locales/de.js', 'dist/locales/nl.js', 'dist/locales/zh-cn.js',
-  ]) assert.equal(files.includes(required), true, `${required} must be packed`);
-  assert.equal(files.some(path => /^(?:src|legacy|tests|fixtures|node_modules)\//.test(path)), false);
+    'LICENSE',
+    'package.json',
+    'readme.md',
+    'dist/index.d.ts',
+    'dist/styles.css',
+    'dist/tego-sheet.js',
+    'dist/tego-sheet.cjs',
+    'dist/locales/en.js',
+    'dist/locales/en.cjs',
+    'dist/locales/en.d.ts',
+    'dist/locales/de.js',
+    'dist/locales/nl.js',
+    'dist/locales/zh-cn.js',
+  ])
+    assert.equal(files.includes(required), true, `${required} must be packed`);
+  assert.equal(
+    files.some((path) => /^(?:src|legacy|tests|fixtures|node_modules)\//.test(path)),
+    false,
+  );
 });
 
 test('repository lockfile cryptographically pins every registry package', () => {
   const lockfile = JSON.parse(readFileSync(new URL('package-lock.json', packageRoot), 'utf8'));
   const gaps = Object.entries(lockfile.packages).flatMap(([path, entry]) => {
     if (!path.startsWith('node_modules/') || entry.link || entry.inBundle) return [];
-    if (typeof entry.resolved !== 'string' || !entry.resolved.startsWith('https://registry.npmjs.org/')) {
+    if (
+      typeof entry.resolved !== 'string' ||
+      !entry.resolved.startsWith('https://registry.npmjs.org/')
+    ) {
       return [`${path}: resolved`];
     }
     if (typeof entry.integrity !== 'string' || !/^sha(?:1|256|384|512)-/.test(entry.integrity)) {

@@ -33,7 +33,7 @@ export function createControllerExternalStore(
     snapshot = next;
     let firstError: unknown;
     let failed = false;
-    for (const listener of [...listeners]) {
+    for (const listener of Array.from(listeners)) {
       if (!listeners.has(listener)) continue;
       try {
         listener();
@@ -52,7 +52,7 @@ export function createControllerExternalStore(
     const token: ConnectionToken = { active: true };
     let unsubscribe: (() => void) | null = null;
     try {
-      unsubscribe = controller.subscribe(event => {
+      unsubscribe = controller.subscribe((event) => {
         if (token.active) publish(event.snapshot);
       });
       const current = controller.getSnapshot();

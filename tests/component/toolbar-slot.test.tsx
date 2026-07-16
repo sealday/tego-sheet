@@ -20,7 +20,10 @@ import { createCanvasHarness } from '../helpers/canvas-harness';
 beforeEach(() => {
   const context = createCanvasHarness().canvas.getContext('2d');
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => context);
-  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+  vi.stubGlobal(
+    'requestAnimationFrame',
+    vi.fn(() => 1),
+  );
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
 });
 
@@ -32,7 +35,9 @@ afterEach(() => {
 
 it('supports default, hidden and custom toolbar hosts without leaking a controller', async () => {
   const rendered = render(<TegoSheet defaultValue={[{ name: 'A' }]} />);
-  await waitFor(() => expect(rendered.container.querySelector('[data-tego-toolbar="default"]')).not.toBeNull());
+  await waitFor(() =>
+    expect(rendered.container.querySelector('[data-tego-toolbar="default"]')).not.toBeNull(),
+  );
   rendered.rerender(<TegoSheet defaultValue={[]} toolbar={false} />);
   expect(rendered.container.querySelector('[data-tego-toolbar]')).toBeNull();
 
@@ -40,7 +45,7 @@ it('supports default, hidden and custom toolbar hosts without leaking a controll
   rendered.rerender(
     <TegoSheet
       defaultValue={[]}
-      toolbar={value => {
+      toolbar={(value) => {
         props = value;
         return <button type="button">custom toolbar</button>;
       }}
@@ -61,12 +66,12 @@ it('@parity:formatting.toolbar dispatches public actions through the command pip
   const rendered = render(
     <TegoSheet
       defaultValue={[{ name: 'A' }]}
-      toolbar={value => {
+      toolbar={(value) => {
         props = value;
         return null;
       }}
       onChange={(_value, change) => changes.push(change.kind)}
-      onError={error => errors.push(error)}
+      onError={(error) => errors.push(error)}
     />,
   );
   await waitFor(() => expect(props.selection).not.toBeNull());
@@ -75,20 +80,23 @@ it('@parity:formatting.toolbar dispatches public actions through the command pip
     { type: 'set-border', mode: 'bottom', line: ['thin', '#000'] },
     { type: 'merge' },
     { type: 'freeze' },
-    { type: 'set-validation', rule: { mode: 'cell', type: 'number', required: false, operator: 'gte', value: '0' } },
+    {
+      type: 'set-validation',
+      rule: { mode: 'cell', type: 'number', required: false, operator: 'gte', value: '0' },
+    },
   ];
-  act(() => actions.forEach(action => props.execute(action)));
+  act(() => actions.forEach((action) => props.execute(action)));
   expect(changes).toEqual(['style', 'style', 'validation']);
 
   rendered.rerender(
     <TegoSheet
       defaultValue={[]}
       readOnly
-      toolbar={value => {
+      toolbar={(value) => {
         props = value;
         return null;
       }}
-      onError={error => errors.push(error)}
+      onError={(error) => errors.push(error)}
     />,
   );
   await waitFor(() => expect(props.readOnly).toBe(true));
@@ -102,7 +110,7 @@ it('@parity:selection.keyboard-extension exposes the Shift-extended range throug
   const rendered = render(
     <TegoSheet
       defaultValue={[{ rows: { len: 2 }, cols: { len: 3 } }]}
-      toolbar={value => {
+      toolbar={(value) => {
         props = value;
         return null;
       }}
@@ -134,9 +142,9 @@ it('keeps paint-format disabled and applies the latest read-only gate to retaine
   const rendered = render(
     <TegoSheet
       defaultValue={[{ name: 'A' }]}
-      toolbar={props => <Probe {...props} />}
+      toolbar={(props) => <Probe {...props} />}
       onChange={(_value, change) => changes.push(change.kind)}
-      onError={error => errors.push(error)}
+      onError={(error) => errors.push(error)}
     />,
   );
   await waitFor(() => expect(retained).toBeTypeOf('function'));
@@ -145,12 +153,12 @@ it('keeps paint-format disabled and applies the latest read-only gate to retaine
     <TegoSheet
       defaultValue={[]}
       readOnly
-      toolbar={props => {
+      toolbar={(props) => {
         current = props;
         return <Probe {...props} />;
       }}
       onChange={(_value, change) => changes.push(change.kind)}
-      onError={error => errors.push(error)}
+      onError={(error) => errors.push(error)}
     />,
   );
   expect(changes).toEqual([]);
@@ -171,12 +179,14 @@ it('@parity:ranges.selection-anchor uses range starts for structural actions eve
   const rendered = render(
     <TegoSheet
       ref={ref}
-      defaultValue={[{
-        name: 'A',
-        rows: { len: 3, 0: { cells: { 0: { text: 'anchor' } } } },
-        cols: { len: 3 },
-      }]}
-      toolbar={value => {
+      defaultValue={[
+        {
+          name: 'A',
+          rows: { len: 3, 0: { cells: { 0: { text: 'anchor' } } } },
+          cols: { len: 3 },
+        },
+      ]}
+      toolbar={(value) => {
         props = value;
         return null;
       }}
@@ -207,14 +217,16 @@ it('allows active-sheet-only actions when a zero-sized grid has no selection', a
   const changes: string[] = [];
   render(
     <TegoSheet
-      defaultValue={[{
-        name: 'A',
-        rows: { len: 0 },
-        cols: { len: 0 },
-        freeze: 'B2',
-        autofilter: { ref: 'A1', filters: [{ ci: 0, operator: 'all', value: [] }] },
-      }]}
-      toolbar={value => {
+      defaultValue={[
+        {
+          name: 'A',
+          rows: { len: 0 },
+          cols: { len: 0 },
+          freeze: 'B2',
+          autofilter: { ref: 'A1', filters: [{ ci: 0, operator: 'all', value: [] }] },
+        },
+      ]}
+      toolbar={(value) => {
         props = value;
         return null;
       }}
@@ -234,7 +246,7 @@ it('allows active-sheet-only actions when a zero-sized grid has no selection', a
 
 it.each(['suspend', 'throw'] as const)(
   'does not run toolbar actions from a render that will %s',
-  async mode => {
+  async (mode) => {
     const ref = createRef<TegoSheetHandle>();
     const changes = vi.fn();
     const errors = vi.fn();
@@ -265,7 +277,7 @@ it.each(['suspend', 'throw'] as const)(
           <TegoSheet
             ref={ref}
             defaultValue={[{ name: 'A' }]}
-            toolbar={props => {
+            toolbar={(props) => {
               if (attack) props.execute({ type: 'set-style', patch: { color: 'aborted' } });
               return null;
             }}
@@ -275,9 +287,11 @@ it.each(['suspend', 'throw'] as const)(
           <AbortAfterSheet />
         </>
       );
-      return mode === 'suspend'
-        ? <Suspense fallback={<output data-suspended="" />}>{content}</Suspense>
-        : <ErrorBoundary>{content}</ErrorBoundary>;
+      return mode === 'suspend' ? (
+        <Suspense fallback={<output data-suspended="" />}>{content}</Suspense>
+      ) : (
+        <ErrorBoundary>{content}</ErrorBoundary>
+      );
     }
 
     const rendered = render(<Mounted />);
@@ -302,12 +316,12 @@ it('disables payload-independent actions that are already known to be unavailabl
   render(
     <TegoSheet
       defaultValue={[{ name: 'A', rows: { len: 3 }, cols: { len: 3 } }]}
-      toolbar={props => {
+      toolbar={(props) => {
         base = props;
         return null;
       }}
       onChange={baseChanges}
-      onError={error => baseErrors.push(error)}
+      onError={(error) => baseErrors.push(error)}
     />,
   );
   await waitFor(() => expect(base.selection).not.toBeNull());
@@ -329,12 +343,12 @@ it('disables payload-independent actions that are already known to be unavailabl
   const overlapRender = render(
     <TegoSheet
       defaultValue={[{ name: 'Overlap', rows: { len: 3 }, cols: { len: 3 }, merges: ['B1:C2'] }]}
-      toolbar={props => {
+      toolbar={(props) => {
         overlap = props;
         return null;
       }}
       onChange={overlapChanges}
-      onError={error => overlapErrors.push(error)}
+      onError={(error) => overlapErrors.push(error)}
     />,
   );
   await waitFor(() => expect(overlap.selection).not.toBeNull());
@@ -351,18 +365,20 @@ it('disables payload-independent actions that are already known to be unavailabl
   let outsideFilter!: ToolbarRenderProps;
   render(
     <TegoSheet
-      defaultValue={[{
-        name: 'Filter',
-        rows: { len: 3 },
-        cols: { len: 3 },
-        autofilter: { ref: 'B1:C3', filters: [] },
-      }]}
-      toolbar={props => {
+      defaultValue={[
+        {
+          name: 'Filter',
+          rows: { len: 3 },
+          cols: { len: 3 },
+          autofilter: { ref: 'B1:C3', filters: [] },
+        },
+      ]}
+      toolbar={(props) => {
         outsideFilter = props;
         return null;
       }}
       onChange={sortChanges}
-      onError={error => sortErrors.push(error)}
+      onError={(error) => sortErrors.push(error)}
     />,
   );
   await waitFor(() => expect(outsideFilter.selection).not.toBeNull());
@@ -377,12 +393,12 @@ it('disables payload-independent actions that are already known to be unavailabl
   const rowRender = render(
     <TegoSheet
       defaultValue={[{ name: 'Rows', rows: { len: 4 }, cols: { len: 3 }, merges: ['A2:A3'] }]}
-      toolbar={props => {
+      toolbar={(props) => {
         rowDelete = props;
         return null;
       }}
       onChange={rowChanges}
-      onError={error => rowErrors.push(error)}
+      onError={(error) => rowErrors.push(error)}
     />,
   );
   await waitFor(() => expect(rowDelete.selection).not.toBeNull());
@@ -401,12 +417,12 @@ it('disables payload-independent actions that are already known to be unavailabl
   const columnRender = render(
     <TegoSheet
       defaultValue={[{ name: 'Columns', rows: { len: 3 }, cols: { len: 4 }, merges: ['B1:C1'] }]}
-      toolbar={props => {
+      toolbar={(props) => {
         columnDelete = props;
         return null;
       }}
       onChange={columnChanges}
-      onError={error => columnErrors.push(error)}
+      onError={(error) => columnErrors.push(error)}
     />,
   );
   await waitFor(() => expect(columnDelete.selection).not.toBeNull());

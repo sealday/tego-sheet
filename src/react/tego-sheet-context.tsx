@@ -14,9 +14,7 @@ export function TegoSheetProvider(props: {
   readonly children: ReactNode;
 }) {
   return (
-    <TegoSheetContext.Provider value={props.value}>
-      {props.children}
-    </TegoSheetContext.Provider>
+    <TegoSheetContext.Provider value={props.value}>{props.children}</TegoSheetContext.Provider>
   );
 }
 

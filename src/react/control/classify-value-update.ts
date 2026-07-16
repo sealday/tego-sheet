@@ -24,9 +24,7 @@ export interface ValueClassificationState {
 }
 
 function invalidValue(cause: unknown): TegoSheetError {
-  const message = cause instanceof TegoSheetException
-    ? cause.message
-    : 'Workbook data is invalid';
+  const message = cause instanceof TegoSheetException ? cause.message : 'Workbook data is invalid';
   return {
     code: 'INVALID_DATA',
     message,

@@ -6,10 +6,7 @@ import dts from 'vite-plugin-dts';
 
 export function isReactExternal(id: string): boolean {
   return (
-    id === 'react'
-    || id.startsWith('react/')
-    || id === 'react-dom'
-    || id.startsWith('react-dom/')
+    id === 'react' || id.startsWith('react/') || id === 'react-dom' || id.startsWith('react-dom/')
   );
 }
 
@@ -24,9 +21,8 @@ export function addJavaScriptDeclarationExtensions(filePath: string, content: st
     (statement, prefix: string, specifier: string, suffix: string) => {
       if (/\.(?:[cm]?js|json|css)$/.test(specifier)) return statement;
       const sourceTarget = resolve(sourceDirectory, specifier);
-      const extension = existsSync(sourceTarget) && statSync(sourceTarget).isDirectory()
-        ? '/index.js'
-        : '.js';
+      const extension =
+        existsSync(sourceTarget) && statSync(sourceTarget).isDirectory() ? '/index.js' : '.js';
       return `${prefix}${specifier}${extension}${suffix}`;
     },
   );

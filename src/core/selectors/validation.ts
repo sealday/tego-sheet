@@ -45,11 +45,16 @@ export function validateWorkbook(source: ValidationWorkbookSource): ValidationRe
         } catch {
           continue;
         }
-        const area = (BigInt(range.end.row) - BigInt(range.start.row) + 1n)
-          * (BigInt(range.end.column) - BigInt(range.start.column) + 1n);
-        inspected += Number(area > BigInt(MAX_VALIDATION_CELLS) ? BigInt(MAX_VALIDATION_CELLS + 1) : area);
+        const area =
+          (BigInt(range.end.row) - BigInt(range.start.row) + 1n) *
+          (BigInt(range.end.column) - BigInt(range.start.column) + 1n);
+        inspected += Number(
+          area > BigInt(MAX_VALIDATION_CELLS) ? BigInt(MAX_VALIDATION_CELLS + 1) : area,
+        );
         if (inspected > MAX_VALIDATION_CELLS) {
-          throw new RangeError(`validation exceeds the ${MAX_VALIDATION_CELLS}-cell inspection limit`);
+          throw new RangeError(
+            `validation exceeds the ${MAX_VALIDATION_CELLS}-cell inspection limit`,
+          );
         }
         for (let row = range.start.row; row <= range.end.row; row += 1) {
           for (let column = range.start.column; column <= range.end.column; column += 1) {
@@ -74,14 +79,15 @@ export function validateWorkbook(source: ValidationWorkbookSource): ValidationRe
     });
   });
 
-  issues.sort((left, right) => (
-    left.issue.sheetIndex - right.issue.sheetIndex
-    || left.issue.address.row - right.issue.address.row
-    || left.issue.address.column - right.issue.address.column
-    || left.ruleIndex - right.ruleIndex
-  ));
+  issues.sort(
+    (left, right) =>
+      left.issue.sheetIndex - right.issue.sheetIndex ||
+      left.issue.address.row - right.issue.address.row ||
+      left.issue.address.column - right.issue.address.column ||
+      left.ruleIndex - right.ruleIndex,
+  );
   return freezeDeep({
     valid: issues.length === 0,
-    issues: issues.map(entry => entry.issue),
+    issues: issues.map((entry) => entry.issue),
   });
 }

@@ -8,8 +8,11 @@ const { zhCN } = require('tego-sheet/locales/zh-cn');
 
 assert.equal(typeof TegoSheet, 'object');
 assert.equal(
-  new TegoSheetException({ code: 'INVALID_COMMAND', message: 'probe', recoverable: false })
-    instanceof TegoSheetException,
+  new TegoSheetException({
+    code: 'INVALID_COMMAND',
+    message: 'probe',
+    recoverable: false,
+  }) instanceof TegoSheetException,
   true,
 );
 assert.equal(packageJson.name, 'tego-sheet');

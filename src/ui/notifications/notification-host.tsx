@@ -8,7 +8,9 @@ export function NotificationHost(props: {
   return (
     <div role="status" className="tego-sheet__notification" data-error-code={props.error.code}>
       <span>{props.error.message}</span>
-      <button type="button" aria-label="Dismiss notification" onClick={props.onDismiss}>×</button>
+      <button type="button" aria-label="Dismiss notification" onClick={props.onDismiss}>
+        ×
+      </button>
     </div>
   );
 }

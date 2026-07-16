@@ -89,7 +89,9 @@ export class ResourceRegistry {
     return this.own(() => disposeListener(target, type, guarded, options, afterRemove));
   }
 
-  guard<Args extends readonly unknown[]>(callback: (...args: Args) => void): (...args: Args) => void {
+  guard<Args extends readonly unknown[]>(
+    callback: (...args: Args) => void,
+  ): (...args: Args) => void {
     return (...args: Args): void => {
       if (!this.disposed) callback(...args);
     };

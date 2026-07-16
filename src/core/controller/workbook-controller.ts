@@ -32,9 +32,7 @@ export interface DispatchOptions {
    * If it throws, state, history, revision, and change sequencing are rolled back before the
    * original exception is rethrown, and no subscription is published.
    */
-  readonly beforeNotify?: (
-    commit: CommandCommit<unknown, WorkbookCommand>,
-  ) => void;
+  readonly beforeNotify?: (commit: CommandCommit<unknown, WorkbookCommand>) => void;
   /** Suppress the document subscription used by controlled replay and restore. */
   readonly notify?: boolean;
   /** Skip the potentially large paste result when no consumer needs it. */
@@ -75,7 +73,7 @@ interface MutationTransaction {
 let nextControllerId = 1;
 
 function cloneValue<T>(value: T): T {
-  if (Array.isArray(value)) return value.map(item => cloneValue(item)) as T;
+  if (Array.isArray(value)) return value.map((item) => cloneValue(item)) as T;
   if (value !== null && typeof value === 'object') {
     const output: Record<string, unknown> = {};
     for (const key of Object.keys(value)) {
@@ -146,7 +144,7 @@ export class WorkbookController {
   }
 
   getSheetIds(): readonly SheetId[] {
-    return Object.freeze(this.state.sheets.map(sheet => sheet.id));
+    return Object.freeze(this.state.sheets.map((sheet) => sheet.id));
   }
 
   getInitializationDefaults(): Readonly<WorkbookInitializationDefaults> {
@@ -198,8 +196,8 @@ export class WorkbookController {
     this.ensureMutable();
     const commandSnapshot = this.isolateCommand(command);
     if (
-      options.replayAddSheetId !== undefined
-      && (commandSnapshot.type !== 'add-sheet' || options.notify !== false)
+      options.replayAddSheetId !== undefined &&
+      (commandSnapshot.type !== 'add-sheet' || options.notify !== false)
     ) {
       throw invalidCommand('A replay sheet ID requires a silent add-sheet command');
     }
@@ -223,16 +221,9 @@ export class WorkbookController {
     });
     if (applied === null) return { status: 'noop' };
 
-    const transaction = options.beforeNotify === undefined
-      ? undefined
-      : this.captureTransaction();
+    const transaction = options.beforeNotify === undefined ? undefined : this.captureTransaction();
     const before = this.state;
-    const change = this.createChange(
-      applied.kind,
-      source,
-      applied.sheet,
-      applied.range,
-    );
+    const change = this.createChange(applied.kind, source, applied.sheet, applied.range);
     this.state = applied.state;
     this.revision += 1;
     if (applied.undoable) {
@@ -249,11 +240,7 @@ export class WorkbookController {
       change,
       applied.result as CommandResult<Command>,
     );
-    this.runBeforeNotify(
-      commit as CommandCommit<unknown, WorkbookCommand>,
-      options,
-      transaction,
-    );
+    this.runBeforeNotify(commit as CommandCommit<unknown, WorkbookCommand>, options, transaction);
     this.publish(commit, options);
     return { status: 'committed', commit };
   }
@@ -287,10 +274,10 @@ export class WorkbookController {
   restore(checkpoint: ControllerCheckpoint): void {
     this.ensureActive();
     if (
-      typeof checkpoint !== 'object'
-      || checkpoint === null
-      || !this.checkpoints.has(checkpoint)
-      || !hasCheckpointOwner(checkpoint, this.checkpointOwner)
+      typeof checkpoint !== 'object' ||
+      checkpoint === null ||
+      !this.checkpoints.has(checkpoint) ||
+      !hasCheckpointOwner(checkpoint, this.checkpointOwner)
     ) {
       throw invalidCommand('Checkpoint does not belong to this workbook controller');
     }
@@ -327,9 +314,7 @@ export class WorkbookController {
     source: ChangeSource,
     options: DispatchOptions,
   ): CommandOutcome<void, Command> {
-    const transaction = options.beforeNotify === undefined
-      ? undefined
-      : this.captureTransaction();
+    const transaction = options.beforeNotify === undefined ? undefined : this.captureTransaction();
     const entry = direction === 'undo' ? this.history.undo() : this.history.redo();
     if (entry === null) return { status: 'noop' };
     this.state = direction === 'undo' ? entry.before : entry.after;
@@ -341,11 +326,7 @@ export class WorkbookController {
       entry.metadata.change.range,
     );
     const commit = this.createCommit(command, change, undefined);
-    this.runBeforeNotify(
-      commit as CommandCommit<unknown, WorkbookCommand>,
-      options,
-      transaction,
-    );
+    this.runBeforeNotify(commit as CommandCommit<unknown, WorkbookCommand>, options, transaction);
     this.publish(commit, options);
     return { status: 'committed', commit };
   }
@@ -424,10 +405,12 @@ export class WorkbookController {
     options: DispatchOptions,
   ): void {
     if (options.notify === false) return;
-    this.subscriptions.publish(Object.freeze({
-      snapshot: this.getSnapshot(),
-      commit: commit as CommandCommit<unknown, WorkbookCommand>,
-    }));
+    this.subscriptions.publish(
+      Object.freeze({
+        snapshot: this.getSnapshot(),
+        commit: commit as CommandCommit<unknown, WorkbookCommand>,
+      }),
+    );
   }
 
   private ensureMutable(): void {

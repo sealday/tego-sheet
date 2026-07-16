@@ -72,23 +72,25 @@ export interface SheetChromeProps {
 
 export function SheetChrome(props: SheetChromeProps) {
   const t = createTranslator(props.locale);
-  const toolbar = props.toolbarRenderer === false ? null
-    : typeof props.toolbarRenderer === 'function'
-      ? <div data-tego-toolbar="custom">{props.toolbarRenderer(props.toolbar)}</div>
-      : (
-        <DefaultToolbar
-          toolbar={props.toolbar}
-          t={t}
-          paintFormatActive={props.paintFormatActive}
-          onOpenFilter={props.onOpenFilter}
-          onOpenPrint={props.onOpenPrint}
-          onOpenValidation={props.onOpenValidation}
-        />
-      );
-  const tabs = props.tabsRenderer === false ? null
-    : typeof props.tabsRenderer === 'function'
-      ? <div data-tego-sheet-tabs="custom">{props.tabsRenderer(props.tabs)}</div>
-      : props.tabs.sheets.length === 0 ? null : <SheetTabs tabs={props.tabs} t={t} />;
+  const toolbar =
+    props.toolbarRenderer === false ? null : typeof props.toolbarRenderer === 'function' ? (
+      <div data-tego-toolbar="custom">{props.toolbarRenderer(props.toolbar)}</div>
+    ) : (
+      <DefaultToolbar
+        toolbar={props.toolbar}
+        t={t}
+        paintFormatActive={props.paintFormatActive}
+        onOpenFilter={props.onOpenFilter}
+        onOpenPrint={props.onOpenPrint}
+        onOpenValidation={props.onOpenValidation}
+      />
+    );
+  const tabs =
+    props.tabsRenderer === false ? null : typeof props.tabsRenderer === 'function' ? (
+      <div data-tego-sheet-tabs="custom">{props.tabsRenderer(props.tabs)}</div>
+    ) : props.tabs.sheets.length === 0 ? null : (
+      <SheetTabs tabs={props.tabs} t={t} />
+    );
   return (
     <>
       {toolbar}

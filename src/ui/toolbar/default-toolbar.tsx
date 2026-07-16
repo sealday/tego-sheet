@@ -35,26 +35,45 @@ export function DefaultToolbar(props: DefaultToolbarProps) {
       {...(icons[action.type] === undefined ? {} : { icon: icons[action.type] })}
       disabled={toolbar.disabledActions.has(action.type)}
       onClick={() => toolbar.execute(action)}
-    >{label}</ToolbarButton>
+    >
+      {label}
+    </ToolbarButton>
   );
   const mutating = toolbar.readOnly || toolbar.selection === null;
   return (
-    <div className="tego-sheet__toolbar" data-tego-toolbar="default" role="toolbar" aria-label={t('toolbar.label', 'Spreadsheet toolbar')}>
+    <div
+      className="tego-sheet__toolbar"
+      data-tego-toolbar="default"
+      role="toolbar"
+      aria-label={t('toolbar.label', 'Spreadsheet toolbar')}
+    >
       {button({ type: 'undo' }, t('toolbar.undo', 'Undo'))}
       {button({ type: 'redo' }, t('toolbar.redo', 'Redo'))}
-      <ToolbarButton icon="print" disabled={toolbar.disabledActions.has('print')} onClick={props.onOpenPrint}>
+      <ToolbarButton
+        icon="print"
+        disabled={toolbar.disabledActions.has('print')}
+        onClick={props.onOpenPrint}
+      >
         {t('toolbar.print', 'Print')}
       </ToolbarButton>
-      {button({ type: 'paint-format' }, t('toolbar.paintFormat', 'Paint format'), props.paintFormatActive)}
+      {button(
+        { type: 'paint-format' },
+        t('toolbar.paintFormat', 'Paint format'),
+        props.paintFormatActive,
+      )}
       {button({ type: 'clear-format' }, t('toolbar.clearFormat', 'Clear format'))}
       <FormatControls toolbar={toolbar} t={t} />
       <BorderControls toolbar={toolbar} t={t} />
-      {button({ type: toolbar.merged ? 'unmerge' : 'merge' }, toolbar.merged
-        ? t('toolbar.unmerge', 'Unmerge')
-        : t('toolbar.merge', 'Merge'), toolbar.merged)}
-      {button({ type: toolbar.frozen ? 'unfreeze' : 'freeze' }, toolbar.frozen
-        ? t('toolbar.unfreeze', 'Unfreeze')
-        : t('toolbar.freeze', 'Freeze'), toolbar.frozen)}
+      {button(
+        { type: toolbar.merged ? 'unmerge' : 'merge' },
+        toolbar.merged ? t('toolbar.unmerge', 'Unmerge') : t('toolbar.merge', 'Merge'),
+        toolbar.merged,
+      )}
+      {button(
+        { type: toolbar.frozen ? 'unfreeze' : 'freeze' },
+        toolbar.frozen ? t('toolbar.unfreeze', 'Unfreeze') : t('toolbar.freeze', 'Freeze'),
+        toolbar.frozen,
+      )}
       <ToolbarButton icon="validation" disabled={mutating} onClick={props.onOpenValidation}>
         {t('toolbar.validation', 'Data validation')}
       </ToolbarButton>

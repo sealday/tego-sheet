@@ -1,5 +1,5 @@
 import { act, render } from '@testing-library/react';
-import { StrictMode } from 'react';
+import { StrictMode, useLayoutEffect } from 'react';
 import { expect, it, vi } from 'vitest';
 import {
   WorkbookController,
@@ -32,7 +32,7 @@ function createTestEpochSlot(): TestEpochSlot {
   let snapshot: ActiveEpochLike | null = null;
   const listeners = new Set<() => void>();
   const publish = () => {
-    for (const listener of [...listeners]) {
+    for (const listener of Array.from(listeners)) {
       if (listeners.has(listener)) listener();
     }
   };
@@ -116,13 +116,15 @@ it('keeps the controller epoch usable through Strict Mode effect replay', () => 
   const rendered = renderSheet({ defaultValue: [{}] }, { strict: true });
   const sheet = rendered.runtime.epoch.snapshot.sheets[0]!.id;
 
-  expect(() => act(() => {
-    rendered.runtime.dispatchRef({
-      type: 'set-cell-text',
-      address: { sheet, row: 0, column: 0 },
-      text: 'strict',
-    });
-  })).not.toThrow();
+  expect(() =>
+    act(() => {
+      rendered.runtime.dispatchRef({
+        type: 'set-cell-text',
+        address: { sheet, row: 0, column: 0 },
+        text: 'strict',
+      });
+    }),
+  ).not.toThrow();
 });
 
 it('creates no controller for an aborted render and disposes every Strict Mode epoch once', () => {
@@ -151,7 +153,11 @@ it('creates no controller for an aborted render and disposes every Strict Mode e
     const epoch = useControllerEpoch({ defaultValue: [{}] }, { createController });
     return <output>{epoch?.snapshot.revision ?? 'pending'}</output>;
   }
-  const mounted = render(<StrictMode><Mounted /></StrictMode>);
+  const mounted = render(
+    <StrictMode>
+      <Mounted />
+    </StrictMode>,
+  );
   expect(created).toBe(2);
   expect(disposed).toBe(1);
   mounted.unmount();
@@ -173,7 +179,7 @@ it('rolls back an activated epoch when a slot listener throws during setup', () 
   let activatedEpoch: ActiveEpochLike | undefined;
   const dispose = vi.fn();
   const activate = slot.activate.bind(slot);
-  slot.activate = epoch => {
+  slot.activate = (epoch) => {
     activatedEpoch = epoch;
     activate(epoch);
   };
@@ -256,7 +262,7 @@ it('preserves setup and both resource cleanup errors in order', () => {
   let controller: WorkbookController | undefined;
   let activatedEpoch: ActiveEpochLike | undefined;
   const activate = slot.activate.bind(slot);
-  slot.activate = epoch => {
+  slot.activate = (epoch) => {
     activatedEpoch = epoch;
     const actualStoreDispose = epoch.store.dispose.bind(epoch.store);
     (epoch.store as { dispose: () => void }).dispose = () => {
@@ -345,7 +351,9 @@ it('attempts slot and both resource cleanups after making the epoch inactive', (
 
   function Mounted() {
     const active = useControllerEpoch({ defaultValue: [{}] }, runtime);
-    if (active !== null) epoch = active;
+    useLayoutEffect(() => {
+      if (active !== null) epoch = active;
+    }, [active]);
     return null;
   }
 
@@ -382,11 +390,13 @@ it('makes an unmounted epoch synchronously inactive', () => {
 
   rendered.unmount();
 
-  expect(() => staleDispatcher.dispatchRef({
-    type: 'set-cell-text',
-    address: { sheet, row: 0, column: 0 },
-    text: 'after unmount',
-  })).toThrow(/disposed|inactive/i);
+  expect(() =>
+    staleDispatcher.dispatchRef({
+      type: 'set-cell-text',
+      address: { sheet, row: 0, column: 0 },
+      text: 'after unmount',
+    }),
+  ).toThrow(/disposed|inactive/i);
 });
 
 it('disposes the controller once when store cleanup throws during epoch teardown', () => {
@@ -398,7 +408,7 @@ it('disposes the controller once when store cleanup throws during epoch teardown
   const createController = (input: WorkbookInput, options: WorkbookControllerOptions) => {
     controller = new WorkbookController(input, options);
     const actualSubscribe = controller.subscribe.bind(controller);
-    controller.subscribe = listener => {
+    controller.subscribe = (listener) => {
       const unsubscribe = actualSubscribe(listener);
       return () => {
         unsubscribe();
@@ -415,7 +425,9 @@ it('disposes the controller once when store cleanup throws during epoch teardown
 
   function Mounted() {
     const epoch = useControllerEpoch({ defaultValue: [{}] }, { createController });
-    if (epoch !== null) store = epoch.store;
+    useLayoutEffect(() => {
+      if (epoch !== null) store = epoch.store;
+    }, [epoch]);
     return <output>{epoch?.snapshot.revision ?? 'pending'}</output>;
   }
 
@@ -445,7 +457,7 @@ it('aggregates store and controller errors after attempting both epoch cleanups'
   const createController = (input: WorkbookInput, options: WorkbookControllerOptions) => {
     controller = new WorkbookController(input, options);
     const actualSubscribe = controller.subscribe.bind(controller);
-    controller.subscribe = listener => {
+    controller.subscribe = (listener) => {
       const unsubscribe = actualSubscribe(listener);
       return () => {
         unsubscribe();
@@ -463,7 +475,9 @@ it('aggregates store and controller errors after attempting both epoch cleanups'
 
   function Mounted() {
     const epoch = useControllerEpoch({ defaultValue: [{}] }, { createController });
-    if (epoch !== null) store = epoch.store;
+    useLayoutEffect(() => {
+      if (epoch !== null) store = epoch.store;
+    }, [epoch]);
     return <output>{epoch?.snapshot.revision ?? 'pending'}</output>;
   }
 
@@ -479,10 +493,7 @@ it('aggregates store and controller errors after attempting both epoch cleanups'
   }
 
   expect(thrown).toBeInstanceOf(AggregateError);
-  expect((thrown as AggregateError).errors).toEqual([
-    unsubscribeError,
-    controllerDisposeError,
-  ]);
+  expect((thrown as AggregateError).errors).toEqual([unsubscribeError, controllerDisposeError]);
   expect(dispose).toHaveBeenCalledOnce();
   expect(() => activeController.validate()).toThrow(/disposed/i);
 });
@@ -492,22 +503,28 @@ it('catches up the external snapshot on delayed first subscribe and reconnect', 
   const store = createControllerExternalStore(controller);
   const sheet = controller.getSheetIds()[0]!;
 
-  controller.dispatch({
-    type: 'set-cell-text',
-    address: { sheet, row: 0, column: 0 },
-    text: 'before subscribe',
-  }, 'ref');
+  controller.dispatch(
+    {
+      type: 'set-cell-text',
+      address: { sheet, row: 0, column: 0 },
+      text: 'before subscribe',
+    },
+    'ref',
+  );
   const first = vi.fn();
   const disconnect = store.subscribe(first);
   expect(store.getSnapshot().revision).toBe(1);
   expect(first).not.toHaveBeenCalled();
 
   disconnect();
-  controller.dispatch({
-    type: 'set-cell-text',
-    address: { sheet, row: 0, column: 0 },
-    text: 'while disconnected',
-  }, 'ref');
+  controller.dispatch(
+    {
+      type: 'set-cell-text',
+      address: { sheet, row: 0, column: 0 },
+      text: 'while disconnected',
+    },
+    'ref',
+  );
   const second = vi.fn();
   store.subscribe(second);
   expect(store.getSnapshot().revision).toBe(2);
@@ -523,20 +540,26 @@ it('adopts a same-revision branch after a disconnected checkpoint restore', () =
   const store = createControllerExternalStore(controller);
   const sheet = controller.getSheetIds()[0]!;
   const disconnect = store.subscribe(() => undefined);
-  controller.dispatch({
-    type: 'set-cell-text',
-    address: { sheet, row: 0, column: 0 },
-    text: 'branch A',
-  }, 'ref');
+  controller.dispatch(
+    {
+      type: 'set-cell-text',
+      address: { sheet, row: 0, column: 0 },
+      text: 'branch A',
+    },
+    'ref',
+  );
   expect(store.getSnapshot().revision).toBe(1);
   disconnect();
 
   controller.restore(base);
-  controller.dispatch({
-    type: 'set-cell-text',
-    address: { sheet, row: 0, column: 0 },
-    text: 'branch B',
-  }, 'ref');
+  controller.dispatch(
+    {
+      type: 'set-cell-text',
+      address: { sheet, row: 0, column: 0 },
+      text: 'branch B',
+    },
+    'ref',
+  );
   const listener = vi.fn();
   store.subscribe(listener);
 
@@ -557,16 +580,15 @@ it('makes a failed connection inert when rollback cleanup also throws', () => {
   const connectError = new Error('snapshot refresh failed');
   const cleanupError = new Error('rollback cleanup failed');
   const actualSubscribe = controller.subscribe.bind(controller);
-  vi.spyOn(controller, 'subscribe').mockImplementation(listener => {
+  vi.spyOn(controller, 'subscribe').mockImplementation((listener) => {
     actualSubscribe(listener);
     return () => {
       throw cleanupError;
     };
   });
-  const getSnapshot = vi.spyOn(controller, 'getSnapshot')
-    .mockImplementationOnce(() => {
-      throw connectError;
-    });
+  const getSnapshot = vi.spyOn(controller, 'getSnapshot').mockImplementationOnce(() => {
+    throw connectError;
+  });
 
   let thrown: unknown;
   try {
@@ -577,21 +599,27 @@ it('makes a failed connection inert when rollback cleanup also throws', () => {
   expect(thrown).toBeInstanceOf(AggregateError);
   expect((thrown as AggregateError).errors).toEqual([connectError, cleanupError]);
   getSnapshot.mockRestore();
-  controller.dispatch({
-    type: 'set-cell-text',
-    address: { sheet, row: 0, column: 0 },
-    text: 'late rollback event',
-  }, 'ref');
+  controller.dispatch(
+    {
+      type: 'set-cell-text',
+      address: { sheet, row: 0, column: 0 },
+      text: 'late rollback event',
+    },
+    'ref',
+  );
   expect(store.getSnapshot().revision).toBe(0);
 
   const liveListener = vi.fn();
   const disconnect = store.subscribe(liveListener);
   expect(liveListener).not.toHaveBeenCalled();
-  controller.dispatch({
-    type: 'set-cell-text',
-    address: { sheet, row: 1, column: 0 },
-    text: 'after reconnect',
-  }, 'ref');
+  controller.dispatch(
+    {
+      type: 'set-cell-text',
+      address: { sheet, row: 1, column: 0 },
+      text: 'after reconnect',
+    },
+    'ref',
+  );
   expect(liveListener).toHaveBeenCalledOnce();
 
   expect(() => disconnect()).toThrow(cleanupError);
@@ -615,11 +643,16 @@ it('notifies every current listener before rethrowing the first listener error',
   second.mockClear();
   shouldThrow = true;
 
-  expect(() => controller.dispatch({
-    type: 'set-cell-text',
-    address: { sheet, row: 0, column: 0 },
-    text: 'committed despite notification error',
-  }, 'ref')).toThrow(firstError);
+  expect(() =>
+    controller.dispatch(
+      {
+        type: 'set-cell-text',
+        address: { sheet, row: 0, column: 0 },
+        text: 'committed despite notification error',
+      },
+      'ref',
+    ),
+  ).toThrow(firstError);
   expect(first).toHaveBeenCalledOnce();
   expect(second).toHaveBeenCalledOnce();
   expect(controller.getCellText({ sheet, row: 0, column: 0 })).toBe(
@@ -637,7 +670,7 @@ it('makes a disconnected connection inert before a failing cleanup', () => {
   const controller = new WorkbookController([{}]);
   const actualSubscribe = controller.subscribe.bind(controller);
   const cleanupError = new Error('disconnect failed');
-  const subscribe = vi.spyOn(controller, 'subscribe').mockImplementation(listener => {
+  const subscribe = vi.spyOn(controller, 'subscribe').mockImplementation((listener) => {
     actualSubscribe(listener);
     return () => {
       throw cleanupError;
@@ -648,21 +681,27 @@ it('makes a disconnected connection inert before a failing cleanup', () => {
   const disconnectFirst = store.subscribe(vi.fn());
 
   expect(() => disconnectFirst()).toThrow(cleanupError);
-  controller.dispatch({
-    type: 'set-cell-text',
-    address: { sheet, row: 0, column: 0 },
-    text: 'late disconnected event',
-  }, 'ref');
+  controller.dispatch(
+    {
+      type: 'set-cell-text',
+      address: { sheet, row: 0, column: 0 },
+      text: 'late disconnected event',
+    },
+    'ref',
+  );
   expect(store.getSnapshot().revision).toBe(0);
 
   const second = vi.fn();
   const disconnectSecond = store.subscribe(second);
   expect(subscribe).toHaveBeenCalledTimes(2);
-  controller.dispatch({
-    type: 'set-cell-text',
-    address: { sheet, row: 1, column: 0 },
-    text: 'after reconnect',
-  }, 'ref');
+  controller.dispatch(
+    {
+      type: 'set-cell-text',
+      address: { sheet, row: 1, column: 0 },
+      text: 'after reconnect',
+    },
+    'ref',
+  );
   expect(second).toHaveBeenCalledOnce();
 
   expect(() => disconnectSecond()).toThrow(cleanupError);
@@ -674,7 +713,7 @@ it('clears listeners even when controller cleanup throws during dispose', () => 
   const controller = new WorkbookController([{}]);
   const actualSubscribe = controller.subscribe.bind(controller);
   const cleanupError = new Error('dispose disconnect failed');
-  vi.spyOn(controller, 'subscribe').mockImplementation(listener => {
+  vi.spyOn(controller, 'subscribe').mockImplementation((listener) => {
     actualSubscribe(listener);
     return () => {
       throw cleanupError;
@@ -692,11 +731,16 @@ it('clears listeners even when controller cleanup throws during dispose', () => 
   shouldThrow = true;
 
   expect(() => store.dispose()).toThrow(cleanupError);
-  expect(() => controller.dispatch({
-    type: 'set-cell-text',
-    address: { sheet, row: 0, column: 0 },
-    text: 'after failed dispose',
-  }, 'ref')).not.toThrow();
+  expect(() =>
+    controller.dispatch(
+      {
+        type: 'set-cell-text',
+        address: { sheet, row: 0, column: 0 },
+        text: 'after failed dispose',
+      },
+      'ref',
+    ),
+  ).not.toThrow();
   expect(listener).not.toHaveBeenCalled();
 
   controller.dispose();

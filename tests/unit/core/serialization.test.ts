@@ -41,7 +41,7 @@ function loadFixture(id: (typeof fixtureIds)[number]): WorkbookFixture {
 describe('workbook parsing and serialization', () => {
   it.each(fixtureIds)(
     '@parity:workbook.canonical-roundtrip matches the exact %s fixture without mutation',
-    id => {
+    (id) => {
       const fixture = loadFixture(id);
       const before = structuredClone(fixture.input);
 
@@ -147,7 +147,7 @@ describe('workbook parsing and serialization', () => {
     const firstOutput = serializeWorkbook(parsed);
 
     (input.rows[0].cells[0] as { text: string }).text = 'changed input';
-    (firstOutput[0]?.rows?.[0] as { cells: { 0: { text: string } } }).cells[0].text =
+    (firstOutput[0]!.rows![0] as { cells: { 0: { text: string } } }).cells[0].text =
       'changed output';
 
     expect(serializeWorkbook(parsed)[0]?.rows?.[0]).toEqual({
@@ -171,7 +171,7 @@ describe('workbook parsing and serialization', () => {
     { vendor: Array(1) },
     Array(1),
     { [Symbol('not-json')]: true },
-  ])('rejects invalid workbook input atomically: %o', invalid => {
+  ])('rejects invalid workbook input atomically: %o', (invalid) => {
     let exposed: unknown = 'unchanged';
 
     try {
@@ -189,9 +189,9 @@ describe('workbook parsing and serialization', () => {
   });
 
   it('rejects sparse-key collisions after leading-zero normalization', () => {
-    expect(() =>
-      parseWorkbook({ rows: { 1: { cells: {} }, '01': { cells: {} } } }),
-    ).toThrowError(TegoSheetException);
+    expect(() => parseWorkbook({ rows: { 1: { cells: {} }, '01': { cells: {} } } })).toThrowError(
+      TegoSheetException,
+    );
   });
 
   it('normalizes arbitrary-size sparse decimal keys without Number coercion', () => {
@@ -210,7 +210,7 @@ describe('workbook parsing and serialization', () => {
       cols: { [`000${columnKey}`]: { width: 80 } },
     });
 
-    expect(Object.keys(parsed[0]?.rows ?? {}).filter(key => /^\d+$/.test(key))).toEqual([
+    expect(Object.keys(parsed[0]?.rows ?? {}).filter((key) => /^\d+$/.test(key))).toEqual([
       rowKey,
       laterRowKey,
     ]);
@@ -242,7 +242,7 @@ describe('workbook parsing and serialization', () => {
         },
       },
     },
-  ])('rejects arbitrary-size sparse-key collisions after normalization: %o', input => {
+  ])('rejects arbitrary-size sparse-key collisions after normalization: %o', (input) => {
     expect(() => parseWorkbook(input as never)).toThrowError(TegoSheetException);
   });
 
@@ -332,9 +332,7 @@ describe('workbook parsing and serialization', () => {
     const extension: unknown[] = [];
     Object.defineProperty(extension, 'hidden', { value: true, enumerable: false });
 
-    expect(() => parseWorkbook({ vendor: extension } as never)).toThrowError(
-      TegoSheetException,
-    );
+    expect(() => parseWorkbook({ vendor: extension } as never)).toThrowError(TegoSheetException);
   });
 
   it('canonicalizes deterministically and compares semantic content independent of object order', () => {

@@ -28,7 +28,9 @@ function git(root, args) {
 function assertCleanRepository(root) {
   const status = git(root, ['status', '--porcelain=v1', '--untracked-files=all']);
   if (status !== '') {
-    throw new Error('parity release requires a clean repository so the revision and tree fingerprint are exact');
+    throw new Error(
+      'parity release requires a clean repository so the revision and tree fingerprint are exact',
+    );
   }
 }
 
@@ -43,16 +45,25 @@ export function computeParityReleaseIdentity(root) {
     revision: git(root, ['rev-parse', 'HEAD']),
     treeHash: git(root, ['rev-parse', 'HEAD^{tree}']),
     manifestHash: hashReleaseFiles(root, ['tests/parity/manifest.ts']),
-    lanes: Object.fromEntries(lanes.map(lane => [lane, {
-      runner: lane === 'unit' || lane === 'component'
-        ? `vitest@${vitest}`
-        : `playwright@${playwright}`,
-      configHash: hashReleaseFiles(root, parityLaneConfigFiles[lane]),
-      expectedProjects: [...parityProjectContract[lane]],
-      allowedProjectSkips: Object.fromEntries(
-        Object.entries(parityAllowedProjectSkips[lane]).map(([id, projects]) => [id, [...projects]]),
-      ),
-    }])),
+    lanes: Object.fromEntries(
+      lanes.map((lane) => [
+        lane,
+        {
+          runner:
+            lane === 'unit' || lane === 'component'
+              ? `vitest@${vitest}`
+              : `playwright@${playwright}`,
+          configHash: hashReleaseFiles(root, parityLaneConfigFiles[lane]),
+          expectedProjects: [...parityProjectContract[lane]],
+          allowedProjectSkips: Object.fromEntries(
+            Object.entries(parityAllowedProjectSkips[lane]).map(([id, projects]) => [
+              id,
+              [...projects],
+            ]),
+          ),
+        },
+      ]),
+    ),
   };
 }
 
@@ -73,12 +84,19 @@ export function assertParityReleaseContextCurrent(context, root, now = new Date(
   if (context?.schemaVersion !== 1 || typeof context.runId !== 'string') {
     throw new Error('parity release context has an unsupported or malformed schema');
   }
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(context.runId)) {
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(context.runId)
+  ) {
     throw new Error('parity release context run ID must be a random UUID');
   }
   const started = Date.parse(context.startedAt);
   const expires = Date.parse(context.expiresAt);
-  if (Number.isNaN(started) || Number.isNaN(expires) || now.getTime() < started || now.getTime() > expires) {
+  if (
+    Number.isNaN(started) ||
+    Number.isNaN(expires) ||
+    now.getTime() < started ||
+    now.getTime() > expires
+  ) {
     throw new Error('parity release context is stale or outside its validity window');
   }
   const current = computeParityReleaseIdentity(root);
@@ -91,7 +109,9 @@ export function assertParityReleaseContextCurrent(context, root, now = new Date(
     const actual = context.lanes?.[lane];
     const expected = current.lanes[lane];
     if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-      throw new Error(`parity release context ${lane} runner, config, project matrix, or skip contract is stale`);
+      throw new Error(
+        `parity release context ${lane} runner, config, project matrix, or skip contract is stale`,
+      );
     }
   }
 }

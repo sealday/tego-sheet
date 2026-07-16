@@ -37,12 +37,14 @@ export function findResizeHandle(
   const { model } = viewport;
   const size = boundary.axis === 'row' ? model.rowHeight : model.columnWidth;
   const index = previousVisible(boundary.axis, boundary.boundary, viewport);
-  return index === null ? null : {
-    ...boundary,
-    index,
-    position: boundary.axis === 'row' ? point.y : point.x,
-    size: size(index),
-  };
+  return index === null
+    ? null
+    : {
+        ...boundary,
+        index,
+        position: boundary.axis === 'row' ? point.y : point.x,
+        size: size(index),
+      };
 }
 
 export function findResizeBoundary(
@@ -55,8 +57,10 @@ export function findResizeBoundary(
     const region = hitTestRegion(point, viewport);
     if (region?.kind !== 'column-header') return null;
     const column = region.column;
-    const left = viewport.rowHeaderWidth + model.columnOffset(column)
-      - (column < viewport.freeze.column ? 0 : viewport.scroll.x);
+    const left =
+      viewport.rowHeaderWidth +
+      model.columnOffset(column) -
+      (column < viewport.freeze.column ? 0 : viewport.scroll.x);
     const leftDistance = Math.abs(point.x - left);
     const rightDistance = Math.abs(point.x - (left + model.columnWidth(column)));
     const hitsLeft = leftDistance <= tolerance && leftDistance <= rightDistance;
@@ -71,8 +75,10 @@ export function findResizeBoundary(
     if (region?.kind !== 'row-header') return null;
     const row = region.row;
     const visualRow = model.visualIndexOfRow(row);
-    const top = viewport.columnHeaderHeight + model.rowOffset(visualRow)
-      - (visualRow < viewport.freeze.row ? 0 : viewport.scroll.y);
+    const top =
+      viewport.columnHeaderHeight +
+      model.rowOffset(visualRow) -
+      (visualRow < viewport.freeze.row ? 0 : viewport.scroll.y);
     const topDistance = Math.abs(point.y - top);
     const bottomDistance = Math.abs(point.y - (top + model.rowHeight(row)));
     const hitsTop = topDistance <= tolerance && topDistance <= bottomDistance;
@@ -102,10 +108,11 @@ export function hiddenRunBefore(
   viewport: ViewportMetrics,
 ): readonly [start: number, count: number] | null {
   if (
-    axis === 'row'
-    && boundary > 0
-    && viewport.model.logicalRowAtVisualIndex(boundary - 1) !== boundary - 1
-  ) return null;
+    axis === 'row' &&
+    boundary > 0 &&
+    viewport.model.logicalRowAtVisualIndex(boundary - 1) !== boundary - 1
+  )
+    return null;
   const previous = previousVisible(axis, boundary, viewport);
   const start = previous === null ? 0 : previous + 1;
   return start === boundary ? null : [start, boundary - start];

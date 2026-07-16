@@ -13,7 +13,10 @@ import { createCanvasHarness } from '../helpers/canvas-harness';
 beforeEach(() => {
   const context = createCanvasHarness().canvas.getContext('2d');
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => context);
-  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+  vi.stubGlobal(
+    'requestAnimationFrame',
+    vi.fn(() => 1),
+  );
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
 });
 
@@ -32,7 +35,7 @@ it('keeps viewing, selection, navigation and copy available while rejecting ever
       ref={ref}
       defaultValue={[{ name: 'A', rows: { 0: { cells: { 0: { text: 'copy me' } } } } }]}
       readOnly
-      onSelectionChange={event => {
+      onSelectionChange={(event) => {
         sheet = event.sheet;
         onSelectionChange(event);
       }}
@@ -48,7 +51,9 @@ it('keeps viewing, selection, navigation and copy available while rejecting ever
 
   const clipboard = { setData: vi.fn(), getData: vi.fn(() => '') };
   fireEvent.copy(window, { clipboardData: clipboard });
-  await waitFor(() => expect(clipboard.setData).toHaveBeenCalledWith('text/plain', expect.any(String)));
+  await waitFor(() =>
+    expect(clipboard.setData).toHaveBeenCalledWith('text/plain', expect.any(String)),
+  );
 
   const commands = [
     () => ref.current!.setCellText({ sheet, row: 0, column: 0 }, 'blocked'),
@@ -63,9 +68,16 @@ it('keeps viewing, selection, navigation and copy available while rejecting ever
   }
   expect(() => ref.current!.activateSheet(sheet)).not.toThrow();
   expect(() => ref.current!.validate()).not.toThrow();
-  act(() => rendered.rerender(
-    <TegoSheet ref={ref} defaultValue={[]} readOnly={false} onSelectionChange={onSelectionChange} />,
-  ));
+  act(() =>
+    rendered.rerender(
+      <TegoSheet
+        ref={ref}
+        defaultValue={[]}
+        readOnly={false}
+        onSelectionChange={onSelectionChange}
+      />,
+    ),
+  );
   expect(() => ref.current!.setCellText({ sheet, row: 0, column: 0 }, 'allowed')).not.toThrow();
 });
 
@@ -97,12 +109,12 @@ it('commits the false-to-true read-only gate before custom child layout commands
     <TegoSheet
       ref={ref}
       defaultValue={[{ name: 'A' }]}
-      toolbar={props => {
+      toolbar={(props) => {
         toolbar = props;
         return <Probe {...props} />;
       }}
       onChange={changes}
-      onError={error => errors.push(error)}
+      onError={(error) => errors.push(error)}
     />,
   );
   await waitFor(() => expect(toolbar.selection).not.toBeNull());
@@ -115,12 +127,12 @@ it('commits the false-to-true read-only gate before custom child layout commands
       ref={ref}
       defaultValue={[]}
       readOnly
-      toolbar={props => {
+      toolbar={(props) => {
         toolbar = props;
         return <Probe {...props} />;
       }}
       onChange={changes}
-      onError={error => errors.push(error)}
+      onError={(error) => errors.push(error)}
     />,
   );
 
@@ -159,7 +171,7 @@ it('commits the true-to-false read-only gate before custom child layout commands
       ref={ref}
       defaultValue={[{ name: 'A' }]}
       readOnly
-      toolbar={props => {
+      toolbar={(props) => {
         toolbar = props;
         return <Probe {...props} />;
       }}
@@ -174,7 +186,7 @@ it('commits the true-to-false read-only gate before custom child layout commands
       ref={ref}
       defaultValue={[]}
       readOnly={false}
-      toolbar={props => {
+      toolbar={(props) => {
         toolbar = props;
         return <Probe {...props} />;
       }}

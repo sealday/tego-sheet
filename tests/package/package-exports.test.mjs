@@ -17,16 +17,20 @@ const expectedExports = [
 ];
 
 test('the package exposes only the approved React surface', () => {
-  const packageJson = JSON.parse(readFileSync(
-    join(consumer, 'node_modules/tego-sheet/package.json'),
-    'utf8',
-  ));
+  const packageJson = JSON.parse(
+    readFileSync(join(consumer, 'node_modules/tego-sheet/package.json'), 'utf8'),
+  );
   assert.deepEqual(Object.keys(packageJson.exports), expectedExports);
   assert.equal(packageJson.exports['./locales'], undefined);
 });
 
 test('the built root has only the approved runtime exports and internal subpaths are blocked', () => {
-  execFileSync(process.execPath, ['--input-type=module', '--eval', `
+  execFileSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '--eval',
+      `
       const root = await import('tego-sheet');
       if (JSON.stringify(Object.keys(root)) !== JSON.stringify(['TegoSheet', 'TegoSheetException'])) {
         throw new Error('Unexpected root exports: ' + Object.keys(root).join(','));
@@ -35,7 +39,10 @@ test('the built root has only the approved runtime exports and internal subpaths
         code: 'INVALID_COMMAND', message: 'probe', recoverable: false,
       });
       if (!(exception instanceof root.TegoSheetException)) throw new Error('bad exception runtime');
-    `], { cwd: consumer, stdio: 'pipe' });
+    `,
+    ],
+    { cwd: consumer, stdio: 'pipe' },
+  );
 
   for (const subpath of [
     'tego-sheet/locales',
@@ -45,11 +52,11 @@ test('the built root has only the approved runtime exports and internal subpaths
     'tego-sheet/src/index',
     'tego-sheet/legacy',
   ]) {
-    const result = spawnSync(process.execPath, [
-      '--input-type=module',
-      '--eval',
-      `await import(${JSON.stringify(subpath)})`,
-    ], { cwd: consumer, encoding: 'utf8' });
+    const result = spawnSync(
+      process.execPath,
+      ['--input-type=module', '--eval', `await import(${JSON.stringify(subpath)})`],
+      { cwd: consumer, encoding: 'utf8' },
+    );
     assert.notEqual(result.status, 0, `${subpath} unexpectedly resolved`);
     assert.match(result.stderr, /ERR_PACKAGE_PATH_NOT_EXPORTED/);
   }
@@ -63,12 +70,20 @@ test('each locale entry exports only its intended dictionary', () => {
     ['zh-cn', 'zhCN', 'zh-CN'],
   ];
   for (const [subpath, name, id] of probes) {
-    execFileSync(process.execPath, ['--input-type=module', '--eval', `
+    execFileSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '--eval',
+        `
       const locale = await import(${JSON.stringify(`tego-sheet/locales/${subpath}`)});
       if (JSON.stringify(Object.keys(locale)) !== JSON.stringify([${JSON.stringify(name)}])) {
         throw new Error('Unexpected locale exports: ' + Object.keys(locale).join(','));
       }
       if (locale[${JSON.stringify(name)}].id !== ${JSON.stringify(id)}) throw new Error('bad id');
-    `], { cwd: consumer, stdio: 'pipe' });
+    `,
+      ],
+      { cwd: consumer, stdio: 'pipe' },
+    );
   }
 });

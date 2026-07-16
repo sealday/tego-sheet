@@ -14,25 +14,32 @@ const exactEvidence = new Set([
 ]);
 
 function isApprovedEvidence(file: string): boolean {
-  return exactEvidence.has(file)
-    || /^docs\/superpowers\/(?:[^/]+\/)*[^/]+\.md$/.test(file)
-    || /^tests\/visual\/__snapshots__\/[^/]+\.png$/.test(file);
+  return (
+    exactEvidence.has(file) ||
+    /^docs\/superpowers\/(?:[^/]+\/)*[^/]+\.md$/.test(file) ||
+    /^tests\/visual\/__snapshots__\/[^/]+\.png$/.test(file)
+  );
 }
 
 function isGeneratedOutput(file: string): boolean {
   if (isApprovedEvidence(file)) return false;
   const sourceOrFixture = /(?:^|\/)(?:src|fixtures?)(?:\/|$)/.test(file);
   return (
-    /^(?:docs\/superpowers|tests\/parity\/legacy|tests\/visual\/(?:__snapshots__|fonts))(?:\/|$)/.test(file)
-    || /(?:^|\/)(?:build|dist|demo-dist|coverage|playwright-report|test-results|reports?)(?:\/|$)/.test(file)
-    || /\.map$/i.test(file)
-    || /\.min\.(?:js|cjs|mjs|css)$/i.test(file)
-    || /(?:^|\/)[a-f0-9]{8,}\.(?:js|cjs|mjs|css|map|svg|png|woff2?)$/i.test(file)
-    || /(?:^|\/)(?:assets\/)?[^/]+-[a-z0-9_-]{8,}\.(?:js|css)$/i.test(file)
-    || /^docs\/.*\.(?:html|js|cjs|mjs|css|map|svg|png)$/i.test(file)
-    || (!sourceOrFixture && /(?:^|\/)[^/]*(?:bundle|chunk)[^/]*\.(?:js|cjs|mjs|css)$/i.test(file))
-    || (!sourceOrFixture && /(?:^|\/)(?:main|index|app)(?:[-.][^/]*)?\.(?:js|cjs|mjs|css)$/i.test(file))
-    || /(?:^|\/)(?:tego-sheet|xspreadsheet)(?:\.[a-z0-9-]+)?\.(?:js|cjs|mjs|css)$/i.test(file)
+    /^(?:docs\/superpowers|tests\/parity\/legacy|tests\/visual\/(?:__snapshots__|fonts))(?:\/|$)/.test(
+      file,
+    ) ||
+    /(?:^|\/)(?:build|dist|demo-dist|coverage|playwright-report|test-results|reports?)(?:\/|$)/.test(
+      file,
+    ) ||
+    /\.map$/i.test(file) ||
+    /\.min\.(?:js|cjs|mjs|css)$/i.test(file) ||
+    /(?:^|\/)[a-f0-9]{8,}\.(?:js|cjs|mjs|css|map|svg|png|woff2?)$/i.test(file) ||
+    /(?:^|\/)(?:assets\/)?[^/]+-[a-z0-9_-]{8,}\.(?:js|css)$/i.test(file) ||
+    /^docs\/.*\.(?:html|js|cjs|mjs|css|map|svg|png)$/i.test(file) ||
+    (!sourceOrFixture && /(?:^|\/)[^/]*(?:bundle|chunk)[^/]*\.(?:js|cjs|mjs|css)$/i.test(file)) ||
+    (!sourceOrFixture &&
+      /(?:^|\/)(?:main|index|app)(?:[-.][^/]*)?\.(?:js|cjs|mjs|css)$/i.test(file)) ||
+    /(?:^|\/)(?:tego-sheet|xspreadsheet)(?:\.[a-z0-9-]+)?\.(?:js|cjs|mjs|css)$/i.test(file)
   );
 }
 
@@ -83,7 +90,9 @@ it('[ARCH-1] exposes only the React component and public exception at runtime', 
   expect(Object.keys(publicApi).sort()).toEqual(['TegoSheet', 'TegoSheetException']);
 
   const source = readFileSync(resolve(root, 'src/index.ts'), 'utf8');
-  expect(source).not.toMatch(/export\s+\*|\b(?:DataProxy|WorkbookController|CanvasEngine|InteractionManager)\b/);
+  expect(source).not.toMatch(
+    /export\s+\*|\b(?:DataProxy|WorkbookController|CanvasEngine|InteractionManager)\b/,
+  );
   expect(source).not.toMatch(/\b(?:xspreadsheet|spreadsheet)\s*[=:]|\.on\s*\(/i);
 });
 
@@ -116,11 +125,8 @@ it('keeps the removed root legacy tree visible to filesystem and ignore guards',
 });
 
 it('removes obsolete rewrite residue and serves the implemented React demo', () => {
-  for (const obsolete of [
-    'assets/material_common_sprite82.svg',
-    'assets/sprite.svg',
-    'index.html',
-  ]) expect(existsSync(resolve(root, obsolete)), obsolete).toBe(false);
+  for (const obsolete of ['assets/material_common_sprite82.svg', 'assets/sprite.svg', 'index.html'])
+    expect(existsSync(resolve(root, obsolete)), obsolete).toBe(false);
 
   const packageJson = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
     readonly scripts?: Readonly<Record<string, string>>;
@@ -129,7 +135,8 @@ it('removes obsolete rewrite residue and serves the implemented React demo', () 
 
   for (const file of [
     'vitest.config.ts',
-    'eslint.config.js',
+    '.oxlintrc.json',
+    '.oxfmtrc.json',
     'tsconfig.json',
     'tsconfig.build.json',
     'tsconfig.tests.json',
@@ -142,15 +149,16 @@ it('removes obsolete rewrite residue and serves the implemented React demo', () 
 
 it('keeps the immutable legacy baseline without shipping recapture tooling', () => {
   const tracked = trackedFiles();
-  expect(tracked.filter(file => file.startsWith('tests/parity/legacy/'))).toEqual([
+  expect(tracked.filter((file) => file.startsWith('tests/parity/legacy/'))).toEqual([
     'tests/parity/legacy/baseline-meta.json',
   ]);
   for (const obsolete of [
     'npmx.txt',
     'scripts/capture-legacy-parity.cjs',
     'tests/parity/legacy/capture-atomicity.test.cjs',
-  ]) expect(tracked, obsolete).not.toContain(obsolete);
-  for (const file of tracked.filter(path => path.startsWith('docs/') && path.endsWith('.md'))) {
+  ])
+    expect(tracked, obsolete).not.toContain(obsolete);
+  for (const file of tracked.filter((path) => path.startsWith('docs/') && path.endsWith('.md'))) {
     expect(readFileSync(resolve(root, file), 'utf8'), file).not.toMatch(
       /capture-legacy-parity|capture-atomicity/,
     );
@@ -163,7 +171,10 @@ it('does not track generated output outside the explicit evidence allowlist', ()
 
   for (const file of exactEvidence) expect(tracked, file).toContain(file);
   for (const prefix of ['docs/superpowers/', 'tests/visual/__snapshots__/']) {
-    expect(tracked.some(file => file.startsWith(prefix) && isApprovedEvidence(file)), prefix).toBe(true);
+    expect(
+      tracked.some((file) => file.startsWith(prefix) && isApprovedEvidence(file)),
+      prefix,
+    ).toBe(true);
   }
   expect(generated, 'tracked generated outputs').toEqual([]);
 });

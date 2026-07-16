@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SheetData } from '../../../src/core';
-import {
-  PAPER_SIZES,
-  createPrintLayout,
-  renderPrintPage,
-} from '../../../src/engine';
+import { PAPER_SIZES, createPrintLayout, renderPrintPage } from '../../../src/engine';
 import { createCanvasHarness } from '../../helpers/canvas-harness';
 import { deepFreeze } from '../../helpers/deep-freeze';
 
@@ -51,7 +47,7 @@ describe('print layout', () => {
     });
 
     expect(layout.scale).toBe(1);
-    expect(layout.pages.map(page => [page.rowStart, page.rowEnd])).toEqual([
+    expect(layout.pages.map((page) => [page.rowStart, page.rowEnd])).toEqual([
       [0, 1],
       [2, 3],
       [4, 5],
@@ -68,10 +64,12 @@ describe('print layout', () => {
       cols: { len: 1 },
     };
 
-    expect(() => createPrintLayout(sheet, {
-      paperSize: 'A5',
-      orientation: 'portrait',
-    })).toThrow(new RangeError('print layout exceeds the 10000-page limit'));
+    expect(() =>
+      createPrintLayout(sheet, {
+        paperSize: 'A5',
+        orientation: 'portrait',
+      }),
+    ).toThrow(new RangeError('print layout exceeds the 10000-page limit'));
   });
 
   it('shrinks wide content and keeps legacy strict row-fit page boundaries', () => {
@@ -92,25 +90,28 @@ describe('print layout', () => {
     });
 
     expect(layout.scale).toBeCloseTo(459 / 800);
-    expect(layout.pages.map(page => [page.rowStart, page.rowEnd])).toEqual([
+    expect(layout.pages.map((page) => [page.rowStart, page.rowEnd])).toEqual([
       [0, 0],
       [1, 2],
     ]);
 
-    const exactBoundary = createPrintLayout({
-      rows: {
-        len: 2,
-        0: { height: 346, cells: { 0: { text: 'one' } } },
-        1: { height: 347, cells: { 0: { text: 'two' } } },
+    const exactBoundary = createPrintLayout(
+      {
+        rows: {
+          len: 2,
+          0: { height: 346, cells: { 0: { text: 'one' } } },
+          1: { height: 347, cells: { 0: { text: 'two' } } },
+        },
+        cols: { len: 1, 0: { width: 100 } },
       },
-      cols: { len: 1, 0: { width: 100 } },
-    }, {
-      paperSize: 'A5',
-      orientation: 'portrait',
-      padding: 50,
-    });
+      {
+        paperSize: 'A5',
+        orientation: 'portrait',
+        padding: 50,
+      },
+    );
     expect(exactBoundary.pages).toHaveLength(2);
-    expect(exactBoundary.pages.map(page => [page.rowStart, page.rowEnd])).toEqual([
+    expect(exactBoundary.pages.map((page) => [page.rowStart, page.rowEnd])).toEqual([
       [0, 0],
       [1, 1],
     ]);
@@ -124,7 +125,10 @@ describe('print layout', () => {
       merges: ['A1:B2'],
       rows: {
         len: 2,
-        0: { height: 30, cells: { 0: { text: 'secret', printable: false, style: 0, merge: [1, 1] } } },
+        0: {
+          height: 30,
+          cells: { 0: { text: 'secret', printable: false, style: 0, merge: [1, 1] } },
+        },
         1: { height: 40 },
       },
       cols: { len: 2, 0: { width: 80 }, 1: { width: 120 } },
@@ -132,7 +136,7 @@ describe('print layout', () => {
     const before = structuredClone(sheet);
 
     const layout = createPrintLayout(sheet, { paperSize: 'A4', orientation: 'portrait' });
-    const anchor = layout.pages[0]?.cells.find(cell => cell.row === 0 && cell.column === 0);
+    const anchor = layout.pages[0]?.cells.find((cell) => cell.row === 0 && cell.column === 0);
 
     expect(sheet).toEqual(before);
     expect(anchor).toMatchObject({
@@ -151,22 +155,28 @@ describe('print layout', () => {
       devicePixelRatio: 1,
       measurement: harness.measurement,
     });
-    expect(harness.operations.some(operation => (
-      operation.name === 'fillText' && operation.args[0] === 'secret'
-    ))).toBe(false);
-    expect(harness.operations.some(operation => (
-      operation.name === 'set:fillStyle' && operation.args[0] === '#ffeecc'
-    ))).toBe(true);
-    expect(harness.operations.some(operation => operation.name === 'stroke')).toBe(true);
+    expect(
+      harness.operations.some(
+        (operation) => operation.name === 'fillText' && operation.args[0] === 'secret',
+      ),
+    ).toBe(false);
+    expect(
+      harness.operations.some(
+        (operation) => operation.name === 'set:fillStyle' && operation.args[0] === '#ffeecc',
+      ),
+    ).toBe(true);
+    expect(harness.operations.some((operation) => operation.name === 'stroke')).toBe(true);
   });
 
   it('deeply isolates and freezes every value exposed by a print layout', () => {
     const sheet: SheetData = {
-      styles: [{
-        bgcolor: '#ffeecc',
-        font: { name: 'Original', bold: true },
-        border: { bottom: ['dashed', '#112233'] },
-      }],
+      styles: [
+        {
+          bgcolor: '#ffeecc',
+          font: { name: 'Original', bold: true },
+          border: { bottom: ['dashed', '#112233'] },
+        },
+      ],
       merges: ['A1:B1'],
       rows: {
         len: 1,
@@ -181,22 +191,24 @@ describe('print layout', () => {
     expect(cell).toBeDefined();
     if (page === undefined || cell === undefined || cell.merge === null) return;
 
-    expect([
-      layout,
-      layout.paper,
-      layout.pages,
-      page,
-      page.cells,
-      cell,
-      cell.rect,
-      cell.style,
-      cell.style.font,
-      cell.style.border,
-      cell.style.border?.bottom,
-      cell.merge,
-      cell.merge.start,
-      cell.merge.end,
-    ].every(value => value === undefined || Object.isFrozen(value))).toBe(true);
+    expect(
+      [
+        layout,
+        layout.paper,
+        layout.pages,
+        page,
+        page.cells,
+        cell,
+        cell.rect,
+        cell.style,
+        cell.style.font,
+        cell.style.border,
+        cell.style.border?.bottom,
+        cell.merge,
+        cell.merge.start,
+        cell.merge.end,
+      ].every((value) => value === undefined || Object.isFrozen(value)),
+    ).toBe(true);
 
     expect(() => {
       (cell.rect as { left: number }).left = 1_000;
@@ -209,7 +221,7 @@ describe('print layout', () => {
     if (sourceStyle !== undefined) {
       (sourceStyle as { bgcolor: string }).bgcolor = '#ff0000';
       (sourceStyle.font as { name: string }).name = 'Mutated source';
-      (sourceStyle.border?.bottom as [string, string])[1] = '#00ff00';
+      (sourceStyle.border!.bottom as [string, string])[1] = '#00ff00';
     }
     const harness = createCanvasHarness();
     renderPrintPage(layout, 0, harness.canvas, { measurement: harness.measurement });
@@ -221,11 +233,13 @@ describe('print layout', () => {
 
   it('prints formulas, scaled styles, borders, validation, and editable marks without blank cells', () => {
     const sheet: SheetData = {
-      styles: [{
-        format: 'number',
-        bgcolor: '#ddeeff',
-        border: { bottom: ['dashed', '#112233'] },
-      }],
+      styles: [
+        {
+          format: 'number',
+          bgcolor: '#ddeeff',
+          border: { bottom: ['dashed', '#112233'] },
+        },
+      ],
       rows: {
         len: 1,
         0: {
@@ -242,7 +256,7 @@ describe('print layout', () => {
       orientation: 'portrait',
       invalidCells: [{ row: 0, column: 1 }],
     });
-    const formula = layout.pages[0]?.cells.find(cell => cell.column === 1);
+    const formula = layout.pages[0]?.cells.find((cell) => cell.column === 1);
 
     expect(layout.scale).toBeCloseTo(459 / 1000);
     expect(layout.pages[0]?.cells).toHaveLength(2);
@@ -257,9 +271,11 @@ describe('print layout', () => {
     renderPrintPage(layout, 0, harness.canvas, {
       measurement: harness.measurement,
     });
-    expect(harness.operations.some(operation => (
-      operation.name === 'fillText' && operation.args[0] === '2.00'
-    ))).toBe(true);
+    expect(
+      harness.operations.some(
+        (operation) => operation.name === 'fillText' && operation.args[0] === '2.00',
+      ),
+    ).toBe(true);
     expect(harness.operations).toContainEqual({
       name: 'set:lineWidth',
       args: [0.5],
@@ -268,9 +284,15 @@ describe('print layout', () => {
       name: 'setLineDash',
       args: [[3 * layout.scale, 2 * layout.scale]],
     });
-    expect(harness.operations).toContainEqual({ name: 'set:fillStyle', args: ['rgba(255, 0, 0, .65)'] });
-    expect(harness.operations).toContainEqual({ name: 'set:fillStyle', args: ['rgba(0, 255, 0, .85)'] });
-    expect(harness.operations.some(operation => operation.name === 'strokeRect')).toBe(false);
+    expect(harness.operations).toContainEqual({
+      name: 'set:fillStyle',
+      args: ['rgba(255, 0, 0, .65)'],
+    });
+    expect(harness.operations).toContainEqual({
+      name: 'set:fillStyle',
+      args: ['rgba(0, 255, 0, .85)'],
+    });
+    expect(harness.operations.some((operation) => operation.name === 'strokeRect')).toBe(false);
     const formulaRect = formula?.rect;
     expect(formulaRect).toBeDefined();
     if (formulaRect !== undefined) {
@@ -282,17 +304,23 @@ describe('print layout', () => {
         Math.floor(formulaRect.width * layout.scale - 2 * layout.scale),
         Math.floor(formulaRect.height * layout.scale - 2 * layout.scale),
       ];
-      expect(harness.operations.filter(operation => operation.name === 'rect').map(operation => operation.args))
-        .toContainEqual(contentClip);
-      const borderStroke = harness.operations.findIndex(operation => (
-        operation.name === 'set:strokeStyle' && operation.args[0] === '#112233'
-      ));
-      const clip = harness.operations.findIndex(operation => (
-        operation.name === 'rect' && operation.args.every((value, index) => value === contentClip[index])
-      ));
-      const validationMark = harness.operations.findIndex(operation => (
-        operation.name === 'set:fillStyle' && operation.args[0] === 'rgba(255, 0, 0, .65)'
-      ));
+      expect(
+        harness.operations
+          .filter((operation) => operation.name === 'rect')
+          .map((operation) => operation.args),
+      ).toContainEqual(contentClip);
+      const borderStroke = harness.operations.findIndex(
+        (operation) => operation.name === 'set:strokeStyle' && operation.args[0] === '#112233',
+      );
+      const clip = harness.operations.findIndex(
+        (operation) =>
+          operation.name === 'rect' &&
+          operation.args.every((value, index) => value === contentClip[index]),
+      );
+      const validationMark = harness.operations.findIndex(
+        (operation) =>
+          operation.name === 'set:fillStyle' && operation.args[0] === 'rgba(255, 0, 0, .65)',
+      );
       expect(borderStroke).toBeLessThan(clip);
       expect(validationMark).toBeGreaterThan(clip);
     }
@@ -337,10 +365,13 @@ describe('print layout', () => {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'devicePixelRatio');
     Object.defineProperty(globalThis, 'devicePixelRatio', { configurable: true, value: 2 });
     try {
-      const layout = createPrintLayout({
-        rows: { len: 1, 0: { cells: { 0: { text: 'print' } } } },
-        cols: { len: 1 },
-      }, { paperSize: 'A5', orientation: 'portrait' });
+      const layout = createPrintLayout(
+        {
+          rows: { len: 1, 0: { cells: { 0: { text: 'print' } } } },
+          cols: { len: 1 },
+        },
+        { paperSize: 'A5', orientation: 'portrait' },
+      );
       const harness = createCanvasHarness();
       renderPrintPage(layout, 0, harness.canvas, { measurement: harness.measurement });
 
@@ -348,36 +379,43 @@ describe('print layout', () => {
       expect(harness.canvas.height).toBe(layout.paper.height * 2);
       expect(harness.operations).toContainEqual({ name: 'setTransform', args: [2, 0, 0, 2, 0, 0] });
     } finally {
-      if (descriptor === undefined) delete (globalThis as { devicePixelRatio?: number }).devicePixelRatio;
+      if (descriptor === undefined)
+        delete (globalThis as { devicePixelRatio?: number }).devicePixelRatio;
       else Object.defineProperty(globalThis, 'devicePixelRatio', descriptor);
     }
   });
 
   it('keeps the legacy blank-sheet page without DOM access', () => {
-    const layout = createPrintLayout({ rows: { len: 0 }, cols: { len: 0 } }, {
-      paperSize: 'B5',
-      orientation: 'landscape',
-    });
+    const layout = createPrintLayout(
+      { rows: { len: 0 }, cols: { len: 0 } },
+      {
+        paperSize: 'B5',
+        orientation: 'landscape',
+      },
+    );
 
     expect(layout.pages).toHaveLength(1);
     expect(layout.pages[0]?.cells).toEqual([]);
   });
 
   it('uses the highest row last-cell column instead of a global or merge-extended width', () => {
-    const layout = createPrintLayout({
-      merges: ['A2:F2'],
-      rows: {
-        len: 2,
-        0: { cells: { 5: { text: 'F1 must be outside legacy contentRange' } } },
-        1: { cells: { 0: { text: 'A2' } } },
+    const layout = createPrintLayout(
+      {
+        merges: ['A2:F2'],
+        rows: {
+          len: 2,
+          0: { cells: { 5: { text: 'F1 must be outside legacy contentRange' } } },
+          1: { cells: { 0: { text: 'A2' } } },
+        },
+        cols: { len: 6 },
       },
-      cols: { len: 6 },
-    }, {
-      paperSize: 'A4',
-      orientation: 'portrait',
-    });
+      {
+        paperSize: 'A4',
+        orientation: 'portrait',
+      },
+    );
 
     expect(layout.contentWidth).toBe(100);
-    expect(layout.pages.flatMap(page => page.cells).map(cell => cell.text)).toEqual(['A2']);
+    expect(layout.pages.flatMap((page) => page.cells).map((cell) => cell.text)).toEqual(['A2']);
   });
 });

@@ -52,26 +52,24 @@ export function buildAndInstallPackedConsumer(repositoryRoot) {
   const temporaryRoot = mkdtempSync(join(tmpdir(), 'tego-sheet-packed-'));
 
   try {
-    const pack = JSON.parse(runNpm(
-      ['pack', '--json', '--pack-destination', temporaryRoot],
-      repositoryRoot,
-    ));
+    const pack = JSON.parse(
+      runNpm(['pack', '--json', '--pack-destination', temporaryRoot], repositoryRoot),
+    );
     const tarball = join(temporaryRoot, pack[0].filename);
     const consumer = join(temporaryRoot, 'consumer');
     cpSync(resolve(repositoryRoot, 'fixtures/consumer'), consumer, { recursive: true });
     runNpm(['ci', '--ignore-scripts'], consumer);
     runNpm(['install', '--ignore-scripts', '--no-save', tarball], consumer);
 
-    const installed = JSON.parse(readFileSync(
-      join(consumer, 'node_modules/tego-sheet/package.json'),
-      'utf8',
-    ));
+    const installed = JSON.parse(
+      readFileSync(join(consumer, 'node_modules/tego-sheet/package.json'), 'utf8'),
+    );
     assert.equal(installed.name, 'tego-sheet');
 
     return {
       directory: consumer,
       tarball,
-      packFiles: pack[0].files.map(file => file.path),
+      packFiles: pack[0].files.map((file) => file.path),
       cleanup: () => rmSync(temporaryRoot, { recursive: true, force: true }),
     };
   } catch (error) {

@@ -8,7 +8,10 @@ import { createCanvasHarness } from '../helpers/canvas-harness';
 beforeEach(() => {
   const context = createCanvasHarness().canvas.getContext('2d');
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => context);
-  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+  vi.stubGlobal(
+    'requestAnimationFrame',
+    vi.fn(() => 1),
+  );
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
 });
 
@@ -32,12 +35,7 @@ it('@parity:correction.empty-workbook-component preserves an empty array and let
   const onChange = vi.fn();
   const ref = createRef<TegoSheetHandle>();
   const rendered = render(
-    <TegoSheet
-      ref={ref}
-      defaultValue={[]}
-      initialActiveSheetIndex={99}
-      onChange={onChange}
-    />,
+    <TegoSheet ref={ref} defaultValue={[]} initialActiveSheetIndex={99} onChange={onChange} />,
   );
   await waitFor(() => expect(ref.current).not.toBeNull());
 
@@ -60,7 +58,7 @@ it('disables print in the default and custom toolbar while no active sheet exist
   rendered.rerender(
     <TegoSheet
       defaultValue={[]}
-      toolbar={props => {
+      toolbar={(props) => {
         disabledActions = props.disabledActions;
         return null;
       }}

@@ -24,8 +24,10 @@ export interface PasteTransform {
 }
 
 function area(range: CellRange): bigint {
-  return (BigInt(range.end.row) - BigInt(range.start.row) + 1n)
-    * (BigInt(range.end.column) - BigInt(range.start.column) + 1n);
+  return (
+    (BigInt(range.end.row) - BigInt(range.start.row) + 1n) *
+    (BigInt(range.end.column) - BigInt(range.start.column) + 1n)
+  );
 }
 
 export function assertClipboardResourceLimit(range: CellRange): void {
@@ -68,11 +70,7 @@ function expandedRange(source: CellRange, target: CellRange): CellRange {
   };
 }
 
-export function internalPasteRange(
-  source: CellRange,
-  target: CellRange,
-  cut = false,
-): CellRange {
+export function internalPasteRange(source: CellRange, target: CellRange, cut = false): CellRange {
   return expandedRange(source, cut ? { start: target.start, end: target.start } : target);
 }
 
@@ -81,7 +79,7 @@ export function externalPasteRange(
   values: readonly (readonly string[])[],
 ): CellRange {
   const rows = Math.max(1, values.length);
-  const columns = Math.max(1, ...values.map(row => row.length));
+  const columns = Math.max(1, ...values.map((row) => row.length));
   const endRow = BigInt(target.start.row) + BigInt(rows) - 1n;
   const endColumn = BigInt(target.start.column) + BigInt(columns) - 1n;
   if (endRow > BigInt(Number.MAX_SAFE_INTEGER) || endColumn > BigInt(Number.MAX_SAFE_INTEGER)) {
@@ -97,7 +95,7 @@ export function parseClipboardMatrix(text: string): readonly (readonly string[])
   const normalized = text.replace(/\r\n?/g, '\n');
   const rows = normalized.split('\n');
   if (rows.length > 1 && rows[rows.length - 1] === '') rows.pop();
-  return rows.map(row => row.split('\t'));
+  return rows.map((row) => row.split('\t'));
 }
 
 export function clipboardMatrix(
@@ -134,7 +132,11 @@ function rowRecord(sheet: SheetData, row: number, create: boolean): Record<strin
   return value as Record<string, unknown>;
 }
 
-function cellsRecord(sheet: SheetData, row: number, create: boolean): Record<string, unknown> | null {
+function cellsRecord(
+  sheet: SheetData,
+  row: number,
+  create: boolean,
+): Record<string, unknown> | null {
   const record = rowRecord(sheet, row, create);
   if (record === null) return null;
   let cells = record.cells;
@@ -163,8 +165,9 @@ function assignCell(
       return;
     }
     const currentValue = cells[String(column)];
-    if (currentValue === null || typeof currentValue !== 'object' || Array.isArray(currentValue)) return;
-    const next = { ...currentValue as Record<string, unknown> };
+    if (currentValue === null || typeof currentValue !== 'object' || Array.isArray(currentValue))
+      return;
+    const next = { ...(currentValue as Record<string, unknown>) };
     delete next.style;
     delete next.merge;
     cells[String(column)] = next;
@@ -172,9 +175,10 @@ function assignCell(
   }
   const cells = cellsRecord(sheet, row, true)!;
   const currentValue = cells[String(column)];
-  const current = currentValue !== null && typeof currentValue === 'object' && !Array.isArray(currentValue)
-    ? currentValue as Record<string, unknown>
-    : {};
+  const current =
+    currentValue !== null && typeof currentValue === 'object' && !Array.isArray(currentValue)
+      ? (currentValue as Record<string, unknown>)
+      : {};
 
   if (mode === 'all') {
     const next = structuredClone(source) as Record<string, unknown>;
@@ -230,8 +234,13 @@ function translatedMerges(
     for (let column = target.start.column; column <= target.end.column; column += sourceColumns) {
       for (const raw of sourceSheet.merges ?? []) {
         const merge = parseA1Range(raw);
-        if (merge.start.row < source.start.row || merge.end.row > source.end.row
-          || merge.start.column < source.start.column || merge.end.column > source.end.column) continue;
+        if (
+          merge.start.row < source.start.row ||
+          merge.end.row > source.end.row ||
+          merge.start.column < source.start.column ||
+          merge.end.column > source.end.column
+        )
+          continue;
         const shifted = {
           start: {
             row: row + merge.start.row - source.start.row,
@@ -287,29 +296,31 @@ export function pasteInternal(
       const sourceColumn = source.start.column + ((column - range.start.column) % sourceColumns);
       const sourceCell = snapshots.get(`${sourceRow}:${sourceColumn}`) ?? null;
       if (cut && sourceCell === null) continue;
-      assignCell(
-        next,
-        row,
-        column,
-        sourceCell,
-        mode,
-        sourceSheet.styles ?? [],
-      );
+      assignCell(next, row, column, sourceCell, mode, sourceSheet.styles ?? []);
     }
   }
   if (mode !== 'value') {
-    const retained = (next.merges ?? []).filter(raw => {
+    const retained = (next.merges ?? []).filter((raw) => {
       const merge = parseA1Range(raw);
-      return merge.end.row < range.start.row || merge.start.row > range.end.row
-        || merge.end.column < range.start.column || merge.start.column > range.end.column;
+      return (
+        merge.end.row < range.start.row ||
+        merge.start.row > range.end.row ||
+        merge.end.column < range.start.column ||
+        merge.start.column > range.end.column
+      );
     });
-    const sourceRetained = cut && sourceSheet === targetSheet
-      ? retained.filter(raw => {
-        const merge = parseA1Range(raw);
-        return merge.end.row < source.start.row || merge.start.row > source.end.row
-          || merge.end.column < source.start.column || merge.start.column > source.end.column;
-      })
-      : retained;
+    const sourceRetained =
+      cut && sourceSheet === targetSheet
+        ? retained.filter((raw) => {
+            const merge = parseA1Range(raw);
+            return (
+              merge.end.row < source.start.row ||
+              merge.start.row > source.end.row ||
+              merge.end.column < source.start.column ||
+              merge.start.column > source.end.column
+            );
+          })
+        : retained;
     (next as Record<string, unknown>).merges = [
       ...sourceRetained,
       ...translatedMerges(sourceSheet, source, range),
@@ -339,14 +350,21 @@ export function pasteExternal(
     const sourceRow = normalized[row] ?? [];
     const columns = range.end.column - range.start.column + 1;
     for (let column = 0; column < columns; column += 1) {
-      assignCell(next, range.start.row + row, range.start.column + column, {
-        text: sourceRow[column] ?? '',
-      }, 'value', []);
+      assignCell(
+        next,
+        range.start.row + row,
+        range.start.column + column,
+        {
+          text: sourceRow[column] ?? '',
+        },
+        'value',
+        [],
+      );
     }
   }
   return {
     sheet: semanticEqual(next, sheet) ? sheet : next,
     range,
-    values: captureValues ? normalized.map(row => [...row]) : [],
+    values: captureValues ? normalized.map((row) => [...row]) : [],
   };
 }

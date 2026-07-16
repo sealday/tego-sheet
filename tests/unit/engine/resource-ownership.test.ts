@@ -66,7 +66,7 @@ function managerPorts(
     getBoundingClientRect(): { left: number; top: number; width: number; height: number };
     getClientSize(): { width: number; height: number };
   };
-  interactionRoot.contains = target => target === interactionRoot;
+  interactionRoot.contains = (target) => target === interactionRoot;
   interactionRoot.getBoundingClientRect = () => ({ left: 0, top: 0, width: 300, height: 200 });
   interactionRoot.getClientSize = () => ({ width: 300, height: 200 });
   return {
@@ -139,8 +139,12 @@ describe('ResourceRegistry', () => {
     const removeError = new Error('remove failed');
     const afterError = new Error('after remove failed');
     const target = new FakeTarget();
-    target.removeEventListener = () => { throw removeError; };
-    const afterRemove = vi.fn(() => { throw afterError; });
+    target.removeEventListener = () => {
+      throw removeError;
+    };
+    const afterRemove = vi.fn(() => {
+      throw afterError;
+    });
     registry.listen(target, 'ping', () => {}, undefined, afterRemove);
 
     let thrown: unknown;
@@ -192,22 +196,31 @@ describe('ResourceRegistry', () => {
     const addLedger = new ResourceLedger();
     const addRoot = new LedgerTarget(addLedger, 4);
     const addGlobal = new LedgerTarget(addLedger);
-    expect(() => createInteractionManager({
-      ports: managerPorts(addRoot, addGlobal),
-    })).toThrow('add 4 failed');
+    expect(() =>
+      createInteractionManager({
+        ports: managerPorts(addRoot, addGlobal),
+      }),
+    ).toThrow('add 4 failed');
     expect(addLedger.current()).toEqual(addLedger.baseline());
-    expect([...addRoot.listeners.values(), ...addGlobal.listeners.values()]
-      .every(listeners => listeners.size === 0)).toBe(true);
+    expect(
+      [...addRoot.listeners.values(), ...addGlobal.listeners.values()].every(
+        (listeners) => listeners.size === 0,
+      ),
+    ).toBe(true);
 
     const observeLedger = new ResourceLedger();
     const observeRoot = new LedgerTarget(observeLedger);
     const observeGlobal = new LedgerTarget(observeLedger);
     const observeError = new Error('observe failed');
-    expect(() => createInteractionManager({
-      ports: managerPorts(observeRoot, observeGlobal, {
-        observeRoot: () => { throw observeError; },
+    expect(() =>
+      createInteractionManager({
+        ports: managerPorts(observeRoot, observeGlobal, {
+          observeRoot: () => {
+            throw observeError;
+          },
+        }),
       }),
-    })).toThrow(observeError);
+    ).toThrow(observeError);
     expect(observeLedger.current()).toEqual(observeLedger.baseline());
   });
 
@@ -221,7 +234,9 @@ describe('ResourceRegistry', () => {
     try {
       createInteractionManager({
         ports: managerPorts(root, globalTarget, {
-          observeRoot: () => { throw original; },
+          observeRoot: () => {
+            throw original;
+          },
         }),
       });
     } catch (error) {
@@ -238,7 +253,7 @@ describe('ResourceRegistry', () => {
       getBoundingClientRect(): { left: number; top: number; width: number; height: number };
       getClientSize(): { width: number; height: number };
     };
-    root.contains = target => target === root;
+    root.contains = (target) => target === root;
     root.getBoundingClientRect = () => ({ left: 0, top: 0, width: 300, height: 200 });
     root.getClientSize = () => ({ width: 300, height: 200 });
     const globalTarget = new FakeTarget();
@@ -246,8 +261,12 @@ describe('ResourceRegistry', () => {
     const preview = vi.fn((value: unknown) => {
       if (value === null) throw new Error('preview cleanup failed');
     });
-    const transient = vi.fn(() => { throw new Error('transient cleanup failed'); });
-    const cancelTimer = vi.fn(() => { throw new Error('touch cleanup failed'); });
+    const transient = vi.fn(() => {
+      throw new Error('transient cleanup failed');
+    });
+    const cancelTimer = vi.fn(() => {
+      throw new Error('touch cleanup failed');
+    });
     const manager = createInteractionManager({
       ports: {
         root,
@@ -284,8 +303,11 @@ describe('ResourceRegistry', () => {
     expect(preview).toHaveBeenCalledWith(null);
     expect(transient).toHaveBeenCalledOnce();
     expect(cancelTimer).toHaveBeenCalledOnce();
-    expect([...root.listeners.values(), ...globalTarget.listeners.values()]
-      .every(listeners => listeners.size === 0)).toBe(true);
+    expect(
+      [...root.listeners.values(), ...globalTarget.listeners.values()].every(
+        (listeners) => listeners.size === 0,
+      ),
+    ).toBe(true);
     expect(() => manager.dispose()).not.toThrow();
   });
 });

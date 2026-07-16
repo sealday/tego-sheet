@@ -30,39 +30,41 @@ afterEach(() => {
 it('balances Strict Mode resources and makes retained browser callbacks inert', async () => {
   const ledger = new ResourceLedger();
   const retainedObservers: Array<() => void> = [];
-  const listeners = new WeakMap<object, Map<string, Array<{
-    readonly listener: EventListenerOrEventListenerObject;
-    readonly release: () => void;
-  }>>>();
+  const listeners = new WeakMap<
+    object,
+    Map<
+      string,
+      Array<{
+        readonly listener: EventListenerOrEventListenerObject;
+        readonly release: () => void;
+      }>
+    >
+  >();
   const actualAdd = EventTarget.prototype.addEventListener;
   const actualRemove = EventTarget.prototype.removeEventListener;
-  vi.spyOn(EventTarget.prototype, 'addEventListener').mockImplementation(function (
-    this: EventTarget,
-    type,
-    listener,
-    options,
-  ) {
-    actualAdd.call(this, type, listener, options);
-    if (!(this === window || (this instanceof HTMLElement && this.matches('[data-tego-sheet]')))) {
-      return;
-    }
-    const byType = listeners.get(this) ?? new Map();
-    const entries = byType.get(type) ?? [];
-    entries.push({ listener, release: ledger.acquire('listener') });
-    byType.set(type, entries);
-    listeners.set(this, byType);
-  });
-  vi.spyOn(EventTarget.prototype, 'removeEventListener').mockImplementation(function (
-    this: EventTarget,
-    type,
-    listener,
-    options,
-  ) {
-    actualRemove.call(this, type, listener, options);
-    const entries = listeners.get(this)?.get(type);
-    const index = entries?.findIndex(entry => entry.listener === listener) ?? -1;
-    if (entries !== undefined && index >= 0) entries.splice(index, 1)[0]!.release();
-  });
+  vi.spyOn(EventTarget.prototype, 'addEventListener').mockImplementation(
+    function (this: EventTarget, type, listener, options) {
+      actualAdd.call(this, type, listener, options);
+      if (
+        !(this === window || (this instanceof HTMLElement && this.matches('[data-tego-sheet]')))
+      ) {
+        return;
+      }
+      const byType = listeners.get(this) ?? new Map();
+      const entries = byType.get(type) ?? [];
+      entries.push({ listener, release: ledger.acquire('listener') });
+      byType.set(type, entries);
+      listeners.set(this, byType);
+    },
+  );
+  vi.spyOn(EventTarget.prototype, 'removeEventListener').mockImplementation(
+    function (this: EventTarget, type, listener, options) {
+      actualRemove.call(this, type, listener, options);
+      const entries = listeners.get(this)?.get(type);
+      const index = entries?.findIndex((entry) => entry.listener === listener) ?? -1;
+      if (entries !== undefined && index >= 0) entries.splice(index, 1)[0]!.release();
+    },
+  );
 
   class LedgerResizeObserver {
     private release: (() => void) | null = null;
@@ -96,26 +98,27 @@ it('balances Strict Mode resources and makes retained browser callbacks inert', 
   });
 
   const actualSubscribe = WorkbookController.prototype.subscribe;
-  vi.spyOn(WorkbookController.prototype, 'subscribe').mockImplementation(function (
-    this: WorkbookController,
-    subscriber,
-  ) {
-    const release = ledger.acquire('subscription');
-    const unsubscribe = actualSubscribe.call(this, subscriber);
-    let active = true;
-    return () => {
-      if (!active) return;
-      active = false;
-      try {
-        unsubscribe();
-      } finally {
-        release();
-      }
-    };
-  });
+  vi.spyOn(WorkbookController.prototype, 'subscribe').mockImplementation(
+    function (this: WorkbookController, subscriber) {
+      const release = ledger.acquire('subscription');
+      const unsubscribe = actualSubscribe.call(this, subscriber);
+      let active = true;
+      return () => {
+        if (!active) return;
+        active = false;
+        try {
+          unsubscribe();
+        } finally {
+          release();
+        }
+      };
+    },
+  );
 
   const rendered = render(
-    <StrictMode><TegoSheet defaultValue={[{ name: 'A' }]} /></StrictMode>,
+    <StrictMode>
+      <TegoSheet defaultValue={[{ name: 'A' }]} />
+    </StrictMode>,
   );
   await waitFor(() => expect(rendered.container.querySelector('canvas')).not.toBeNull());
   expect(ledger.current().listener).toBeGreaterThan(0);
@@ -130,46 +133,51 @@ it('balances Strict Mode resources and makes retained browser callbacks inert', 
 });
 
 it('cleans runtime resources in the specified ownership order', async () => {
-  vi.stubGlobal('ResizeObserver', class {
-    observe(): void {}
-    disconnect(): void {}
-  });
-  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe(): void {}
+      disconnect(): void {}
+    },
+  );
+  vi.stubGlobal(
+    'requestAnimationFrame',
+    vi.fn(() => 1),
+  );
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
   const order: string[] = [];
   let subscriptionSequence = 0;
   const actualSubscribe = WorkbookController.prototype.subscribe;
-  vi.spyOn(WorkbookController.prototype, 'subscribe').mockImplementation(function (
-    this: WorkbookController,
-    subscriber,
-  ) {
-    subscriptionSequence += 1;
-    const label = `subscription-${subscriptionSequence}`;
-    const unsubscribe = actualSubscribe.call(this, subscriber);
-    return () => {
-      order.push(label);
-      unsubscribe();
-    };
-  });
+  vi.spyOn(WorkbookController.prototype, 'subscribe').mockImplementation(
+    function (this: WorkbookController, subscriber) {
+      subscriptionSequence += 1;
+      const label = `subscription-${subscriptionSequence}`;
+      const unsubscribe = actualSubscribe.call(this, subscriber);
+      return () => {
+        order.push(label);
+        unsubscribe();
+      };
+    },
+  );
   const actualInteractionDispose = InteractionManager.prototype.dispose;
-  vi.spyOn(InteractionManager.prototype, 'dispose').mockImplementation(function (
-    this: InteractionManager,
-  ) {
-    order.push('interactions');
-    actualInteractionDispose.call(this);
-  });
+  vi.spyOn(InteractionManager.prototype, 'dispose').mockImplementation(
+    function (this: InteractionManager) {
+      order.push('interactions');
+      actualInteractionDispose.call(this);
+    },
+  );
   const actualEngineDispose = CanvasEngine.prototype.dispose;
   vi.spyOn(CanvasEngine.prototype, 'dispose').mockImplementation(function (this: CanvasEngine) {
     order.push('engine');
     actualEngineDispose.call(this);
   });
   const actualControllerDispose = WorkbookController.prototype.dispose;
-  vi.spyOn(WorkbookController.prototype, 'dispose').mockImplementation(function (
-    this: WorkbookController,
-  ) {
-    order.push('controller');
-    actualControllerDispose.call(this);
-  });
+  vi.spyOn(WorkbookController.prototype, 'dispose').mockImplementation(
+    function (this: WorkbookController) {
+      order.push('controller');
+      actualControllerDispose.call(this);
+    },
+  );
 
   const rendered = render(<TegoSheet defaultValue={[{}]} />);
   await waitFor(() => expect(rendered.container.querySelector('canvas')).not.toBeNull());
@@ -191,37 +199,37 @@ it('disconnects a partially registered ResizeObserver and drains manager listene
   const disconnect = vi.fn(() => {
     activeObservers -= 1;
   });
-  vi.stubGlobal('ResizeObserver', class {
-    observe(): void {
-      activeObservers += 1;
-      throw observeError;
-    }
-    disconnect = disconnect;
-  });
-  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe(): void {
+        activeObservers += 1;
+        throw observeError;
+      }
+      disconnect = disconnect;
+    },
+  );
+  vi.stubGlobal(
+    'requestAnimationFrame',
+    vi.fn(() => 1),
+  );
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
   const actualAdd = EventTarget.prototype.addEventListener;
   const actualRemove = EventTarget.prototype.removeEventListener;
   let managedAdds = 0;
   let managedRemoves = 0;
-  vi.spyOn(EventTarget.prototype, 'addEventListener').mockImplementation(function (
-    this: EventTarget,
-    type,
-    listener,
-    options,
-  ) {
-    actualAdd.call(this, type, listener, options);
-    if (this instanceof HTMLElement && this.matches('[data-tego-sheet]')) managedAdds += 1;
-  });
-  vi.spyOn(EventTarget.prototype, 'removeEventListener').mockImplementation(function (
-    this: EventTarget,
-    type,
-    listener,
-    options,
-  ) {
-    actualRemove.call(this, type, listener, options);
-    if (this instanceof HTMLElement && this.matches('[data-tego-sheet]')) managedRemoves += 1;
-  });
+  vi.spyOn(EventTarget.prototype, 'addEventListener').mockImplementation(
+    function (this: EventTarget, type, listener, options) {
+      actualAdd.call(this, type, listener, options);
+      if (this instanceof HTMLElement && this.matches('[data-tego-sheet]')) managedAdds += 1;
+    },
+  );
+  vi.spyOn(EventTarget.prototype, 'removeEventListener').mockImplementation(
+    function (this: EventTarget, type, listener, options) {
+      actualRemove.call(this, type, listener, options);
+      if (this instanceof HTMLElement && this.matches('[data-tego-sheet]')) managedRemoves += 1;
+    },
+  );
 
   expect(() => render(<TegoSheet defaultValue={[{}]} />)).toThrow(observeError);
   expect(disconnect).toHaveBeenCalledOnce();
@@ -237,13 +245,19 @@ it('preserves observer setup and rollback failures in one aggregate', () => {
   const disconnect = vi.fn(() => {
     throw disconnectError;
   });
-  vi.stubGlobal('ResizeObserver', class {
-    observe(): void {
-      throw observeError;
-    }
-    disconnect = disconnect;
-  });
-  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe(): void {
+        throw observeError;
+      }
+      disconnect = disconnect;
+    },
+  );
+  vi.stubGlobal(
+    'requestAnimationFrame',
+    vi.fn(() => 1),
+  );
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
 
   let thrown: unknown;

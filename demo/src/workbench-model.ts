@@ -12,18 +12,20 @@ export interface PreviewEvent extends PreviewEventInput {
   readonly id: string;
 }
 
-const EXAMPLE_WORKBOOK: WorkbookData = [{
-  name: 'Budget',
-  freeze: 'B2',
-  rows: {
-    len: 5,
-    0: { cells: { 0: { text: 'Item' }, 1: { text: 'Amount' } } },
-    1: { cells: { 0: { text: 'Hosting' }, 1: { text: '29' } } },
-    2: { cells: { 0: { text: 'Support' }, 1: { text: '75' } } },
-    3: { cells: { 0: { text: 'Total' }, 1: { text: '=SUM(B2:B3)' } } },
+const EXAMPLE_WORKBOOK: WorkbookData = [
+  {
+    name: 'Budget',
+    freeze: 'B2',
+    rows: {
+      len: 5,
+      0: { cells: { 0: { text: 'Item' }, 1: { text: 'Amount' } } },
+      1: { cells: { 0: { text: 'Hosting' }, 1: { text: '29' } } },
+      2: { cells: { 0: { text: 'Support' }, 1: { text: '75' } } },
+      3: { cells: { 0: { text: 'Total' }, 1: { text: '=SUM(B2:B3)' } } },
+    },
+    cols: { len: 4 },
   },
-  cols: { len: 4 },
-}];
+];
 
 function isSheetData(value: unknown): value is WorkbookData[number] {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -53,7 +55,7 @@ function createEventId(logs: readonly PreviewEvent[], timestamp: string): string
   let id = baseId;
   let suffix = 1;
 
-  while (logs.some(entry => entry.id === id)) {
+  while (logs.some((entry) => entry.id === id)) {
     id = `${baseId}-${suffix}`;
     suffix += 1;
   }

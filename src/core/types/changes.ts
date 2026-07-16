@@ -1,9 +1,4 @@
-import type {
-  CellAddress,
-  CellRange,
-  Selection,
-  SheetId,
-} from './coordinates';
+import type { CellAddress, CellRange, Selection, SheetId } from './coordinates';
 
 export type WorkbookChangeKind =
   | 'cell'

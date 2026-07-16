@@ -17,9 +17,7 @@ function coordinate(point: CellPoint, axis: Axis): number {
 }
 
 function replaceCoordinate(point: CellPoint, axis: Axis, value: number): CellPoint {
-  return axis === 'row'
-    ? { row: value, column: point.column }
-    : { row: point.row, column: value };
+  return axis === 'row' ? { row: value, column: point.column } : { row: point.row, column: value };
 }
 
 function parsedMerges(sheet: SheetData): readonly CellRange[] {
@@ -34,21 +32,24 @@ function withMergeList(sheet: SheetData, ranges: readonly CellRange[]): SheetDat
 }
 
 export function findMerge(sheet: SheetData, row: number, column: number): CellRange | null {
-  return parsedMerges(sheet).find(range => containsCell(range, { row, column })) ?? null;
+  return parsedMerges(sheet).find((range) => containsCell(range, { row, column })) ?? null;
 }
 
 export function mergeIntersects(sheet: SheetData, range: CellRange): boolean {
   const normalized = normalizeRange(range);
-  return parsedMerges(sheet).some(merge => rangesIntersect(merge, normalized));
+  return parsedMerges(sheet).some((merge) => rangesIntersect(merge, normalized));
 }
 
 export function addMerge(sheet: SheetData, range: CellRange): SheetData {
   const normalized = normalizeRange(range);
-  if (normalized.start.row === normalized.end.row
-    && normalized.start.column === normalized.end.column) return sheet;
+  if (
+    normalized.start.row === normalized.end.row &&
+    normalized.start.column === normalized.end.column
+  )
+    return sheet;
   const merges = parsedMerges(sheet);
-  if (merges.some(merge => rangesEqual(merge, normalized))) return sheet;
-  if (merges.some(merge => rangesIntersect(merge, normalized))) {
+  if (merges.some((merge) => rangesEqual(merge, normalized))) return sheet;
+  if (merges.some((merge) => rangesIntersect(merge, normalized))) {
     throw new RangeError('Merge overlaps an existing merged range');
   }
 
@@ -66,11 +67,19 @@ function removeStoredNonAnchorCells(sheet: SheetData, range: CellRange): SheetDa
 
   for (const [rowKey, rowValue] of Object.entries(rows)) {
     const rowIndex = canonicalSparseIndex(rowKey);
-    if (rowIndex === null || rowIndex < startRow || rowIndex > endRow
-      || rowValue === null || typeof rowValue !== 'object' || Array.isArray(rowValue)) continue;
+    if (
+      rowIndex === null ||
+      rowIndex < startRow ||
+      rowIndex > endRow ||
+      rowValue === null ||
+      typeof rowValue !== 'object' ||
+      Array.isArray(rowValue)
+    )
+      continue;
     const row = { ...rowValue } as Record<string, unknown>;
     const cellsValue = row.cells;
-    if (cellsValue === null || typeof cellsValue !== 'object' || Array.isArray(cellsValue)) continue;
+    if (cellsValue === null || typeof cellsValue !== 'object' || Array.isArray(cellsValue))
+      continue;
     const cells = { ...cellsValue } as Record<string, unknown>;
     for (const cellKey of Object.keys(cells)) {
       const columnIndex = canonicalSparseIndex(cellKey);
@@ -87,7 +96,7 @@ function removeStoredNonAnchorCells(sheet: SheetData, range: CellRange): SheetDa
 export function removeMerge(sheet: SheetData, range: CellRange): SheetData {
   const normalized = normalizeRange(range);
   const merges = parsedMerges(sheet);
-  const remaining = merges.filter(merge => !rangesIntersect(merge, normalized));
+  const remaining = merges.filter((merge) => !rangesIntersect(merge, normalized));
   return remaining.length === merges.length ? sheet : withMergeList(sheet, remaining);
 }
 
@@ -97,7 +106,7 @@ export function transformMergesForInsert(
   index: number,
   count: number,
 ): SheetData {
-  const ranges = parsedMerges(sheet).map(range => {
+  const ranges = parsedMerges(sheet).map((range) => {
     const start = coordinate(range.start, axis);
     const end = coordinate(range.end, axis);
     if (start >= index) {
@@ -121,15 +130,17 @@ export function transformMergesForDelete(
   endIndex: number,
 ): SheetData {
   const count = endIndex - startIndex + 1;
-  const ranges = parsedMerges(sheet).flatMap(range => {
+  const ranges = parsedMerges(sheet).flatMap((range) => {
     const start = coordinate(range.start, axis);
     const end = coordinate(range.end, axis);
     if (end < startIndex) return [range];
     if (start > endIndex) {
-      return [{
-        start: shiftPoint(range.start, axis, -count),
-        end: shiftPoint(range.end, axis, -count),
-      }];
+      return [
+        {
+          start: shiftPoint(range.start, axis, -count),
+          end: shiftPoint(range.end, axis, -count),
+        },
+      ];
     }
 
     const keepsBefore = start < startIndex;
@@ -138,10 +149,12 @@ export function transformMergesForDelete(
     const nextStart = keepsBefore ? start : startIndex;
     const nextEnd = keepsAfter ? end - count : startIndex - 1;
     if (nextEnd < nextStart) return [];
-    return [{
-      start: replaceCoordinate(range.start, axis, nextStart),
-      end: replaceCoordinate(range.end, axis, nextEnd),
-    }];
+    return [
+      {
+        start: replaceCoordinate(range.start, axis, nextStart),
+        end: replaceCoordinate(range.end, axis, nextEnd),
+      },
+    ];
   });
   return withMergeList(sheet, ranges);
 }
@@ -151,14 +164,24 @@ export function synchronizeMergeAnchors(sheet: SheetData): SheetData {
   const rows = { ...(next.rows ?? { len: 100 }) } as Record<string, unknown>;
 
   for (const [rowKey, rowValue] of Object.entries(rows)) {
-    if (canonicalSparseIndex(rowKey) === null || rowValue === null || typeof rowValue !== 'object'
-      || Array.isArray(rowValue)) continue;
+    if (
+      canonicalSparseIndex(rowKey) === null ||
+      rowValue === null ||
+      typeof rowValue !== 'object' ||
+      Array.isArray(rowValue)
+    )
+      continue;
     const row = { ...rowValue } as Record<string, unknown>;
     if (row.cells === null || typeof row.cells !== 'object' || Array.isArray(row.cells)) continue;
     const cells = { ...row.cells } as Record<string, unknown>;
     for (const [cellKey, cellValue] of Object.entries(cells)) {
-      if (canonicalSparseIndex(cellKey) === null || cellValue === null || typeof cellValue !== 'object'
-        || Array.isArray(cellValue)) continue;
+      if (
+        canonicalSparseIndex(cellKey) === null ||
+        cellValue === null ||
+        typeof cellValue !== 'object' ||
+        Array.isArray(cellValue)
+      )
+        continue;
       const cell = { ...cellValue } as Record<string, unknown>;
       delete cell.merge;
       cells[cellKey] = cell as CellData;
@@ -171,21 +194,21 @@ export function synchronizeMergeAnchors(sheet: SheetData): SheetData {
     const rowKey = String(merge.start.row);
     const cellKey = String(merge.start.column);
     const rowValue = rows[rowKey];
-    const row = rowValue !== null && typeof rowValue === 'object' && !Array.isArray(rowValue)
-      ? { ...rowValue } as Record<string, unknown>
-      : {};
+    const row =
+      rowValue !== null && typeof rowValue === 'object' && !Array.isArray(rowValue)
+        ? ({ ...rowValue } as Record<string, unknown>)
+        : {};
     const cellsValue = row.cells;
-    const cells = cellsValue !== null && typeof cellsValue === 'object' && !Array.isArray(cellsValue)
-      ? { ...cellsValue } as Record<string, unknown>
-      : {};
+    const cells =
+      cellsValue !== null && typeof cellsValue === 'object' && !Array.isArray(cellsValue)
+        ? ({ ...cellsValue } as Record<string, unknown>)
+        : {};
     const cellValue = cells[cellKey];
-    const cell = cellValue !== null && typeof cellValue === 'object' && !Array.isArray(cellValue)
-      ? { ...cellValue } as Record<string, unknown>
-      : {};
-    cell.merge = [
-      merge.end.row - merge.start.row,
-      merge.end.column - merge.start.column,
-    ];
+    const cell =
+      cellValue !== null && typeof cellValue === 'object' && !Array.isArray(cellValue)
+        ? ({ ...cellValue } as Record<string, unknown>)
+        : {};
+    cell.merge = [merge.end.row - merge.start.row, merge.end.column - merge.start.column];
     cells[cellKey] = cell as CellData;
     row.cells = cells as CellsData;
     rows[rowKey] = row as RowData;

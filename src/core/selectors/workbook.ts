@@ -14,5 +14,5 @@ export function selectRuntimeSheet(state: WorkbookState, id: SheetId): RuntimeSh
 
 export function selectSheetData(state: WorkbookState, id: SheetId): SheetData | null {
   const sheet = state.get(id);
-  return sheet === null ? null : serializeWorkbook([sheet.data])[0] as SheetData;
+  return sheet === null ? null : (serializeWorkbook([sheet.data])[0] as SheetData);
 }

@@ -21,17 +21,25 @@ function freezeJson<T>(value: T): T {
 }
 
 function runtimeSheets(data: WorkbookData): readonly RuntimeSheet[] {
-  return Object.freeze(data.map(sheet => Object.freeze({
-    id: createSheetId(),
-    data: freezeJson(sheet),
-  })));
+  return Object.freeze(
+    data.map((sheet) =>
+      Object.freeze({
+        id: createSheetId(),
+        data: freezeJson(sheet),
+      }),
+    ),
+  );
 }
 
 function freezeSheets(sheets: readonly RuntimeSheet[]): readonly RuntimeSheet[] {
-  return Object.freeze(sheets.map(sheet => Object.freeze({
-    id: sheet.id,
-    data: freezeJson(sheet.data),
-  })));
+  return Object.freeze(
+    sheets.map((sheet) =>
+      Object.freeze({
+        id: sheet.id,
+        data: freezeJson(sheet.data),
+      }),
+    ),
+  );
 }
 
 export class WorkbookState {
@@ -59,22 +67,22 @@ export class WorkbookState {
   }
 
   serialize(): WorkbookData {
-    return serializeWorkbook(this.sheets.map(sheet => sheet.data));
+    return serializeWorkbook(this.sheets.map((sheet) => sheet.data));
   }
 
   get(id: SheetId): RuntimeSheet | null {
-    return this.sheets.find(sheet => sheet.id === id) ?? null;
+    return this.sheets.find((sheet) => sheet.id === id) ?? null;
   }
 
   update(id: SheetId, updater: (sheet: SheetData) => SheetData): WorkbookState {
-    const index = this.sheets.findIndex(sheet => sheet.id === id);
+    const index = this.sheets.findIndex((sheet) => sheet.id === id);
     if (index < 0) throw new RangeError(`Unknown sheet ID: ${id}`);
     const current = this.sheets[index] as RuntimeSheet;
     const updated = updater(current.data);
     const data = parseWorkbook([updated])[0] as SheetData;
-    const sheets = this.sheets.map((sheet, sheetIndex) => (
-      sheetIndex === index ? { id: sheet.id, data } : sheet
-    ));
+    const sheets = this.sheets.map((sheet, sheetIndex) =>
+      sheetIndex === index ? { id: sheet.id, data } : sheet,
+    );
     return new WorkbookState(sheets, this.defaults);
   }
 
@@ -82,7 +90,7 @@ export class WorkbookState {
     const current = this.get(id);
     if (current === null) throw new RangeError(`Unknown sheet ID: ${id}`);
     if (current.data.name === name) return this;
-    return this.update(id, sheet => ({ ...sheet, name }) as unknown as SheetData);
+    return this.update(id, (sheet) => ({ ...sheet, name }) as unknown as SheetData);
   }
 
   add(name = `sheet${this.sheets.length + 1}`, id = createSheetId()): WorkbookState {
@@ -93,6 +101,9 @@ export class WorkbookState {
 
   delete(id: SheetId): WorkbookState {
     if (this.get(id) === null) throw new RangeError(`Unknown sheet ID: ${id}`);
-    return new WorkbookState(this.sheets.filter(sheet => sheet.id !== id), this.defaults);
+    return new WorkbookState(
+      this.sheets.filter((sheet) => sheet.id !== id),
+      this.defaults,
+    );
   }
 }

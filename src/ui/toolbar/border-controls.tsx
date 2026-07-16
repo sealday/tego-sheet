@@ -24,20 +24,24 @@ export function BorderControls(props: {
       aria-label={props.t('toolbar.border', 'Borders')}
       defaultValue=""
       disabled={disabled}
-      onChange={event => {
+      onChange={(event) => {
         const value = event.target.value;
         if (value !== '') {
           const mode = value as BorderMode;
-          props.toolbar.execute(mode === 'none'
-            ? { type: 'set-border', mode }
-            : { type: 'set-border', mode, line: ['thin', '#000000'] });
+          props.toolbar.execute(
+            mode === 'none'
+              ? { type: 'set-border', mode }
+              : { type: 'set-border', mode, line: ['thin', '#000000'] },
+          );
         }
         event.currentTarget.value = '';
       }}
     >
       <option value="">{props.t('toolbar.border', 'Borders')}</option>
       {borders.map(([mode, label]) => (
-        <option key={mode} value={mode}>{props.t(`border.${mode}`, label)}</option>
+        <option key={mode} value={mode}>
+          {props.t(`border.${mode}`, label)}
+        </option>
       ))}
     </select>
   );

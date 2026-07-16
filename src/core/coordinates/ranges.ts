@@ -9,7 +9,7 @@ export function normalizeRange(range: CellRange): CellRange {
 
 export function parseA1Range(input: string): CellRange {
   const parts = input.split(':');
-  if (parts.length < 1 || parts.length > 2 || parts.some(part => part.length === 0)) {
+  if (parts.length < 1 || parts.length > 2 || parts.some((part) => part.length === 0)) {
     throw new TypeError(`Invalid A1 range: ${input}`);
   }
   const start = parseA1(parts[0] as string);
@@ -26,19 +26,21 @@ export function renderA1Range(range: CellRange): string {
 
 export function shiftA1Range(input: string, delta: CoordinateDelta): string {
   const parts = input.split(':');
-  if (parts.length < 1 || parts.length > 2 || parts.some(part => part.length === 0)) {
+  if (parts.length < 1 || parts.length > 2 || parts.some((part) => part.length === 0)) {
     throw new TypeError(`Invalid A1 range: ${input}`);
   }
-  const shifted = parts.map(part => shiftA1(part, delta));
+  const shifted = parts.map((part) => shiftA1(part, delta));
   return shifted.join(':');
 }
 
 export function containsCell(range: CellRange, point: CellPoint): boolean {
   const normalized = normalizeRange(range);
-  return point.row >= normalized.start.row
-    && point.row <= normalized.end.row
-    && point.column >= normalized.start.column
-    && point.column <= normalized.end.column;
+  return (
+    point.row >= normalized.start.row &&
+    point.row <= normalized.end.row &&
+    point.column >= normalized.start.column &&
+    point.column <= normalized.end.column
+  );
 }
 
 export function containsRange(container: CellRange, candidate: CellRange): boolean {
@@ -123,10 +125,12 @@ export function rangeSize(range: CellRange): readonly [rows: number, columns: nu
 export function rangesEqual(left: CellRange, right: CellRange): boolean {
   const a = normalizeRange(left);
   const b = normalizeRange(right);
-  return a.start.row === b.start.row
-    && a.start.column === b.start.column
-    && a.end.row === b.end.row
-    && a.end.column === b.end.column;
+  return (
+    a.start.row === b.start.row &&
+    a.start.column === b.start.column &&
+    a.end.row === b.end.row &&
+    a.end.column === b.end.column
+  );
 }
 
 export function iterateRange(range: CellRange): readonly CellPoint[] {

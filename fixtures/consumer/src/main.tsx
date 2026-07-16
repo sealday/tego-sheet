@@ -5,4 +5,8 @@ import { App } from './app';
 
 const root = document.getElementById('root');
 if (root === null) throw new Error('Missing consumer root');
-createRoot(root).render(<StrictMode><App /></StrictMode>);
+createRoot(root).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);

@@ -9,13 +9,15 @@ import {
   selection,
 } from './support';
 
-test('@parity:view.zoom-scroll keeps canvas hit testing aligned after consumer zoom and scrolling', async ({ page }) => {
+test('@parity:view.zoom-scroll keeps canvas hit testing aligned after consumer zoom and scrolling', async ({
+  page,
+}) => {
   await openHarness(page);
   await expect(page.getByRole('toolbar', { name: 'Spreadsheet toolbar' })).toBeVisible();
   await expect(page.getByRole('tablist', { name: 'Sheets' })).toBeVisible();
   await selectCell(page, 1, 1);
   await page.getByRole('button', { name: 'Freeze', exact: true }).click();
-  let value = await capture(page) as Array<{ freeze?: string }>;
+  let value = (await capture(page)) as Array<{ freeze?: string }>;
   expect(value[0]?.freeze).toBe('B2');
   await page.getByRole('button', { name: 'Unfreeze', exact: true }).click();
 
@@ -40,7 +42,9 @@ test('@parity:view.zoom-scroll keeps canvas hit testing aligned after consumer z
   for (let index = 0; index < 5; index += 1) await page.mouse.wheel(0, 100);
   const point = await cellPoint(page, 0, 0);
   await page.mouse.click(point.x, point.y);
-  await expect.poll(async () => (await selection(page))?.active.row ?? -1).toBeGreaterThanOrEqual(5);
-  value = await capture(page) as typeof value;
+  await expect
+    .poll(async () => (await selection(page))?.active.row ?? -1)
+    .toBeGreaterThanOrEqual(5);
+  value = (await capture(page)) as typeof value;
   expect(value[0]?.freeze ?? 'A1').toBe('A1');
 });

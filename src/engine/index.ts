@@ -13,16 +13,8 @@ export {
   createViewportState,
   resizeViewport,
 } from './viewport/viewport-state';
-export type {
-  ViewportState,
-  ViewportStateInput,
-} from './viewport/viewport-state';
-export {
-  clampScroll,
-  createScrollState,
-  scrollBy,
-  scrollTo,
-} from './viewport/scroll-state';
+export type { ViewportState, ViewportStateInput } from './viewport/viewport-state';
+export { clampScroll, createScrollState, scrollBy, scrollTo } from './viewport/scroll-state';
 export {
   createSelectionState,
   createRangeSelection,
@@ -30,11 +22,7 @@ export {
   moveSelection,
   normalizeSelection,
 } from './viewport/selection-state';
-export type {
-  SelectionDirection,
-  SelectionKind,
-  SelectionState,
-} from './viewport/selection-state';
+export type { SelectionDirection, SelectionKind, SelectionState } from './viewport/selection-state';
 export {
   cellRect,
   clipToDataViewport,
@@ -50,10 +38,7 @@ export {
 export { hitTest, hitTestRegion } from './geometry/hit-test';
 export type { HitTestRegion } from './geometry/hit-test';
 export { frozenQuadrants } from './geometry/frozen-pane-geometry';
-export type {
-  FrozenQuadrant,
-  FrozenQuadrantKind,
-} from './geometry/frozen-pane-geometry';
+export type { FrozenQuadrant, FrozenQuadrantKind } from './geometry/frozen-pane-geometry';
 export { overlayAnchor, overlayAnchors } from './geometry/overlay-anchors';
 export type { OverlayAnchor, PaneOverlayAnchor } from './geometry/overlay-anchors';
 export { CanvasEngine } from './canvas/canvas-engine';

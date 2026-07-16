@@ -19,7 +19,7 @@ export interface InternalClipboardState {
 }
 
 export function matrixToTsv(values: readonly (readonly string[])[]): string {
-  return values.map(row => row.join('\t')).join('\n');
+  return values.map((row) => row.join('\t')).join('\n');
 }
 
 export function clipboardDenied(cause: unknown): TegoSheetException {

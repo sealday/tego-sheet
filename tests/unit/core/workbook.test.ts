@@ -7,17 +7,32 @@ describe('sheet and freeze operations', () => {
     const controller = new WorkbookController({ ...freezeFixture.sheet, freeze: 'A1' });
     const sheet = controller.getSheetIds()[0]!;
 
-    const outcome = controller.dispatch({
-      type: 'set-freeze', sheet, row: freezeFixture.operation.ri, column: freezeFixture.operation.ci,
-    }, 'toolbar');
+    const outcome = controller.dispatch(
+      {
+        type: 'set-freeze',
+        sheet,
+        row: freezeFixture.operation.ri,
+        column: freezeFixture.operation.ci,
+      },
+      'toolbar',
+    );
 
     expect(controller.getValue()[0]).toEqual(freezeFixture.sheet);
     expect(outcome).toMatchObject({
-      status: 'committed', commit: { change: { kind: 'structure', sheet } },
+      status: 'committed',
+      commit: { change: { kind: 'structure', sheet } },
     });
-    expect(controller.dispatch({
-      type: 'set-freeze', sheet, row: freezeFixture.operation.ri, column: freezeFixture.operation.ci,
-    }, 'toolbar')).toEqual({ status: 'noop' });
+    expect(
+      controller.dispatch(
+        {
+          type: 'set-freeze',
+          sheet,
+          row: freezeFixture.operation.ri,
+          column: freezeFixture.operation.ci,
+        },
+        'toolbar',
+      ),
+    ).toEqual({ status: 'noop' });
   });
 
   it('@parity:correction.empty-workbook adds, renames, deletes the last sheet, and returns its ID', () => {
@@ -57,12 +72,15 @@ describe('sheet and freeze operations', () => {
     const third = controller.getSheetIds()[2]!;
     const afterAdd = controller.getValue();
 
-    expect(() => controller.dispatch({ type: 'rename-sheet', sheet: third, name: '   ' }, 'sheet-tabs'))
-      .toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
-    expect(() => controller.dispatch({ type: 'rename-sheet', sheet: third, name: 'sheet1' }, 'sheet-tabs'))
-      .toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
-    expect(() => controller.dispatch({ type: 'add-sheet', name: 'sheet2' }, 'sheet-tabs'))
-      .toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
+    expect(() =>
+      controller.dispatch({ type: 'rename-sheet', sheet: third, name: '   ' }, 'sheet-tabs'),
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
+    expect(() =>
+      controller.dispatch({ type: 'rename-sheet', sheet: third, name: 'sheet1' }, 'sheet-tabs'),
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
+    expect(() =>
+      controller.dispatch({ type: 'add-sheet', name: 'sheet2' }, 'sheet-tabs'),
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND' }));
     expect(controller.getValue()).toEqual(afterAdd);
     expect(controller.historySize).toEqual({ undo: 1, redo: 0 });
     expect(events).toHaveBeenCalledTimes(1);
@@ -71,12 +89,14 @@ describe('sheet and freeze operations', () => {
 
   it('preserves legacy sheet deletion even when the sheet contains locked cells', () => {
     const controller = new WorkbookController({
-      name: 'Locked', rows: { 0: { cells: { 0: { editable: false, vendorCell: true } } } },
+      name: 'Locked',
+      rows: { 0: { cells: { 0: { editable: false, vendorCell: true } } } },
     });
     const sheet = controller.getSheetIds()[0]!;
 
-    expect(controller.dispatch({ type: 'delete-sheet', sheet }, 'sheet-tabs').status)
-      .toBe('committed');
+    expect(controller.dispatch({ type: 'delete-sheet', sheet }, 'sheet-tabs').status).toBe(
+      'committed',
+    );
     expect(controller.getValue()).toEqual([]);
     expect(controller.historySize).toEqual({ undo: 1, redo: 0 });
   });
