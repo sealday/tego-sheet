@@ -1,6 +1,13 @@
 MIT License
 
-Copyright (c) 2017 myliang
+Original work Copyright (c) 2017 myliang
+Modifications Copyright (c) 2026 sealday
+
+Tego Sheet uses a new React and TypeScript architecture. Its interaction design,
+data-format compatibility, and portions of compatibility logic and locale
+content were adapted from x-data-spreadsheet under this license. Tego Sheet does
+not bundle or depend on the upstream JavaScript runtime. Files that carry
+separate third-party notices remain governed by those notices.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

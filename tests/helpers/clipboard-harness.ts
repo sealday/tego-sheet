@@ -18,7 +18,6 @@ export class ClipboardHarness {
     },
   };
 }
-
 export class DataTransferHarness {
   private readonly values = new Map<string, string>();
   clears = 0;
@@ -36,4 +35,3 @@ export class DataTransferHarness {
     this.values.set(type, value);
   }
 }
-

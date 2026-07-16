@@ -10,8 +10,14 @@ const pkg = require('../../package.json');
 
 test('metadata describes a peer-only React package with explicit exports', () => {
   assert.equal(pkg.name, 'tego-sheet');
+  assert.equal(pkg.version, '0.1.0');
   assert.equal(pkg.type, 'module');
   assert.equal(pkg.license, 'MIT');
+  assert.equal(pkg.author, 'sealday <sealday@gmail.com>');
+  assert.deepEqual(pkg.repository, {
+    type: 'git',
+    url: 'git+https://github.com/sealday/tego-sheet.git',
+  });
   assert.deepEqual(pkg.dependencies, {});
   assert.deepEqual(pkg.peerDependencies, { react: '^19.2.7', 'react-dom': '^19.2.7' });
   assert.deepEqual(pkg.files, ['dist', 'docs/migration-from-x-data-spreadsheet.md']);
@@ -32,6 +38,7 @@ test('metadata describes a peer-only React package with explicit exports', () =>
 
 test('published docs cover the complete React API and migration contract', () => {
   const readme = readFileSync(new URL('readme.md', packageRoot), 'utf8');
+  const license = readFileSync(new URL('LICENSE', packageRoot), 'utf8');
   const migration = readFileSync(
     new URL('docs/migration-from-x-data-spreadsheet.md', packageRoot),
     'utf8',
@@ -39,13 +46,22 @@ test('published docs cover the complete React API and migration contract', () =>
 
   for (const term of [
     'controlled', 'uncontrolled', 'onChange', 'onCellEdit', 'TegoSheetHandle',
-    'toolbar', 'sheetTabs', 'styles.css', 'locales/zh-cn',
+    'toolbar', 'sheetTabs', 'styles.css', 'locales/zh-cn', 'x-data-spreadsheet',
+    'upstream', 'adapted', 'design', 'sealday',
   ]) assert.match(readme, new RegExp(term, 'i'));
 
   for (const term of [
     'empty workbook', 'all sheets', 'rendered value', 'resource cleanup',
     'printable', 'constructor', 'global', 'emitter',
   ]) assert.match(migration, new RegExp(term, 'i'));
+
+  for (const term of [
+    'Original work Copyright (c) 2017 myliang',
+    'Modifications Copyright (c) 2026 sealday',
+    'MIT License',
+  ]) {
+    assert.match(license, new RegExp(term.replace(/[()]/g, '\\$&'), 'i'));
+  }
 });
 
 test('packed files contain publishable outputs but no workspace source or dependencies', () => {

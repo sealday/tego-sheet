@@ -1,6 +1,6 @@
 {
   "name": "tego-sheet",
-  "version": "1.1.8",
+  "version": "0.1.0",
   "description": "A React spreadsheet library",
   "type": "module",
   "types": "./dist/index.d.ts",
@@ -42,12 +42,16 @@
   "sideEffects": [
     "**/*.css"
   ],
-  "author": "myliang <liangyuliang0335@gmail.com>",
+  "author": "sealday <sealday@gmail.com>",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/myliang/x-spreadsheet.git"
+    "url": "git+https://github.com/sealday/tego-sheet.git"
   },
+  "bugs": {
+    "url": "https://github.com/sealday/tego-sheet/issues"
+  },
+  "homepage": "https://github.com/sealday/tego-sheet#readme",
   "scripts": {
     "test": "vitest run",
     "test:unit": "vitest run --project unit --project component --project architecture",
