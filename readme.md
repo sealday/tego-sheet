@@ -2,13 +2,7 @@
 
 `tego-sheet` is a React, TypeScript, and Canvas spreadsheet component. It keeps the sparse workbook JSON used by x-data-spreadsheet while replacing the constructor, global locale registry, and event emitter with a React-only API.
 
-## Ownership and upstream attribution
-
-Tego Sheet is maintained by [sealday](https://github.com/sealday). Its React API, TypeScript architecture, component lifecycle, and the modifications in this repository are owned by sealday under the MIT License.
-
-The spreadsheet interaction design, supported workbook JSON format, feature behavior, compatibility goals, and portions of compatibility logic and locale content were adapted from [x-data-spreadsheet](https://github.com/myliang/x-spreadsheet), also under the MIT License. Tego Sheet does not bundle or depend on the upstream JavaScript runtime, but it is not presented as a clean-room implementation. The original `myliang` copyright notice is retained in [LICENSE](LICENSE).
-
-Tego Sheet is a separate project and is not affiliated with or endorsed by the upstream project. Third-party assets that carry their own notices remain subject to their respective licenses.
+![Tego Sheet interactive workbench](docs/assets/tego-sheet-demo.png)
 
 ## Install
 
@@ -126,3 +120,11 @@ The public locale subpaths are `tego-sheet/locales/en`, `/de`, `/nl`, and `/zh-c
 Existing sparse sheet, row, column, cell, style, merge, validation, filter, and extension-key data can be passed directly through `value` or `defaultValue`. `getValue()` and `onChange` return the compatible serialized shape. Runtime `SheetId` values are opaque UI identities and are never added to the JSON.
 
 See [Migration from x-data-spreadsheet](docs/migration-from-x-data-spreadsheet.md) for option mappings, the five intentional correctness fixes, and removal of the old imperative API.
+
+## Ownership and upstream attribution
+
+Tego Sheet is maintained by [sealday](https://github.com/sealday). Its React API, TypeScript architecture, component lifecycle, and the modifications in this repository are owned by sealday under the MIT License.
+
+The spreadsheet interaction design, supported workbook JSON format, feature behavior, compatibility goals, and portions of compatibility logic and locale content were adapted from [x-data-spreadsheet](https://github.com/myliang/x-spreadsheet), also under the MIT License. Tego Sheet does not bundle or depend on the upstream JavaScript runtime, but it is not presented as a clean-room implementation. The original `myliang` copyright notice is retained in [LICENSE](LICENSE).
+
+Tego Sheet is a separate project and is not affiliated with or endorsed by the upstream project. Third-party assets that carry their own notices remain subject to their respective licenses.

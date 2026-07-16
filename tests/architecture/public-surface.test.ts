@@ -6,6 +6,7 @@ import * as publicApi from '../../src';
 
 const root = resolve(import.meta.dirname, '../..');
 const exactEvidence = new Set([
+  'docs/assets/tego-sheet-demo.png',
   'docs/migration-from-x-data-spreadsheet.md',
   'tests/parity/legacy/baseline-meta.json',
   'tests/visual/fonts/NotoSans-Regular.woff2',
@@ -45,6 +46,7 @@ function isGeneratedOutput(file: string): boolean {
 
 it('classifies only exact architecture evidence as approved and rejects generated lookalikes', () => {
   const approved = [
+    'docs/assets/tego-sheet-demo.png',
     'docs/superpowers/plans/design.md',
     'tests/parity/legacy/baseline-meta.json',
     'tests/visual/__snapshots__/workbook.png',
