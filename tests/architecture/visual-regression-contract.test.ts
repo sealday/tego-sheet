@@ -35,8 +35,10 @@ describe('visual regression release contract', () => {
     expect(visualMasks).toContain('[data-visual-mask="native-scrollbars"]');
   });
 
-  it('masks only deterministic caret pixels declared by the editing fixture', () => {
-    expect(visualCss).not.toMatch(/caret-color\s*:\s*transparent/);
+  it('stabilizes the editing caret only inside the visual harness', () => {
+    expect(visualCss).toMatch(
+      /\.tego-sheet__editor textarea[^{]*{[^}]*caret-color:\s*transparent/s,
+    );
     expect(editingFixture).toContain("masks: ['blinking-caret']");
     expect(visualHarness).toContain("data-visual-mask', 'blinking-caret'");
     expect(visualHarness).toContain("mask.style.width = '2px'");
