@@ -33,6 +33,14 @@ describe('fullscreen demo workbench model', () => {
     expect(parseWorkbookJson(formatted)).toEqual(workbook);
   });
 
+  it('accepts and formats a single-sheet object without changing its JSON shape', () => {
+    const source = '{"name":"Solo","rows":{"len":1}}';
+    const parsed = parseWorkbookJson(source);
+
+    expect(parsed).toEqual({ name: 'Solo', rows: { len: 1 } });
+    expect(formatWorkbookJson(parsed)).toBe('{\n  "name": "Solo",\n  "rows": {\n    "len": 1\n  }\n}');
+  });
+
   it('returns deeply independent example workbooks', () => {
     const first = cloneExampleWorkbook();
     const second = cloneExampleWorkbook();
@@ -59,11 +67,12 @@ describe('fullscreen demo workbench model', () => {
   });
 
   it.each([
-    ['an object', '{"name":"Not a workbook"}'],
     ['null', 'null'],
+    ['a number', '42'],
+    ['a string', '"sheet"'],
     ['an array containing a primitive', '[1]'],
   ])('rejects %s as invalid top-level workbook data', (_description, source) => {
-    expect(() => parseWorkbookJson(source)).toThrow('Workbook JSON must be an array of sheet objects.');
+    expect(() => parseWorkbookJson(source)).toThrow('Workbook JSON must be a sheet object or an array of sheet objects.');
   });
 
   it.each([
@@ -71,6 +80,7 @@ describe('fullscreen demo workbench model', () => {
     ['array-shaped rows', '[{"rows":[]}]'],
     ['array-shaped columns', '[{"cols":[]}]'],
     ['a non-string freeze point', '[{"freeze":false}]'],
+    ['a numeric name in a single-sheet object', '{"name":42}'],
   ])('rejects %s through known-field validation', (_description, source) => {
     expect(() => parseWorkbookJson(source)).toThrow('Workbook data is invalid');
   });

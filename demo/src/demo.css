@@ -144,8 +144,7 @@ body {
 }
 
 .preview-controls__fields,
-.preview-controls__actions,
-.preview-controls__secondary > [role="alert"] {
+.preview-controls__actions {
   grid-column: 1 / -1;
 }
 
@@ -170,7 +169,7 @@ body {
   font-size: 0.82rem;
 }
 
-.preview-controls__secondary > [role="alert"] {
+.preview-alert {
   margin: 0;
   padding: 7px 9px;
   border: 1px solid #e5a0a0;

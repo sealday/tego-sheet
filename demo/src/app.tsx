@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   TegoSheet,
   type ActiveSheetChangeEvent,
@@ -7,6 +7,7 @@ import {
   type TegoSheetHandle,
   type WorkbookChange,
   type WorkbookData,
+  type WorkbookInput,
 } from 'tego-sheet';
 import { zhCN } from 'tego-sheet/locales/zh-cn';
 import {
@@ -20,23 +21,54 @@ import {
 type PreviewMode = 'uncontrolled' | 'controlled';
 type LocaleCode = 'en' | 'zh-CN';
 
+interface PreviewErrorBoundaryProps {
+  readonly children: ReactNode;
+  readonly onError: (error: Error) => void;
+}
+
+interface PreviewErrorBoundaryState {
+  readonly failed: boolean;
+}
+
+class PreviewErrorBoundary extends Component<PreviewErrorBoundaryProps, PreviewErrorBoundaryState> {
+  state: PreviewErrorBoundaryState = { failed: false };
+
+  static getDerivedStateFromError(): PreviewErrorBoundaryState {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: Error): void {
+    this.props.onError(error);
+  }
+
+  render(): ReactNode {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
 function eventDetails(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function workbookStatus(workbook: WorkbookData): string {
-  const firstName = workbook[0]?.name?.trim() || 'Untitled';
-  const suffix = workbook.length === 1 ? 'sheet' : 'sheets';
-  return `${firstName} · ${workbook.length} ${suffix}`;
+function workbookStatus(workbook: WorkbookInput): string {
+  const sheets = Array.isArray(workbook) ? workbook : [workbook];
+  const firstName = sheets[0]?.name?.trim() || 'Untitled';
+  const suffix = sheets.length === 1 ? 'sheet' : 'sheets';
+  return `${firstName} · ${sheets.length} ${suffix}`;
 }
 
 export function App() {
   const initialWorkbook = useMemo(cloneExampleWorkbook, []);
   const sheetRef = useRef<TegoSheetHandle>(null);
+  const lastStableRef = useRef<{ workbook: WorkbookData; mode: PreviewMode }>({
+    workbook: initialWorkbook,
+    mode: 'uncontrolled',
+  });
+  const recoveringRef = useRef(false);
   const [mode, setMode] = useState<PreviewMode>('uncontrolled');
   const [readOnly, setReadOnly] = useState(false);
   const [localeCode, setLocaleCode] = useState<LocaleCode>('en');
-  const [workbook, setWorkbook] = useState<WorkbookData>(initialWorkbook);
+  const [workbook, setWorkbook] = useState<WorkbookInput>(initialWorkbook);
   const [jsonText, setJsonText] = useState(() => formatWorkbookJson(initialWorkbook));
   const [mountEpoch, setMountEpoch] = useState(0);
   const [controlsCollapsed, setControlsCollapsed] = useState(false);
@@ -47,6 +79,14 @@ export function App() {
 
   const locale = useMemo(() => localeCode === 'zh-CN' ? zhCN : undefined, [localeCode]);
 
+  useEffect(() => {
+    const stableWorkbook = sheetRef.current?.getValue();
+    if (stableWorkbook === undefined) return;
+
+    lastStableRef.current = { workbook: stableWorkbook, mode };
+    recoveringRef.current = false;
+  }, [mode, mountEpoch, workbook]);
+
   const recordEvent = useCallback((input: Omit<PreviewEventInput, 'timestamp'>) => {
     setEvents(current => appendPreviewEvent(current, {
       ...input,
@@ -55,6 +95,7 @@ export function App() {
   }, []);
 
   const changeMode = (nextMode: PreviewMode) => {
+    recoveringRef.current = false;
     setMode(nextMode);
     setMountEpoch(current => current + 1);
   };
@@ -62,6 +103,11 @@ export function App() {
   const importJson = () => {
     try {
       const imported = parseWorkbookJson(jsonText);
+      const currentWorkbook = sheetRef.current?.getValue();
+      if (currentWorkbook !== undefined) {
+        lastStableRef.current = { workbook: currentWorkbook, mode };
+      }
+      recoveringRef.current = false;
       setWorkbook(imported);
       setJsonText(formatWorkbookJson(imported));
       setError(null);
@@ -73,9 +119,11 @@ export function App() {
 
   const resetWorkbook = () => {
     const freshWorkbook = cloneExampleWorkbook();
+    recoveringRef.current = false;
     setWorkbook(freshWorkbook);
     setJsonText(formatWorkbookJson(freshWorkbook));
     setError(null);
+    setEvents([]);
     setMountEpoch(current => current + 1);
   };
 
@@ -104,7 +152,23 @@ export function App() {
   };
 
   const handleError = (sheetError: TegoSheetError) => {
+    setError(sheetError.message);
     recordEvent({ label: 'Spreadsheet error', details: sheetError.message });
+  };
+
+  const recoverFromRenderError = (renderError: Error) => {
+    if (recoveringRef.current) {
+      setError(`Spreadsheet recovery failed: ${renderError.message}`);
+      return;
+    }
+
+    recoveringRef.current = true;
+    const stable = lastStableRef.current;
+    setWorkbook(stable.workbook);
+    setMode(stable.mode);
+    setJsonText(formatWorkbookJson(stable.workbook));
+    setError(`Workbook import failed: ${renderError.message}`);
+    setMountEpoch(current => current + 1);
   };
 
   return (
@@ -128,6 +192,8 @@ export function App() {
             {controlsCollapsed ? 'Expand controls' : 'Collapse controls'}
           </button>
         </div>
+
+        {error !== null && <p className="preview-alert" role="alert">{error}</p>}
 
         {!controlsCollapsed && (
           <div id="preview-controls-secondary" className="preview-controls__secondary">
@@ -186,8 +252,6 @@ export function App() {
               </button>
             </div>
 
-            {error !== null && <p role="alert">{error}</p>}
-
             {jsonVisible && (
               <div id="workbook-json-panel" className="preview-json-panel">
                 <label htmlFor="workbook-json">Workbook JSON</label>
@@ -220,17 +284,19 @@ export function App() {
       </header>
 
       <section className="preview-workspace" aria-label="Spreadsheet preview">
-        <TegoSheet
-          key={mountEpoch}
-          ref={sheetRef}
-          {...(mode === 'controlled' ? { value: workbook } : { defaultValue: workbook })}
-          readOnly={readOnly}
-          locale={locale}
-          onChange={handleChange}
-          onActiveSheetChange={handleActiveSheetChange}
-          onSelectionChange={handleSelectionChange}
-          onError={handleError}
-        />
+        <PreviewErrorBoundary key={`preview-boundary-${mountEpoch}`} onError={recoverFromRenderError}>
+          <TegoSheet
+            key={mountEpoch}
+            ref={sheetRef}
+            {...(mode === 'controlled' ? { value: workbook } : { defaultValue: workbook })}
+            readOnly={readOnly}
+            locale={locale}
+            onChange={handleChange}
+            onActiveSheetChange={handleActiveSheetChange}
+            onSelectionChange={handleSelectionChange}
+            onError={handleError}
+          />
+        </PreviewErrorBoundary>
       </section>
     </main>
   );

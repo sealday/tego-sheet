@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TegoSheet, WorkbookData } from 'tego-sheet';
@@ -8,7 +8,9 @@ type SheetProps = ComponentProps<typeof TegoSheet>;
 
 const sheetMock = vi.hoisted(() => ({
   currentProps: undefined as SheetProps | undefined,
-  handleValue: [{ name: 'Exported' }] as WorkbookData,
+  delayedRefAttachments: 0,
+  delayNextRef: false,
+  handleValue: undefined as WorkbookData | undefined,
   mounts: 0,
 }));
 
@@ -17,16 +19,30 @@ vi.mock('tego-sheet', async () => {
 
   const MockTegoSheet = React.forwardRef<unknown, SheetProps>((props, ref) => {
     sheetMock.currentProps = props;
+    const workbook = props.value ?? props.defaultValue ?? [];
+    const sheets = Array.isArray(workbook) ? workbook : [workbook];
+    const delayRef = React.useRef(sheetMock.delayNextRef).current;
+    const [refReady, setRefReady] = React.useState(!delayRef);
 
     React.useEffect(() => {
       sheetMock.mounts += 1;
-    }, []);
+      if (delayRef) {
+        sheetMock.delayNextRef = false;
+        setRefReady(true);
+      }
+    }, [delayRef]);
 
-    React.useImperativeHandle(ref, () => ({
-      getValue: () => sheetMock.handleValue,
+    React.useEffect(() => {
+      if (delayRef && refReady) sheetMock.delayedRefAttachments += 1;
+    }, [delayRef, refReady]);
+
+    React.useImperativeHandle(refReady ? ref : null, () => ({
+      getValue: () => sheetMock.handleValue ?? sheets,
     }));
 
-    const workbook = props.value ?? props.defaultValue ?? [];
+    if (sheets.some(sheet => typeof Reflect.get(sheet.rows ?? {}, 'len') === 'string')) {
+      throw new TypeError('Workbook data is invalid: rows.len must be a number.');
+    }
 
     return (
       <div
@@ -56,12 +72,15 @@ function workbookFromBoundary(boundary: HTMLElement): unknown {
 
 beforeEach(() => {
   sheetMock.currentProps = undefined;
-  sheetMock.handleValue = [{ name: 'Exported' }];
+  sheetMock.delayedRefAttachments = 0;
+  sheetMock.delayNextRef = false;
+  sheetMock.handleValue = undefined;
   sheetMock.mounts = 0;
 });
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
 });
 
 describe('demo workbench', () => {
@@ -139,9 +158,9 @@ describe('demo workbench', () => {
     fireEvent.click(rendered.getByRole('button', { name: 'Show JSON' }));
     const json = rendered.getByRole('textbox', { name: 'Workbook JSON' });
 
-    fireEvent.change(json, { target: { value: '[{"name":"Imported"}]' } });
+    fireEvent.change(json, { target: { value: '{"name":"Imported"}' } });
     fireEvent.click(rendered.getByRole('button', { name: 'Import JSON' }));
-    expect(workbookFromBoundary(rendered.getByTestId('tego-sheet'))).toEqual([{ name: 'Imported' }]);
+    expect(workbookFromBoundary(rendered.getByTestId('tego-sheet'))).toEqual({ name: 'Imported' });
     expect(sheetMock.mounts).toBe(2);
 
     fireEvent.click(rendered.getByRole('button', { name: 'Reset workbook' }));
@@ -184,6 +203,65 @@ describe('demo workbench', () => {
     expect(log.textContent).toMatch(/active sheet changed/i);
     expect(log.textContent).toMatch(/workbook changed/i);
     expect(log.textContent).not.toContain('"id":"change-0"');
+  });
+
+  it('clears callback events when the example workbook is reset', () => {
+    const rendered = render(<App />);
+    act(() => currentSheetProps().onError?.({
+      code: 'RENDER_FAILED',
+      message: 'Temporary render warning',
+      recoverable: true,
+    }));
+
+    fireEvent.click(rendered.getByRole('button', { name: 'Reset workbook' }));
+    fireEvent.click(rendered.getByRole('button', { name: 'Show events' }));
+
+    expect(within(rendered.getByRole('log')).queryAllByRole('listitem')).toHaveLength(0);
+  });
+
+  it('keeps sheet callback errors visible when controls are collapsed', () => {
+    const rendered = render(<App />);
+    act(() => currentSheetProps().onError?.({
+      code: 'RENDER_FAILED',
+      message: 'Canvas unavailable',
+      recoverable: true,
+    }));
+
+    expect(rendered.getByRole('alert').textContent).toMatch(/canvas unavailable/i);
+    fireEvent.click(rendered.getByRole('button', { name: 'Collapse controls' }));
+    expect(rendered.getByRole('alert').textContent).toMatch(/canvas unavailable/i);
+  });
+
+  it('recovers from nested invalid imports with the last committed workbook and mode', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const rendered = render(<App />);
+    fireEvent.click(rendered.getByRole('button', { name: 'Show JSON' }));
+    const json = rendered.getByRole('textbox', { name: 'Workbook JSON' });
+
+    fireEvent.change(rendered.getByRole('combobox', { name: 'Mode' }), {
+      target: { value: 'controlled' },
+    });
+    sheetMock.delayNextRef = true;
+    fireEvent.change(json, { target: { value: '[{"name":"Last good"}]' } });
+    fireEvent.click(rendered.getByRole('button', { name: 'Import JSON' }));
+    await waitFor(() => expect(sheetMock.delayedRefAttachments).toBe(1));
+    const stableMounts = sheetMock.mounts;
+
+    fireEvent.change(json, { target: { value: '[{"name":"Broken","rows":{"len":"bad"}}]' } });
+    fireEvent.click(rendered.getByRole('button', { name: 'Import JSON' }));
+
+    await waitFor(() => {
+      expect(workbookFromBoundary(rendered.getByTestId('tego-sheet'))).toEqual([{ name: 'Last good' }]);
+    });
+    expect(rendered.getByText(/mode: controlled/i)).toBeTruthy();
+    expect(rendered.getByText(/workbook: last good/i)).toBeTruthy();
+    expect(rendered.getByRole('alert').textContent).toMatch(/rows\.len must be a number/i);
+    expect(sheetMock.mounts).toBe(stableMounts + 1);
+
+    fireEvent.click(rendered.getByRole('button', { name: 'Reset workbook' }));
+    expect(workbookFromBoundary(rendered.getByTestId('tego-sheet'))).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'Budget' })]),
+    );
   });
 
   it('provides disclosure state and keeps primary status available when controls collapse', () => {

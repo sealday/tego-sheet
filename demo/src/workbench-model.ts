@@ -1,4 +1,4 @@
-import type { WorkbookData } from 'tego-sheet';
+import type { WorkbookData, WorkbookInput } from 'tego-sheet';
 
 export const PREVIEW_EVENT_LIMIT = 12;
 
@@ -65,18 +65,27 @@ export function cloneExampleWorkbook(): WorkbookData {
   return JSON.parse(JSON.stringify(EXAMPLE_WORKBOOK)) as WorkbookData;
 }
 
-export function parseWorkbookJson(source: string): WorkbookData {
+export function parseWorkbookJson(source: string): WorkbookInput {
   const parsed: unknown = JSON.parse(source);
 
-  if (!Array.isArray(parsed) || !parsed.every(isSheetData)) {
-    throw new TypeError('Workbook JSON must be an array of sheet objects.');
+  if (Array.isArray(parsed)) {
+    if (!parsed.every(isSheetData)) {
+      throw new TypeError('Workbook JSON must be a sheet object or an array of sheet objects.');
+    }
+
+    parsed.forEach(validateKnownSheetFields);
+    return parsed;
   }
 
-  parsed.forEach(validateKnownSheetFields);
+  if (!isSheetData(parsed)) {
+    throw new TypeError('Workbook JSON must be a sheet object or an array of sheet objects.');
+  }
+
+  validateKnownSheetFields(parsed, 0);
   return parsed;
 }
 
-export function formatWorkbookJson(workbook: WorkbookData): string {
+export function formatWorkbookJson(workbook: WorkbookInput): string {
   return JSON.stringify(workbook, null, 2);
 }
 
