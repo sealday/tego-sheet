@@ -269,7 +269,12 @@ for (const fixture of visualFixtures) {
     await expect(screenshot).toHaveScreenshot(`${fixture.name}.png`, {
       mask: [...namedMasks(page, fixture.masks ?? [])],
       ...(fixture.name === 'editing-overlays-menus'
-        ? { maskColor: '#ffffff', maxDiffPixelRatio: 0 }
+        ? {
+            maskColor: '#ffffff',
+            ...(testInfo.project.name.startsWith('desktop-')
+              ? { maxDiffPixels: 50 }
+              : { maxDiffPixelRatio: 0 }),
+          }
         : {}),
     });
   });

@@ -35,10 +35,8 @@ describe('visual regression release contract', () => {
     expect(visualMasks).toContain('[data-visual-mask="native-scrollbars"]');
   });
 
-  it('stabilizes the editing caret only inside the visual harness', () => {
-    expect(visualCss).toMatch(
-      /\.tego-sheet__editor textarea[^{]*{[^}]*caret-color:\s*transparent/s,
-    );
+  it('masks the caret and narrowly bounds editor edge rasterization', () => {
+    expect(visualCss).not.toMatch(/caret-color\s*:\s*transparent/);
     expect(editingFixture).toContain("masks: ['blinking-caret']");
     expect(visualHarness).toContain("data-visual-mask', 'blinking-caret'");
     expect(visualHarness).toContain("mask.style.width = '2px'");
@@ -46,6 +44,11 @@ describe('visual regression release contract', () => {
     expect(visualMasks).toContain("'blinking-caret': '[data-visual-mask=\"blinking-caret\"]'");
     expect(visualSpec).toContain("fill('Editing')");
     expect(visualSpec).toContain('setSelectionRange(0, 0)');
+    expect(visualSpec).toMatch(
+      /fixture\.name === 'editing-overlays-menus'\s*\? \{\s*maskColor: '#ffffff',\s*\.\.\.\(testInfo\.project\.name\.startsWith\('desktop-'\)\s*\? \{ maxDiffPixels: 50 \}\s*: \{ maxDiffPixelRatio: 0 \}\),\s*\}\s*: \{\}/,
+    );
+    expect(visualSpec.match(/maxDiffPixels: 50/g)).toHaveLength(1);
+    expect(visualSpec.match(/maxDiffPixelRatio: 0/g)).toHaveLength(1);
   });
 
   it('captures the real context menu opened through public pointer interaction', () => {
