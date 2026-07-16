@@ -10,6 +10,7 @@ try {
     'tests/package/packed-consumer.test.mjs',
     'tests/package/package-metadata.check.mjs',
     'tests/package/quality-gates.test.mjs',
+    'tests/package/repository-policy.test.mjs',
   ], consumer);
 } finally {
   consumer.cleanup();
