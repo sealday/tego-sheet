@@ -16,6 +16,7 @@ export default defineConfig({
   projects: [...visualProjects],
   reporter: [
     ['list'],
+    ['html', { open: 'never', outputFolder: 'playwright-report/visual' }],
     [
       './scripts/reporters/playwright-parity-evidence.ts',
       { lane: 'visual', outputPath: 'test-results/parity/visual.ndjson', releaseOnly: true },
@@ -34,7 +35,7 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: 'pnpm exec vite --config tests/visual/harness/vite.config.ts',
+    command: 'npm exec -- vite --config tests/visual/harness/vite.config.ts',
     port: 4174,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

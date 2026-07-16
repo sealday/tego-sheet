@@ -329,6 +329,11 @@ Not-tested: GitHub-hosted hooks and workflow jobs"
 
 **Files:**
 - Create: `.github/workflows/ci.yml`
+- Create: `scripts/resolve-commit-range.mjs`
+- Create: `tests/package/commit-range.test.mjs`
+- Modify: `scripts/test-package.mjs`
+- Modify: `tests/package/quality-gates.test.mjs`
+- Modify: `tests/package/repository-policy.test.mjs`
 - Modify: `playwright.config.ts`
 - Modify: `playwright.visual.config.ts`
 
@@ -346,7 +351,13 @@ and in the visual config:
 ['html', { open: 'never', outputFolder: 'playwright-report/visual' }],
 ```
 
-- [ ] **Step 2: Create the CI workflow**
+- [ ] **Step 2: Create the commit-range resolver and CI workflow**
+
+Add dependency-free resolver tests for available event bases, all-zero bases, fetchable and
+unfetchable missing bases, root commits, malformed SHAs, and `GITHUB_OUTPUT`. The resolver uses
+argument-array Git calls, fetches a missing nonzero base explicitly by SHA, validates the selected
+range, falls back to `head^..head`, and emits `last` only when the head has no parent. Add the test
+to `scripts/test-package.mjs` and the Node 20 syntax guard.
 
 Create `.github/workflows/ci.yml` with:
 
@@ -376,26 +387,45 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Validate introduced commits
+      - name: Resolve introduced commit range
+        id: commit-range
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: npm exec -- commitlint --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
+        run: node scripts/resolve-commit-range.mjs "$BASE_SHA" "$HEAD_SHA"
+      - name: Validate introduced commits
+        env:
+          RANGE_MODE: ${{ steps.commit-range.outputs.mode }}
+          RANGE_BASE: ${{ steps.commit-range.outputs.base }}
+          RANGE_HEAD: ${{ steps.commit-range.outputs.head }}
+        run: |
+          case "$RANGE_MODE" in
+            range)
+              npm exec -- commitlint --from "$RANGE_BASE" --to "$RANGE_HEAD" --verbose
+              ;;
+            last)
+              npm exec -- commitlint --last --verbose
+              ;;
+            *)
+              echo "Unsupported commit range mode" >&2
+              exit 1
+              ;;
+          esac
 
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: npm
@@ -410,8 +440,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: npm
@@ -426,8 +456,8 @@ jobs:
       matrix:
         node: [20, 22, 24]
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -439,8 +469,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: npm
@@ -448,20 +478,21 @@ jobs:
       - run: npm exec -- playwright install --with-deps
       - run: npm run test:browser
       - if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: browser-report
           path: |
             playwright-report/browser
             test-results/playwright
           if-no-files-found: ignore
+          retention-days: 7
 
   visual:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: npm
@@ -469,21 +500,22 @@ jobs:
       - run: npm exec -- playwright install --with-deps chromium
       - run: npm run test:visual
       - if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: visual-report
           path: |
             playwright-report/visual
             test-results/playwright-visual
           if-no-files-found: ignore
+          retention-days: 7
 
   parity-release:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: npm
@@ -491,7 +523,7 @@ jobs:
       - run: npm exec -- playwright install --with-deps
       - run: npm run test:parity-release
       - if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: parity-release-evidence
           path: |
@@ -501,6 +533,7 @@ jobs:
             playwright-report/browser
             playwright-report/visual
           if-no-files-found: ignore
+          retention-days: 30
 ```
 
 - [ ] **Step 3: Run focused policy and configuration tests**
@@ -509,12 +542,14 @@ Run:
 
 ```bash
 npm run format
+node --test tests/package/commit-range.test.mjs
 node --test tests/package/repository-policy.test.mjs
 npm exec -- vitest run tests/parity/evidence-configuration.test.ts
 npm run lint
 ```
 
-Expected: the new workflow and Playwright assertions pass; repository-policy remains RED only for the README screenshot/order.
+Expected: all commit-range tests pass; the new workflow and Playwright assertions pass;
+repository-policy remains RED only for the README screenshot/order.
 
 - [ ] **Step 4: Smoke-test both npm-native Playwright servers**
 
@@ -530,9 +565,9 @@ Expected: both tests pass and produce their separate HTML report directories.
 - [ ] **Step 5: Commit CI and Playwright portability**
 
 ```bash
-git add .github/workflows/ci.yml playwright.config.ts playwright.visual.config.ts
+git add .github/workflows/ci.yml playwright.config.ts playwright.visual.config.ts scripts/resolve-commit-range.mjs scripts/test-package.mjs tests/package/commit-range.test.mjs tests/package/quality-gates.test.mjs tests/package/repository-policy.test.mjs docs/superpowers/specs/2026-07-16-repository-quality-gates-design.md docs/superpowers/plans/2026-07-16-repository-quality-gates.md
 git commit -m "ci: enforce complete repository verification" -m "Constraint: Pull requests need full behavior checks without duplicating the release provenance run
-Rejected: Run parity release on every pull request | browser and visual jobs already provide equivalent PR feedback
+Rejected: PR parity release | browser and visual jobs already cover pull-request behavior
 Confidence: high
 Scope-risk: moderate
 Directive: Keep the parity release command indivisible

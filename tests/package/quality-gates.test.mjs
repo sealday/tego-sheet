@@ -37,6 +37,7 @@ test('package and SSR orchestration is plain JavaScript for Node 20', () => {
 
   const paths = [
     'scripts/package-test-runtime.mjs',
+    'scripts/resolve-commit-range.mjs',
     'scripts/test-package.mjs',
     'scripts/test-parity-gate.mjs',
     'scripts/test-ssr.mjs',
@@ -44,6 +45,7 @@ test('package and SSR orchestration is plain JavaScript for Node 20', () => {
     'tests/package/package-metadata.check.mjs',
     'tests/package/packed-consumer.test.mjs',
     'tests/package/quality-gates.test.mjs',
+    'tests/package/commit-range.test.mjs',
     'tests/package/fixtures/node-esm/index.mjs',
     'tests/package/fixtures/node-cjs/index.cjs',
     'tests/ssr/public-entrypoints.test.mjs',

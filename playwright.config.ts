@@ -11,6 +11,7 @@ export default defineConfig({
   projects: [...browserProjects],
   reporter: [
     ['list'],
+    ['html', { open: 'never', outputFolder: 'playwright-report/browser' }],
     [
       './scripts/reporters/playwright-parity-evidence.ts',
       { lane: 'browser', outputPath: 'test-results/parity/browser.ndjson', releaseOnly: true },
@@ -28,7 +29,7 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: 'pnpm exec vite --config tests/browser/harness/vite.config.ts',
+    command: 'npm exec -- vite --config tests/browser/harness/vite.config.ts',
     port: 4173,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

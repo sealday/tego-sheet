@@ -8,6 +8,20 @@ const repositoryRoot = new URL('../../', import.meta.url);
 const repositoryPath = fileURLToPath(repositoryRoot);
 const normalizeNewlines = (value) => value.replace(/\r\n?/g, '\n');
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const actionPins = Object.freeze({
+  'actions/checkout': {
+    sha: 'df4cb1c069e1874edd31b4311f1884172cec0e10',
+    version: 'v6',
+  },
+  'actions/setup-node': {
+    sha: '249970729cb0ef3589644e2896645e5dc5ba9c38',
+    version: 'v6',
+  },
+  'actions/upload-artifact': {
+    sha: '330a01c490aca151604b8cf639adc76d48f6c5d4',
+    version: 'v5',
+  },
+});
 
 function readRepositoryFile(path) {
   const url = new URL(path, repositoryRoot);
@@ -78,10 +92,14 @@ function stepField(step, key) {
 }
 
 function actionStep(job, action) {
+  const pin = actionPins[action];
+  assert.ok(pin, `${action} must have a repository-owned immutable pin`);
+  assert.match(pin.sha, /^[0-9a-f]{40}$/);
+  const expected = `${action}@${pin.sha} # ${pin.version}`;
   const step = workflowSteps(job).find(
-    (candidate) => stepField(candidate, 'uses')?.value === action,
+    (candidate) => stepField(candidate, 'uses')?.value === expected,
   );
-  assert.ok(step, `job must use ${action} through an anchored uses field`);
+  assert.ok(step, `job must use immutable ${expected} through an anchored uses field`);
   return step;
 }
 
@@ -106,22 +124,35 @@ function assertRunPattern(job, pattern, description) {
   assert.equal(found, true, description);
 }
 
+function stepRunScript(step) {
+  const run = stepField(step, 'run');
+  assert.ok(run, 'step must define run');
+  if (!['|', '|-', '>', '>-'].includes(run.value)) return unquote(run.value);
+  return run.block
+    .split('\n')
+    .slice(1)
+    .map((line) => line.replace(/^ {10}/, ''))
+    .join('\n')
+    .trim();
+}
+
 function assertJobSetup(job, nodeVersion) {
   assert.equal(unquote(yamlScalar(job, 'runs-on', 4)), 'ubuntu-latest');
   assert.match(yamlScalar(job, 'timeout-minutes', 4), /^[1-9]\d*$/);
-  actionStep(job, 'actions/checkout@v6');
-  const setupNode = actionStep(job, 'actions/setup-node@v6');
+  actionStep(job, 'actions/checkout');
+  const setupNode = actionStep(job, 'actions/setup-node');
   assertActionInput(setupNode, 'node-version', nodeVersion);
   assertActionInput(setupNode, 'cache', 'npm');
   assertRunCommand(job, 'npm ci');
 }
 
-function assertArtifactUpload(job, name, paths) {
-  const upload = actionStep(job, 'actions/upload-artifact@v5');
+function assertArtifactUpload(job, name, paths, retentionDays) {
+  const upload = actionStep(job, 'actions/upload-artifact');
   assert.equal(stepField(upload, 'if')?.value, '${{ !cancelled() }}');
   const inputs = actionInputs(upload);
   assert.equal(unquote(yamlScalar(inputs, 'name', 10)), name);
   assertActionInput(upload, 'if-no-files-found', 'ignore');
+  assertActionInput(upload, 'retention-days', String(retentionDays));
   const pathInput = yamlBlock(inputs, 'path', 10);
   const inlinePath = unquote(yamlScalar(inputs, 'path', 10));
   const pathValues = ['|', '|-', '>', '>-'].includes(inlinePath)
@@ -336,10 +367,19 @@ test('Playwright uses npm-hosted Vite servers and separated HTML reports', () =>
 });
 
 test('CI covers policy, quality, package, browser, visual, and release lanes', () => {
-  const workflow = normalizeNewlines(readRepositoryFile('.github/workflows/ci.yml')).replace(
-    /^\s*#.*$/gm,
-    '',
-  );
+  const workflow = normalizeNewlines(readRepositoryFile('.github/workflows/ci.yml'));
+
+  const actionReferences = workflow.split('\n').filter((line) => /^\s+(?:-\s+)?uses:/.test(line));
+  assert.ok(actionReferences.length > 0, 'workflow must use pinned repository Actions');
+  for (const reference of actionReferences) {
+    const match = reference.match(/^\s+(?:-\s+)?uses:\s*([^@\s]+)@([0-9a-f]{40})\s+#\s+(v\d+)\s*$/);
+    assert.ok(
+      match,
+      `Action reference must use a 40-character SHA and version comment: ${reference}`,
+    );
+    const [, action, sha, version] = match;
+    assert.deepEqual({ sha, version }, actionPins[action], `${action} must use its approved pin`);
+  }
 
   const triggers = yamlBlock(workflow, 'on', 0);
   const mainBranch = String.raw`(?:\[\s*['"]?main['"]?\s*\]|\n {6}-\s*['"]?main['"]?\s*)`;
@@ -383,22 +423,52 @@ test('CI covers policy, quality, package, browser, visual, and release lanes', (
     /^(?:\$\{\{\s*)?github\.event_name != 'workflow_dispatch'(?:\s*}})?$/,
   );
   assertJobSetup(commitPolicy, '24');
-  assertActionInput(actionStep(commitPolicy, 'actions/checkout@v6'), 'fetch-depth', '0');
+  assertActionInput(actionStep(commitPolicy, 'actions/checkout'), 'fetch-depth', '0');
+  const resolverStep = workflowSteps(commitPolicy).find(
+    (step) => stepField(step, 'name')?.value === 'Resolve introduced commit range',
+  );
+  assert.ok(resolverStep, 'commit-policy must resolve the introduced commit range');
+  assert.equal(stepField(resolverStep, 'id')?.value, 'commit-range');
+  const resolverEnvironment = yamlBlock(resolverStep, 'env', 8);
+  assert.equal(
+    yamlScalar(resolverEnvironment, 'BASE_SHA', 10),
+    '${{ github.event.pull_request.base.sha || github.event.before }}',
+  );
+  assert.equal(
+    yamlScalar(resolverEnvironment, 'HEAD_SHA', 10),
+    '${{ github.event.pull_request.head.sha || github.sha }}',
+  );
+  assert.equal(
+    stepRunScript(resolverStep),
+    'node scripts/resolve-commit-range.mjs "$BASE_SHA" "$HEAD_SHA"',
+  );
   const commitlintStep = workflowSteps(commitPolicy).find((step) => {
     const run = stepField(step, 'run');
     return run && `${run.value}\n${run.block}`.includes('commitlint');
   });
   assert.ok(commitlintStep, 'commit-policy must run commitlint');
-  const commitlintCommand = stepField(commitlintStep, 'run').block;
-  assert.match(
-    commitlintCommand,
-    /--from[\s\S]*github\.event\.pull_request\.base\.sha\s*\|\|\s*github\.event\.before/,
+  assert.equal(stepField(commitlintStep, 'name')?.value, 'Validate introduced commits');
+  const commitlintEnvironment = yamlBlock(commitlintStep, 'env', 8);
+  assert.equal(
+    yamlScalar(commitlintEnvironment, 'RANGE_MODE', 10),
+    '${{ steps.commit-range.outputs.mode }}',
   );
-  assert.match(
-    commitlintCommand,
-    /--to[\s\S]*github\.event\.pull_request\.head\.sha\s*\|\|\s*github\.sha/,
+  assert.equal(
+    yamlScalar(commitlintEnvironment, 'RANGE_BASE', 10),
+    '${{ steps.commit-range.outputs.base }}',
   );
-  assert.match(commitlintCommand, /--verbose\b/);
+  assert.equal(
+    yamlScalar(commitlintEnvironment, 'RANGE_HEAD', 10),
+    '${{ steps.commit-range.outputs.head }}',
+  );
+  const commitlintScript = stepRunScript(commitlintStep);
+  assert.match(
+    commitlintScript,
+    /npm exec -- commitlint --from "\$RANGE_BASE" --to "\$RANGE_HEAD" --verbose/,
+  );
+  assert.match(commitlintScript, /npm exec -- commitlint --last --verbose/);
+  assert.match(commitlintScript, /case "\$RANGE_MODE" in/);
+  assert.doesNotMatch(commitlintScript, /\beval\b|\$\{\{[^}]+}}/);
 
   assertJobSetup(quality, '24');
   for (const command of [
@@ -431,10 +501,12 @@ test('CI covers policy, quality, package, browser, visual, and release lanes', (
     'browser must install all Playwright browsers with dependencies',
   );
   assertRunCommand(browser, 'npm run test:browser');
-  assertArtifactUpload(browser, 'browser-report', [
-    'playwright-report/browser',
-    'test-results/playwright',
-  ]);
+  assertArtifactUpload(
+    browser,
+    'browser-report',
+    ['playwright-report/browser', 'test-results/playwright'],
+    7,
+  );
 
   assertJobSetup(visual, '24');
   assertRunPattern(
@@ -443,10 +515,12 @@ test('CI covers policy, quality, package, browser, visual, and release lanes', (
     'visual must install Chromium with system dependencies',
   );
   assertRunCommand(visual, 'npm run test:visual');
-  assertArtifactUpload(visual, 'visual-report', [
-    'playwright-report/visual',
-    'test-results/playwright-visual',
-  ]);
+  assertArtifactUpload(
+    visual,
+    'visual-report',
+    ['playwright-report/visual', 'test-results/playwright-visual'],
+    7,
+  );
 
   assert.equal(
     yamlScalar(parityRelease, 'if', 4)
@@ -461,13 +535,18 @@ test('CI covers policy, quality, package, browser, visual, and release lanes', (
     'parity-release must install all Playwright browsers with dependencies',
   );
   assertRunCommand(parityRelease, 'npm run test:parity-release');
-  assertArtifactUpload(parityRelease, 'parity-release-evidence', [
-    'test-results/parity',
-    'test-results/playwright',
-    'test-results/playwright-visual',
-    'playwright-report/browser',
-    'playwright-report/visual',
-  ]);
+  assertArtifactUpload(
+    parityRelease,
+    'parity-release-evidence',
+    [
+      'test-results/parity',
+      'test-results/playwright',
+      'test-results/playwright-visual',
+      'playwright-report/browser',
+      'playwright-report/visual',
+    ],
+    30,
+  );
 });
 
 test('README presents the tracked demo and ends with upstream attribution', () => {

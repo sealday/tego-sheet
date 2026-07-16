@@ -64,7 +64,7 @@ The pre-commit hook is intentionally read-only. Developers use `npm run format` 
 
 ## GitHub Actions
 
-A single `.github/workflows/ci.yml` workflow will run on pull requests targeting `main`, pushes to `main`, and manual dispatch. It will use read-only repository permissions, npm lockfile caching, bounded job timeouts, and concurrency cancellation by workflow and ref.
+A single `.github/workflows/ci.yml` workflow will run on pull requests targeting `main`, pushes to `main`, and manual dispatch. It will use read-only repository permissions, npm lockfile caching, bounded job timeouts, and concurrency cancellation by workflow and ref. Every third-party Action is pinned to an exact 40-character commit SHA with its major version retained as a review comment.
 
 The workflow contains these jobs:
 
@@ -72,6 +72,8 @@ The workflow contains these jobs:
    - Uses a full checkout.
    - On pull requests, validates every commit from the base SHA through the head SHA.
    - On pushes, validates only the new push range so the pre-policy history is not retroactively rejected.
+   - Validates SHA syntax, explicitly fetches an unavailable nonzero base, then falls back to the head parent when the event base is zero or remains unavailable.
+   - Uses Commitlint `--last` only for a root head commit with no parent.
    - Skips manual dispatch because it introduces no commit range.
 2. `quality`
    - Runs `npm ci`, Oxfmt check, Oxlint, typecheck, library build, and demo build on Node 24.
@@ -82,14 +84,14 @@ The workflow contains these jobs:
    - Runs SSR and packed-package consumer tests to validate types, ESM, CommonJS, exports, and clean Vite consumption.
 5. `browser`
    - Installs all Playwright browsers and system dependencies.
-   - Runs the browser suite with one worker and uploads reports and traces when the job is not cancelled.
+   - Runs the browser suite with one worker and retains uploaded reports and traces for 7 days when the job is not cancelled.
 6. `visual`
    - Installs Chromium and its system dependencies.
-   - Runs the visual snapshot suite and uploads reports, diffs, and traces when the job is not cancelled.
+   - Runs the visual snapshot suite and retains uploaded reports, diffs, and traces for 7 days when the job is not cancelled.
 7. `parity-release`
    - Runs only for `main` pushes and manual dispatch.
    - Installs all Playwright browsers and executes the existing indivisible parity-release command so Vitest, browser, visual, and manifest evidence share one provenance context.
-   - Uploads parity evidence and Playwright output when the job is not cancelled.
+   - Retains parity evidence and Playwright output for 30 days when the job is not cancelled.
 
 The Playwright web servers will use `npm exec -- vite`, removing the undeclared pnpm dependency. Browser and visual configs will add non-opening HTML reporters with separate output folders for CI artifacts.
 
@@ -110,6 +112,8 @@ Before changing production configuration, repository-policy tests will be added 
 - Playwright no longer invokes pnpm.
 - README references a tracked screenshot and ends with the ownership section.
 - GitHub Actions contains all required jobs, triggers, minimum permissions, cache setup, Node matrix, report uploads, and the restricted parity-release condition.
+- Commit-range tests cover available, zero, fetchable, unavailable, and root event bases, plus malformed input and safe workflow outputs.
+- GitHub Actions use immutable Action SHAs and bounded browser, visual, and release-evidence retention.
 - Package manager and Node engine metadata agree with CI.
 
 After the failing policy test is recorded, implementation proceeds in small commits. Verification includes the focused policy test, Oxfmt check, Oxlint, typecheck, full Vitest, builds, SSR/package tests, browser tests, visual tests, parity release, hook behavior, workflow syntax inspection, and a clean Git status.
@@ -132,5 +136,5 @@ The completed branch is pushed directly to the existing `main` branch only after
 - **Oxlint rule mismatch:** migrate from the current configuration, inspect effective rules, and retain explicit policy tests for React directives.
 - **Large formatting diff:** exclude historical and immutable evidence, inspect the formatter diff before committing, and keep formatting separate from behavior changes.
 - **Visual CI drift:** use the existing deterministic fonts, viewports, locales, time zone, DPR matrix, and one-worker Playwright configuration.
-- **Commitlint rejecting old history:** validate only event-introduced commit ranges, never all repository commits.
+- **Commitlint rejecting old history:** validate only event-introduced commit ranges; fetch a missing base by SHA, fall back to `head^..head`, and use `--last` for a root commit.
 - **Expensive parity runs:** keep browser and visual checks required on pull requests, but reserve the duplicate full provenance release for `main` and manual dispatch.
