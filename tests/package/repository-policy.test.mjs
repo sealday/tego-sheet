@@ -136,8 +136,8 @@ function stepRunScript(step) {
     .trim();
 }
 
-function assertJobSetup(job, nodeVersion) {
-  assert.equal(unquote(yamlScalar(job, 'runs-on', 4)), 'ubuntu-latest');
+function assertJobSetup(job, nodeVersion, runner = 'ubuntu-latest') {
+  assert.equal(unquote(yamlScalar(job, 'runs-on', 4)), runner);
   assert.match(yamlScalar(job, 'timeout-minutes', 4), /^[1-9]\d*$/);
   actionStep(job, 'actions/checkout');
   const setupNode = actionStep(job, 'actions/setup-node');
@@ -508,11 +508,11 @@ test('CI covers policy, quality, package, browser, visual, and release lanes', (
     7,
   );
 
-  assertJobSetup(visual, '24');
+  assertJobSetup(visual, '24', 'macos-14');
   assertRunPattern(
     visual,
-    /^(?:npm exec -- |npx(?: --no --)? )playwright install --with-deps chromium$/,
-    'visual must install Chromium with system dependencies',
+    /^(?:npm exec -- |npx(?: --no --)? )playwright install chromium$/,
+    'visual must install Chromium on the snapshot baseline platform',
   );
   assertRunCommand(visual, 'npm run test:visual');
   assertArtifactUpload(
@@ -528,11 +528,11 @@ test('CI covers policy, quality, package, browser, visual, and release lanes', (
       .trim(),
     "github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')",
   );
-  assertJobSetup(parityRelease, '24');
+  assertJobSetup(parityRelease, '24', 'macos-14');
   assertRunPattern(
     parityRelease,
-    /^(?:npm exec -- |npx(?: --no --)? )playwright install --with-deps$/,
-    'parity-release must install all Playwright browsers with dependencies',
+    /^(?:npm exec -- |npx(?: --no --)? )playwright install$/,
+    'parity-release must install all Playwright browsers on the snapshot baseline platform',
   );
   assertRunCommand(parityRelease, 'npm run test:parity-release');
   assertArtifactUpload(

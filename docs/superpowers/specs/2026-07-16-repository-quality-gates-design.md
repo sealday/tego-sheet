@@ -86,11 +86,11 @@ The workflow contains these jobs:
    - Installs all Playwright browsers and system dependencies.
    - Runs the browser suite with one worker and retains uploaded reports and traces for 7 days when the job is not cancelled.
 6. `visual`
-   - Installs Chromium and its system dependencies.
+   - Runs on the pinned macOS baseline platform and installs Chromium without Linux-only dependency setup.
    - Runs the visual snapshot suite and retains uploaded reports, diffs, and traces for 7 days when the job is not cancelled.
 7. `parity-release`
    - Runs only for `main` pushes and manual dispatch.
-   - Installs all Playwright browsers and executes the existing indivisible parity-release command so Vitest, browser, visual, and manifest evidence share one provenance context.
+   - Runs on the pinned macOS baseline platform, installs all Playwright browsers, and executes the existing indivisible parity-release command so Vitest, browser, visual, and manifest evidence share one provenance context.
    - Retains parity evidence and Playwright output for 30 days when the job is not cancelled.
 
 The Playwright web servers will use `npm exec -- vite`, removing the undeclared pnpm dependency. Browser and visual configs will add non-opening HTML reporters with separate output folders for CI artifacts.
