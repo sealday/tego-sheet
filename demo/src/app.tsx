@@ -1,119 +1,230 @@
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   TegoSheet,
+  type ActiveSheetChangeEvent,
+  type Selection,
+  type TegoSheetError,
   type TegoSheetHandle,
-  type ToolbarRenderer,
+  type WorkbookChange,
   type WorkbookData,
-  type WorkbookInput,
 } from 'tego-sheet';
 import { zhCN } from 'tego-sheet/locales/zh-cn';
+import {
+  appendPreviewEvent,
+  cloneExampleWorkbook,
+  formatWorkbookJson,
+  parseWorkbookJson,
+  type PreviewEventInput,
+} from './workbench-model';
 
-const legacyWorkbook: WorkbookData = [{
-  name: 'Budget',
-  freeze: 'B2',
-  rows: {
-    len: 5,
-    0: { cells: { 0: { text: 'Item' }, 1: { text: 'Amount' } } },
-    1: { cells: { 0: { text: 'Hosting' }, 1: { text: '29' } } },
-    2: { cells: { 0: { text: 'Support' }, 1: { text: '75' } } },
-    3: { cells: { 0: { text: 'Total' }, 1: { text: '=SUM(B2:B3)' } } },
-  },
-  cols: { len: 4 },
-}];
+type PreviewMode = 'uncontrolled' | 'controlled';
+type LocaleCode = 'en' | 'zh-CN';
 
-const customToolbar: ToolbarRenderer = toolbar => (
-  <div className="demo-toolbar">
-    <button type="button" disabled={!toolbar.canUndo} onClick={() => toolbar.execute({ type: 'undo' })}>
-      Undo
-    </button>
-    <button type="button" disabled={!toolbar.canRedo} onClick={() => toolbar.execute({ type: 'redo' })}>
-      Redo
-    </button>
-    <button
-      type="button"
-      disabled={toolbar.disabledActions.has('set-style')}
-      onClick={() => toolbar.execute({ type: 'set-style', patch: { font: { bold: true } } })}
-    >
-      Bold selection
-    </button>
-  </div>
-);
+function eventDetails(value: unknown): string {
+  return JSON.stringify(value);
+}
 
-function parseWorkbook(source: string): WorkbookInput {
-  return JSON.parse(source) as WorkbookInput;
+function workbookStatus(workbook: WorkbookData): string {
+  const firstName = workbook[0]?.name?.trim() || 'Untitled';
+  const suffix = workbook.length === 1 ? 'sheet' : 'sheets';
+  return `${firstName} · ${workbook.length} ${suffix}`;
 }
 
 export function App() {
-  const uncontrolledRef = useRef<TegoSheetHandle>(null);
-  const [controlled, setControlled] = useState<WorkbookData>(legacyWorkbook);
-  const [loaded, setLoaded] = useState<WorkbookInput>(legacyWorkbook);
-  const [loadEpoch, setLoadEpoch] = useState(0);
-  const [locale, setLocale] = useState<'en' | 'zh-CN'>('en');
-  const [json, setJson] = useState(() => JSON.stringify(legacyWorkbook, null, 2));
-  const localized = useMemo(() => locale === 'zh-CN' ? zhCN : undefined, [locale]);
+  const initialWorkbook = useMemo(cloneExampleWorkbook, []);
+  const sheetRef = useRef<TegoSheetHandle>(null);
+  const [mode, setMode] = useState<PreviewMode>('uncontrolled');
+  const [readOnly, setReadOnly] = useState(false);
+  const [localeCode, setLocaleCode] = useState<LocaleCode>('en');
+  const [workbook, setWorkbook] = useState<WorkbookData>(initialWorkbook);
+  const [jsonText, setJsonText] = useState(() => formatWorkbookJson(initialWorkbook));
+  const [mountEpoch, setMountEpoch] = useState(0);
+  const [controlsCollapsed, setControlsCollapsed] = useState(false);
+  const [jsonVisible, setJsonVisible] = useState(false);
+  const [eventsVisible, setEventsVisible] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [events, setEvents] = useState<ReturnType<typeof appendPreviewEvent>>([]);
+
+  const locale = useMemo(() => localeCode === 'zh-CN' ? zhCN : undefined, [localeCode]);
+
+  const recordEvent = useCallback((input: Omit<PreviewEventInput, 'timestamp'>) => {
+    setEvents(current => appendPreviewEvent(current, {
+      ...input,
+      timestamp: new Date().toISOString(),
+    }));
+  }, []);
+
+  const changeMode = (nextMode: PreviewMode) => {
+    setMode(nextMode);
+    setMountEpoch(current => current + 1);
+  };
+
+  const importJson = () => {
+    try {
+      const imported = parseWorkbookJson(jsonText);
+      setWorkbook(imported);
+      setJsonText(formatWorkbookJson(imported));
+      setError(null);
+      setMountEpoch(current => current + 1);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Workbook JSON is invalid.');
+    }
+  };
+
+  const resetWorkbook = () => {
+    const freshWorkbook = cloneExampleWorkbook();
+    setWorkbook(freshWorkbook);
+    setJsonText(formatWorkbookJson(freshWorkbook));
+    setError(null);
+    setMountEpoch(current => current + 1);
+  };
+
+  const exportJson = () => {
+    const exported = sheetRef.current?.getValue();
+    if (exported === undefined) {
+      setError('The spreadsheet is not ready to export.');
+      return;
+    }
+
+    setJsonText(formatWorkbookJson(exported));
+    setError(null);
+  };
+
+  const handleChange = (nextWorkbook: WorkbookData, change: WorkbookChange) => {
+    setWorkbook(nextWorkbook);
+    recordEvent({ label: 'Workbook changed', details: eventDetails(change) });
+  };
+
+  const handleActiveSheetChange = (change: ActiveSheetChangeEvent) => {
+    recordEvent({ label: 'Active sheet changed', details: eventDetails(change) });
+  };
+
+  const handleSelectionChange = (selection: Selection) => {
+    recordEvent({ label: 'Selection changed', details: eventDetails(selection) });
+  };
+
+  const handleError = (sheetError: TegoSheetError) => {
+    recordEvent({ label: 'Spreadsheet error', details: sheetError.message });
+  };
 
   return (
-    <main className="demo-page">
-      <header>
-        <p className="demo-kicker">React + TypeScript + Vite</p>
-        <h1>tego-sheet</h1>
-        <p>New React API, compatible workbook JSON and spreadsheet behavior.</p>
+    <main className="preview-shell">
+      <header className="preview-controls" aria-label="Preview controls">
+        <div className="preview-controls__summary">
+          <div>
+            <h1>tego-sheet workbench</h1>
+            <p>
+              <span>Mode: {mode === 'controlled' ? 'Controlled' : 'Uncontrolled'}</span>
+              {' · '}
+              <span>Workbook: {workbookStatus(workbook)}</span>
+            </p>
+          </div>
+          <button
+            type="button"
+            aria-expanded={!controlsCollapsed}
+            onClick={() => setControlsCollapsed(current => !current)}
+          >
+            {controlsCollapsed ? 'Expand controls' : 'Collapse controls'}
+          </button>
+        </div>
+
+        {!controlsCollapsed && (
+          <div className="preview-controls__secondary">
+            <div className="preview-controls__fields">
+              <label>
+                Mode
+                <select
+                  value={mode}
+                  onChange={event => changeMode(event.currentTarget.value as PreviewMode)}
+                >
+                  <option value="uncontrolled">Uncontrolled</option>
+                  <option value="controlled">Controlled</option>
+                </select>
+              </label>
+
+              <label>
+                <input
+                  type="checkbox"
+                  checked={readOnly}
+                  onChange={event => setReadOnly(event.currentTarget.checked)}
+                />
+                Read only
+              </label>
+
+              <label>
+                Locale
+                <select
+                  value={localeCode}
+                  onChange={event => setLocaleCode(event.currentTarget.value as LocaleCode)}
+                >
+                  <option value="en">English</option>
+                  <option value="zh-CN">简体中文</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="preview-controls__actions">
+              <button type="button" onClick={resetWorkbook}>Reset workbook</button>
+              <button type="button" onClick={importJson}>Import JSON</button>
+              <button type="button" onClick={exportJson}>Export JSON</button>
+              <button
+                type="button"
+                aria-expanded={jsonVisible}
+                aria-controls="workbook-json-panel"
+                onClick={() => setJsonVisible(current => !current)}
+              >
+                {jsonVisible ? 'Hide JSON' : 'Show JSON'}
+              </button>
+              <button
+                type="button"
+                aria-expanded={eventsVisible}
+                aria-controls="preview-events-panel"
+                onClick={() => setEventsVisible(current => !current)}
+              >
+                {eventsVisible ? 'Hide events' : 'Show events'}
+              </button>
+            </div>
+
+            {error !== null && <p role="alert">{error}</p>}
+
+            {jsonVisible && (
+              <div id="workbook-json-panel">
+                <label htmlFor="workbook-json">Workbook JSON</label>
+                <textarea
+                  id="workbook-json"
+                  value={jsonText}
+                  onChange={event => setJsonText(event.currentTarget.value)}
+                />
+              </div>
+            )}
+
+            {eventsVisible && (
+              <ol id="preview-events-panel" role="log" aria-label="Spreadsheet events">
+                {events.map(event => (
+                  <li key={event.id}>
+                    <strong>{event.label}</strong>
+                    {event.details === undefined ? null : ` — ${event.details}`}
+                    <time dateTime={event.timestamp}>{event.timestamp}</time>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        )}
       </header>
 
-      <section>
-        <div className="demo-section-heading">
-          <div>
-            <h2>Uncontrolled workbook and legacy JSON</h2>
-            <p>Load or export the same sparse JSON shape used by x-data-spreadsheet.</p>
-          </div>
-          <label>
-            Locale
-            <select value={locale} onChange={event => setLocale(event.currentTarget.value as 'en' | 'zh-CN')}>
-              <option value="en">English</option>
-              <option value="zh-CN">简体中文</option>
-            </select>
-          </label>
-        </div>
-        <div className="demo-json-tools">
-          <textarea aria-label="Legacy workbook JSON" value={json} onChange={event => setJson(event.currentTarget.value)} />
-          <div>
-            <button type="button" onClick={() => {
-              setLoaded(parseWorkbook(json));
-              setLoadEpoch(value => value + 1);
-            }}>
-              Load JSON
-            </button>
-            <button type="button" onClick={() => setJson(JSON.stringify(uncontrolledRef.current?.getValue() ?? [], null, 2))}>
-              Export JSON
-            </button>
-          </div>
-        </div>
-        <div className="demo-sheet-frame">
-          <TegoSheet key={loadEpoch} ref={uncontrolledRef} defaultValue={loaded} locale={localized} />
-        </div>
-      </section>
-
-      <section>
-        <h2>Controlled workbook</h2>
-        <p>The parent owns every accepted workbook update.</p>
-        <div className="demo-sheet-frame">
-          <TegoSheet value={controlled} onChange={value => setControlled(value)} />
-        </div>
-      </section>
-
-      <section className="demo-grid">
-        <div>
-          <h2>Read-only</h2>
-          <div className="demo-sheet-frame demo-sheet-frame--compact">
-            <TegoSheet defaultValue={legacyWorkbook} readOnly toolbar={false} />
-          </div>
-        </div>
-        <div>
-          <h2>Custom toolbar</h2>
-          <div className="demo-sheet-frame demo-sheet-frame--compact">
-            <TegoSheet defaultValue={legacyWorkbook} toolbar={customToolbar} />
-          </div>
-        </div>
+      <section className="preview-workspace" aria-label="Spreadsheet preview">
+        <TegoSheet
+          key={mountEpoch}
+          ref={sheetRef}
+          {...(mode === 'controlled' ? { value: workbook } : { defaultValue: workbook })}
+          readOnly={readOnly}
+          locale={locale}
+          onChange={handleChange}
+          onActiveSheetChange={handleActiveSheetChange}
+          onSelectionChange={handleSelectionChange}
+          onError={handleError}
+        />
       </section>
     </main>
   );

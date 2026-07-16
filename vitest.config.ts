@@ -1,6 +1,9 @@
+import { resolve } from 'node:path';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vitest/config';
 import VitestParityEvidenceReporter from './scripts/reporters/vitest-parity-evidence.ts';
+
+const repositoryRoot = import.meta.dirname;
 
 const sharedExcludes = [
   'dist/**',
@@ -17,6 +20,22 @@ const sharedExcludes = [
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: [
+      {
+        find: 'tego-sheet/locales/zh-cn',
+        replacement: resolve(repositoryRoot, 'src/locales/zh-cn.ts'),
+      },
+      {
+        find: 'tego-sheet/styles.css',
+        replacement: resolve(repositoryRoot, 'src/ui/styles/index.less'),
+      },
+      {
+        find: /^tego-sheet$/,
+        replacement: resolve(repositoryRoot, 'src/index.ts'),
+      },
+    ],
+  },
   test: {
     exclude: sharedExcludes,
     reporters: ['default', new VitestParityEvidenceReporter({ releaseOnly: true })],
