@@ -40,7 +40,7 @@ type ProjectionListener = (context: {
   project: {
     children: ProjectionReflection[];
     getChildByName: () => ProjectionReflection;
-    packageName: string;
+    packageName?: string;
   };
 }) => void;
 
@@ -83,6 +83,7 @@ const createProjectionReflection = (): ProjectionReflection => ({
 const invokeProjection = (
   reflection: ProjectionReflection,
   projectChildren: ProjectionReflection[] = [reflection],
+  projectPackageName: string | null = 'tego-sheet',
 ): string[] => {
   const errors: string[] = [];
   let listener: ProjectionListener | undefined;
@@ -100,7 +101,7 @@ const invokeProjection = (
     project: {
       children: projectChildren,
       getChildByName: () => reflection,
-      packageName: 'tego-sheet',
+      ...(projectPackageName === null ? {} : { packageName: projectPackageName }),
     },
   });
   return errors;
@@ -229,22 +230,51 @@ describe('strict TypeDoc generation', () => {
     expect(reflection.children.every((child) => child.inheritedFrom !== undefined)).toBe(true);
   });
 
-  it('rejects an external helper with the same unqualified name', () => {
-    const reflection = createProjectionReflection();
-    reflection.extendedTypes = [
-      {
-        name: 'TegoSheetCallbacks',
-        package: 'external-callbacks',
-        qualifiedName: 'TegoSheetCallbacks',
-        type: 'reference',
+  it.each([
+    {
+      mutate(reference: ProjectionTypeReference) {
+        delete reference.package;
       },
-    ];
+      name: 'missing helper package',
+    },
+    {
+      mutate(reference: ProjectionTypeReference) {
+        reference.package = 'external-callbacks';
+      },
+      name: 'mismatched helper package',
+    },
+    {
+      mutate(reference: ProjectionTypeReference) {
+        delete reference.qualifiedName;
+      },
+      name: 'missing helper qualified name',
+    },
+    {
+      mutate(reference: ProjectionTypeReference) {
+        reference.qualifiedName = 'External.TegoSheetCallbacks';
+      },
+      name: 'mismatched helper qualified name',
+    },
+    {
+      name: 'missing project package',
+      projectPackageName: null,
+    },
+    {
+      name: 'mismatched project package',
+      projectPackageName: 'renamed-project',
+    },
+  ])('rejects $name provenance without mutating the reflection', (testCase) => {
+    const reflection = createProjectionReflection();
+    const reference = reflection.extendedTypes?.[0];
+    if (reference === undefined)
+      throw new Error('projection fixture must include callback heritage');
+    testCase.mutate?.(reference);
+    const before = structuredClone(reflection);
 
-    expect(invokeProjection(reflection)).toEqual([
+    expect(invokeProjection(reflection, [reflection], testCase.projectPackageName)).toEqual([
       'public API projection expected TegoSheetProps to extend the project TegoSheetCallbacks helper',
     ]);
-    expect(reflection.extendedTypes).toHaveLength(1);
-    expect(reflection.children.every((child) => child.inheritedFrom !== undefined)).toBe(true);
+    expect(reflection).toEqual(before);
   });
 
   it('rejects a nested TegoSheetProps reflection instead of projecting by recursive name lookup', () => {
@@ -259,6 +289,17 @@ describe('strict TypeDoc generation', () => {
     ]);
     expect(reflection.extendedTypes).toHaveLength(1);
     expect(reflection.children.every((child) => child.inheritedFrom !== undefined)).toBe(true);
+  });
+
+  it('rejects duplicate direct TegoSheetProps reflections without mutating either candidate', () => {
+    const first = createProjectionReflection();
+    const second = createProjectionReflection();
+    const before = structuredClone([first, second]);
+
+    expect(invokeProjection(first, [first, second])).toEqual([
+      'public API projection expected exactly one direct TegoSheetProps project child',
+    ]);
+    expect([first, second]).toEqual(before);
   });
 
   it('loads one TypeDoc runtime across the Docusaurus and native ESM plugin boundary', async () => {
