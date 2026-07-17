@@ -17,17 +17,23 @@ const inheritedPrefix = 'TegoSheetCallbacks.';
  *
  * @param {import('typedoc').DeclarationReflection} reflection
  * @param {Pick<import('typedoc').Logger, 'error'>} logger
+ * @param {string | undefined} projectPackageName
  * @returns {boolean}
  */
-function projectTegoSheetProps(reflection, logger) {
+function projectTegoSheetProps(reflection, logger, projectPackageName) {
   const extendedTypes = reflection.extendedTypes;
   if (
     !Array.isArray(extendedTypes) ||
     extendedTypes.length !== 1 ||
     extendedTypes[0]?.type !== 'reference' ||
-    extendedTypes[0].name !== 'TegoSheetCallbacks'
+    extendedTypes[0].name !== 'TegoSheetCallbacks' ||
+    extendedTypes[0].qualifiedName !== 'TegoSheetCallbacks' ||
+    projectPackageName === undefined ||
+    extendedTypes[0].package !== projectPackageName
   ) {
-    logger.error('public API projection expected TegoSheetProps to extend only TegoSheetCallbacks');
+    logger.error(
+      'public API projection expected TegoSheetProps to extend the project TegoSheetCallbacks helper',
+    );
     return false;
   }
 
@@ -68,15 +74,23 @@ function projectTegoSheetProps(reflection, logger) {
  */
 function load(app) {
   app.converter.on('resolveBegin', (context) => {
-    const reflection = /** @type {import('typedoc').DeclarationReflection | undefined} */ (
-      context.project.getChildByName('TegoSheetProps')
+    const matches = /** @type {import('typedoc').DeclarationReflection[]} */ (
+      (context.project.children ?? []).filter((child) => child.name === 'TegoSheetProps')
     );
+    if (matches.length !== 1) {
+      app.logger.error(
+        'public API projection expected exactly one direct TegoSheetProps project child',
+      );
+      return;
+    }
+
+    const reflection = matches[0];
     if (!reflection || !('extendedTypes' in reflection)) {
       app.logger.error('public API projection could not find TegoSheetProps interface heritage');
       return;
     }
 
-    projectTegoSheetProps(reflection, app.logger);
+    projectTegoSheetProps(reflection, app.logger, context.project.packageName);
   });
 }
 

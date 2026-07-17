@@ -19,17 +19,29 @@ const root = process.cwd();
 const require = createRequire(import.meta.url);
 
 interface ProjectionChild {
-  inheritedFrom?: { name: string; type: string };
+  inheritedFrom?: ProjectionTypeReference;
   name: string;
 }
 
 interface ProjectionReflection {
   children: ProjectionChild[];
-  extendedTypes?: { name: string; type: string }[];
+  extendedTypes?: ProjectionTypeReference[];
+  name: string;
+}
+
+interface ProjectionTypeReference {
+  name: string;
+  package?: string;
+  qualifiedName?: string;
+  type: string;
 }
 
 type ProjectionListener = (context: {
-  project: { getChildByName: () => ProjectionReflection };
+  project: {
+    children: ProjectionReflection[];
+    getChildByName: () => ProjectionReflection;
+    packageName: string;
+  };
 }) => void;
 
 const projectionPlugin = require(publicApiProjectionPluginPath) as {
@@ -47,6 +59,52 @@ const callbackNames = [
   'onPaste',
   'onSelectionChange',
 ] as const;
+
+const createProjectionReflection = (): ProjectionReflection => ({
+  children: callbackNames.map((name) => ({
+    inheritedFrom: {
+      name: `TegoSheetCallbacks.${name}`,
+      qualifiedName: `TegoSheetCallbacks.${name}`,
+      type: 'reference',
+    },
+    name,
+  })),
+  extendedTypes: [
+    {
+      name: 'TegoSheetCallbacks',
+      package: 'tego-sheet',
+      qualifiedName: 'TegoSheetCallbacks',
+      type: 'reference',
+    },
+  ],
+  name: 'TegoSheetProps',
+});
+
+const invokeProjection = (
+  reflection: ProjectionReflection,
+  projectChildren: ProjectionReflection[] = [reflection],
+): string[] => {
+  const errors: string[] = [];
+  let listener: ProjectionListener | undefined;
+  projectionPlugin.load({
+    converter: {
+      on(event, registeredListener) {
+        expect(event).toBe('resolveBegin');
+        listener = registeredListener;
+      },
+    },
+    logger: { error: (message) => errors.push(message) },
+  });
+
+  listener?.({
+    project: {
+      children: projectChildren,
+      getChildByName: () => reflection,
+      packageName: 'tego-sheet',
+    },
+  });
+  return errors;
+};
 
 afterEach(async () => {
   await Promise.all(
@@ -153,33 +211,53 @@ describe('strict TypeDoc generation', () => {
       },
     },
   ])('fails closed without mutating an $name projection shape', ({ mutate }) => {
-    const children: ProjectionChild[] = callbackNames.map((name) => ({
-      inheritedFrom: { name: `TegoSheetCallbacks.${name}`, type: 'reference' },
-      name,
-    }));
-    mutate(children);
-    const reflection: ProjectionReflection = {
-      children,
-      extendedTypes: [{ name: 'TegoSheetCallbacks', type: 'reference' }],
-    };
-    const errors: string[] = [];
-    let listener: ProjectionListener | undefined;
-    projectionPlugin.load({
-      converter: {
-        on(event, registeredListener) {
-          expect(event).toBe('resolveBegin');
-          listener = registeredListener;
-        },
-      },
-      logger: { error: (message) => errors.push(message) },
-    });
-
-    listener?.({ project: { getChildByName: () => reflection } });
+    const reflection = createProjectionReflection();
+    mutate(reflection.children);
+    const errors = invokeProjection(reflection);
 
     expect(errors).toEqual([
       'public API projection expected exactly six unique TegoSheetCallbacks inherited properties',
     ]);
-    expect(reflection.extendedTypes).toEqual([{ name: 'TegoSheetCallbacks', type: 'reference' }]);
+    expect(reflection.extendedTypes).toEqual([
+      {
+        name: 'TegoSheetCallbacks',
+        package: 'tego-sheet',
+        qualifiedName: 'TegoSheetCallbacks',
+        type: 'reference',
+      },
+    ]);
+    expect(reflection.children.every((child) => child.inheritedFrom !== undefined)).toBe(true);
+  });
+
+  it('rejects an external helper with the same unqualified name', () => {
+    const reflection = createProjectionReflection();
+    reflection.extendedTypes = [
+      {
+        name: 'TegoSheetCallbacks',
+        package: 'external-callbacks',
+        qualifiedName: 'TegoSheetCallbacks',
+        type: 'reference',
+      },
+    ];
+
+    expect(invokeProjection(reflection)).toEqual([
+      'public API projection expected TegoSheetProps to extend the project TegoSheetCallbacks helper',
+    ]);
+    expect(reflection.extendedTypes).toHaveLength(1);
+    expect(reflection.children.every((child) => child.inheritedFrom !== undefined)).toBe(true);
+  });
+
+  it('rejects a nested TegoSheetProps reflection instead of projecting by recursive name lookup', () => {
+    const reflection = createProjectionReflection();
+    const namespace: ProjectionReflection = {
+      children: [reflection],
+      name: 'NestedNamespace',
+    };
+
+    expect(invokeProjection(reflection, [namespace])).toEqual([
+      'public API projection expected exactly one direct TegoSheetProps project child',
+    ]);
+    expect(reflection.extendedTypes).toHaveLength(1);
     expect(reflection.children.every((child) => child.inheritedFrom !== undefined)).toBe(true);
   });
 
