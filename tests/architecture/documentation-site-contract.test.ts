@@ -11,10 +11,10 @@ import {
 } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 const root = process.cwd();
 const read = (path: string) => readFileSync(join(root, path), 'utf8');
@@ -29,6 +29,81 @@ const publishedPackagePaths = new Set([
   'tego-sheet/locales/de',
   'tego-sheet/locales/nl',
 ]);
+
+const publishedStylesDeclaration = 'website/src/types/tego-sheet-styles.d.ts';
+
+interface SitePackageExport {
+  readonly specifier: string;
+  readonly runtimeTarget: string;
+  readonly typeTarget?: string;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const sitePackageExports = (packageJson: unknown): readonly SitePackageExport[] => {
+  if (!isRecord(packageJson) || !isRecord(packageJson.exports)) {
+    throw new Error('package.json must define conditional exports');
+  }
+
+  const packageExports = packageJson.exports;
+  const exportKeys = Object.keys(packageExports).filter((key) => key !== './package.json');
+  const expectedKeys = [...publishedPackagePaths]
+    .map((specifier) =>
+      specifier === 'tego-sheet' ? '.' : `./${specifier.slice('tego-sheet/'.length)}`,
+    )
+    .sort();
+  if (JSON.stringify([...exportKeys].sort()) !== JSON.stringify(expectedKeys)) {
+    throw new Error(`site package export drift: ${exportKeys.join(', ')}`);
+  }
+
+  return exportKeys.map((exportKey) => {
+    const specifier = exportKey === '.' ? 'tego-sheet' : `tego-sheet/${exportKey.slice(2)}`;
+    const conditions = packageExports[exportKey];
+    if (typeof conditions === 'string') {
+      return { specifier, runtimeTarget: conditions };
+    }
+    if (!isRecord(conditions) || typeof conditions.import !== 'string') {
+      throw new Error(`${exportKey} must define an import target`);
+    }
+    if (typeof conditions.types !== 'string') {
+      throw new Error(`${exportKey} must define a types target`);
+    }
+    return {
+      specifier,
+      runtimeTarget: conditions.import,
+      typeTarget: conditions.types,
+    };
+  });
+};
+
+const websiteProgramDiagnostics = (probeSource: string): readonly ts.Diagnostic[] => {
+  const websiteRoot = join(root, 'website');
+  const configPath = join(websiteRoot, 'tsconfig.json');
+  const configFile = ts.readConfigFile(configPath, ts.sys.readFile);
+  if (configFile.error) return [configFile.error];
+  const parsed = ts.parseJsonConfigFileContent(
+    configFile.config,
+    ts.sys,
+    websiteRoot,
+    {},
+    configPath,
+  );
+  if (parsed.errors.length > 0) return parsed.errors;
+
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 'tego-sheet-website-program-'));
+  try {
+    const probePath = join(fixtureRoot, 'public-package-probe.ts');
+    writeFileSync(probePath, probeSource);
+    const program = ts.createProgram({
+      rootNames: [...parsed.fileNames, probePath],
+      options: parsed.options,
+    });
+    return ts.getPreEmitDiagnostics(program);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+};
 
 const manualDocumentation = [
   ['website/docs/getting-started/quick-start.mdx', ['TegoSheet', 'WorkbookData']],
@@ -183,8 +258,6 @@ const typecheckDocumentationFences = (): string[] => {
       fileOwners.set(fileName, fence);
       return fileName;
     });
-    const stylesDeclaration = join(fixtureRoot, 'published-styles.d.ts');
-    writeFileSync(stylesDeclaration, "declare module 'tego-sheet/styles.css';\n");
     const localStylesDeclaration = join(fixtureRoot, 'sheet-panel.d.css.ts');
     writeFileSync(localStylesDeclaration, 'export {};\n');
     symlinkSync(
@@ -192,7 +265,11 @@ const typecheckDocumentationFences = (): string[] => {
       join(fixtureRoot, 'node_modules'),
       process.platform === 'win32' ? 'junction' : 'dir',
     );
-    rootNames.push(stylesDeclaration, localStylesDeclaration, join(root, 'src/styles.d.ts'));
+    rootNames.push(
+      join(root, publishedStylesDeclaration),
+      localStylesDeclaration,
+      join(root, 'src/styles.d.ts'),
+    );
 
     const program = ts.createProgram({
       rootNames,
@@ -343,6 +420,13 @@ const loadConfig = async (): Promise<DocumentationConfig> => {
 };
 
 describe('documentation site contract', () => {
+  beforeAll(() => {
+    const build = spawnSync('npm', ['run', 'build'], { cwd: root, encoding: 'utf8' });
+    if (build.status !== 0) {
+      throw new Error(`Public package build failed:\n${build.stdout}\n${build.stderr}`);
+    }
+  });
+
   it('builds for the GitHub Pages project path', async () => {
     const config = await loadConfig();
 
@@ -580,26 +664,46 @@ describe('documentation site contract', () => {
     expect(ignore).toContain('/website/.docusaurus/');
   });
 
+  it('typechecks every published package import in the real website program', () => {
+    const diagnostics = websiteProgramDiagnostics(`
+      import { TegoSheet, type LocaleDefinition, type WorkbookData } from 'tego-sheet';
+      import 'tego-sheet/styles.css';
+      import { en } from 'tego-sheet/locales/en';
+      import { zhCN } from 'tego-sheet/locales/zh-cn';
+      import { de } from 'tego-sheet/locales/de';
+      import { nl } from 'tego-sheet/locales/nl';
+
+      const workbook: WorkbookData = [];
+      const locales: readonly LocaleDefinition[] = [en, zhCN, de, nl];
+      void [TegoSheet, workbook, locales];
+    `);
+
+    expect(
+      diagnostics.map((diagnostic) =>
+        ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'),
+      ),
+    ).toEqual([]);
+  });
+
   it('resolves site imports through synchronized public dist aliases', async () => {
     expect(JSON.parse(read('website/package.json'))).toEqual({ private: true });
 
-    const expectedTypePaths = {
-      'tego-sheet': ['../dist/index.d.ts'],
-      'tego-sheet/styles.css': ['../dist/styles.css'],
-      'tego-sheet/locales/en': ['../dist/locales/en.d.ts'],
-      'tego-sheet/locales/zh-cn': ['../dist/locales/zh-cn.d.ts'],
-      'tego-sheet/locales/de': ['../dist/locales/de.d.ts'],
-      'tego-sheet/locales/nl': ['../dist/locales/nl.d.ts'],
-    };
+    const packageJson = JSON.parse(read('package.json')) as unknown;
+    const packageEntries = sitePackageExports(packageJson);
+    const distRoot = resolve(root, 'dist');
+    const resolveTarget = (target: string): string => resolve(root, target);
+    const expectedTypePaths = Object.fromEntries(
+      packageEntries.flatMap(({ specifier, typeTarget }) =>
+        typeTarget === undefined
+          ? []
+          : [[specifier, [relative(join(root, 'website'), resolveTarget(typeTarget))]]],
+      ),
+    );
     const expectedRuntimeAliases = Object.fromEntries(
-      [
-        ['tego-sheet$', 'dist/tego-sheet.js'],
-        ['tego-sheet/styles.css$', 'dist/styles.css'],
-        ['tego-sheet/locales/en$', 'dist/locales/en.js'],
-        ['tego-sheet/locales/zh-cn$', 'dist/locales/zh-cn.js'],
-        ['tego-sheet/locales/de$', 'dist/locales/de.js'],
-        ['tego-sheet/locales/nl$', 'dist/locales/nl.js'],
-      ].map(([specifier, target]) => [specifier, join(root, target)]),
+      packageEntries.map(({ specifier, runtimeTarget }) => [
+        `${specifier}$`,
+        resolveTarget(runtimeTarget),
+      ]),
     );
     const docsTypeScript = JSON.parse(read('website/tsconfig.json')) as {
       compilerOptions?: { paths?: unknown };
@@ -621,15 +725,40 @@ describe('documentation site contract', () => {
     });
     expect(aliasPlugin).toBeDefined();
     expect(aliasPlugin?.().configureWebpack().resolve.alias).toEqual(expectedRuntimeAliases);
-    expect(Object.keys(expectedTypePaths)).toEqual([...publishedPackagePaths]);
-    expect(
-      Object.values(expectedTypePaths)
-        .flat()
-        .some((target) => target.includes('/src/')),
-    ).toBe(false);
-    expect(
-      Object.values(expectedRuntimeAliases).some((target) => (target as string).includes('/src/')),
-    ).toBe(false);
+    expect(packageEntries.map(({ specifier }) => specifier).sort()).toEqual(
+      [...publishedPackagePaths].sort(),
+    );
+
+    for (const entry of packageEntries) {
+      for (const target of [entry.runtimeTarget, entry.typeTarget].filter(
+        (value): value is string => value !== undefined,
+      )) {
+        const absoluteTarget = resolveTarget(target);
+        const distRelative = relative(distRoot, absoluteTarget);
+        expect(isAbsolute(distRelative) || distRelative.startsWith('..')).toBe(false);
+        expect(existsSync(absoluteTarget), `${entry.specifier} target missing: ${target}`).toBe(
+          true,
+        );
+      }
+    }
+
+    expect(read(publishedStylesDeclaration)).toBe("declare module 'tego-sheet/styles.css';\n");
+  });
+
+  it('rejects site package export drift and missing conditional targets', () => {
+    const packageJson = JSON.parse(read('package.json')) as Record<string, unknown>;
+    if (!isRecord(packageJson.exports)) throw new Error('package exports must be an object');
+
+    const drifted = structuredClone(packageJson);
+    if (!isRecord(drifted.exports)) throw new Error('package exports must be an object');
+    drifted.exports['./private'] = { types: './dist/private.d.ts', import: './dist/private.js' };
+
+    const missingTarget = structuredClone(packageJson);
+    if (!isRecord(missingTarget.exports)) throw new Error('package exports must be an object');
+    missingTarget.exports['./locales/en'] = { types: './dist/locales/en.d.ts' };
+
+    expect(() => sitePackageExports(drifted)).toThrow(/site package export drift/);
+    expect(() => sitePackageExports(missingTarget)).toThrow(/must define an import target/);
   });
 
   it('typechecks the CommonJS TypeDoc runtime bridge as checked JavaScript', () => {

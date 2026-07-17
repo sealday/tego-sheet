@@ -8,7 +8,6 @@
     "paths": {
       "@site/*": ["./*"],
       "tego-sheet": ["../dist/index.d.ts"],
-      "tego-sheet/styles.css": ["../dist/styles.css"],
       "tego-sheet/locales/en": ["../dist/locales/en.d.ts"],
       "tego-sheet/locales/zh-cn": ["../dist/locales/zh-cn.d.ts"],
       "tego-sheet/locales/de": ["../dist/locales/de.d.ts"],
