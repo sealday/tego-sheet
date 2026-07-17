@@ -1,0 +1,57 @@
+.loading {
+  width: min(96rem, calc(100% - 2rem));
+  min-height: calc(100vh - var(--ifm-navbar-height));
+  margin: 0 auto;
+  padding: clamp(1.5rem, 4vw, 3rem) 0;
+}
+
+.loadingHeader,
+.loadingGrid > div {
+  border-radius: 0.75rem;
+  background: linear-gradient(
+    100deg,
+    var(--ifm-color-emphasis-100) 25%,
+    var(--ifm-color-emphasis-200) 45%,
+    var(--ifm-color-emphasis-100) 65%
+  );
+  background-size: 200% 100%;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.loadingHeader {
+  width: min(44rem, 80%);
+  height: 8rem;
+  margin-bottom: 1.5rem;
+}
+
+.loadingGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(19rem, 0.8fr);
+  gap: 1rem;
+}
+
+.loadingGrid > div {
+  min-height: 38rem;
+}
+
+@keyframes pulse {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loadingHeader,
+  .loadingGrid > div {
+    animation: none;
+  }
+}
+
+@media (max-width: 72rem) {
+  .loadingGrid {
+    grid-template-columns: 1fr;
+  }
+}

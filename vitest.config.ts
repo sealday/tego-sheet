@@ -23,8 +23,20 @@ export default defineConfig({
   resolve: {
     alias: [
       {
+        find: 'tego-sheet/locales/en',
+        replacement: resolve(repositoryRoot, 'src/locales/en.ts'),
+      },
+      {
         find: 'tego-sheet/locales/zh-cn',
         replacement: resolve(repositoryRoot, 'src/locales/zh-cn.ts'),
+      },
+      {
+        find: 'tego-sheet/locales/de',
+        replacement: resolve(repositoryRoot, 'src/locales/de.ts'),
+      },
+      {
+        find: 'tego-sheet/locales/nl',
+        replacement: resolve(repositoryRoot, 'src/locales/nl.ts'),
       },
       {
         find: 'tego-sheet/styles.css',

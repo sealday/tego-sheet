@@ -485,13 +485,15 @@ describe('documentation site contract', () => {
     ]);
   });
 
-  it('keeps approved future routes linkable without implementing later features', () => {
+  it('keeps Quick Start linkable and isolates the interactive playground behind BrowserOnly', () => {
     const quickStart = read('website/docs/getting-started/quick-start.mdx');
     const playground = read('website/src/pages/playground.tsx');
 
     expect(quickStart).toContain('# Quick Start');
     expect(quickStart).toContain('./installation');
-    expect(playground).toContain('<h1>Playground</h1>');
+    expect(playground).toContain("import BrowserOnly from '@docusaurus/BrowserOnly'");
+    expect(playground).toContain('fallback={<PlaygroundLoadingState />}');
+    expect(playground).toContain('{() => <Playground />}');
     expect(playground).not.toContain('TegoSheet');
   });
 
