@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -15,6 +16,37 @@ import {
 const temporaryDirectories: string[] = [];
 const execFileAsync = promisify(execFile);
 const root = process.cwd();
+const require = createRequire(import.meta.url);
+
+interface ProjectionChild {
+  inheritedFrom?: { name: string; type: string };
+  name: string;
+}
+
+interface ProjectionReflection {
+  children: ProjectionChild[];
+  extendedTypes?: { name: string; type: string }[];
+}
+
+type ProjectionListener = (context: {
+  project: { getChildByName: () => ProjectionReflection };
+}) => void;
+
+const projectionPlugin = require(publicApiProjectionPluginPath) as {
+  load: (app: {
+    converter: { on: (event: string, listener: ProjectionListener) => void };
+    logger: { error: (message: string) => void };
+  }) => void;
+};
+
+const callbackNames = [
+  'onActiveSheetChange',
+  'onCellEdit',
+  'onChange',
+  'onError',
+  'onPaste',
+  'onSelectionChange',
+] as const;
 
 afterEach(async () => {
   await Promise.all(
@@ -101,6 +133,56 @@ const createProjectOutput = async () => {
 };
 
 describe('strict TypeDoc generation', () => {
+  it.each([
+    {
+      name: 'extra inherited callback',
+      mutate(children: ProjectionChild[]) {
+        children.push({
+          inheritedFrom: {
+            name: 'TegoSheetCallbacks.unexpected',
+            type: 'reference',
+          },
+          name: 'unexpected',
+        });
+      },
+    },
+    {
+      name: 'duplicate callback child',
+      mutate(children: ProjectionChild[]) {
+        children.push({ ...children[0] });
+      },
+    },
+  ])('fails closed without mutating an $name projection shape', ({ mutate }) => {
+    const children: ProjectionChild[] = callbackNames.map((name) => ({
+      inheritedFrom: { name: `TegoSheetCallbacks.${name}`, type: 'reference' },
+      name,
+    }));
+    mutate(children);
+    const reflection: ProjectionReflection = {
+      children,
+      extendedTypes: [{ name: 'TegoSheetCallbacks', type: 'reference' }],
+    };
+    const errors: string[] = [];
+    let listener: ProjectionListener | undefined;
+    projectionPlugin.load({
+      converter: {
+        on(event, registeredListener) {
+          expect(event).toBe('resolveBegin');
+          listener = registeredListener;
+        },
+      },
+      logger: { error: (message) => errors.push(message) },
+    });
+
+    listener?.({ project: { getChildByName: () => reflection } });
+
+    expect(errors).toEqual([
+      'public API projection expected exactly six unique TegoSheetCallbacks inherited properties',
+    ]);
+    expect(reflection.extendedTypes).toEqual([{ name: 'TegoSheetCallbacks', type: 'reference' }]);
+    expect(reflection.children.every((child) => child.inheritedFrom !== undefined)).toBe(true);
+  });
+
   it('loads one TypeDoc runtime across the Docusaurus and native ESM plugin boundary', async () => {
     const pluginPath = join(root, 'website/plugins/strict-typedoc-generation.ts');
     const entryPoint = join(root, 'src/index.ts');

@@ -1,6 +1,6 @@
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import ts from 'typescript';
 import { Application, normalizePath } from 'typedoc';
 import type { TypeDocOptions } from 'typedoc';
@@ -209,26 +209,6 @@ const publicDeclarations = (
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null;
 
-const findNested = (
-  value: unknown,
-  predicate: (record: Readonly<Record<string, unknown>>) => boolean,
-): Readonly<Record<string, unknown>> | undefined => {
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = findNested(item, predicate);
-      if (found !== undefined) return found;
-    }
-    return undefined;
-  }
-  if (!isRecord(value)) return undefined;
-  if (predicate(value)) return value;
-  for (const item of Object.values(value)) {
-    const found = findNested(item, predicate);
-    if (found !== undefined) return found;
-  }
-  return undefined;
-};
-
 const visitRecords = (
   value: unknown,
   visitor: (record: Readonly<Record<string, unknown>>) => void,
@@ -333,19 +313,6 @@ const localReferenceViolations = (
   return [...violations].sort();
 };
 
-const findFile = async (directory: string, fileName: string): Promise<string | undefined> => {
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) {
-      const nested = await findFile(path, fileName);
-      if (nested !== undefined) return nested;
-    } else if (basename(path) === fileName) {
-      return path;
-    }
-  }
-  return undefined;
-};
-
 const summaryText = (reflection: Readonly<Record<string, unknown>>): string => {
   const comment = reflection.comment;
   if (!isRecord(comment) || !Array.isArray(comment.summary)) return '';
@@ -358,32 +325,33 @@ const summaryText = (reflection: Readonly<Record<string, unknown>>): string => {
 const hasSummary = (reflection: Readonly<Record<string, unknown>>): boolean =>
   summaryText(reflection) !== '';
 
+const publicProgram = createPublicProgram();
+const publicChecker = publicProgram.getTypeChecker();
+const publicLocalDeclarationNames = localDeclarationNames(publicProgram);
+
 describe('public API documentation', () => {
   it('documents the exact root export surface and its public members', () => {
-    const program = createPublicProgram();
-    const checker = program.getTypeChecker();
-    const source = program.getSourceFile(entryPoint);
+    const source = publicProgram.getSourceFile(entryPoint);
     if (source === undefined)
       throw new Error('src/index.ts must be part of the TypeScript program');
-    const moduleSymbol = checker.getSymbolAtLocation(source);
+    const moduleSymbol = publicChecker.getSymbolAtLocation(source);
     if (moduleSymbol === undefined) throw new Error('src/index.ts must be a module');
-    const exports = checker
+    const exports = publicChecker
       .getExportsOfModule(moduleSymbol)
       .sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
 
     expect(exports.map((symbol) => symbol.name)).toEqual(expectedPublicExports);
 
     const undocumented = exports
-      .flatMap((symbol) => publicDeclarations(symbol, checker))
-      .filter((declaration) => !hasDocumentation(declaration, checker))
+      .flatMap((symbol) => publicDeclarations(symbol, publicChecker))
+      .filter((declaration) => !hasDocumentation(declaration, publicChecker))
       .map((declaration) => declaration.name);
 
     expect(undocumented).toEqual([]);
   });
 
   it('@interface is TypeDoc display-only and keeps all 14 compiler declarations as type aliases', () => {
-    const program = createPublicProgram();
-    const source = program.getSourceFile(join(root, 'src/core/types/workbook.ts'));
+    const source = publicProgram.getSourceFile(join(root, 'src/core/types/workbook.ts'));
     if (source === undefined)
       throw new Error('workbook types must be part of the TypeScript program');
     const declarations = new Map(
@@ -486,16 +454,13 @@ describe('public API documentation', () => {
         [],
       );
       expect(JSON.stringify(tegoSheetProps)).not.toContain('TegoSheetCallbacks');
-      expect(
-        localReferenceViolations(serializedRecord, localDeclarationNames(createPublicProgram())),
-      ).toEqual([]);
+      expect(localReferenceViolations(serializedRecord, publicLocalDeclarationNames)).toEqual([]);
 
       const activeSheetChange = rootChildren.find(
         (child) => child.name === 'ActiveSheetChangeEvent',
       );
-      const activeSheet = findNested(
-        activeSheetChange,
-        (value) => value.variant === 'declaration' && value.name === 'sheet',
+      const activeSheet = directRecords(activeSheetChange, 'children').find(
+        (value) => value.name === 'sheet',
       );
       expect(activeSheet).toBeDefined();
       expect(summaryText(activeSheet ?? {})).toBe(
@@ -506,9 +471,10 @@ describe('public API documentation', () => {
       expect([app.logger.errorCount, app.logger.warningCount], 'TypeDoc output logger').toEqual([
         0, 0,
       ]);
-      const propsPath = await findFile(outputDirectory, 'TegoSheetProps.md');
-      if (propsPath === undefined) throw new Error('TypeDoc must generate TegoSheetProps.md');
-      const propsMarkdown = await readFile(propsPath, 'utf8');
+      const propsMarkdown = await readFile(
+        join(outputDirectory, 'interfaces/TegoSheetProps.md'),
+        'utf8',
+      );
       expect(propsMarkdown).not.toContain('TegoSheetCallbacks');
       expect(propsMarkdown).not.toMatch(/Inherited from/iu);
       for (const callback of callbackNames) {
@@ -517,12 +483,13 @@ describe('public API documentation', () => {
         );
       }
 
-      const cellsPath = await findFile(outputDirectory, 'CellsData.md');
-      if (cellsPath === undefined) throw new Error('TypeDoc must generate CellsData.md');
-      const cellsMarkdown = await readFile(cellsPath, 'utf8');
+      const cellsMarkdown = await readFile(
+        join(outputDirectory, 'interfaces/CellsData.md'),
+        'utf8',
+      );
       expect(cellsMarkdown).toContain('Cell data stored at a zero-based decimal column index.');
     } finally {
       await rm(temporaryRoot, { force: true, recursive: true });
     }
-  }, 30_000);
+  });
 });
