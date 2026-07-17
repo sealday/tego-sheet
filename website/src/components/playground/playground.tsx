@@ -204,6 +204,13 @@ function PresetSession({ mode, presetKey, setStatus, onReset }: PresetSessionPro
   );
 
   const formattedSnapshot = useMemo(() => JSON.stringify(snapshot, null, 2), [snapshot]);
+  const announceNewStatus = useCallback(
+    (message: string): void => {
+      copyRequest.current += 1;
+      setStatus(message);
+    },
+    [setStatus],
+  );
   const copySnapshot = async (): Promise<void> => {
     const request = ++copyRequest.current;
     try {
@@ -220,7 +227,7 @@ function PresetSession({ mode, presetKey, setStatus, onReset }: PresetSessionPro
   const refreshSnapshot = (): void => {
     const currentValue = sheetRef.current?.getValue();
     if (currentValue) setSnapshot(currentValue);
-    setStatus('Workbook JSON refreshed from TegoSheetHandle.getValue()');
+    announceNewStatus('Workbook JSON refreshed from TegoSheetHandle.getValue()');
   };
 
   return (

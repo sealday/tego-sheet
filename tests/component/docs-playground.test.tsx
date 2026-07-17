@@ -172,12 +172,15 @@ function latestSheetProps(): SheetDoubleProps | undefined {
 function deferredPromise(): {
   readonly promise: Promise<void>;
   readonly resolve: () => void;
+  readonly reject: (error: Error) => void;
 } {
   let resolve!: () => void;
-  const promise = new Promise<void>((complete) => {
+  let reject!: (error: Error) => void;
+  const promise = new Promise<void>((complete, fail) => {
     resolve = complete;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function installClipboard(writeText: (value: string) => Promise<void>): void {
@@ -442,6 +445,26 @@ it('does not let a completed copy from an unmounted preset overwrite the selecte
 
   expect(screen.getByRole('status').textContent).toContain('Controlled selected');
 });
+
+it.each(['resolve', 'reject'] as const)(
+  'does not let a copy that later %s overwrite a newer Refresh status',
+  async (settlement) => {
+    const pending = deferredPromise();
+    installClipboard(() => pending.promise);
+    await renderPlayground();
+    fireEvent.click(screen.getByRole('button', { name: 'Copy JSON' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh JSON' }));
+    expect(screen.getByRole('status').textContent).toContain('Workbook JSON refreshed');
+    await act(async () => {
+      if (settlement === 'resolve') pending.resolve();
+      else pending.reject(new Error('clipboard failed'));
+      await pending.promise.catch(() => undefined);
+    });
+
+    expect(screen.getByRole('status').textContent).toContain('Workbook JSON refreshed');
+  },
+);
 
 it('lets only the latest copy request announce after promises settle in reverse order', async () => {
   const first = deferredPromise();

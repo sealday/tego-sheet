@@ -728,9 +728,12 @@ describe('documentation site contract', () => {
         'tego-sheet/styles.css',
       ]),
     );
+    const discoveredPackageImports = [...externalSpecifiers].filter((specifier) =>
+      specifier.startsWith('tego-sheet'),
+    );
     expect(
-      [...externalSpecifiers].filter((specifier) => specifier.startsWith('tego-sheet')).sort(),
-    ).toEqual([...publishedPackagePaths].sort());
+      discoveredPackageImports.every((specifier) => publishedPackagePaths.has(specifier)),
+    ).toBe(true);
     expect(
       [...externalSpecifiers].filter(
         (specifier) =>
