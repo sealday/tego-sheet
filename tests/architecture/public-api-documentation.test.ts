@@ -124,6 +124,9 @@ const callbackNames = [
   'onSelectionChange',
 ] as const;
 
+const sparseCollectionNames = ['CellsData', 'ColsData', 'RowsData'] as const;
+const sparseCollectionSummary = 'JSON-compatible entry stored at a sparse decimal index.';
+
 interface PublicDeclaration {
   readonly name: string;
   readonly symbol?: ts.Symbol;
@@ -434,9 +437,9 @@ describe('public API documentation', () => {
         const indexSignatures = directRecords(reflection, 'indexSignatures');
         expect(indexSignatures, `${name} direct index signature`).toHaveLength(1);
         expect(summaryText(indexSignatures[0] ?? {}), `${name} index summary`).not.toBe('');
-        if (name === 'CellsData') {
-          expect(summaryText(indexSignatures[0] ?? {})).toBe(
-            'Cell data stored at a zero-based decimal column index.',
+        if (sparseCollectionNames.includes(name as (typeof sparseCollectionNames)[number])) {
+          expect(summaryText(indexSignatures[0] ?? {}), `${name} exact index summary`).toBe(
+            sparseCollectionSummary,
           );
         }
 
@@ -483,13 +486,17 @@ describe('public API documentation', () => {
         );
       }
 
-      const cellsMarkdown = await readFile(
-        join(outputDirectory, 'interfaces/CellsData.md'),
-        'utf8',
+      const sparseCollectionMarkdown = await Promise.all(
+        sparseCollectionNames.map(async (name) => [
+          name,
+          await readFile(join(outputDirectory, `interfaces/${name}.md`), 'utf8'),
+        ]),
       );
-      expect(cellsMarkdown).toContain('Cell data stored at a zero-based decimal column index.');
+      for (const [name, markdown] of sparseCollectionMarkdown) {
+        expect(markdown, `${name} Markdown index summary`).toContain(sparseCollectionSummary);
+      }
     } finally {
       await rm(temporaryRoot, { force: true, recursive: true });
     }
-  });
+  }, 15_000);
 });
