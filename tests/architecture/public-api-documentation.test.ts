@@ -186,13 +186,17 @@ const findNested = (
   return undefined;
 };
 
-const hasSummary = (reflection: Readonly<Record<string, unknown>>): boolean => {
+const summaryText = (reflection: Readonly<Record<string, unknown>>): string => {
   const comment = reflection.comment;
-  if (!isRecord(comment) || !Array.isArray(comment.summary)) return false;
-  return comment.summary.some(
-    (part) => isRecord(part) && typeof part.text === 'string' && part.text.trim() !== '',
-  );
+  if (!isRecord(comment) || !Array.isArray(comment.summary)) return '';
+  return comment.summary
+    .map((part) => (isRecord(part) && typeof part.text === 'string' ? part.text : ''))
+    .join('')
+    .trim();
 };
+
+const hasSummary = (reflection: Readonly<Record<string, unknown>>): boolean =>
+  summaryText(reflection) !== '';
 
 describe('public API documentation', () => {
   it('documents the exact root export surface and its public members', () => {
@@ -265,5 +269,17 @@ describe('public API documentation', () => {
 
     expect(selfReferences).toEqual([]);
     expect(missingDocumentedMembers).toEqual([]);
+
+    const activeSheetChange = (serialized.children ?? []).find(
+      (child) => child.name === 'ActiveSheetChangeEvent',
+    );
+    const activeSheet = findNested(
+      activeSheetChange,
+      (value) => value.variant === 'declaration' && value.name === 'sheet',
+    );
+    expect(activeSheet).toBeDefined();
+    expect(summaryText(activeSheet ?? {})).toBe(
+      'Worksheet reported as active by the activation event.',
+    );
   }, 15_000);
 });

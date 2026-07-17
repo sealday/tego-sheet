@@ -71,7 +71,7 @@ export interface PasteEvent {
  * Imperative ref activation emits even when the requested worksheet is already active.
  */
 export interface ActiveSheetChangeEvent {
-  /** Newly active worksheet. */
+  /** Worksheet reported as active by the activation event. */
   readonly sheet: SheetId;
   /** Zero-based position of the worksheet in the workbook. */
   readonly index: number;
