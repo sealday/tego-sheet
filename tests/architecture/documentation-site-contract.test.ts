@@ -142,4 +142,14 @@ describe('documentation site contract', () => {
     expect(ignore).toContain('/website/build/');
     expect(ignore).toContain('/website/.docusaurus/');
   });
+
+  it('typechecks the CommonJS TypeDoc runtime bridge as checked JavaScript', () => {
+    const docsTypeScript = JSON.parse(read('website/tsconfig.json')) as {
+      compilerOptions?: { allowJs?: unknown; checkJs?: unknown };
+      include?: unknown[];
+    };
+
+    expect(docsTypeScript.compilerOptions).toMatchObject({ allowJs: true, checkJs: true });
+    expect(docsTypeScript.include).toContain('plugins/**/*.cjs');
+  });
 });

@@ -102,16 +102,65 @@ const createProjectOutput = async () => {
 describe('strict TypeDoc generation', () => {
   it('loads one TypeDoc runtime across the Docusaurus and native ESM plugin boundary', async () => {
     const pluginPath = join(root, 'website/plugins/strict-typedoc-generation.ts');
+    const entryPoint = join(root, 'src/index.ts');
+    const tsconfig = join(root, 'tsconfig.json');
     const script = `
+      import { createRequire } from 'node:module';
+      import { existsSync } from 'node:fs';
+      import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+      import { tmpdir } from 'node:os';
+      import { join } from 'node:path';
       import { loadFreshModule } from '@docusaurus/utils';
-      await loadFreshModule(${JSON.stringify(pluginPath)});
-      await import('typedoc-plugin-markdown');
-      const paths = globalThis[Symbol.for('typedoc_paths')] ?? [];
-      process.stdout.write(JSON.stringify({
-        loads: globalThis[Symbol.for('typedoc_loads')] ?? 0,
-        pathCount: paths.length,
-        uniquePathCount: new Set(paths).size,
-      }));
+
+      const originalCwd = process.cwd();
+      const projectRoot = await mkdtemp(join(tmpdir(), 'strict-typedoc-runtime-'));
+      const require = createRequire(import.meta.url);
+      let result;
+
+      try {
+        process.chdir(projectRoot);
+        await mkdir(join(projectRoot, 'website/docs'), { recursive: true });
+        const plugin = await loadFreshModule(${JSON.stringify(pluginPath)});
+        await plugin(
+          {
+            siteDir: join(projectRoot, 'website'),
+            siteConfig: { presets: [] },
+          },
+          {
+            entryPoints: [${JSON.stringify(entryPoint)}],
+            tsconfig: ${JSON.stringify(tsconfig)},
+            out: 'website/docs/api',
+            readme: 'none',
+            excludePrivate: true,
+            excludeProtected: true,
+            excludeInternal: true,
+            validation: {
+              invalidLink: true,
+              notDocumented: true,
+              notExported: true,
+            },
+            treatWarningsAsErrors: true,
+            treatValidationWarningsAsErrors: true,
+          },
+        );
+
+        const output = join(projectRoot, 'website/docs/api');
+        const paths = globalThis[Symbol.for('typedoc_paths')] ?? [];
+        result = {
+          bridgeLoaded: Object.keys(require.cache).some((path) =>
+            path.endsWith('/website/plugins/strict-typedoc-runtime.cjs'),
+          ),
+          generated: existsSync(output) && (await readdir(output)).length > 0,
+          loads: globalThis[Symbol.for('typedoc_loads')] ?? 0,
+          pathCount: paths.length,
+          uniquePathCount: new Set(paths).size,
+        };
+      } finally {
+        process.chdir(originalCwd);
+        await rm(projectRoot, { force: true, recursive: true });
+      }
+
+      process.stdout.write('\\nSTRICT_TYPEDOC_RESULT=' + JSON.stringify(result));
     `;
 
     const { stdout } = await execFileAsync(
@@ -120,8 +169,16 @@ describe('strict TypeDoc generation', () => {
       { cwd: root },
     );
 
-    expect(JSON.parse(stdout)).toEqual({ loads: 1, pathCount: 1, uniquePathCount: 1 });
-  });
+    const resultLine = stdout.trim().split('\n').at(-1);
+    expect(resultLine).toBeDefined();
+    expect(JSON.parse(resultLine!.replace('STRICT_TYPEDOC_RESULT=', ''))).toEqual({
+      bridgeLoaded: true,
+      generated: true,
+      loads: 1,
+      pathCount: 1,
+      uniquePathCount: 1,
+    });
+  }, 15_000);
 
   it('rejects bootstrap warnings before conversion even without TypeDoc strict flags', async () => {
     const { app, calls, events } = createFakeApplication({

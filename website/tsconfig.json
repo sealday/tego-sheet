@@ -1,12 +1,15 @@
 {
   "extends": "@docusaurus/tsconfig",
   "compilerOptions": {
+    "allowJs": true,
     "baseUrl": ".",
+    "checkJs": true,
     "ignoreDeprecations": "6.0",
     "strict": true
   },
   "include": [
     "docusaurus.config.ts",
+    "plugins/**/*.cjs",
     "plugins/**/*.ts",
     "sidebars.ts",
     "src/**/*.ts",
