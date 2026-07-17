@@ -5,6 +5,51 @@ title: Quick Start
 
 # Quick Start
 
-The complete typed React example is being prepared for the usage guide.
+Install the package in a React 19 application running Node.js 20.19.0 or newer:
 
-[Install tego-sheet first](./installation).
+```bash
+npm install tego-sheet
+```
+
+Import the stylesheet once in your application entry point, then render the component inside a
+container with an explicit height. This example uses uncontrolled ownership: `defaultValue` is read
+only when the component mounts, and `onChange` receives a complete `WorkbookData` snapshot after
+each committed mutation.
+
+```tsx
+import { TegoSheet, type WorkbookData } from 'tego-sheet';
+import 'tego-sheet/styles.css';
+
+const initialWorkbook: WorkbookData = [
+  {
+    name: 'Budget',
+    rows: {
+      len: 20,
+      0: { cells: { 0: { text: 'Item' }, 1: { text: 'Amount' } } },
+      1: { cells: { 0: { text: 'Hosting' }, 1: { text: '29' } } },
+      2: { cells: { 0: { text: 'Total' }, 1: { text: '=SUM(B2:B2)' } } },
+    },
+    cols: { len: 6 },
+  },
+];
+
+export function BudgetSheet() {
+  return (
+    <div style={{ height: 520, minWidth: 0 }}>
+      <TegoSheet
+        defaultValue={initialWorkbook}
+        onChange={(value, change) => {
+          console.log(change.kind, JSON.stringify(value));
+        }}
+      />
+    </div>
+  );
+}
+```
+
+The workbook is ordinary JSON-compatible data. Keep the initial value in a module constant or memoize
+it; do not parse untrusted JSON without validating it first.
+
+[Review installation details](./installation), then learn about
+[workbook ownership](../concepts/controlled-and-uncontrolled) or try the
+[uncontrolled Playground](/playground?mode=uncontrolled).

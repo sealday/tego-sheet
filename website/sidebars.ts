@@ -10,25 +10,37 @@ const sidebars: SidebarsConfig = {
     {
       type: 'category',
       label: 'Getting Started',
-      items: ['getting-started/installation', 'getting-started/quick-start'],
+      items: [
+        'getting-started/installation',
+        'getting-started/quick-start',
+        'getting-started/styling-and-sizing',
+      ],
     },
     {
       type: 'category',
       label: 'Core Concepts',
-      link: { type: 'generated-index', slug: '/concepts' },
-      items: [],
+      items: [
+        'concepts/controlled-and-uncontrolled',
+        'concepts/workbook-data',
+        'concepts/refs-and-commands',
+        'concepts/callbacks-and-errors',
+      ],
     },
     {
       type: 'category',
       label: 'Guides',
-      link: { type: 'generated-index', slug: '/guides' },
-      items: [],
+      items: [
+        'guides/custom-chrome',
+        'guides/locales',
+        'guides/validation-and-filtering',
+        'guides/frozen-panes-and-layout',
+        'guides/printing',
+      ],
     },
     {
       type: 'category',
       label: 'Migration',
-      link: { type: 'generated-index', slug: '/migration' },
-      items: [],
+      items: ['migration/from-x-data-spreadsheet'],
     },
     {
       type: 'category',

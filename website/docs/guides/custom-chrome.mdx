@@ -1,0 +1,82 @@
+---
+title: Custom Toolbar and Sheet Tabs
+---
+
+# Custom Toolbar and Sheet Tabs
+
+Pass a typed renderer to `toolbar` or `sheetTabs` to replace the built-in chrome. Renderers receive
+immutable public state and actions; they do not expose a controller or mutable sheet model.
+
+```tsx
+import { TegoSheet, type SheetTabsRenderProps, type ToolbarRenderProps } from 'tego-sheet';
+import 'tego-sheet/styles.css';
+
+function Toolbar({ canUndo, canRedo, disabledActions, execute }: ToolbarRenderProps) {
+  return (
+    <div role="toolbar" aria-label="Workbook commands">
+      <button
+        type="button"
+        disabled={!canUndo || disabledActions.has('undo')}
+        onClick={() => execute({ type: 'undo' })}
+      >
+        Undo
+      </button>
+      <button
+        type="button"
+        disabled={!canRedo || disabledActions.has('redo')}
+        onClick={() => execute({ type: 'redo' })}
+      >
+        Redo
+      </button>
+      <button
+        type="button"
+        disabled={disabledActions.has('set-style')}
+        onClick={() => execute({ type: 'set-style', patch: { font: { bold: true } } })}
+      >
+        Bold
+      </button>
+    </div>
+  );
+}
+
+function SheetTabs({ sheets, activeSheet, readOnly, add, activate }: SheetTabsRenderProps) {
+  return (
+    <div role="tablist" aria-label="Sheets">
+      {sheets.map((sheet) => (
+        <button
+          key={sheet.id}
+          type="button"
+          role="tab"
+          aria-selected={sheet.id === activeSheet}
+          onClick={() => activate(sheet.id)}
+        >
+          {sheet.name}
+        </button>
+      ))}
+      <button type="button" disabled={readOnly} onClick={() => add()}>
+        Add sheet
+      </button>
+    </div>
+  );
+}
+
+export function CustomChromeSheet() {
+  return (
+    <div style={{ height: 480 }}>
+      <TegoSheet
+        defaultValue={[{ name: 'Overview' }]}
+        toolbar={(props) => <Toolbar {...props} />}
+        sheetTabs={(props) => <SheetTabs {...props} />}
+      />
+    </div>
+  );
+}
+```
+
+Before calling `execute`, check `disabledActions`; unavailable actions report a recoverable
+`INVALID_COMMAND` through `onError`. Sheet-tab render props also expose typed `delete`, `rename`, and
+`activate` actions. Pass `'default'` to use built-in chrome or `false` to hide a region.
+
+Try the [Custom Chrome Playground](/playground?mode=custom-chrome), then review
+[ToolbarRenderProps](/docs/api/interfaces/ToolbarRenderProps) and
+[SheetTabsRenderProps](/docs/api/interfaces/SheetTabsRenderProps).

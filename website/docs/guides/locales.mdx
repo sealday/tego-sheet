@@ -1,0 +1,39 @@
+---
+title: Locales
+---
+
+# Locales
+
+Bundled dictionaries are separate package exports. Import only the languages used by the application
+and pass one `LocaleDefinition` to each component instance.
+
+```tsx
+import { TegoSheet, type LocaleDefinition } from 'tego-sheet';
+import 'tego-sheet/styles.css';
+import { de } from 'tego-sheet/locales/de';
+import { en } from 'tego-sheet/locales/en';
+import { nl } from 'tego-sheet/locales/nl';
+import { zhCN } from 'tego-sheet/locales/zh-cn';
+
+const locales = {
+  English: en,
+  简体中文: zhCN,
+  Deutsch: de,
+  Nederlands: nl,
+} satisfies Record<string, LocaleDefinition>;
+
+export function LocalizedSheet({ language }: { language: keyof typeof locales }) {
+  return (
+    <div style={{ height: 480 }}>
+      <TegoSheet defaultValue={[{ name: 'Locale demo' }]} locale={locales[language]} />
+    </div>
+  );
+}
+```
+
+Locale is per instance, so English, Simplified Chinese, German, and Dutch spreadsheets can coexist
+without global registration or mutation. It localizes built-in chrome; it does not translate workbook
+cell data or sheet names.
+
+Try all four dictionaries in the [Locales Playground](/playground?mode=locales), or review the
+[LocaleDefinition API](/docs/api/interfaces/LocaleDefinition).

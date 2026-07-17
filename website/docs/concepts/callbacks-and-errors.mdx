@@ -1,0 +1,69 @@
+---
+title: Callbacks and Errors
+---
+
+# Callbacks and Errors
+
+Callbacks expose committed workbook state and public interaction details without an event emitter or
+internal controller. `onChange` receives the complete snapshot and its `WorkbookChange` metadata.
+More specific callbacks follow the commit callback for the same user action.
+
+```tsx
+import {
+  TegoSheet,
+  TegoSheetException,
+  type TegoSheetError,
+  type TegoSheetHandle,
+  type WorkbookChange,
+  type WorkbookData,
+} from 'tego-sheet';
+import 'tego-sheet/styles.css';
+
+function recordChange(value: WorkbookData, change: WorkbookChange) {
+  console.log(change.id, change.kind, change.source, value);
+}
+
+function reportHandledError(error: TegoSheetError) {
+  console.error(error.code, error.message, { recoverable: error.recoverable });
+}
+
+export function ObservedSheet() {
+  return (
+    <div style={{ height: 480 }}>
+      <TegoSheet
+        defaultValue={[{ name: 'Observed' }]}
+        onChange={recordChange}
+        onCellEdit={(event) => console.log(event.address, event.text)}
+        onPaste={(event) => console.log(event.target, event.values)}
+        onSelectionChange={(selection) => console.log(selection.active)}
+        onActiveSheetChange={(event) => console.log(event.index, event.source)}
+        onError={reportHandledError}
+      />
+    </div>
+  );
+}
+
+export function safelyPrint(handle: TegoSheetHandle | null) {
+  try {
+    handle?.print();
+  } catch (error) {
+    if (error instanceof TegoSheetException) {
+      console.error(error.code, error.message, error.recoverable);
+      return;
+    }
+    throw error;
+  }
+}
+```
+
+`onError` reports an operation failure the component handled, such as denied clipboard access or a
+print failure. Invalid props and imperative contract violations throw `TegoSheetException`
+synchronously. Its `code`, `message`, `recoverable`, `cause`, and structured `error` fields are public.
+Do not catch and discard unknown exceptions from your own callbacks.
+
+External controlled-value replacements do not emit `onChange`. Event payloads and workbook snapshots
+are isolated values; do not depend on object identity across commits.
+
+See [WorkbookChange](/docs/api/interfaces/WorkbookChange),
+[TegoSheetError](/docs/api/interfaces/TegoSheetError), and
+[TegoSheetException](/docs/api/classes/TegoSheetException).

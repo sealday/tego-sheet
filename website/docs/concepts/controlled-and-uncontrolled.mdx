@@ -1,0 +1,64 @@
+---
+title: Controlled and Uncontrolled Workbooks
+---
+
+# Controlled and Uncontrolled Workbooks
+
+Choose one ownership model when `TegoSheet` mounts. Never pass both `value` and `defaultValue`, and
+never switch a mounted instance between controlled and uncontrolled mode. A mode change is a new
+spreadsheet instance: unmount the old one or give the replacement a new React `key`.
+
+## Uncontrolled ownership
+
+With `defaultValue`, the component owns subsequent workbook state. Use `onChange` to persist snapshots
+and a ref for occasional reads or commands.
+
+```tsx
+import { TegoSheet, type WorkbookData } from 'tego-sheet';
+import 'tego-sheet/styles.css';
+
+const initialWorkbook: WorkbookData = [{ name: 'Notes' }];
+
+export function UncontrolledSheet() {
+  return (
+    <div style={{ height: 480 }}>
+      <TegoSheet defaultValue={initialWorkbook} onChange={(value) => saveDraft(value)} />
+    </div>
+  );
+}
+
+function saveDraft(value: WorkbookData) {
+  localStorage.setItem('notes-workbook', JSON.stringify(value));
+}
+```
+
+## Controlled ownership
+
+With `value`, the parent owns the accepted snapshot. Apply the `onChange` value to state. Keeping the
+same object reference during unrelated parent renders avoids unnecessary external replacement work.
+
+```tsx
+import { useState } from 'react';
+import { TegoSheet, type WorkbookData } from 'tego-sheet';
+import 'tego-sheet/styles.css';
+
+const initialWorkbook: WorkbookData = [{ name: 'Plan' }];
+
+export function ControlledSheet() {
+  const [workbook, setWorkbook] = useState<WorkbookData>(initialWorkbook);
+
+  return (
+    <div style={{ height: 480 }}>
+      <TegoSheet value={workbook} onChange={(nextWorkbook) => setWorkbook(nextWorkbook)} />
+    </div>
+  );
+}
+```
+
+Controlled mode is useful when another React view must own every accepted edit. Uncontrolled mode is
+usually simpler when the workbook can own rapid editing state and the application only persists
+committed snapshots.
+
+Compare the [uncontrolled](/playground?mode=uncontrolled) and
+[controlled](/playground?mode=controlled) Playground presets, or read the
+[TegoSheetProps API](/docs/api/interfaces/TegoSheetProps).

@@ -1,0 +1,51 @@
+---
+title: Refs and Commands
+---
+
+# Refs and Commands
+
+Attach a `useRef<TegoSheetHandle>` when an application action must focus, inspect, or command a mounted
+spreadsheet. Guard `current` because the handle is unavailable before mount and after unmount.
+
+```tsx
+import { useRef } from 'react';
+import { TegoSheet, type TegoSheetHandle } from 'tego-sheet';
+import 'tego-sheet/styles.css';
+
+export function CommandedSheet() {
+  const sheetRef = useRef<TegoSheetHandle>(null);
+
+  function exportWorkbook() {
+    const value = sheetRef.current?.getValue();
+    if (value) console.log(JSON.stringify(value));
+  }
+
+  return (
+    <>
+      <button type="button" onClick={() => sheetRef.current?.focus()}>
+        Focus grid
+      </button>
+      <button type="button" onClick={exportWorkbook}>
+        Read current value
+      </button>
+      <div style={{ height: 480 }}>
+        <TegoSheet ref={sheetRef} defaultValue={[{ name: 'Commands' }]} />
+      </div>
+    </>
+  );
+}
+```
+
+The public handle contains only these methods:
+
+- focus and snapshots: `focus()`, `getValue()`, `getCell()`, `getCellStyle()`;
+- workbook mutations: `setCellText()`, `addSheet()`, `deleteSheet()`, `renameSheet()`,
+  `activateSheet()`;
+- history and tools: `undo()`, `redo()`, `validate()`, `print()`;
+- layout: `recalculateLayout()`.
+
+Addresses passed to cell methods use a runtime `SheetId` plus zero-based `row` and `column`. Obtain a
+sheet ID from `onActiveSheetChange`, `onSelectionChange`, `addSheet()`, or custom sheet-tab props. Ref
+mutations use the same read-only, validation, history, and callback behavior as user actions.
+
+See the complete [TegoSheetHandle API](/docs/api/interfaces/TegoSheetHandle).

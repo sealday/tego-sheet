@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -6,6 +6,21 @@ import { describe, expect, it } from 'vitest';
 const root = process.cwd();
 const read = (path: string) => readFileSync(join(root, path), 'utf8');
 const configUrl = pathToFileURL(join(root, 'website/docusaurus.config.ts')).href;
+
+const manualDocumentation = [
+  ['website/docs/getting-started/quick-start.mdx', ['TegoSheet', 'WorkbookData']],
+  ['website/docs/getting-started/styling-and-sizing.md', ['TegoSheet']],
+  ['website/docs/concepts/controlled-and-uncontrolled.mdx', ['TegoSheet', 'WorkbookData']],
+  ['website/docs/concepts/workbook-data.md', ['WorkbookData', 'WorkbookInput']],
+  ['website/docs/concepts/refs-and-commands.mdx', ['TegoSheetHandle']],
+  ['website/docs/concepts/callbacks-and-errors.mdx', ['WorkbookChange', 'TegoSheetException']],
+  ['website/docs/guides/custom-chrome.mdx', ['ToolbarRenderProps', 'SheetTabsRenderProps']],
+  ['website/docs/guides/locales.mdx', ['LocaleDefinition']],
+  ['website/docs/guides/validation-and-filtering.md', ['ValidationData', 'AutoFilterData']],
+  ['website/docs/guides/frozen-panes-and-layout.md', ['SheetData', 'SheetOptions']],
+  ['website/docs/guides/printing.md', ['TegoSheetHandle']],
+  ['website/docs/migration/from-x-data-spreadsheet.md', ['TegoSheet', 'TegoSheetHandle']],
+] as const;
 
 interface DocumentationConfig {
   baseUrl?: unknown;
@@ -121,6 +136,61 @@ describe('documentation site contract', () => {
     expect(quickStart).toContain('./installation');
     expect(playground).toContain('<h1>Playground</h1>');
     expect(playground).not.toContain('TegoSheet');
+  });
+
+  it('keeps the exact approved hand-written documentation inventory on public APIs', () => {
+    expect(manualDocumentation).toHaveLength(12);
+    expect(new Set(manualDocumentation.map(([path]) => path)).size).toBe(12);
+
+    const missingPages = manualDocumentation
+      .map(([path]) => path)
+      .filter((path) => !existsSync(join(root, path)));
+
+    expect(missingPages).toEqual([]);
+
+    for (const [path, publicIdentifiers] of manualDocumentation) {
+      const content = read(path);
+      const headings = content.match(/^# (?!#).+$/gm) ?? [];
+
+      expect(headings, `${path} must contain exactly one H1`).toHaveLength(1);
+      for (const identifier of publicIdentifiers) {
+        expect(content, `${path} must reference public API ${identifier}`).toContain(identifier);
+      }
+      const packageImports = [
+        ...content.matchAll(/(?:from\s+|import\s+)['"](tego-sheet[^'"]*)['"]/g),
+      ].map((match) => match[1]);
+      expect(packageImports, `${path} must use only published package paths`).toEqual(
+        packageImports.filter((specifier) =>
+          [
+            'tego-sheet',
+            'tego-sheet/styles.css',
+            'tego-sheet/locales/en',
+            'tego-sheet/locales/zh-cn',
+            'tego-sheet/locales/de',
+            'tego-sheet/locales/nl',
+          ].includes(specifier),
+        ),
+      );
+      expect(content, `${path} must not import source or private modules`).not.toMatch(
+        /from\s+['"][^'"]*(?:\bsrc\/|\bcore\/|\bcontroller\b|\bengine\/|\breact\/)[^'"]*['"]|import\s+['"][^'"]*(?:\bsrc\/|\bcore\/|\bcontroller\b|\bengine\/|\breact\/)[^'"]*['"]/,
+      );
+    }
+  });
+
+  it('orders all documentation categories explicitly with generated API reference last', () => {
+    const sidebar = read('website/sidebars.ts');
+    const labels = [...sidebar.matchAll(/label: '([^']+)'/g)].map((match) => match[1]);
+
+    expect(labels).toEqual([
+      'Getting Started',
+      'Core Concepts',
+      'Guides',
+      'Migration',
+      'API Reference',
+    ]);
+    expect(sidebar).toContain("require('./docs/api/typedoc-sidebar.cjs')");
+    expect(sidebar).toContain("link: { type: 'doc', id: 'api/index' }");
+    expect(sidebar).toContain('items: typedocSidebar');
   });
 
   it('disables the classic preset blog structurally', async () => {
