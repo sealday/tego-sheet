@@ -6,9 +6,10 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -60,6 +61,14 @@ const collectHandWrittenDocumentation = (directory = 'website/docs'): string[] =
     .sort();
 
 const dynamicModuleSpecifier = '<dynamic module specifier>';
+const approvedNonCheckableFences = new Set<string>();
+
+interface CheckableFence {
+  readonly documentPath: string;
+  readonly fenceNumber: number;
+  readonly language: 'ts' | 'tsx';
+  readonly source: string;
+}
 
 const literalModuleSpecifier = (node: ts.Node | undefined): string | null => {
   if (node && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))) {
@@ -128,6 +137,94 @@ const unsupportedDocumentationModules = (content: string): string[] =>
 const unsupportedSourceModules = (source: string): string[] =>
   unsupportedModuleSpecifiers(moduleSpecifiers(source));
 
+const checkableCodeFences = (): CheckableFence[] =>
+  manualDocumentation.flatMap(([documentPath]) => {
+    const content = read(documentPath);
+    let fenceNumber = 0;
+    return [...content.matchAll(/```([^\n]*)\n([\s\S]*?)```/g)].flatMap((match) => {
+      fenceNumber += 1;
+      const metadata = match[1].trim().split(/\s+/).filter(Boolean);
+      const language = metadata[0];
+      if (language !== 'ts' && language !== 'tsx') return [];
+      const fenceId = `${documentPath}#${fenceNumber}`;
+      if (metadata.includes('non-checkable')) {
+        if (!approvedNonCheckableFences.has(fenceId)) {
+          throw new Error(`${fenceId} uses an unapproved non-checkable marker`);
+        }
+        return [];
+      }
+      return [{ documentPath, fenceNumber, language, source: match[2] }];
+    });
+  });
+
+const typecheckDocumentationFences = (): string[] => {
+  const configFile = ts.readConfigFile(join(root, 'tsconfig.json'), ts.sys.readFile);
+  if (configFile.error) {
+    throw new Error(ts.flattenDiagnosticMessageText(configFile.error.messageText, '\n'));
+  }
+  const parsedConfig = ts.parseJsonConfigFileContent(configFile.config, ts.sys, root);
+  if (parsedConfig.errors.length > 0) {
+    throw new Error(
+      ts.formatDiagnosticsWithColorAndContext(parsedConfig.errors, {
+        getCanonicalFileName: (name) => name,
+        getCurrentDirectory: () => root,
+        getNewLine: () => '\n',
+      }),
+    );
+  }
+
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 'tego-sheet-documentation-fences-'));
+  try {
+    const fences = checkableCodeFences();
+    const fileOwners = new Map<string, CheckableFence>();
+    const rootNames = fences.map((fence, index) => {
+      const fileName = join(fixtureRoot, `fence-${index + 1}.${fence.language}`);
+      writeFileSync(fileName, fence.source);
+      fileOwners.set(fileName, fence);
+      return fileName;
+    });
+    const stylesDeclaration = join(fixtureRoot, 'published-styles.d.ts');
+    writeFileSync(stylesDeclaration, "declare module 'tego-sheet/styles.css';\n");
+    const localStylesDeclaration = join(fixtureRoot, 'sheet-panel.d.css.ts');
+    writeFileSync(localStylesDeclaration, 'export {};\n');
+    symlinkSync(join(root, 'node_modules'), join(fixtureRoot, 'node_modules'), 'dir');
+    rootNames.push(stylesDeclaration, localStylesDeclaration, join(root, 'src/styles.d.ts'));
+
+    const program = ts.createProgram({
+      rootNames,
+      options: {
+        ...parsedConfig.options,
+        allowArbitraryExtensions: true,
+        baseUrl: root,
+        composite: false,
+        incremental: false,
+        noEmit: true,
+      },
+    });
+    return rootNames.flatMap((fileName) => {
+      const owner = fileOwners.get(fileName);
+      if (!owner) return [];
+      const sourceFile = program.getSourceFile(fileName);
+      if (!sourceFile) return [`${owner.documentPath} fence ${owner.fenceNumber}: source missing`];
+      return [
+        ...program.getSyntacticDiagnostics(sourceFile),
+        ...program.getSemanticDiagnostics(sourceFile),
+      ].map((diagnostic) => {
+        const position =
+          diagnostic.start === undefined
+            ? ''
+            : (() => {
+                const location = sourceFile.getLineAndCharacterOfPosition(diagnostic.start);
+                return `:${location.line + 1}:${location.character + 1}`;
+              })();
+        return `${owner.documentPath} fence ${owner.fenceNumber}${position} TS${diagnostic.code}: ${ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')}`;
+      });
+    });
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+};
+
 const transpileModule = (source: string, fileName: string): string => {
   const result = ts.transpileModule(source, {
     fileName,
@@ -150,7 +247,9 @@ const transpileModule = (source: string, fileName: string): string => {
   return result.outputText;
 };
 
-const loadRealSidebarsInIsolatedProcess = (): unknown => {
+const loadRealSidebarsInIsolatedProcess = (
+  fixtureSource = 'module.exports = [{ type: "doc", id: "api/generated-entry" }];\n',
+): unknown => {
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'tego-sheet-sidebar-contract-'));
   try {
     const sourceSidebars = join(root, 'website/sidebars.ts');
@@ -160,10 +259,7 @@ const loadRealSidebarsInIsolatedProcess = (): unknown => {
     copyFileSync(sourceSidebars, copiedSidebars);
     copyFileSync(sourceStructure, copiedStructure);
     mkdirSync(join(fixtureRoot, 'docs/api'), { recursive: true });
-    writeFileSync(
-      join(fixtureRoot, 'docs/api/typedoc-sidebar.cjs'),
-      'module.exports = [{ type: "doc", id: "api/generated-entry" }];\n',
-    );
+    writeFileSync(join(fixtureRoot, 'docs/api/typedoc-sidebar.cjs'), fixtureSource);
     writeFileSync(
       join(fixtureRoot, 'sidebars.mjs'),
       transpileModule(readFileSync(copiedSidebars, 'utf8'), copiedSidebars),
@@ -174,7 +270,7 @@ const loadRealSidebarsInIsolatedProcess = (): unknown => {
     );
 
     const moduleUrl = pathToFileURL(join(fixtureRoot, 'sidebars.mjs')).href;
-    const output = execFileSync(
+    const child = spawnSync(
       process.execPath,
       [
         '--input-type=module',
@@ -183,7 +279,10 @@ const loadRealSidebarsInIsolatedProcess = (): unknown => {
       ],
       { encoding: 'utf8' },
     );
-    return JSON.parse(output) as unknown;
+    if (child.status !== 0) {
+      throw new Error(`Isolated sidebar load failed:\n${child.stderr || child.stdout}`);
+    }
+    return JSON.parse(child.stdout) as unknown;
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true });
   }
@@ -305,6 +404,19 @@ describe('documentation site contract', () => {
     expect(playground).not.toContain('TegoSheet');
   });
 
+  it('documents the exact React peer dependency range from package metadata', () => {
+    const packageJson = JSON.parse(read('package.json')) as {
+      peerDependencies?: Record<string, unknown>;
+    };
+    const peers = packageJson.peerDependencies;
+    const quickStart = read('website/docs/getting-started/quick-start.mdx');
+
+    expect(peers).toMatchObject({ react: '^19.2.7', 'react-dom': '^19.2.7' });
+    expect(quickStart).toContain(
+      `React and React DOM must both\nsatisfy \`${peers?.react}\` (19.2.7 through 19.x)`,
+    );
+  });
+
   it('keeps the exact approved hand-written documentation inventory on public APIs', () => {
     expect(manualDocumentation).toHaveLength(12);
     expect(new Set(manualDocumentation.map(([path]) => path)).size).toBe(12);
@@ -351,6 +463,12 @@ describe('documentation site contract', () => {
   ])('allows published template-literal module loading: %s', (source, expected) => {
     expect(moduleSpecifiers(source)).toContain(expected);
     expect(unsupportedSourceModules(source)).toEqual([]);
+  });
+
+  it('semantically typechecks every Task 4 TypeScript code fence against the public package', () => {
+    expect(approvedNonCheckableFences).toEqual(new Set());
+    expect(checkableCodeFences()).toHaveLength(13);
+    expect(typecheckDocumentationFences()).toEqual([]);
   });
 
   it('defines the complete sidebar structure from explicit document IDs', async () => {
@@ -413,6 +531,16 @@ describe('documentation site contract', () => {
     expect((sidebars as { docsSidebar: { items: unknown }[] }).docsSidebar.at(-1)?.items).toEqual(
       typedocSidebar,
     );
+  });
+
+  it.each([
+    ['module.exports = {};\n', /Generated TypeDoc sidebar export must be an array/],
+    [
+      'module.exports = [{ type: "doc" }];\n',
+      /Generated TypeDoc sidebar export\[0\]\.id must be a non-empty string/,
+    ],
+  ])('rejects malformed generated sidebar exports', (fixtureSource, expected) => {
+    expect(() => loadRealSidebarsInIsolatedProcess(fixtureSource)).toThrow(expected);
   });
 
   it('disables the classic preset blog structurally', async () => {

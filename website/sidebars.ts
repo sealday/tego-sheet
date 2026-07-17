@@ -1,9 +1,8 @@
 import { createRequire } from 'node:module';
-import type { SidebarItem } from '@docusaurus/plugin-content-docs/lib/sidebars/types.js';
-import { createDocumentationSidebars } from './sidebar-structure';
+import { createDocumentationSidebars, parseGeneratedSidebar } from './sidebar-structure';
 
 const require = createRequire(import.meta.url);
-const typedocSidebar = require('./docs/api/typedoc-sidebar.cjs') as SidebarItem[];
+const typedocSidebar = parseGeneratedSidebar(require('./docs/api/typedoc-sidebar.cjs'));
 
 const sidebars = createDocumentationSidebars(typedocSidebar);
 
