@@ -187,7 +187,11 @@ const typecheckDocumentationFences = (): string[] => {
     writeFileSync(stylesDeclaration, "declare module 'tego-sheet/styles.css';\n");
     const localStylesDeclaration = join(fixtureRoot, 'sheet-panel.d.css.ts');
     writeFileSync(localStylesDeclaration, 'export {};\n');
-    symlinkSync(join(root, 'node_modules'), join(fixtureRoot, 'node_modules'), 'dir');
+    symlinkSync(
+      join(root, 'node_modules'),
+      join(fixtureRoot, 'node_modules'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     rootNames.push(stylesDeclaration, localStylesDeclaration, join(root, 'src/styles.d.ts'));
 
     const program = ts.createProgram({
@@ -538,6 +542,18 @@ describe('documentation site contract', () => {
     [
       'module.exports = [{ type: "doc" }];\n',
       /Generated TypeDoc sidebar export\[0\]\.id must be a non-empty string/,
+    ],
+    [
+      'module.exports = [{ type: "doc", id: "api/example", label: 42 }];\n',
+      /Generated TypeDoc sidebar export\[0\]\.label must be a non-empty string/,
+    ],
+    [
+      'module.exports = [{ type: "category", label: "Example", collapsed: "yes", items: [] }];\n',
+      /Generated TypeDoc sidebar export\[0\]\.collapsed must be a boolean/,
+    ],
+    [
+      'module.exports = [{ type: "link", label: "Example", href: "/example", customProps: "bad" }];\n',
+      /Generated TypeDoc sidebar export\[0\]\.customProps must be an object/,
     ],
   ])('rejects malformed generated sidebar exports', (fixtureSource, expected) => {
     expect(() => loadRealSidebarsInIsolatedProcess(fixtureSource)).toThrow(expected);
