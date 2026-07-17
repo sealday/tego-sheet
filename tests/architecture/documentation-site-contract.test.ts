@@ -414,10 +414,11 @@ describe('documentation site contract', () => {
     };
     const peers = packageJson.peerDependencies;
     const quickStart = read('website/docs/getting-started/quick-start.mdx');
+    const normalizedQuickStart = quickStart.replace(/\s+/g, ' ').trim();
 
     expect(peers).toMatchObject({ react: '^19.2.7', 'react-dom': '^19.2.7' });
-    expect(quickStart).toContain(
-      `React and React DOM must both\nsatisfy \`${peers?.react}\` (19.2.7 through 19.x)`,
+    expect(normalizedQuickStart).toContain(
+      `React and React DOM must both satisfy \`${peers?.react}\` (19.2.7 through 19.x)`,
     );
   });
 
