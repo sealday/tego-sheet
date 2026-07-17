@@ -63,7 +63,7 @@
 .customChrome button {
   display: inline-flex;
   align-items: center;
-  min-height: 2.35rem;
+  min-height: 2.75rem;
   padding: 0.45rem 0.75rem;
   border: 1px solid var(--ifm-color-emphasis-300);
   border-radius: 0.45rem;
@@ -159,7 +159,7 @@
 }
 
 .field select {
-  min-height: 2.35rem;
+  min-height: 2.75rem;
   border: 1px solid var(--ifm-color-emphasis-300);
   border-radius: 0.4rem;
   background: var(--tego-surface-strong);

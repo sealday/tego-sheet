@@ -512,6 +512,16 @@ describe('documentation site contract', () => {
     expect(unsupportedSourceModules(preview)).toEqual([]);
   });
 
+  it('keeps every Playground mode and inspector control at least 44 pixels tall', () => {
+    const playgroundStyles = read('website/src/components/playground/playground.module.css');
+
+    expect(playgroundStyles).toMatch(
+      /\.modePicker span,[\s\S]*?\.inspector button,[\s\S]*?\.customChrome button\s*{[^}]*min-height:\s*2\.75rem/,
+    );
+    expect(playgroundStyles).toMatch(/\.field select\s*{[^}]*min-height:\s*2\.75rem/);
+    expect(playgroundStyles).not.toMatch(/min-height:\s*2\.35rem/);
+  });
+
   it('documents the exact React peer dependency range from package metadata', () => {
     const packageJson = JSON.parse(read('package.json')) as {
       peerDependencies?: Record<string, unknown>;
