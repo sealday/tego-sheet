@@ -1,20 +1,23 @@
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   readdirSync,
-  rmdirSync,
-  unlinkSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 const root = process.cwd();
 const read = (path: string) => readFileSync(join(root, path), 'utf8');
 const configUrl = pathToFileURL(join(root, 'website/docusaurus.config.ts')).href;
-const sidebarsUrl = pathToFileURL(join(root, 'website/sidebars.ts')).href;
 const sidebarStructureUrl = pathToFileURL(join(root, 'website/sidebar-structure.ts')).href;
 
 const publishedPackagePaths = new Set([
@@ -56,23 +59,135 @@ const collectHandWrittenDocumentation = (directory = 'website/docs'): string[] =
     })
     .sort();
 
-const moduleSpecifiers = (content: string): string[] => {
-  const staticModules = [
-    ...content.matchAll(/\b(?:import|export)\s+(?:type\s+)?(?:[^;]*?\s+from\s+)?['"]([^'"]+)['"]/g),
-  ].map((match) => match[1]);
-  const runtimeModules = [
-    ...content.matchAll(/\b(?:import|require)\s*\(\s*['"]([^'"]+)['"]\s*\)/g),
-  ].map((match) => match[1]);
+const dynamicModuleSpecifier = '<dynamic module specifier>';
 
-  return [...staticModules, ...runtimeModules];
+const literalModuleSpecifier = (node: ts.Node | undefined): string | null => {
+  if (node && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))) {
+    return node.text;
+  }
+  return null;
 };
 
-const unsupportedDocumentationModules = (content: string): string[] =>
-  moduleSpecifiers(content).filter(
+const moduleSpecifiers = (source: string): string[] => {
+  const sourceFile = ts.createSourceFile(
+    'documentation-example.tsx',
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const specifiers: string[] = [];
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      const specifier = literalModuleSpecifier(node.moduleSpecifier);
+      if (specifier !== null) specifiers.push(specifier);
+    } else if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference)
+    ) {
+      specifiers.push(
+        literalModuleSpecifier(node.moduleReference.expression) ?? dynamicModuleSpecifier,
+      );
+    } else if (ts.isCallExpression(node)) {
+      const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
+      const isRequire = ts.isIdentifier(node.expression) && node.expression.text === 'require';
+      if (isDynamicImport || isRequire) {
+        specifiers.push(literalModuleSpecifier(node.arguments[0]) ?? dynamicModuleSpecifier);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sourceFile);
+  return specifiers;
+};
+
+const documentationModuleSpecifiers = (content: string): string[] => {
+  const fencedSources: string[] = [];
+  const outsideFences = content.replace(/```[^\n]*\n([\s\S]*?)```/g, (_block, source: string) => {
+    fencedSources.push(source);
+    return '\n';
+  });
+  return [outsideFences, ...outsideFences.split('\n'), ...fencedSources]
+    .flatMap(moduleSpecifiers)
+    .filter((specifier, index, all) => all.indexOf(specifier) === index);
+};
+
+const unsupportedModuleSpecifiers = (specifiers: readonly string[]): string[] =>
+  specifiers.filter(
     (specifier) =>
+      specifier === dynamicModuleSpecifier ||
       (specifier.startsWith('tego-sheet') && !publishedPackagePaths.has(specifier)) ||
       /(?:^|\/)(?:src|core|controller|engine|private)(?:\/|$)/.test(specifier),
   );
+
+const unsupportedDocumentationModules = (content: string): string[] =>
+  unsupportedModuleSpecifiers(documentationModuleSpecifiers(content));
+
+const unsupportedSourceModules = (source: string): string[] =>
+  unsupportedModuleSpecifiers(moduleSpecifiers(source));
+
+const transpileModule = (source: string, fileName: string): string => {
+  const result = ts.transpileModule(source, {
+    fileName,
+    reportDiagnostics: true,
+    compilerOptions: {
+      module: ts.ModuleKind.ES2022,
+      target: ts.ScriptTarget.ES2022,
+      verbatimModuleSyntax: true,
+    },
+  });
+  if (result.diagnostics && result.diagnostics.length > 0) {
+    throw new Error(
+      ts.formatDiagnosticsWithColorAndContext(result.diagnostics, {
+        getCanonicalFileName: (name) => name,
+        getCurrentDirectory: () => root,
+        getNewLine: () => '\n',
+      }),
+    );
+  }
+  return result.outputText;
+};
+
+const loadRealSidebarsInIsolatedProcess = (): unknown => {
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 'tego-sheet-sidebar-contract-'));
+  try {
+    const sourceSidebars = join(root, 'website/sidebars.ts');
+    const sourceStructure = join(root, 'website/sidebar-structure.ts');
+    const copiedSidebars = join(fixtureRoot, 'sidebars.ts');
+    const copiedStructure = join(fixtureRoot, 'sidebar-structure.ts');
+    copyFileSync(sourceSidebars, copiedSidebars);
+    copyFileSync(sourceStructure, copiedStructure);
+    mkdirSync(join(fixtureRoot, 'docs/api'), { recursive: true });
+    writeFileSync(
+      join(fixtureRoot, 'docs/api/typedoc-sidebar.cjs'),
+      'module.exports = [{ type: "doc", id: "api/generated-entry" }];\n',
+    );
+    writeFileSync(
+      join(fixtureRoot, 'sidebars.mjs'),
+      transpileModule(readFileSync(copiedSidebars, 'utf8'), copiedSidebars),
+    );
+    writeFileSync(
+      join(fixtureRoot, 'sidebar-structure'),
+      transpileModule(readFileSync(copiedStructure, 'utf8'), copiedStructure),
+    );
+
+    const moduleUrl = pathToFileURL(join(fixtureRoot, 'sidebars.mjs')).href;
+    const output = execFileSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '--eval',
+        `import sidebars from ${JSON.stringify(moduleUrl)}; process.stdout.write(JSON.stringify(sidebars));`,
+      ],
+      { encoding: 'utf8' },
+    );
+    return JSON.parse(output) as unknown;
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+};
 
 interface DocumentationConfig {
   baseUrl?: unknown;
@@ -217,33 +332,30 @@ describe('documentation site contract', () => {
   });
 
   it.each([
+    ["import Workbook from 'tego-sheet/src/private'", 'tego-sheet/src/private'],
     ["import('../../src/core')", '../../src/core'],
     ["require('tego-sheet/controller/private')", 'tego-sheet/controller/private'],
     ["export { Workbook } from 'tego-sheet/core'", 'tego-sheet/core'],
+    ["import privateModule = require('tego-sheet/private')", 'tego-sheet/private'],
+    ['import(`tego-sheet/core`)', 'tego-sheet/core'],
+    ['require(`tego-sheet/controller/private`)', 'tego-sheet/controller/private'],
+    ['import(`tego-sheet/${section}`)', dynamicModuleSpecifier],
+    ['require(`tego-sheet/${section}`)', dynamicModuleSpecifier],
   ])('rejects private module loading in documentation: %s', (source, expected) => {
-    expect(unsupportedDocumentationModules(source)).toEqual([expected]);
+    expect(unsupportedSourceModules(source)).toEqual([expected]);
+  });
+
+  it.each([
+    ['import(`tego-sheet`)', 'tego-sheet'],
+    ['require(`tego-sheet/locales/en`)', 'tego-sheet/locales/en'],
+  ])('allows published template-literal module loading: %s', (source, expected) => {
+    expect(moduleSpecifiers(source)).toContain(expected);
+    expect(unsupportedSourceModules(source)).toEqual([]);
   });
 
   it('defines the complete sidebar structure from explicit document IDs', async () => {
-    const apiDirectory = join(root, 'website/docs/api');
-    const typedocSidebarPath = join(apiDirectory, 'typedoc-sidebar.cjs');
-    const apiDirectoryExisted = existsSync(apiDirectory);
-    const previousTypedocSidebar = existsSync(typedocSidebarPath)
-      ? readFileSync(typedocSidebarPath, 'utf8')
-      : null;
     const typedocSidebar = [{ type: 'doc', id: 'api/generated-entry' }];
-    mkdirSync(apiDirectory, { recursive: true });
-    writeFileSync(typedocSidebarPath, `module.exports = ${JSON.stringify(typedocSidebar)};\n`);
-
-    let sidebars: unknown;
-    try {
-      const sidebarsModule = (await import(sidebarsUrl)) as { default: unknown };
-      sidebars = sidebarsModule.default;
-    } finally {
-      if (previousTypedocSidebar === null) unlinkSync(typedocSidebarPath);
-      else writeFileSync(typedocSidebarPath, previousTypedocSidebar);
-      if (!apiDirectoryExisted && readdirSync(apiDirectory).length === 0) rmdirSync(apiDirectory);
-    }
+    const sidebars = loadRealSidebarsInIsolatedProcess();
 
     const { createDocumentationSidebars } = (await import(sidebarStructureUrl)) as {
       createDocumentationSidebars: (typedocSidebar: readonly unknown[]) => unknown;
