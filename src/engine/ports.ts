@@ -363,7 +363,7 @@ function createSparseAxis<T extends { readonly hide?: boolean }>(
   for (const index of forcedHidden) {
     if (Number.isSafeInteger(index) && index >= 0 && index < count) overrideSizes.set(index, 0);
   }
-  const rawOverrides = [...overrideSizes.entries()]
+  const rawOverrides = Array.from(overrideSizes.entries())
     .map(([index, size]) => ({ index, size }))
     .sort((left, right) => left.index - right.index);
   let overrideSizeSum = 0;

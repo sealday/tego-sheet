@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   cellRect,
@@ -69,6 +71,30 @@ const emptyAxisCases: readonly {
 ];
 
 describe('DOM-free grid geometry', () => {
+  it('keeps sparse override collection safe for downlevel consumers', () => {
+    const noFilter = createSheetGridModel({ rows: { len: 4 }, cols: { len: 1 } });
+    const withFilter = createSheetGridModel({
+      rows: {
+        len: 4,
+        0: { cells: { 0: { text: 'Kind' } } },
+        1: { cells: { 0: { text: 'odd' } } },
+        2: { cells: { 0: { text: 'even' } } },
+        3: { cells: { 0: { text: 'odd' } } },
+      },
+      cols: { len: 1 },
+      autofilter: {
+        ref: 'A1:A4',
+        filters: [{ ci: 0, operator: 'in', value: ['even'] }],
+      },
+    });
+
+    expect(noFilter.rowOffset(4)).toBe(100);
+    expect(withFilter.rowOffset(4)).toBe(50);
+    expect(readFileSync(join(process.cwd(), 'src/engine/ports.ts'), 'utf8')).toContain(
+      'Array.from(overrideSizes.entries())',
+    );
+  });
+
   it('matches the legacy header-offset hit-test fixture', () => {
     const model = createSheetGridModel({ rows: { len: 10 }, cols: { len: 10 } });
     const metrics = createViewportMetrics(model, { width: 500, height: 300 });
