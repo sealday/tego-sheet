@@ -4,6 +4,7 @@ import styles from './playground.module.css';
 interface PlaygroundErrorBoundaryProps {
   readonly children: ReactNode;
   readonly onReset: () => void;
+  readonly onReload: () => void;
 }
 
 interface PlaygroundErrorBoundaryState {
@@ -31,7 +32,7 @@ export class PlaygroundErrorBoundary extends Component<
   };
 
   private readonly reload = (): void => {
-    window.location.reload();
+    this.props.onReload();
   };
 
   public render(): ReactNode {

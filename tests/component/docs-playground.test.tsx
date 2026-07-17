@@ -149,9 +149,9 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function renderPlayground() {
+async function renderPlayground(onReload?: () => void) {
   const { Playground } = await import('../../website/src/components/playground/playground');
-  return render(<Playground />);
+  return render(<Playground onReload={onReload} />);
 }
 
 function latestSheetProps(): SheetDoubleProps | undefined {
@@ -187,11 +187,25 @@ it('canonicalizes an invalid mode while preserving the path and unrelated parame
   );
 });
 
+it('canonicalizes a missing mode while preserving the path and unrelated parameters', async () => {
+  window.history.replaceState({}, '', '/tego-sheet/playground?theme=dark&panel=events');
+  const replaceState = vi.spyOn(window.history, 'replaceState');
+
+  await renderPlayground();
+
+  expect(replaceState).toHaveBeenCalledWith(
+    window.history.state,
+    '',
+    '/tego-sheet/playground?theme=dark&panel=events&mode=uncontrolled',
+  );
+});
+
 it('pushes a selected mode, changes the keyed preset boundary, and clears old events', async () => {
   await renderPlayground();
   fireEvent.click(screen.getByRole('button', { name: 'Commit mock change' }));
   expect(screen.getAllByRole('listitem', { name: /event/i })).toHaveLength(1);
   const oldKey = screen.getByTestId('preset-boundary').getAttribute('data-preset-key');
+  const oldMount = screen.getByTestId('tego-sheet-double').getAttribute('data-mount-id');
   const pushState = vi.spyOn(window.history, 'pushState');
 
   fireEvent.click(screen.getByRole('radio', { name: 'Controlled' }));
@@ -202,28 +216,44 @@ it('pushes a selected mode, changes the keyed preset boundary, and clears old ev
     '/tego-sheet/playground?mode=controlled',
   );
   expect(screen.getByTestId('preset-boundary').getAttribute('data-preset-key')).not.toBe(oldKey);
+  expect(screen.getByTestId('tego-sheet-double').getAttribute('data-mount-id')).not.toBe(oldMount);
   expect(screen.queryAllByRole('listitem', { name: /event/i })).toHaveLength(0);
 });
 
-it('restores the matching mode when browser history emits popstate', async () => {
-  await renderPlayground();
+it('restores a remounted mode from popstate and removes the identical listener on unmount', async () => {
+  const addEventListener = vi.spyOn(window, 'addEventListener');
+  const removeEventListener = vi.spyOn(window, 'removeEventListener');
+  const rendered = await renderPlayground();
+  const oldMount = screen.getByTestId('tego-sheet-double').getAttribute('data-mount-id');
+  const popstateListener = addEventListener.mock.calls.find(
+    ([type]) => type === 'popstate',
+  )?.[1] as EventListener | undefined;
   window.history.pushState({}, '', '/tego-sheet/playground?mode=locales');
 
+  expect(popstateListener).toBeDefined();
   fireEvent(window, new PopStateEvent('popstate'));
 
   expect((screen.getByRole('radio', { name: 'Locales' }) as HTMLInputElement).checked).toBe(true);
+  expect(screen.getByTestId('tego-sheet-double').getAttribute('data-mount-id')).not.toBe(oldMount);
   expect(screen.getByLabelText('Locale')).toBeTruthy();
+
+  rendered.unmount();
+  expect(removeEventListener).toHaveBeenCalledWith('popstate', popstateListener);
 });
 
 it('Reset mode recreates the current fixture without reloading the page', async () => {
-  await renderPlayground();
+  const onReload = vi.fn();
+  await renderPlayground(onReload);
   const firstMount = screen.getByTestId('tego-sheet-double').getAttribute('data-mount-id');
+  const firstFixture = latestSheetProps()?.defaultValue;
 
   fireEvent.click(screen.getByRole('button', { name: 'Reset mode' }));
 
   expect(screen.getByTestId('tego-sheet-double').getAttribute('data-mount-id')).not.toBe(
     firstMount,
   );
+  expect(latestSheetProps()?.defaultValue).not.toBe(firstFixture);
+  expect(onReload).not.toHaveBeenCalled();
   expect(screen.getByRole('status').textContent).toContain('Uncontrolled reset');
 });
 
@@ -294,7 +324,8 @@ it('records structured onError payloads as public events', async () => {
 });
 
 it('offers Reset and Reload after an unexpected render failure without exposing a stack', async () => {
-  await renderPlayground();
+  const onReload = vi.fn();
+  await renderPlayground(onReload);
   const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
   sheetMock.failRender = true;
   fireEvent.click(screen.getByRole('radio', { name: 'Controlled' }));
@@ -306,11 +337,17 @@ it('offers Reset and Reload after an unexpected render failure without exposing 
   expect(screen.getByRole('button', { name: 'Reset' })).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Reload' })).toBeTruthy();
 
-  sheetMock.failRender = false;
+  fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+  expect(onReload).toHaveBeenCalledOnce();
+
   fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
   expect((screen.getByRole('radio', { name: 'Uncontrolled' }) as HTMLInputElement).checked).toBe(
     true,
   );
+  expect(screen.getByRole('alert')).toBeTruthy();
+
+  sheetMock.failRender = false;
+  fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
   expect(screen.getByTestId('tego-sheet-double')).toBeTruthy();
   expect(consoleError).toHaveBeenCalled();
 });

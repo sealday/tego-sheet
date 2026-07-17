@@ -65,6 +65,14 @@ function sitePath(path: string): string {
   return `${window.location.pathname.replace(/\/playground\/?$/, '')}${path}`;
 }
 
+function reloadWindow(): void {
+  window.location.reload();
+}
+
+export interface PlaygroundProps {
+  readonly onReload?: () => void;
+}
+
 interface PresetSheetProps {
   readonly fixture: WorkbookData;
   readonly locale: (typeof LOCALES)[LocaleId];
@@ -304,7 +312,7 @@ function PresetSession({ mode, presetKey, setStatus, onReset }: PresetSessionPro
   );
 }
 
-export function Playground(): ReactElement {
+export function Playground({ onReload = reloadWindow }: PlaygroundProps = {}): ReactElement {
   const [initialMode] = useState<PlaygroundMode>(modeFromLocation);
   const [mode, setMode] = useState<PlaygroundMode>(initialMode);
   const [resetRevision, setResetRevision] = useState(0);
@@ -381,7 +389,7 @@ export function Playground(): ReactElement {
       <p className={styles.srStatus} role="status" aria-live="polite">
         {status}
       </p>
-      <PlaygroundErrorBoundary onReset={recoverFromError}>
+      <PlaygroundErrorBoundary onReset={recoverFromError} onReload={onReload}>
         <PresetSession
           key={presetKey}
           mode={mode}

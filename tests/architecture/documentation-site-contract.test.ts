@@ -690,6 +690,30 @@ describe('documentation site contract', () => {
     ).toEqual([]);
   });
 
+  it('keeps the playground implementation on the exact public package and local module boundary', () => {
+    const source = read('website/src/components/playground/playground.tsx');
+
+    expect(moduleSpecifiers(source)).toEqual([
+      'tego-sheet',
+      'tego-sheet/locales/en',
+      'tego-sheet/locales/zh-cn',
+      'tego-sheet/locales/de',
+      'tego-sheet/locales/nl',
+      'tego-sheet/styles.css',
+      'react',
+      './playground-fixtures',
+      './playground-model',
+      './playground-error-boundary',
+      './playground.module.css',
+    ]);
+    expect(
+      moduleSpecifiers(source)
+        .filter((specifier) => specifier.startsWith('tego-sheet'))
+        .sort(),
+    ).toEqual([...publishedPackagePaths].sort());
+    expect(source).not.toMatch(/(?:^|[/'"])(?:src|private|controller)(?:[/'"]|$)/m);
+  });
+
   it('resolves site imports through synchronized public dist aliases', async () => {
     expect(JSON.parse(read('website/package.json'))).toEqual({ private: true });
 
