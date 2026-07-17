@@ -11,6 +11,7 @@
     "docusaurus.config.ts",
     "plugins/**/*.cjs",
     "plugins/**/*.ts",
+    "sidebar-structure.ts",
     "sidebars.ts",
     "src/**/*.ts",
     "src/**/*.tsx"

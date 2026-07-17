@@ -1,4 +1,12 @@
-import { existsSync, readFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmdirSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -6,6 +14,17 @@ import { describe, expect, it } from 'vitest';
 const root = process.cwd();
 const read = (path: string) => readFileSync(join(root, path), 'utf8');
 const configUrl = pathToFileURL(join(root, 'website/docusaurus.config.ts')).href;
+const sidebarsUrl = pathToFileURL(join(root, 'website/sidebars.ts')).href;
+const sidebarStructureUrl = pathToFileURL(join(root, 'website/sidebar-structure.ts')).href;
+
+const publishedPackagePaths = new Set([
+  'tego-sheet',
+  'tego-sheet/styles.css',
+  'tego-sheet/locales/en',
+  'tego-sheet/locales/zh-cn',
+  'tego-sheet/locales/de',
+  'tego-sheet/locales/nl',
+]);
 
 const manualDocumentation = [
   ['website/docs/getting-started/quick-start.mdx', ['TegoSheet', 'WorkbookData']],
@@ -21,6 +40,39 @@ const manualDocumentation = [
   ['website/docs/guides/printing.md', ['TegoSheetHandle']],
   ['website/docs/migration/from-x-data-spreadsheet.md', ['TegoSheet', 'TegoSheetHandle']],
 ] as const;
+
+const approvedHandWrittenDocumentation = [
+  'website/docs/getting-started/installation.md',
+  ...manualDocumentation.map(([path]) => path),
+].sort();
+
+const collectHandWrittenDocumentation = (directory = 'website/docs'): string[] =>
+  readdirSync(join(root, directory), { withFileTypes: true })
+    .flatMap((entry) => {
+      const path = `${directory}/${entry.name}`;
+      if (entry.isDirectory())
+        return path === 'website/docs/api' ? [] : collectHandWrittenDocumentation(path);
+      return entry.isFile() && /\.mdx?$/.test(entry.name) ? [path] : [];
+    })
+    .sort();
+
+const moduleSpecifiers = (content: string): string[] => {
+  const staticModules = [
+    ...content.matchAll(/\b(?:import|export)\s+(?:type\s+)?(?:[^;]*?\s+from\s+)?['"]([^'"]+)['"]/g),
+  ].map((match) => match[1]);
+  const runtimeModules = [
+    ...content.matchAll(/\b(?:import|require)\s*\(\s*['"]([^'"]+)['"]\s*\)/g),
+  ].map((match) => match[1]);
+
+  return [...staticModules, ...runtimeModules];
+};
+
+const unsupportedDocumentationModules = (content: string): string[] =>
+  moduleSpecifiers(content).filter(
+    (specifier) =>
+      (specifier.startsWith('tego-sheet') && !publishedPackagePaths.has(specifier)) ||
+      /(?:^|\/)(?:src|core|controller|engine|private)(?:\/|$)/.test(specifier),
+  );
 
 interface DocumentationConfig {
   baseUrl?: unknown;
@@ -147,6 +199,7 @@ describe('documentation site contract', () => {
       .filter((path) => !existsSync(join(root, path)));
 
     expect(missingPages).toEqual([]);
+    expect(collectHandWrittenDocumentation()).toEqual(approvedHandWrittenDocumentation);
 
     for (const [path, publicIdentifiers] of manualDocumentation) {
       const content = read(path);
@@ -156,41 +209,98 @@ describe('documentation site contract', () => {
       for (const identifier of publicIdentifiers) {
         expect(content, `${path} must reference public API ${identifier}`).toContain(identifier);
       }
-      const packageImports = [
-        ...content.matchAll(/(?:from\s+|import\s+)['"](tego-sheet[^'"]*)['"]/g),
-      ].map((match) => match[1]);
-      expect(packageImports, `${path} must use only published package paths`).toEqual(
-        packageImports.filter((specifier) =>
-          [
-            'tego-sheet',
-            'tego-sheet/styles.css',
-            'tego-sheet/locales/en',
-            'tego-sheet/locales/zh-cn',
-            'tego-sheet/locales/de',
-            'tego-sheet/locales/nl',
-          ].includes(specifier),
-        ),
-      );
-      expect(content, `${path} must not import source or private modules`).not.toMatch(
-        /from\s+['"][^'"]*(?:\bsrc\/|\bcore\/|\bcontroller\b|\bengine\/|\breact\/)[^'"]*['"]|import\s+['"][^'"]*(?:\bsrc\/|\bcore\/|\bcontroller\b|\bengine\/|\breact\/)[^'"]*['"]/,
-      );
+      expect(
+        unsupportedDocumentationModules(content),
+        `${path} must use only published modules`,
+      ).toEqual([]);
     }
   });
 
-  it('orders all documentation categories explicitly with generated API reference last', () => {
-    const sidebar = read('website/sidebars.ts');
-    const labels = [...sidebar.matchAll(/label: '([^']+)'/g)].map((match) => match[1]);
+  it.each([
+    ["import('../../src/core')", '../../src/core'],
+    ["require('tego-sheet/controller/private')", 'tego-sheet/controller/private'],
+    ["export { Workbook } from 'tego-sheet/core'", 'tego-sheet/core'],
+  ])('rejects private module loading in documentation: %s', (source, expected) => {
+    expect(unsupportedDocumentationModules(source)).toEqual([expected]);
+  });
 
-    expect(labels).toEqual([
-      'Getting Started',
-      'Core Concepts',
-      'Guides',
-      'Migration',
-      'API Reference',
-    ]);
-    expect(sidebar).toContain("require('./docs/api/typedoc-sidebar.cjs')");
-    expect(sidebar).toContain("link: { type: 'doc', id: 'api/index' }");
-    expect(sidebar).toContain('items: typedocSidebar');
+  it('defines the complete sidebar structure from explicit document IDs', async () => {
+    const apiDirectory = join(root, 'website/docs/api');
+    const typedocSidebarPath = join(apiDirectory, 'typedoc-sidebar.cjs');
+    const apiDirectoryExisted = existsSync(apiDirectory);
+    const previousTypedocSidebar = existsSync(typedocSidebarPath)
+      ? readFileSync(typedocSidebarPath, 'utf8')
+      : null;
+    const typedocSidebar = [{ type: 'doc', id: 'api/generated-entry' }];
+    mkdirSync(apiDirectory, { recursive: true });
+    writeFileSync(typedocSidebarPath, `module.exports = ${JSON.stringify(typedocSidebar)};\n`);
+
+    let sidebars: unknown;
+    try {
+      const sidebarsModule = (await import(sidebarsUrl)) as { default: unknown };
+      sidebars = sidebarsModule.default;
+    } finally {
+      if (previousTypedocSidebar === null) unlinkSync(typedocSidebarPath);
+      else writeFileSync(typedocSidebarPath, previousTypedocSidebar);
+      if (!apiDirectoryExisted && readdirSync(apiDirectory).length === 0) rmdirSync(apiDirectory);
+    }
+
+    const { createDocumentationSidebars } = (await import(sidebarStructureUrl)) as {
+      createDocumentationSidebars: (typedocSidebar: readonly unknown[]) => unknown;
+    };
+
+    expect(sidebars).toEqual({
+      docsSidebar: [
+        {
+          type: 'category',
+          label: 'Getting Started',
+          items: [
+            'getting-started/installation',
+            'getting-started/quick-start',
+            'getting-started/styling-and-sizing',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'Core Concepts',
+          items: [
+            'concepts/controlled-and-uncontrolled',
+            'concepts/workbook-data',
+            'concepts/refs-and-commands',
+            'concepts/callbacks-and-errors',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'Guides',
+          items: [
+            'guides/custom-chrome',
+            'guides/locales',
+            'guides/validation-and-filtering',
+            'guides/frozen-panes-and-layout',
+            'guides/printing',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'Migration',
+          items: ['migration/from-x-data-spreadsheet'],
+        },
+        {
+          type: 'category',
+          label: 'API Reference',
+          link: { type: 'doc', id: 'api/index' },
+          items: typedocSidebar,
+        },
+      ],
+    });
+    const builderSidebars = createDocumentationSidebars(typedocSidebar) as {
+      docsSidebar: { items: unknown }[];
+    };
+    expect(builderSidebars.docsSidebar.at(-1)?.items).toBe(typedocSidebar);
+    expect((sidebars as { docsSidebar: { items: unknown }[] }).docsSidebar.at(-1)?.items).toEqual(
+      typedocSidebar,
+    );
   });
 
   it('disables the classic preset blog structurally', async () => {
