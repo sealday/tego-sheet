@@ -13,7 +13,7 @@ export type BorderLine = readonly [style: string, color?: string];
 /**
  * Font overrides stored in a cell style.
  *
- * @useDeclaredType
+ * @interface
  */
 export type FontStyle = JsonExtensible<{
   /** Font family name. */
@@ -29,7 +29,7 @@ export type FontStyle = JsonExtensible<{
 /**
  * Border lines applied to the four sides of a cell.
  *
- * @useDeclaredType
+ * @interface
  */
 export type CellBorders = JsonExtensible<{
   /** Top border line. */
@@ -45,7 +45,7 @@ export type CellBorders = JsonExtensible<{
 /**
  * Serializable visual formatting for a cell, row, or column.
  *
- * @useDeclaredType
+ * @interface
  */
 export type CellStyle = JsonExtensible<{
   /** Display format identifier, such as a number or date format. */
@@ -73,10 +73,10 @@ export type CellStyle = JsonExtensible<{
 /**
  * Serializable contents and metadata for one cell.
  *
- * @useDeclaredType
+ * @interface
  */
 export type CellData = JsonExtensible<{
-  /** Displayed and editable text, including a leading `=` for formulas. */
+  /** Editable source text; formulas retain their leading `=` rather than a rendered value. */
   readonly text?: string;
   /** Zero-based index into the containing sheet's `styles` array. */
   readonly style?: number;
@@ -84,9 +84,9 @@ export type CellData = JsonExtensible<{
   readonly merge?: readonly [rowSpan: number, columnSpan: number];
   /** Whether users may edit this cell when the sheet is otherwise writable. */
   readonly editable?: boolean;
-  /** Whether this cell is included in printed output. */
+  /** Whether printed content is visible; `false` preserves style and merged-cell geometry. */
   readonly printable?: boolean;
-  /** Optional JSON-compatible application metadata. */
+  /** Optional cached value that may be invalidated when the cell is edited. */
   readonly value?: JsonValue;
 }>;
 
@@ -94,14 +94,14 @@ export type CellData = JsonExtensible<{
  * Sparse cell data keyed by zero-based decimal column indexes.
  * Omitted columns are empty cells.
  *
- * @useDeclaredType
+ * @interface
  */
 export type CellsData = SparseJsonCollection;
 
 /**
  * Serializable properties for one row in a sparse row collection.
  *
- * @useDeclaredType
+ * @interface
  */
 export type RowData = JsonExtensible<{
   /** Row height in CSS pixels. */
@@ -118,7 +118,7 @@ export type RowData = JsonExtensible<{
  * Sparse row data keyed by zero-based decimal row indexes.
  * Omitted rows retain their default dimensions and contain no cells.
  *
- * @useDeclaredType
+ * @interface
  */
 export type RowsData = SparseJsonCollection<{
   /** Logical row count, including rows omitted from the sparse object. */
@@ -128,7 +128,7 @@ export type RowsData = SparseJsonCollection<{
 /**
  * Serializable properties for one column in a sparse column collection.
  *
- * @useDeclaredType
+ * @interface
  */
 export type ColumnData = JsonExtensible<{
   /** Column width in CSS pixels. */
@@ -142,7 +142,7 @@ export type ColumnData = JsonExtensible<{
 /**
  * Sparse column data keyed by zero-based decimal column indexes.
  *
- * @useDeclaredType
+ * @interface
  */
 export type ColsData = SparseJsonCollection<{
   /** Logical column count, including columns omitted from the sparse object. */
@@ -152,7 +152,7 @@ export type ColsData = SparseJsonCollection<{
 /**
  * Serialized validation rule and its target A1 references.
  *
- * @useDeclaredType
+ * @interface
  */
 export type ValidationData = JsonExtensible<{
   /** A1 cells or ranges to which the rule applies. */
@@ -172,10 +172,10 @@ export type ValidationData = JsonExtensible<{
 /**
  * Serialized filter for a single column within an auto-filter range.
  *
- * @useDeclaredType
+ * @interface
  */
 export type AutoFilterItemData = JsonExtensible<{
-  /** Zero-based column offset within the auto-filter range. */
+  /** Absolute zero-based column index in the worksheet. */
   readonly ci?: number;
   /** Whether all values or only listed values remain visible. */
   readonly operator?: 'all' | 'in';
@@ -186,10 +186,10 @@ export type AutoFilterItemData = JsonExtensible<{
 /**
  * Serialized sort applied within an auto-filter range.
  *
- * @useDeclaredType
+ * @interface
  */
 export type AutoFilterSortData = JsonExtensible<{
-  /** Zero-based column offset within the auto-filter range. */
+  /** Absolute zero-based column index in the worksheet. */
   readonly ci?: number;
   /** Sort direction. */
   readonly order?: 'asc' | 'desc';
@@ -198,7 +198,7 @@ export type AutoFilterSortData = JsonExtensible<{
 /**
  * Serialized filter range, column filters, and optional sort state.
  *
- * @useDeclaredType
+ * @interface
  */
 export type AutoFilterData = JsonExtensible<{
   /** A1 range containing the filter header and data rows. */
@@ -213,7 +213,7 @@ export type AutoFilterData = JsonExtensible<{
  * JSON-compatible representation of one worksheet.
  * Rows, columns, and cells use sparse objects with zero-based decimal keys.
  *
- * @useDeclaredType
+ * @interface
  */
 export type SheetData = JsonExtensible<{
   /** Display name shown on the sheet tab. */
@@ -222,7 +222,7 @@ export type SheetData = JsonExtensible<{
   readonly freeze?: string;
   /** Style table referenced by zero-based style indexes. */
   readonly styles?: readonly CellStyle[];
-  /** Normalized A1 ranges for merged cells. */
+  /** A1 merge ranges with canonical casing; reversed endpoint order is preserved. */
   readonly merges?: readonly string[];
   /** Sparse row data and logical row count. */
   readonly rows?: RowsData;

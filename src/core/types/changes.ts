@@ -66,7 +66,10 @@ export interface PasteEvent {
   readonly values: readonly (readonly string[])[];
 }
 
-/** Details emitted after a different worksheet becomes active. */
+/**
+ * Details emitted when worksheet activation is requested.
+ * Imperative ref activation emits even when the requested worksheet is already active.
+ */
 export interface ActiveSheetChangeEvent {
   /** Newly active worksheet. */
   readonly sheet: SheetId;

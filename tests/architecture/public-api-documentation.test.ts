@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import ts from 'typescript';
+import { Application, normalizePath, TSConfigReader } from 'typedoc';
 import { describe, expect, it } from 'vitest';
 
 const root = process.cwd();
@@ -62,6 +63,23 @@ const expectedPublicExports = [
   'WorkbookData',
   'WorkbookInput',
 ] as const;
+
+const structuredAliases = {
+  AutoFilterData: 'ref',
+  AutoFilterItemData: 'ci',
+  AutoFilterSortData: 'ci',
+  CellBorders: 'top',
+  CellData: 'text',
+  CellStyle: 'format',
+  CellsData: null,
+  ColsData: 'len',
+  ColumnData: 'width',
+  FontStyle: 'name',
+  RowData: 'cells',
+  RowsData: 'len',
+  SheetData: 'rows',
+  ValidationData: 'refs',
+} as const;
 
 interface PublicDeclaration {
   readonly name: string;
@@ -145,6 +163,37 @@ const publicDeclarations = (
   return declarations;
 };
 
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null;
+
+const findNested = (
+  value: unknown,
+  predicate: (record: Readonly<Record<string, unknown>>) => boolean,
+): Readonly<Record<string, unknown>> | undefined => {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findNested(item, predicate);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  if (!isRecord(value)) return undefined;
+  if (predicate(value)) return value;
+  for (const item of Object.values(value)) {
+    const found = findNested(item, predicate);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+};
+
+const hasSummary = (reflection: Readonly<Record<string, unknown>>): boolean => {
+  const comment = reflection.comment;
+  if (!isRecord(comment) || !Array.isArray(comment.summary)) return false;
+  return comment.summary.some(
+    (part) => isRecord(part) && typeof part.text === 'string' && part.text.trim() !== '',
+  );
+};
+
 describe('public API documentation', () => {
   it('documents the exact root export surface and its public members', () => {
     const program = createPublicProgram();
@@ -167,4 +216,54 @@ describe('public API documentation', () => {
 
     expect(undocumented).toEqual([]);
   });
+
+  it('converts structured aliases into documented TypeDoc members instead of self references', async () => {
+    const app = await Application.bootstrap(
+      {
+        entryPoints: ['src/index.ts'],
+        excludeInternal: true,
+        excludePrivate: true,
+        excludeProtected: true,
+        readme: 'none',
+        skipErrorChecking: true,
+        tsconfig: 'tsconfig.json',
+      },
+      [new TSConfigReader()],
+    );
+    const project = await app.convert();
+    if (project === undefined) throw new Error('TypeDoc must convert the public entry point');
+    const serialized = app.serializer.projectToObject(project, normalizePath(root));
+    const aliases = new Map(
+      (serialized.children ?? [])
+        .filter((child) => Object.hasOwn(structuredAliases, child.name))
+        .map((child) => [child.name, child]),
+    );
+
+    expect([...aliases.keys()].sort()).toEqual(Object.keys(structuredAliases).sort());
+
+    const selfReferences: string[] = [];
+    const missingDocumentedMembers: string[] = [];
+    for (const [name, member] of Object.entries(structuredAliases)) {
+      const reflection = aliases.get(name);
+      if (reflection?.type?.type === 'reference' && reflection.type.name === name) {
+        selfReferences.push(name);
+      }
+      if (member === null) {
+        const indexSignature = findNested(
+          reflection,
+          (value) => Array.isArray(value.indexSignatures) && value.indexSignatures.length > 0,
+        );
+        if (indexSignature === undefined) missingDocumentedMembers.push(`${name}.[key]`);
+        continue;
+      }
+      const documentedMember = findNested(
+        reflection,
+        (value) => value.variant === 'declaration' && value.name === member && hasSummary(value),
+      );
+      if (documentedMember === undefined) missingDocumentedMembers.push(`${name}.${member}`);
+    }
+
+    expect(selfReferences).toEqual([]);
+    expect(missingDocumentedMembers).toEqual([]);
+  }, 15_000);
 });
