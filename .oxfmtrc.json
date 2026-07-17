@@ -7,6 +7,9 @@
     "tests/parity/fixtures/**",
     "tests/parity/legacy/**",
     "tests/visual/__snapshots__/**",
-    "tests/visual/fonts/**"
+    "tests/visual/fonts/**",
+    "website/docs/api/**",
+    "website/build/**",
+    "website/.docusaurus/**"
   ]
 }

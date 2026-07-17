@@ -41,7 +41,7 @@
       }
     },
     {
-      "files": ["src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}"],
+      "files": ["src/**/*.{ts,tsx}", "website/src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}"],
       "rules": {
         "react/rules-of-hooks": "error",
         "react/exhaustive-deps": "error",
@@ -49,7 +49,7 @@
       }
     },
     {
-      "files": ["src/**/*.tsx"],
+      "files": ["src/**/*.tsx", "website/src/**/*.tsx"],
       "rules": {
         "react/only-export-components": ["error", { "allowConstantExport": true }]
       }

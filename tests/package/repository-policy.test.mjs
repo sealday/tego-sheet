@@ -8,6 +8,7 @@ const repositoryRoot = new URL('../../', import.meta.url);
 const repositoryPath = fileURLToPath(repositoryRoot);
 const normalizeNewlines = (value) => value.replace(/\r\n?/g, '\n');
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const sorted = (values) => [...values].sort();
 const actionPins = Object.freeze({
   'actions/checkout': {
     sha: 'df4cb1c069e1874edd31b4311f1884172cec0e10',
@@ -21,6 +22,17 @@ const actionPins = Object.freeze({
     sha: '330a01c490aca151604b8cf639adc76d48f6c5d4',
     version: 'v5',
   },
+});
+const documentationDevDependencyPins = Object.freeze({
+  '@docusaurus/core': '3.10.2',
+  '@docusaurus/preset-classic': '3.10.2',
+  '@docusaurus/tsconfig': '3.10.2',
+  '@docusaurus/types': '3.10.2',
+  '@mdx-js/react': '3.1.1',
+  'docusaurus-plugin-typedoc': '1.4.2',
+  'prism-react-renderer': '2.4.1',
+  typedoc: '0.28.20',
+  'typedoc-plugin-markdown': '4.12.0',
 });
 
 function readRepositoryFile(path) {
@@ -188,9 +200,14 @@ test('package metadata pins the repository toolchain and supported runtimes', ()
 
   assert.deepEqual(
     Object.fromEntries(
-      ['oxlint', 'oxfmt', 'husky', '@commitlint/cli', '@commitlint/config-conventional'].map(
-        (name) => [name, packageJson.devDependencies[name]],
-      ),
+      [
+        'oxlint',
+        'oxfmt',
+        'husky',
+        '@commitlint/cli',
+        '@commitlint/config-conventional',
+        ...Object.keys(documentationDevDependencyPins),
+      ].map((name) => [name, packageJson.devDependencies[name]]),
     ),
     {
       oxlint: '1.74.0',
@@ -198,10 +215,55 @@ test('package metadata pins the repository toolchain and supported runtimes', ()
       husky: '9.1.7',
       '@commitlint/cli': '20.5.3',
       '@commitlint/config-conventional': '20.5.3',
+      ...documentationDevDependencyPins,
     },
   );
   assert.equal(packageJson.packageManager, 'npm@11.13.0');
   assert.equal(packageJson.engines?.node, '>=20.19.0');
+});
+
+test('package lock root metadata pins the documentation toolchain', () => {
+  const packageLock = readJson('package-lock.json');
+  const rootDevDependencies = packageLock.packages?.['']?.devDependencies;
+
+  assert.ok(rootDevDependencies, 'package-lock.json must define root devDependencies');
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.keys(documentationDevDependencyPins).map((name) => [name, rootDevDependencies[name]]),
+    ),
+    documentationDevDependencyPins,
+  );
+});
+
+test('package lock resolved entries pin the documentation toolchain', () => {
+  const packageLock = readJson('package-lock.json');
+
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.keys(documentationDevDependencyPins).map((name) => [
+        name,
+        packageLock.packages?.[`node_modules/${name}`]?.version,
+      ]),
+    ),
+    documentationDevDependencyPins,
+  );
+});
+
+test('documentation site does not define nested package metadata', () => {
+  const nestedPackageFiles = ['website/package.json', 'website/package-lock.json'].filter((path) =>
+    existsSync(new URL(path, repositoryRoot)),
+  );
+
+  assert.deepEqual(nestedPackageFiles, [], 'website must use the root package and lockfile');
+});
+
+test('package lock contains only the root project and installed packages', () => {
+  const packageLock = readJson('package-lock.json');
+  const extraPackageRoots = Object.keys(packageLock.packages ?? {}).filter(
+    (path) => path !== '' && !path.startsWith('node_modules/'),
+  );
+
+  assert.deepEqual(extraPackageRoots, [], 'package-lock.json must not define nested package roots');
 });
 
 test('legacy direct ESLint dependencies are removed', () => {
@@ -240,6 +302,19 @@ test('package scripts expose the Oxlint, Oxfmt, and Husky commands', () => {
       prepare: 'husky',
     },
   );
+
+  assert.equal(scripts['docs:start'], 'npm run build && docusaurus start website');
+  assert.equal(scripts['docs:build'], 'npm run build && docusaurus build website');
+  assert.equal(scripts['docs:serve'], 'docusaurus serve website');
+  assert.equal(
+    scripts['typecheck:docs'],
+    'npm run build && tsc --noEmit --project website/tsconfig.json',
+  );
+  assert.equal(scripts['test:docs'], 'playwright test --config playwright.docs.config.ts');
+  assert.equal(
+    scripts['test:docs-visual'],
+    'playwright test --config playwright.docs-visual.config.ts',
+  );
 });
 
 test('Oxlint enables the required plugins and React correctness rules', () => {
@@ -252,7 +327,7 @@ test('Oxlint enables the required plugins and React correctness rules', () => {
     override.files?.includes('**/*.{js,mjs,cjs}'),
   );
   assert.ok(jsOverride, 'JavaScript override must exist');
-  assert.deepEqual(jsOverride.files, ['**/*.{js,mjs,cjs}']);
+  assert.deepEqual(sorted(jsOverride.files), sorted(['**/*.{js,mjs,cjs}']));
   assert.equal(jsOverride.env.node, true);
   for (const rule of [
     'no-case-declarations',
@@ -272,7 +347,7 @@ test('Oxlint enables the required plugins and React correctness rules', () => {
     override.files?.includes('**/*.{ts,tsx}'),
   );
   assert.ok(tsOverride, 'TypeScript override must exist');
-  assert.deepEqual(tsOverride.files, ['**/*.{ts,tsx}']);
+  assert.deepEqual(sorted(tsOverride.files), sorted(['**/*.{ts,tsx}']));
   for (const rule of [
     'no-var',
     'prefer-const',
@@ -293,7 +368,10 @@ test('Oxlint enables the required plugins and React correctness rules', () => {
     override.files?.includes('src/**/*.{ts,tsx}'),
   );
   assert.ok(reactOverride, 'React Hooks override must exist');
-  assert.deepEqual(reactOverride.files, ['src/**/*.{ts,tsx}', 'tests/**/*.{ts,tsx}']);
+  assert.deepEqual(
+    sorted(reactOverride.files),
+    sorted(['src/**/*.{ts,tsx}', 'website/src/**/*.{ts,tsx}', 'tests/**/*.{ts,tsx}']),
+  );
   assert.equal(reactOverride.rules['react/rules-of-hooks'], 'error');
   assert.equal(reactOverride.rules['react/exhaustive-deps'], 'error');
   assert.equal(reactOverride.rules['react/react-compiler'], 'error');
@@ -302,7 +380,7 @@ test('Oxlint enables the required plugins and React correctness rules', () => {
     override.files?.includes('src/**/*.tsx'),
   );
   assert.ok(refreshOverride, 'React Refresh override must exist');
-  assert.deepEqual(refreshOverride.files, ['src/**/*.tsx']);
+  assert.deepEqual(sorted(refreshOverride.files), sorted(['src/**/*.tsx', 'website/src/**/*.tsx']));
   assert.deepEqual(refreshOverride.rules['react/only-export-components'], [
     'error',
     { allowConstantExport: true },
@@ -314,13 +392,27 @@ test('Oxfmt pins formatting and excludes only generated or parity-owned paths', 
 
   assert.equal(config.singleQuote, true);
   assert.equal(config.printWidth, 100);
-  assert.deepEqual(config.ignorePatterns, [
-    'docs/superpowers/**',
-    'tests/parity/fixtures/**',
-    'tests/parity/legacy/**',
-    'tests/visual/__snapshots__/**',
-    'tests/visual/fonts/**',
-  ]);
+  assert.deepEqual(
+    sorted(config.ignorePatterns),
+    sorted([
+      'docs/superpowers/**',
+      'tests/parity/fixtures/**',
+      'tests/parity/legacy/**',
+      'tests/visual/__snapshots__/**',
+      'tests/visual/fonts/**',
+      'website/docs/api/**',
+      'website/build/**',
+      'website/.docusaurus/**',
+    ]),
+  );
+});
+
+test('generated documentation outputs are ignored', () => {
+  const ignorePatterns = readRepositoryFile('.gitignore').split(/\r?\n/);
+
+  for (const path of ['/website/build/', '/website/.docusaurus/', '/website/docs/api/']) {
+    assert.ok(ignorePatterns.includes(path), `.gitignore must include ${path}`);
+  }
 });
 
 test('commit messages use the unweakened conventional configuration', async () => {
