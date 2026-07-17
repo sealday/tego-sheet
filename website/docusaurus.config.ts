@@ -1,9 +1,28 @@
+import { resolve } from 'node:path';
 import type { Options, ThemeConfig } from '@docusaurus/preset-classic';
 import type { Config } from '@docusaurus/types';
 import type { PluginOptions as DocusaurusTypeDocOptions } from 'docusaurus-plugin-typedoc';
 import { themes as prismThemes } from 'prism-react-renderer';
 import type { TypeDocOptions } from 'typedoc';
 import strictTypeDocGenerationPlugin from './plugins/strict-typedoc-generation';
+
+const PUBLIC_PACKAGE_RUNTIME_ALIASES = Object.freeze({
+  'tego-sheet$': resolve(process.cwd(), 'dist/tego-sheet.js'),
+  'tego-sheet/styles.css$': resolve(process.cwd(), 'dist/styles.css'),
+  'tego-sheet/locales/en$': resolve(process.cwd(), 'dist/locales/en.js'),
+  'tego-sheet/locales/zh-cn$': resolve(process.cwd(), 'dist/locales/zh-cn.js'),
+  'tego-sheet/locales/de$': resolve(process.cwd(), 'dist/locales/de.js'),
+  'tego-sheet/locales/nl$': resolve(process.cwd(), 'dist/locales/nl.js'),
+});
+
+function publicPackageExportsPlugin() {
+  return {
+    name: 'public-package-exports',
+    configureWebpack() {
+      return { resolve: { alias: PUBLIC_PACKAGE_RUNTIME_ALIASES } };
+    },
+  };
+}
 
 const typedocOptions = {
   entryPoints: ['src/index.ts'],
@@ -69,7 +88,7 @@ const config: Config = {
       } satisfies Options,
     ],
   ],
-  plugins: [[strictTypeDocGenerationPlugin, typedocOptions]],
+  plugins: [[strictTypeDocGenerationPlugin, typedocOptions], publicPackageExportsPlugin],
   themeConfig: {
     navbar: {
       title: 'tego-sheet',

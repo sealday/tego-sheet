@@ -580,6 +580,58 @@ describe('documentation site contract', () => {
     expect(ignore).toContain('/website/.docusaurus/');
   });
 
+  it('resolves site imports through synchronized public dist aliases', async () => {
+    expect(JSON.parse(read('website/package.json'))).toEqual({ private: true });
+
+    const expectedTypePaths = {
+      'tego-sheet': ['../dist/index.d.ts'],
+      'tego-sheet/styles.css': ['../dist/styles.css'],
+      'tego-sheet/locales/en': ['../dist/locales/en.d.ts'],
+      'tego-sheet/locales/zh-cn': ['../dist/locales/zh-cn.d.ts'],
+      'tego-sheet/locales/de': ['../dist/locales/de.d.ts'],
+      'tego-sheet/locales/nl': ['../dist/locales/nl.d.ts'],
+    };
+    const expectedRuntimeAliases = Object.fromEntries(
+      [
+        ['tego-sheet$', 'dist/tego-sheet.js'],
+        ['tego-sheet/styles.css$', 'dist/styles.css'],
+        ['tego-sheet/locales/en$', 'dist/locales/en.js'],
+        ['tego-sheet/locales/zh-cn$', 'dist/locales/zh-cn.js'],
+        ['tego-sheet/locales/de$', 'dist/locales/de.js'],
+        ['tego-sheet/locales/nl$', 'dist/locales/nl.js'],
+      ].map(([specifier, target]) => [specifier, join(root, target)]),
+    );
+    const docsTypeScript = JSON.parse(read('website/tsconfig.json')) as {
+      compilerOptions?: { paths?: unknown };
+    };
+    const configModule = (await import(configUrl)) as {
+      default: DocumentationConfig;
+    };
+    const aliasPlugin = configModule.default.plugins?.find(
+      (
+        plugin,
+      ): plugin is () => {
+        configureWebpack: () => { resolve: { alias: unknown } };
+      } => typeof plugin === 'function' && plugin.name === 'publicPackageExportsPlugin',
+    );
+
+    expect(docsTypeScript.compilerOptions?.paths).toEqual({
+      '@site/*': ['./*'],
+      ...expectedTypePaths,
+    });
+    expect(aliasPlugin).toBeDefined();
+    expect(aliasPlugin?.().configureWebpack().resolve.alias).toEqual(expectedRuntimeAliases);
+    expect(Object.keys(expectedTypePaths)).toEqual([...publishedPackagePaths]);
+    expect(
+      Object.values(expectedTypePaths)
+        .flat()
+        .some((target) => target.includes('/src/')),
+    ).toBe(false);
+    expect(
+      Object.values(expectedRuntimeAliases).some((target) => (target as string).includes('/src/')),
+    ).toBe(false);
+  });
+
   it('typechecks the CommonJS TypeDoc runtime bridge as checked JavaScript', () => {
     const docsTypeScript = JSON.parse(read('website/tsconfig.json')) as {
       compilerOptions?: { allowJs?: unknown; checkJs?: unknown };
