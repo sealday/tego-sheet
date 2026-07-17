@@ -121,6 +121,12 @@ Existing sparse sheet, row, column, cell, style, merge, validation, filter, and 
 
 See [Migration from x-data-spreadsheet](docs/migration-from-x-data-spreadsheet.md) for option mappings, the five intentional correctness fixes, and removal of the old imperative API.
 
+## Documentation
+
+- [Documentation](https://sealday.github.io/tego-sheet/docs/getting-started/installation)
+- [API Reference](https://sealday.github.io/tego-sheet/docs/api)
+- [Playground](https://sealday.github.io/tego-sheet/playground)
+
 ## Ownership and upstream attribution
 
 Tego Sheet is maintained by [sealday](https://github.com/sealday). Its React API, TypeScript architecture, component lifecycle, and the modifications in this repository are owned by sealday under the MIT License.
