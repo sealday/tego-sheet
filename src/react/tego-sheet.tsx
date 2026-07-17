@@ -1071,6 +1071,21 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
 
 const ForwardedRuntime = forwardRef(Runtime);
 
+/**
+ * Renders an interactive spreadsheet with controlled or uncontrolled workbook ownership.
+ * Use a {@link TegoSheetHandle} ref for cell, sheet, validation, print, and layout operations.
+ *
+ * @example
+ * ```tsx
+ * import { useState } from 'react';
+ * import { TegoSheet, type WorkbookData } from 'tego-sheet';
+ *
+ * function BudgetSheet() {
+ *   const [value, setValue] = useState<WorkbookData>([{ name: 'Budget' }]);
+ *   return <TegoSheet value={value} onChange={(next) => setValue(next)} />;
+ * }
+ * ```
+ */
 export const TegoSheet = forwardRef<TegoSheetHandle, TegoSheetProps>(
   function TegoSheet(props, ref) {
     const mountOptions = useMountOptionWarnings(props.initialActiveSheetIndex, props.options);

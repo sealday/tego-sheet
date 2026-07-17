@@ -1,3 +1,8 @@
+/**
+ * React component, imperative handle, and serializable public contracts for `tego-sheet`.
+ *
+ * @packageDocumentation
+ */
 import './ui/styles/index.less';
 
 export type {

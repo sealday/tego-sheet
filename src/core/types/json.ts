@@ -1,23 +1,30 @@
+/** @inline */
 export type JsonPrimitive = string | number | boolean | null;
 
+/** @inline */
 export type JsonArray = readonly JsonValue[];
 
+/** @inline */
 export interface JsonObject {
+  /** A JSON property whose value is itself JSON-compatible. */
   readonly [key: string]: JsonValue;
 }
 
+/** A value that can be represented losslessly in JSON. */
 export type JsonValue = JsonPrimitive | JsonArray | JsonObject;
 
 /**
- * Adds direct JSON-compatible extension keys without changing the serialized shape.
- * Known properties retain their precise types while unrecognized properties remain JSON-safe.
+ * Preserves known property types while allowing additional JSON-compatible keys.
+ *
+ * @inline
  */
 export type JsonExtensible<Known extends object> = Readonly<Known> & JsonObject;
 
 /**
- * Serialized sparse collections remain JSON extension bags at the declaration boundary.
- * Arbitrary index reads are therefore JsonValue | undefined; Task 5 parsing validates and
- * narrows non-negative decimal entries before core code treats them as Item.
+ * Represents a JSON object whose decimal keys form a sparse collection.
+ * Missing indexes read as `undefined` and are omitted when serialized.
+ *
+ * @inline
  */
 export type SparseJsonCollection<Known extends object = object> = Readonly<Known> & {
   readonly [key: string]: JsonValue | undefined;

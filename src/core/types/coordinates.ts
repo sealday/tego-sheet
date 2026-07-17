@@ -1,24 +1,40 @@
 declare const sheetIdBrand: unique symbol;
 
-export type SheetId = string & { readonly [sheetIdBrand]: true };
+/** Opaque identifier assigned to a worksheet and returned through the public API. */
+export type SheetId = string & {
+  /** Prevents an arbitrary string from being used as a sheet identifier. */
+  readonly [sheetIdBrand]: true;
+};
 
+/** A zero-based row and column coordinate within a sheet. */
 export interface CellPoint {
+  /** Zero-based row index. */
   readonly row: number;
+  /** Zero-based column index. */
   readonly column: number;
 }
 
+/** A zero-based cell coordinate paired with its worksheet identifier. */
 export interface CellAddress extends CellPoint {
+  /** Worksheet containing the cell. */
   readonly sheet: SheetId;
 }
 
+/** An inclusive rectangular range normalized from top-left to bottom-right. */
 export interface CellRange {
+  /** Zero-based top-left corner, included in the range. */
   readonly start: CellPoint;
+  /** Zero-based bottom-right corner, included in the range. */
   readonly end: CellPoint;
 }
 
+/** Current worksheet selection and its active cell. */
 export interface Selection {
+  /** Worksheet containing the selection. */
   readonly sheet: SheetId;
+  /** Inclusive selected range. */
   readonly range: CellRange;
+  /** Focused cell within `range`, used as the action anchor. */
   readonly active: CellPoint;
 }
 
