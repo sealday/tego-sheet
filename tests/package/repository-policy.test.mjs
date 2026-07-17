@@ -22,6 +22,18 @@ const actionPins = Object.freeze({
     sha: '330a01c490aca151604b8cf639adc76d48f6c5d4',
     version: 'v5',
   },
+  'actions/configure-pages': {
+    sha: '983d7736d9b0ae728b81ab479565c72886d7745b',
+    version: 'v5',
+  },
+  'actions/upload-pages-artifact': {
+    sha: '7b1f4a764d45c48632c6b24a0339c27f5614fb0b',
+    version: 'v4',
+  },
+  'actions/deploy-pages': {
+    sha: 'd6db90164ac5ed86f2b6aed7e0febac5b3c0c03e',
+    version: 'v4',
+  },
 });
 const documentationDevDependencyPins = Object.freeze({
   '@docusaurus/core': '3.10.2',
@@ -159,9 +171,19 @@ function assertJobSetup(job, nodeVersion, runner = 'ubuntu-latest') {
   assertRunCommand(job, 'npm ci');
 }
 
-function assertArtifactUpload(job, name, paths, retentionDays) {
-  const upload = actionStep(job, 'actions/upload-artifact');
-  assert.equal(stepField(upload, 'if')?.value, '${{ !cancelled() }}');
+function assertArtifactUpload(job, name, paths, retentionDays, condition = '${{ !cancelled() }}') {
+  const uploadArtifactPin = actionPins['actions/upload-artifact'];
+  const upload = workflowSteps(job).find((step) => {
+    if (
+      stepField(step, 'uses')?.value !==
+      `actions/upload-artifact@${uploadArtifactPin.sha} # ${uploadArtifactPin.version}`
+    )
+      return false;
+    const withBlock = yamlBlock(step, 'with', 8);
+    return unquote(yamlScalar(withBlock, 'name', 10)) === name;
+  });
+  assert.ok(upload, `job must upload the ${name} artifact`);
+  assert.equal(stepField(upload, 'if')?.value, condition);
   const inputs = actionInputs(upload);
   assert.equal(unquote(yamlScalar(inputs, 'name', 10)), name);
   assertActionInput(upload, 'if-no-files-found', 'ignore');
@@ -178,6 +200,17 @@ function assertArtifactUpload(job, name, paths, retentionDays) {
   for (const path of paths) {
     assert.ok(pathValues.includes(path), `artifact path input must include ${path}`);
   }
+  return upload;
+}
+
+function yamlList(source, key, indent) {
+  const block = yamlBlock(source, key, indent);
+  return block
+    .split('\n')
+    .slice(1)
+    .map((line) => line.match(new RegExp(`^ {${indent + 2}}-\\s*(\\S.*?)\\s*$`))?.[1])
+    .filter(Boolean)
+    .map(unquote);
 }
 
 function configBlock(config, name, closingToken) {
@@ -562,6 +595,7 @@ test('CI covers policy, quality, package, browser, visual, and release lanes', (
 
   const permissions = yamlBlock(workflow, 'permissions', 0);
   assert.equal(unquote(yamlScalar(permissions, 'contents', 2)), 'read');
+  assert.equal(permissions.trim(), 'permissions:\n  contents: read');
   const concurrency = yamlBlock(workflow, 'concurrency', 0);
   assert.equal(unquote(yamlScalar(concurrency, 'cancel-in-progress', 2)), 'true');
 
@@ -570,6 +604,8 @@ test('CI covers policy, quality, package, browser, visual, and release lanes', (
   assert.deepEqual(jobs.toSorted(), [
     'browser',
     'commit-policy',
+    'deploy-pages',
+    'docs-site',
     'package-contract',
     'parity-release',
     'quality',
@@ -584,6 +620,8 @@ test('CI covers policy, quality, package, browser, visual, and release lanes', (
   const browser = jobBlock(jobsSection, 'browser');
   const visual = jobBlock(jobsSection, 'visual');
   const parityRelease = jobBlock(jobsSection, 'parity-release');
+  const docsSite = jobBlock(jobsSection, 'docs-site');
+  const deployPages = jobBlock(jobsSection, 'deploy-pages');
 
   assert.match(
     yamlScalar(commitPolicy, 'if', 4),
@@ -682,11 +720,19 @@ test('CI covers policy, quality, package, browser, visual, and release lanes', (
     'visual must install Chromium on the snapshot baseline platform',
   );
   assertRunCommand(visual, 'npm run test:visual');
+  assertRunCommand(visual, 'npm run test:docs-visual');
   assertArtifactUpload(
     visual,
     'visual-report',
     ['playwright-report/visual', 'test-results/playwright-visual'],
     7,
+  );
+  assertArtifactUpload(
+    visual,
+    'docs-visual-report',
+    ['playwright-report/docs-visual', 'test-results/playwright-docs-visual'],
+    7,
+    '${{ failure() }}',
   );
 
   assert.equal(
@@ -714,6 +760,88 @@ test('CI covers policy, quality, package, browser, visual, and release lanes', (
     ],
     30,
   );
+
+  assert.doesNotMatch(docsSite, /^ {4}if:/m, 'docs-site must run for pull requests');
+  const docsPermissions = yamlBlock(docsSite, 'permissions', 4);
+  assert.equal(docsPermissions.trim(), 'permissions:\n      contents: read\n      pages: read');
+  assertJobSetup(docsSite, '20');
+  assertRunPattern(
+    docsSite,
+    /^(?:npm exec -- |npx(?: --no --)? )playwright install --with-deps chromium$/,
+    'docs-site must install Chromium with system dependencies',
+  );
+  assertRunCommand(docsSite, 'npm run typecheck:docs');
+  assertRunCommand(docsSite, 'npm run test:docs');
+
+  const mainPushCondition = "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}";
+  const configurePages = actionStep(docsSite, 'actions/configure-pages');
+  const uploadPages = actionStep(docsSite, 'actions/upload-pages-artifact');
+  assert.equal(stepField(configurePages, 'if')?.value, mainPushCondition);
+  assert.equal(stepField(uploadPages, 'if')?.value, mainPushCondition);
+  assertActionInput(uploadPages, 'path', 'website/build');
+  const docsReport = assertArtifactUpload(
+    docsSite,
+    'docs-report',
+    ['playwright-report/docs', 'test-results/playwright-docs'],
+    7,
+    '${{ failure() }}',
+  );
+
+  const docsSteps = workflowSteps(docsSite);
+  const docsBrowserTestIndex = docsSteps.findIndex(
+    (step) => stepField(step, 'run')?.value === 'npm run test:docs',
+  );
+  const uploadPagesIndex = docsSteps.indexOf(uploadPages);
+  assert.ok(
+    docsBrowserTestIndex < uploadPagesIndex,
+    'Pages must upload the website/build directory tested by the docs browser suite',
+  );
+  assert.deepEqual(
+    docsSteps.slice(docsBrowserTestIndex + 1, uploadPagesIndex),
+    [docsReport],
+    'only the non-mutating failure report may run before uploading tested website/build',
+  );
+  assert.equal(
+    stepField(docsReport, 'run'),
+    undefined,
+    'the failure report must not rebuild or delete the tested website/build',
+  );
+
+  assert.equal(yamlScalar(deployPages, 'if', 4), mainPushCondition);
+  assert.deepEqual(yamlList(deployPages, 'needs', 4), [
+    'commit-policy',
+    'quality',
+    'vitest',
+    'package-contract',
+    'browser',
+    'visual',
+    'parity-release',
+    'docs-site',
+  ]);
+  const deployPermissions = yamlBlock(deployPages, 'permissions', 4);
+  assert.equal(deployPermissions.trim(), 'permissions:\n      pages: write\n      id-token: write');
+  assert.deepEqual(
+    Object.fromEntries(
+      ['pages', 'id-token'].map((permission) => [
+        permission,
+        unquote(yamlScalar(deployPermissions, permission, 6)),
+      ]),
+    ),
+    { pages: 'write', 'id-token': 'write' },
+  );
+  for (const job of jobs.filter((job) => !['deploy-pages', 'docs-site'].includes(job))) {
+    assert.doesNotMatch(
+      jobBlock(jobsSection, job),
+      /^ {4}permissions:/m,
+      `${job} must inherit read-only workflow permissions`,
+    );
+  }
+  const environment = yamlBlock(deployPages, 'environment', 4);
+  assert.equal(unquote(yamlScalar(environment, 'name', 6)), 'github-pages');
+  assert.equal(yamlScalar(environment, 'url', 6), '${{ steps.deployment.outputs.page_url }}');
+  const deployStep = actionStep(deployPages, 'actions/deploy-pages');
+  assert.equal(stepField(deployStep, 'name')?.value, 'Deploy GitHub Pages');
+  assert.equal(stepField(deployStep, 'id')?.value, 'deployment');
 });
 
 test('README presents the tracked demo and ends with upstream attribution', () => {
