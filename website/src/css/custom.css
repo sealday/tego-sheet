@@ -10,6 +10,14 @@
   --tego-surface-strong: #ffffff;
   --tego-text: #0f172a;
   --tego-muted: #475569;
+  --tego-action: #0674d8;
+  --tego-action-hover: #055fb2;
+  --tego-border: #d7e0e9;
+  --tego-border-strong: #b9c7d6;
+  --tego-workspace: #071b2e;
+  --tego-workspace-border: #30465e;
+  --tego-workspace-muted: #aebfd0;
+  --tego-code-text: #dce9f6;
 }
 
 [data-theme='dark'] {
@@ -24,9 +32,112 @@
   --tego-surface-strong: #172033;
   --tego-text: #f8fafc;
   --tego-muted: #cbd5e1;
+  --tego-action: #38a9ff;
+  --tego-action-hover: #72c1ff;
+  --tego-border: #334155;
+  --tego-border-strong: #475569;
+  --tego-workspace: #051321;
+  --tego-workspace-border: #3a536c;
+  --tego-workspace-muted: #b9c8d8;
+  --tego-code-text: #e5f1fc;
 }
 
 body {
   background: var(--tego-surface);
   color: var(--tego-text);
+}
+
+button,
+select {
+  min-height: 2.75rem;
+}
+
+button:focus-visible,
+select:focus-visible,
+a:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--tego-action) 45%, transparent);
+  outline-offset: 2px;
+}
+
+.navbar {
+  border-bottom: 1px solid var(--tego-border);
+  box-shadow: none;
+}
+
+.navbar__brand {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.tego-home-preview {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--tego-workspace-border);
+  border-radius: 0.62rem;
+  background: #ffffff;
+  box-shadow: 0 2rem 5rem rgb(2 13 24 / 36%);
+}
+
+.tego-home-preview__bar {
+  display: flex;
+  gap: 0.38rem;
+  align-items: center;
+  min-height: 2.35rem;
+  padding: 0 0.8rem;
+  border-bottom: 1px solid #ced7e2;
+  background: #edf2f7;
+}
+
+.tego-home-preview__bar span {
+  width: 0.55rem;
+  height: 0.55rem;
+  border: 1px solid #9baabd;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+.tego-home-preview__bar strong {
+  margin-left: 0.35rem;
+  color: #405066;
+  font-size: 0.67rem;
+  font-weight: 700;
+}
+
+.tego-home-preview__viewport {
+  min-width: 0;
+  height: 22rem;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.tego-home-preview__sheet-host {
+  width: 100%;
+  height: 100%;
+}
+
+.tego-home-preview__loading {
+  display: grid;
+  height: 100%;
+  place-items: center;
+  color: #52647a;
+  font-size: 0.82rem;
+}
+
+.tego-home-preview__note {
+  margin: 0;
+  padding: 0.65rem 0.8rem;
+  border-top: 1px solid #d8e0e9;
+  background: #f7f9fb;
+  color: #52647a;
+  font-size: 0.7rem;
+}
+
+@media (max-width: 36rem) {
+  .tego-home-preview__viewport {
+    height: 18rem;
+  }
+
+  .tego-home-preview__note {
+    line-height: 1.45;
+  }
 }

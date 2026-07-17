@@ -497,6 +497,21 @@ describe('documentation site contract', () => {
     expect(playground).not.toContain('TegoSheet');
   });
 
+  it('presents the approved home-page learning path through the public package', () => {
+    const home = read('website/src/pages/index.tsx');
+    const preview = read('website/src/components/homepage-preview.tsx');
+
+    expect(home).toContain('/docs/getting-started/quick-start');
+    expect(home).toContain('/playground');
+    expect(home).toContain("from 'tego-sheet'");
+    expect(home).toContain("import 'tego-sheet/styles.css'");
+    expect(home).toContain('HomepagePreview');
+    expect(preview).toContain("import BrowserOnly from '@docusaurus/BrowserOnly'");
+    expect(preview).toContain("from 'tego-sheet'");
+    expect(preview).toContain("import 'tego-sheet/styles.css'");
+    expect(unsupportedSourceModules(preview)).toEqual([]);
+  });
+
   it('documents the exact React peer dependency range from package metadata', () => {
     const packageJson = JSON.parse(read('package.json')) as {
       peerDependencies?: Record<string, unknown>;

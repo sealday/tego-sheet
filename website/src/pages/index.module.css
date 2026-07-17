@@ -1,36 +1,49 @@
 .main {
-  min-height: calc(100vh - var(--ifm-navbar-height));
+  overflow: hidden;
   background: var(--tego-surface);
 }
 
-.hero {
-  width: min(72rem, calc(100% - 2rem));
+.hero,
+.exampleSection,
+.capabilities,
+.resources {
+  width: min(76rem, calc(100% - 2rem));
   margin: 0 auto;
-  padding: clamp(5rem, 12vw, 9rem) 0;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(19rem, 0.75fr);
+  gap: clamp(2.5rem, 7vw, 7rem);
+  align-items: end;
+  padding: clamp(3.5rem, 6vw, 5rem) 0 clamp(3rem, 5vw, 4.5rem);
 }
 
 .hero h1 {
+  max-width: 56rem;
   margin: 0;
   color: var(--tego-text);
-  font-size: clamp(3.25rem, 10vw, 7.5rem);
-  letter-spacing: -0.06em;
-  line-height: 0.92;
+  font-size: clamp(3rem, 5.7vw, 5.2rem);
+  letter-spacing: -0.055em;
+  line-height: 0.98;
 }
 
-.eyebrow {
-  margin-bottom: 1rem;
-  color: var(--ifm-color-primary);
-  font-size: 0.8rem;
-  font-weight: 700;
+.eyebrow,
+.sectionLabel {
+  margin: 0 0 0.9rem;
+  color: var(--tego-action);
+  font-size: 0.74rem;
+  font-weight: 800;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
 .tagline {
-  max-width: 40rem;
+  max-width: 45rem;
   margin: 1.75rem 0 0;
   color: var(--tego-muted);
-  font-size: clamp(1.2rem, 3vw, 1.75rem);
+  font-size: clamp(1.1rem, 2vw, 1.38rem);
+  line-height: 1.65;
 }
 
 .actions {
@@ -44,33 +57,309 @@
 .secondaryAction {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   min-height: 2.75rem;
-  padding: 0.65rem 1rem;
-  border: 1px solid var(--ifm-color-primary);
-  border-radius: 0.35rem;
-  font-weight: 700;
+  padding: 0.65rem 1.05rem;
+  border: 1px solid var(--tego-action);
+  border-radius: 0.38rem;
+  font-weight: 750;
 }
 
 .primaryAction {
-  color: var(--ifm-color-primary);
+  background: var(--tego-action);
+  color: #ffffff;
 }
 
 .primaryAction:hover {
-  color: var(--ifm-color-primary-dark);
+  background: var(--tego-action-hover);
+  color: #ffffff;
   text-decoration: none;
 }
 
 .secondaryAction {
-  background: var(--ifm-color-primary);
-  color: #ffffff;
+  background: transparent;
+  color: var(--tego-action);
 }
 
 .secondaryAction:hover {
-  color: #ffffff;
+  border-color: var(--tego-action-hover);
+  color: var(--tego-action-hover);
   text-decoration: none;
 }
 
-.supportingLink {
-  margin-top: 1.25rem;
+.install {
+  padding-top: 1.15rem;
+  border-top: 1px solid var(--tego-border);
+}
+
+.install > p:last-child {
+  margin: 0.85rem 0 0;
   color: var(--tego-muted);
+  font-size: 0.78rem;
+}
+
+.installCommand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  border: 1px solid var(--tego-border-strong);
+  border-radius: 0.42rem;
+  background: var(--tego-surface-strong);
+}
+
+.installCommand code {
+  min-width: 0;
+  padding: 0.85rem 0 0.85rem 1rem;
+  overflow: auto;
+  background: transparent;
+  color: var(--tego-text);
+  font-size: 0.84rem;
+  white-space: nowrap;
+}
+
+.installCommand button {
+  min-height: 2.75rem;
+  margin: 0.25rem;
+  padding: 0 0.8rem;
+  border: 0;
+  border-left: 1px solid var(--tego-border);
+  background: transparent;
+  color: var(--tego-action);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.exampleSection {
+  display: grid;
+  grid-template-columns: minmax(16rem, 0.72fr) minmax(0, 1.28fr);
+  gap: clamp(2rem, 6vw, 5rem);
+  align-items: center;
+  padding: clamp(3.5rem, 7vw, 6rem) 0;
+  border-top: 1px solid var(--tego-border);
+}
+
+.sectionIntro h2,
+.capabilityHeading h2,
+.previewIntro h2,
+.resourceHeading h2 {
+  margin: 0;
+  color: var(--tego-text);
+  font-size: clamp(2rem, 4vw, 3.4rem);
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+}
+
+.sectionIntro > p:last-of-type,
+.previewIntro > p:last-child {
+  margin: 1.25rem 0;
+  color: var(--tego-muted);
+  line-height: 1.7;
+}
+
+.sectionIntro a {
+  font-weight: 700;
+}
+
+.codeBlock {
+  margin: 0;
+  padding: clamp(1.2rem, 3vw, 2rem);
+  overflow: auto;
+  border: 1px solid var(--tego-workspace-border);
+  border-radius: 0.55rem;
+  background: var(--tego-workspace);
+  box-shadow: 0 1.5rem 4rem rgb(15 35 55 / 14%);
+  color: var(--tego-code-text);
+  font-size: clamp(0.72rem, 1.35vw, 0.86rem);
+  line-height: 1.75;
+}
+
+.capabilities {
+  display: grid;
+  grid-template-columns: minmax(15rem, 0.7fr) minmax(0, 1.3fr);
+  gap: clamp(2rem, 6vw, 5rem);
+  padding: clamp(3rem, 6vw, 5rem) 0;
+  border-top: 1px solid var(--tego-border);
+}
+
+.capabilityList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--tego-border-strong);
+  list-style: none;
+}
+
+.capabilityList li {
+  min-width: 0;
+  padding: 1.35rem 1.2rem 1.5rem 0;
+  border-bottom: 1px solid var(--tego-border-strong);
+}
+
+.capabilityList li:nth-child(odd) {
+  padding-right: 1.5rem;
+  border-right: 1px solid var(--tego-border-strong);
+}
+
+.capabilityList li:nth-child(even) {
+  padding-left: 1.5rem;
+}
+
+.capabilityList span {
+  color: var(--tego-action);
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.capabilityList h3 {
+  margin: 0.65rem 0 0.5rem;
+  color: var(--tego-text);
+  font-size: 1rem;
+}
+
+.capabilityList p {
+  margin: 0;
+  color: var(--tego-muted);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.previewSection {
+  display: grid;
+  grid-template-columns: minmax(16rem, 0.55fr) minmax(0, 1.45fr);
+  gap: clamp(2rem, 6vw, 5rem);
+  align-items: center;
+  padding: clamp(3rem, 6vw, 5.5rem) max(1rem, calc((100vw - 76rem) / 2));
+  background: var(--tego-workspace);
+}
+
+.previewIntro h2 {
+  color: #f5f8fc;
+}
+
+.previewIntro > p:last-child {
+  color: var(--tego-workspace-muted);
+}
+
+.resources {
+  display: grid;
+  grid-template-columns: minmax(15rem, 0.7fr) minmax(0, 1.3fr);
+  gap: clamp(2rem, 6vw, 5rem);
+  padding: clamp(3.5rem, 7vw, 6rem) 0;
+}
+
+.resourceList {
+  border-top: 1px solid var(--tego-border-strong);
+}
+
+.resourceList a {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 4.5rem;
+  padding: 0.9rem 0;
+  border-bottom: 1px solid var(--tego-border-strong);
+  color: var(--tego-text);
+}
+
+.resourceList a:hover {
+  color: var(--tego-action);
+  text-decoration: none;
+}
+
+.resourceList span {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.resourceList strong {
+  font-size: 0.95rem;
+}
+
+.resourceList small {
+  color: var(--tego-muted);
+  font-size: 0.8rem;
+}
+
+.resourceList b {
+  font-size: 1rem;
+}
+
+.srStatus {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 62rem) {
+  .hero,
+  .exampleSection,
+  .capabilities,
+  .previewSection,
+  .resources {
+    grid-template-columns: 1fr;
+  }
+
+  .hero {
+    align-items: start;
+  }
+
+  .install {
+    max-width: 30rem;
+  }
+
+  .previewIntro {
+    max-width: 38rem;
+  }
+}
+
+@media (max-width: 36rem) {
+  .hero,
+  .exampleSection,
+  .capabilities,
+  .resources {
+    width: min(100% - 1.25rem, 76rem);
+  }
+
+  .hero {
+    padding-top: 3rem;
+  }
+
+  .hero h1 {
+    font-size: clamp(2.65rem, 14vw, 4rem);
+  }
+
+  .actions > a {
+    width: 100%;
+  }
+
+  .capabilityList {
+    grid-template-columns: 1fr;
+  }
+
+  .capabilityList li,
+  .capabilityList li:nth-child(odd),
+  .capabilityList li:nth-child(even) {
+    padding: 1.2rem 0;
+    border-right: 0;
+  }
+
+  .previewSection {
+    padding-inline: 0.625rem;
+  }
+
+  .resourceList small {
+    max-width: 17rem;
+  }
 }
