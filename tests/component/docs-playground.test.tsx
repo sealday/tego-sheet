@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import {
   forwardRef,
+  StrictMode,
   useImperativeHandle,
   useState,
   type ForwardedRef,
@@ -29,7 +30,10 @@ const sheetMock = vi.hoisted(() => ({
   toolbarActions: [] as unknown[],
   tabActions: [] as string[],
   recordProps: vi.fn(),
+  slotsReadOnly: false,
 }));
+
+let originalClipboardDescriptor: PropertyDescriptor | undefined;
 
 vi.mock('tego-sheet', async () => {
   const React = await import('react');
@@ -67,7 +71,7 @@ vi.mock('tego-sheet', async () => {
         ? props.toolbar({
             selection: null,
             activeStyle: {},
-            readOnly: false,
+            readOnly: sheetMock.slotsReadOnly,
             canUndo: true,
             canRedo: false,
             merged: false,
@@ -81,7 +85,7 @@ vi.mock('tego-sheet', async () => {
         ? props.sheetTabs({
             sheets: [{ id: 'mock-sheet', index: 0, name: 'Roadmap' }],
             activeSheet: 'mock-sheet',
-            readOnly: false,
+            readOnly: sheetMock.slotsReadOnly,
             add: () => sheetMock.tabActions.push('add'),
             delete: () => sheetMock.tabActions.push('delete'),
             rename: () => sheetMock.tabActions.push('rename'),
@@ -136,17 +140,24 @@ vi.mock('tego-sheet/locales/de', () => ({ de: { id: 'de', messages: {} } }));
 vi.mock('tego-sheet/locales/nl', () => ({ nl: { id: 'nl', messages: {} } }));
 
 beforeEach(() => {
+  originalClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
   sheetMock.failRender = false;
   sheetMock.mountSequence = 0;
   sheetMock.toolbarActions.length = 0;
   sheetMock.tabActions.length = 0;
   sheetMock.recordProps.mockClear();
+  sheetMock.slotsReadOnly = false;
   window.history.replaceState({}, '', '/tego-sheet/playground');
 });
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  if (originalClipboardDescriptor) {
+    Object.defineProperty(navigator, 'clipboard', originalClipboardDescriptor);
+  } else {
+    Reflect.deleteProperty(navigator, 'clipboard');
+  }
 });
 
 async function renderPlayground(onReload?: () => void) {
@@ -156,6 +167,24 @@ async function renderPlayground(onReload?: () => void) {
 
 function latestSheetProps(): SheetDoubleProps | undefined {
   return sheetMock.recordProps.mock.lastCall?.[0] as SheetDoubleProps | undefined;
+}
+
+function deferredPromise(): {
+  readonly promise: Promise<void>;
+  readonly resolve: () => void;
+} {
+  let resolve!: () => void;
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+
+function installClipboard(writeText: (value: string) => Promise<void>): void {
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText },
+  });
 }
 
 it('selects Controlled from the initial mode query', async () => {
@@ -313,6 +342,17 @@ it('renders custom chrome from typed public slot props and dispatches public act
   expect(typeof latestSheetProps()?.sheetTabs).toBe('function');
 });
 
+it('disables mutating custom sheet-tab actions when the public slot is read-only', async () => {
+  sheetMock.slotsReadOnly = true;
+  window.history.replaceState({}, '', '/tego-sheet/playground?mode=custom-chrome');
+  await renderPlayground();
+
+  const addSheet = screen.getByRole('button', { name: 'Add demo sheet' }) as HTMLButtonElement;
+  expect(addSheet.disabled).toBe(true);
+  fireEvent.click(addSheet);
+  expect(sheetMock.tabActions).toEqual([]);
+});
+
 it('records structured onError payloads as public events', async () => {
   await renderPlayground();
 
@@ -352,12 +392,85 @@ it('offers Reset and Reload after an unexpected render failure without exposing 
   expect(consoleError).toHaveBeenCalled();
 });
 
+it('clears a failed boundary when selecting a different keyed preset', async () => {
+  await renderPlayground();
+  vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  sheetMock.failRender = true;
+  fireEvent.click(screen.getByRole('radio', { name: 'Controlled' }));
+  expect(screen.getByRole('alert')).toBeTruthy();
+
+  sheetMock.failRender = false;
+  fireEvent.click(screen.getByRole('radio', { name: 'Locales' }));
+
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByTestId('tego-sheet-double')).toBeTruthy();
+  expect(screen.getByLabelText('Locale')).toBeTruthy();
+});
+
+it('allocates exactly one event sequence per callback under StrictMode', async () => {
+  const { Playground } = await import('../../website/src/components/playground/playground');
+  render(
+    <StrictMode>
+      <Playground />
+    </StrictMode>,
+  );
+  const commit = screen.getByRole('button', { name: 'Commit mock change' });
+
+  fireEvent.click(commit);
+  fireEvent.click(commit);
+  fireEvent.click(commit);
+
+  expect(
+    screen
+      .getAllByRole('listitem', { name: /event/i })
+      .map((event) => event.getAttribute('aria-label')),
+  ).toEqual(['Event 3', 'Event 2', 'Event 1']);
+});
+
+it('does not let a completed copy from an unmounted preset overwrite the selected status', async () => {
+  const pending = deferredPromise();
+  installClipboard(() => pending.promise);
+  await renderPlayground();
+  fireEvent.click(screen.getByRole('button', { name: 'Copy JSON' }));
+
+  fireEvent.click(screen.getByRole('radio', { name: 'Controlled' }));
+  expect(screen.getByRole('status').textContent).toContain('Controlled selected');
+  await act(async () => {
+    pending.resolve();
+    await pending.promise;
+  });
+
+  expect(screen.getByRole('status').textContent).toContain('Controlled selected');
+});
+
+it('lets only the latest copy request announce after promises settle in reverse order', async () => {
+  const first = deferredPromise();
+  const second = deferredPromise();
+  const writeText = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+  installClipboard(writeText);
+  await renderPlayground();
+  const copy = screen.getByRole('button', { name: 'Copy JSON' });
+  fireEvent.click(copy);
+  fireEvent.click(copy);
+
+  await act(async () => {
+    second.resolve();
+    await second.promise;
+  });
+  expect(screen.getByRole('status').textContent).toContain('Workbook JSON copied');
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh JSON' }));
+  expect(screen.getByRole('status').textContent).toContain('Workbook JSON refreshed');
+
+  await act(async () => {
+    first.resolve();
+    await first.promise;
+  });
+  expect(screen.getByRole('status').textContent).toContain('Workbook JSON refreshed');
+});
+
 it('copies formatted JSON and announces the result', async () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
-  Object.defineProperty(navigator, 'clipboard', {
-    configurable: true,
-    value: { writeText },
-  });
+  installClipboard(writeText);
   await renderPlayground();
 
   fireEvent.click(screen.getByRole('button', { name: 'Copy JSON' }));

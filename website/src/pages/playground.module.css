@@ -7,15 +7,9 @@
 
 .loadingHeader,
 .loadingGrid > div {
+  border: 1px solid var(--ifm-color-emphasis-200);
   border-radius: 0.75rem;
-  background: linear-gradient(
-    100deg,
-    var(--ifm-color-emphasis-100) 25%,
-    var(--ifm-color-emphasis-200) 45%,
-    var(--ifm-color-emphasis-100) 65%
-  );
-  background-size: 200% 100%;
-  animation: pulse 1.4s ease-in-out infinite;
+  background: var(--ifm-color-emphasis-100);
 }
 
 .loadingHeader {
@@ -32,22 +26,6 @@
 
 .loadingGrid > div {
   min-height: 38rem;
-}
-
-@keyframes pulse {
-  from {
-    background-position: 100% 0;
-  }
-  to {
-    background-position: -100% 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .loadingHeader,
-  .loadingGrid > div {
-    animation: none;
-  }
 }
 
 @media (max-width: 72rem) {

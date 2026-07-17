@@ -120,7 +120,7 @@ function CustomSheetTabs(props: Parameters<SheetTabsRenderer>[0]) {
           {sheet.name}
         </button>
       ))}
-      <button type="button" onClick={() => props.add('Demo sheet')}>
+      <button type="button" disabled={props.readOnly} onClick={() => props.add('Demo sheet')}>
         Add demo sheet
       </button>
     </div>
@@ -158,14 +158,25 @@ function PresetSession({ mode, presetKey, setStatus, onReset }: PresetSessionPro
   const fixture = useMemo(() => createFixture(mode), [mode]);
   const sheetRef = useRef<TegoSheetHandle>(null);
   const sequence = useRef(0);
+  const copyRequest = useRef(0);
+  const mounted = useRef(false);
   const [events, setEvents] = useState<readonly PlaygroundEvent[]>([]);
   const [snapshot, setSnapshot] = useState<WorkbookData>(fixture);
   const [localeId, setLocaleId] = useState<LocaleId>('en');
 
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      copyRequest.current += 1;
+    };
+  }, []);
+
   const record = useCallback((callback: PlaygroundCallbackName, payload: unknown): void => {
+    const nextSequence = ++sequence.current;
     setEvents((current) =>
       appendPlaygroundEvent(current, {
-        sequence: ++sequence.current,
+        sequence: nextSequence,
         callback,
         payload: toPublicJson(payload),
       }),
@@ -194,11 +205,16 @@ function PresetSession({ mode, presetKey, setStatus, onReset }: PresetSessionPro
 
   const formattedSnapshot = useMemo(() => JSON.stringify(snapshot, null, 2), [snapshot]);
   const copySnapshot = async (): Promise<void> => {
+    const request = ++copyRequest.current;
     try {
       await navigator.clipboard.writeText(formattedSnapshot);
-      setStatus('Workbook JSON copied');
+      if (mounted.current && request === copyRequest.current) {
+        setStatus('Workbook JSON copied');
+      }
     } catch {
-      setStatus('Could not copy workbook JSON');
+      if (mounted.current && request === copyRequest.current) {
+        setStatus('Could not copy workbook JSON');
+      }
     }
   };
   const refreshSnapshot = (): void => {
@@ -389,7 +405,7 @@ export function Playground({ onReload = reloadWindow }: PlaygroundProps = {}): R
       <p className={styles.srStatus} role="status" aria-live="polite">
         {status}
       </p>
-      <PlaygroundErrorBoundary onReset={recoverFromError} onReload={onReload}>
+      <PlaygroundErrorBoundary key={presetKey} onReset={recoverFromError} onReload={onReload}>
         <PresetSession
           key={presetKey}
           mode={mode}

@@ -690,28 +690,74 @@ describe('documentation site contract', () => {
     ).toEqual([]);
   });
 
-  it('keeps the playground implementation on the exact public package and local module boundary', () => {
-    const source = read('website/src/components/playground/playground.tsx');
+  it('keeps the recursive playground module graph on published package boundaries', () => {
+    const componentRoot = resolve(root, 'website/src/components/playground');
+    const entryPath = resolve(componentRoot, 'playground.tsx');
+    const entrySpecifiers = moduleSpecifiers(
+      read('website/src/components/playground/playground.tsx'),
+    );
+    const visited = new Set<string>();
+    const externalSpecifiers = new Set<string>();
 
-    expect(moduleSpecifiers(source)).toEqual([
-      'tego-sheet',
-      'tego-sheet/locales/en',
-      'tego-sheet/locales/zh-cn',
-      'tego-sheet/locales/de',
-      'tego-sheet/locales/nl',
-      'tego-sheet/styles.css',
-      'react',
-      './playground-fixtures',
-      './playground-model',
-      './playground-error-boundary',
-      './playground.module.css',
-    ]);
+    const visitModule = (path: string): void => {
+      if (visited.has(path)) return;
+      visited.add(path);
+      for (const specifier of moduleSpecifiers(read(relative(root, path)))) {
+        if (!specifier.startsWith('.')) {
+          externalSpecifiers.add(specifier);
+          continue;
+        }
+        if (specifier.endsWith('.css')) continue;
+        const unresolved = resolve(path, '..', specifier);
+        const candidate = [unresolved, `${unresolved}.ts`, `${unresolved}.tsx`].find(existsSync);
+        expect(candidate, `${specifier} from ${relative(root, path)} must resolve`).toBeDefined();
+        expect(toPosixPath(relative(componentRoot, candidate!))).not.toMatch(/^\.\./);
+        visitModule(candidate!);
+      }
+    };
+
+    visitModule(entryPath);
+
+    expect(entrySpecifiers).toEqual(
+      expect.arrayContaining([
+        'tego-sheet',
+        'tego-sheet/locales/en',
+        'tego-sheet/locales/zh-cn',
+        'tego-sheet/locales/de',
+        'tego-sheet/locales/nl',
+        'tego-sheet/styles.css',
+      ]),
+    );
     expect(
-      moduleSpecifiers(source)
-        .filter((specifier) => specifier.startsWith('tego-sheet'))
-        .sort(),
+      [...externalSpecifiers].filter((specifier) => specifier.startsWith('tego-sheet')).sort(),
     ).toEqual([...publishedPackagePaths].sort());
-    expect(source).not.toMatch(/(?:^|[/'"])(?:src|private|controller)(?:[/'"]|$)/m);
+    expect(
+      [...externalSpecifiers].filter(
+        (specifier) =>
+          specifier !== 'react' &&
+          !specifier.startsWith('@docusaurus/') &&
+          !specifier.startsWith('tego-sheet'),
+      ),
+    ).toEqual([]);
+    expect(
+      [...externalSpecifiers].some((specifier) =>
+        /^tego-sheet\/(?:src|private|core|controller)(?:\/|$)/.test(specifier),
+      ),
+    ).toBe(false);
+    expect([...visited].map((path) => relative(root, path))).toEqual(
+      expect.arrayContaining([
+        'website/src/components/playground/playground-error-boundary.tsx',
+        'website/src/components/playground/playground-fixtures.ts',
+        'website/src/components/playground/playground-model.ts',
+        'website/src/components/playground/playground.tsx',
+      ]),
+    );
+  });
+
+  it('keeps the SSR loading skeleton static and motion-free', () => {
+    const styles = read('website/src/pages/playground.module.css');
+
+    expect(styles).not.toMatch(/gradient|animation|@keyframes|prefers-reduced-motion/);
   });
 
   it('resolves site imports through synchronized public dist aliases', async () => {
