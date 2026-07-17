@@ -8,6 +8,8 @@ const visualHarness = readFileSync('tests/visual/harness/src/main.tsx', 'utf8');
 const visualMasks = readFileSync('tests/visual/masks.ts', 'utf8');
 const visualCss = readFileSync('tests/visual/harness/src/visual.css', 'utf8');
 const editingFixture = readFileSync('tests/visual/fixtures/editing-overlays-menus.ts', 'utf8');
+const docsVisualConfig = readFileSync('playwright.docs-visual.config.ts', 'utf8');
+const docsVisualSpec = readFileSync('tests/docs-visual/docs-visual.spec.ts', 'utf8');
 
 const requiredVisualIds = parityManifest.flatMap((row) =>
   'assertions' in row.visual ? row.visual.assertions : [],
@@ -55,5 +57,20 @@ describe('visual regression release contract', () => {
     expect(visualSpec).toContain("button: 'right'");
     expect(visualSpec).toContain("getByRole('menu', { name: 'Cell actions' })");
     expect(visualSpec).toContain("toHaveScreenshot('context-menu.png')");
+  });
+
+  it('keeps documentation screenshots deterministic and platform-scoped', () => {
+    expect(docsVisualConfig).toContain(
+      "snapshotPathTemplate: '{testDir}/{testFilePath}-snapshots/{arg}-{platform}{ext}'",
+    );
+    expect(docsVisualConfig).toContain("colorScheme: 'light'");
+    expect(docsVisualConfig).toContain("animations: 'disabled'");
+    expect(docsVisualConfig).toContain('maxDiffPixelRatio: 0.002');
+    expect(docsVisualConfig).toContain('threshold: 24 / 255');
+    expect(docsVisualConfig).toContain("outputDir: 'test-results/playwright-docs-visual'");
+    expect(docsVisualConfig).toContain("outputFolder: 'playwright-report/docs-visual'");
+    expect(docsVisualSpec).toContain('document.fonts.ready');
+    expect(docsVisualSpec).toContain("reducedMotion: 'reduce'");
+    expect(docsVisualSpec.match(/toHaveScreenshot\(/g)).toHaveLength(4);
   });
 });

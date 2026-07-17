@@ -471,6 +471,68 @@ test('Playwright uses npm-hosted Vite servers and separated HTML reports', () =>
   }
 });
 
+test('documentation Playwright lanes build and serve the project subpath with isolated artifacts', () => {
+  const docsConfig = readRepositoryFile('playwright.docs.config.ts').replace(/^\s*\/\/.*$/gm, '');
+  const docsVisualConfig = readRepositoryFile('playwright.docs-visual.config.ts').replace(
+    /^\s*\/\/.*$/gm,
+    '',
+  );
+  const lanes = [
+    {
+      name: 'docs browser',
+      config: docsConfig,
+      baseUrl: 'http://127.0.0.1:4175/tego-sheet/',
+      command: 'npm run docs:build && npm run docs:serve -- --host 127.0.0.1 --port 4175',
+      outputDirectory: 'test-results/playwright-docs',
+      reportDirectory: 'playwright-report/docs',
+    },
+    {
+      name: 'docs visual',
+      config: docsVisualConfig,
+      baseUrl: 'http://127.0.0.1:4176/tego-sheet/',
+      command: 'npm run docs:build && npm run docs:serve -- --host 127.0.0.1 --port 4176',
+      outputDirectory: 'test-results/playwright-docs-visual',
+      reportDirectory: 'playwright-report/docs-visual',
+    },
+  ];
+
+  for (const lane of lanes) {
+    const webServer = configBlock(lane.config, 'webServer', '}');
+    assert.match(
+      lane.config,
+      new RegExp(`baseURL:\\s*['"]${escapeRegExp(lane.baseUrl)}['"]`),
+      `${lane.name} must use the deployed project subpath as its base URL`,
+    );
+    assert.match(
+      lane.config,
+      new RegExp(`outputDir:\\s*['"]${escapeRegExp(lane.outputDirectory)}['"]`),
+      `${lane.name} must use ${lane.outputDirectory}`,
+    );
+    assert.match(
+      webServer,
+      new RegExp(`command:\\s*['"]${escapeRegExp(lane.command)}['"]`),
+      `${lane.name} must freshly build before serving`,
+    );
+    assert.match(
+      webServer,
+      new RegExp(`url:\\s*['"]${escapeRegExp(lane.baseUrl)}['"]`),
+      `${lane.name} must wait for the project subpath`,
+    );
+    assert.match(webServer, /timeout:\s*180_000/);
+    assert.match(webServer, /reuseExistingServer:\s*!process\.env\.CI/);
+    assert.match(
+      lane.config,
+      new RegExp(
+        `\\[\\s*['"]html['"]\\s*,\\s*\\{[\\s\\S]*?outputFolder:\\s*['"]${escapeRegExp(lane.reportDirectory)}['"]`,
+      ),
+      `${lane.name} must write its HTML report to ${lane.reportDirectory}`,
+    );
+  }
+
+  assert.notEqual(lanes[0].outputDirectory, lanes[1].outputDirectory);
+  assert.notEqual(lanes[0].reportDirectory, lanes[1].reportDirectory);
+});
+
 test('CI covers policy, quality, package, browser, visual, and release lanes', () => {
   const workflow = normalizeNewlines(readRepositoryFile('.github/workflows/ci.yml'));
 
