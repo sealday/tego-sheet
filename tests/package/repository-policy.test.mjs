@@ -32,6 +32,7 @@ const documentationDevDependencyPins = Object.freeze({
   'docusaurus-plugin-typedoc': '1.4.2',
   'prism-react-renderer': '2.4.1',
   typedoc: '0.28.20',
+  'typedoc-docusaurus-theme': '1.4.2',
   'typedoc-plugin-markdown': '4.12.0',
 });
 
@@ -249,12 +250,24 @@ test('package lock resolved entries pin the documentation toolchain', () => {
   );
 });
 
-test('documentation site does not define nested package metadata', () => {
-  const nestedPackageFiles = ['website/package.json', 'website/package-lock.json'].filter((path) =>
-    existsSync(new URL(path, repositoryRoot)),
-  );
+test('documentation site package metadata is only a module-scope sentinel', () => {
+  const websitePackageJson = readJson('website/package.json');
 
-  assert.deepEqual(nestedPackageFiles, [], 'website must use the root package and lockfile');
+  assert.deepEqual(websitePackageJson, { private: true });
+  assert.equal(existsSync(new URL('website/package-lock.json', repositoryRoot)), false);
+  for (const key of [
+    'scripts',
+    'dependencies',
+    'devDependencies',
+    'workspaces',
+    'packageManager',
+  ]) {
+    assert.equal(
+      Object.hasOwn(websitePackageJson, key),
+      false,
+      `website/package.json forbids ${key}`,
+    );
+  }
 });
 
 test('package lock contains only the root project and installed packages', () => {

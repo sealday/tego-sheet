@@ -1,0 +1,76 @@
+.main {
+  min-height: calc(100vh - var(--ifm-navbar-height));
+  background: var(--tego-surface);
+}
+
+.hero {
+  width: min(72rem, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: clamp(5rem, 12vw, 9rem) 0;
+}
+
+.hero h1 {
+  margin: 0;
+  color: var(--tego-text);
+  font-size: clamp(3.25rem, 10vw, 7.5rem);
+  letter-spacing: -0.06em;
+  line-height: 0.92;
+}
+
+.eyebrow {
+  margin-bottom: 1rem;
+  color: var(--ifm-color-primary);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.tagline {
+  max-width: 40rem;
+  margin: 1.75rem 0 0;
+  color: var(--tego-muted);
+  font-size: clamp(1.2rem, 3vw, 1.75rem);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 2rem;
+}
+
+.primaryAction,
+.secondaryAction {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0.65rem 1rem;
+  border: 1px solid var(--ifm-color-primary);
+  border-radius: 0.35rem;
+  font-weight: 700;
+}
+
+.primaryAction {
+  color: var(--ifm-color-primary);
+}
+
+.primaryAction:hover {
+  color: var(--ifm-color-primary-dark);
+  text-decoration: none;
+}
+
+.secondaryAction {
+  background: var(--ifm-color-primary);
+  color: #ffffff;
+}
+
+.secondaryAction:hover {
+  color: #ffffff;
+  text-decoration: none;
+}
+
+.supportingLink {
+  margin-top: 1.25rem;
+  color: var(--tego-muted);
+}
