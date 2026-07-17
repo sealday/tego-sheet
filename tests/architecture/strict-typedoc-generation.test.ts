@@ -214,20 +214,13 @@ describe('strict TypeDoc generation', () => {
   ])('fails closed without mutating an $name projection shape', ({ mutate }) => {
     const reflection = createProjectionReflection();
     mutate(reflection.children);
+    const before = structuredClone(reflection);
     const errors = invokeProjection(reflection);
 
     expect(errors).toEqual([
       'public API projection expected exactly six unique TegoSheetCallbacks inherited properties',
     ]);
-    expect(reflection.extendedTypes).toEqual([
-      {
-        name: 'TegoSheetCallbacks',
-        package: 'tego-sheet',
-        qualifiedName: 'TegoSheetCallbacks',
-        type: 'reference',
-      },
-    ]);
-    expect(reflection.children.every((child) => child.inheritedFrom !== undefined)).toBe(true);
+    expect(reflection).toEqual(before);
   });
 
   it.each([
