@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { CanvasEngine, createSheetGridModel, createViewportMetrics } from '../../../src/engine';
 import type { SheetData } from '../../../src/core';
@@ -12,6 +14,35 @@ import { deepFreeze } from '../../helpers/deep-freeze';
 import { buildStyledWorkbook } from '../../helpers/workbook-builders';
 
 describe('read-only Canvas rendering', () => {
+  it('materializes visible header sets for downlevel consumers', () => {
+    const sheet: SheetData = { rows: { len: 4 }, cols: { len: 3 } };
+    const viewport = createViewportMetrics(createSheetGridModel(sheet), {
+      width: 320,
+      height: 180,
+    });
+    const harness = createCanvasHarness();
+    const onRenderError = vi.fn();
+    const engine = new CanvasEngine(harness.canvas, {
+      animationFrame: harness.animationFrame,
+      measurement: harness.measurement,
+      onRenderError,
+    });
+
+    engine.render({ sheet, viewport });
+    harness.animationFrame.flush();
+
+    expect(onRenderError).not.toHaveBeenCalled();
+    expect(
+      readFileSync(join(process.cwd(), 'src/engine/canvas/canvas-engine.ts'), 'utf8'),
+    ).toContain('Array.from(visibleRows)');
+    const headerSource = readFileSync(
+      join(process.cwd(), 'src/engine/canvas/header-painter.ts'),
+      'utf8',
+    );
+    expect(headerSource).toContain('Array.from(new Set(visibleRows))');
+    expect(headerSource).toContain('Array.from(new Set(visibleColumns))');
+  });
+
   it('does not require pane metadata when enumerating materialized cells', () => {
     expect(paneCells).toHaveLength(3);
   });

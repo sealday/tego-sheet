@@ -119,8 +119,8 @@ export class CanvasEngine {
     paintHeaders(
       this.draw,
       viewport,
-      [...visibleRows],
-      [...visibleColumns],
+      Array.from(visibleRows),
+      Array.from(visibleColumns),
       snapshot.selection,
       snapshot.sheet,
     );

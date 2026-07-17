@@ -69,10 +69,10 @@ export function paintHeaders(
     },
     '#f4f5f8',
   );
-  const rows = [...new Set(visibleRows)].sort(
+  const rows = Array.from(new Set(visibleRows)).sort(
     (a, b) => viewport.model.visualIndexOfRow(a) - viewport.model.visualIndexOfRow(b),
   );
-  const columns = [...new Set(visibleColumns)].sort((a, b) => a - b);
+  const columns = Array.from(new Set(visibleColumns)).sort((a, b) => a - b);
   for (const row of rows) {
     const top = rowTop(row, viewport);
     const height = viewport.model.rowHeight(row);
