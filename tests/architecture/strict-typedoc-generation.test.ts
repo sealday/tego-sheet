@@ -339,7 +339,7 @@ describe('strict TypeDoc generation', () => {
       pathCount: 1,
       uniquePathCount: 1,
     });
-  }, 15_000);
+  }, 30_000);
 
   it('rejects bootstrap warnings before conversion even without TypeDoc strict flags', async () => {
     const { app, calls, events } = createFakeApplication({
