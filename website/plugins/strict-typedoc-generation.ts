@@ -1,16 +1,12 @@
 import { rm } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import type { LoadContext, Plugin } from '@docusaurus/types';
 import type { PluginOptions as DocusaurusTypeDocOptions } from 'docusaurus-plugin-typedoc';
-import {
-  Application,
-  PackageJsonReader,
-  TSConfigReader,
-  TypeDocReader,
-  type TypeDocOptions,
-} from 'typedoc';
+import type { TypeDocOptions } from 'typedoc';
 
 const requiredPlugins = ['typedoc-plugin-markdown', 'typedoc-docusaurus-theme'];
+const require = createRequire(import.meta.url);
 
 interface TypeDocGenerationContext {
   siteDir: string;
@@ -47,11 +43,10 @@ interface StrictTypeDocDependencies {
 
 const defaultDependencies: StrictTypeDocDependencies = {
   async bootstrap(options) {
-    const app = await Application.bootstrapWithPlugins(options, [
-      new TypeDocReader(),
-      new PackageJsonReader(),
-      new TSConfigReader(),
-    ]);
+    const runtime = require('./strict-typedoc-runtime.cjs') as {
+      bootstrap: (runtimeOptions: TypeDocGenerationOptions) => Promise<unknown>;
+    };
+    const app = await runtime.bootstrap(options);
 
     return app as unknown as StrictTypeDocApplication;
   },
@@ -110,44 +105,24 @@ export async function generateTypeDoc(
   }
 
   await runtime.clearOutput(resolvedOutput);
-  const app = await runtime.bootstrap(options);
-
-  if (app.logger.hasErrors()) throw new Error(describeFailure('bootstrap', app));
-  if (app.options.getValue('treatWarningsAsErrors') && app.logger.hasWarnings()) {
-    throw new Error(describeFailure('bootstrap', app));
-  }
-
-  const project = await app.convert();
-  if (!project) throw new Error(describeFailure('conversion', app));
-  if (app.logger.hasErrors()) throw new Error(describeFailure('conversion', app));
-  if (app.options.getValue('treatWarningsAsErrors') && app.logger.hasWarnings()) {
-    throw new Error(describeFailure('conversion', app));
-  }
-
-  const preValidationWarningCount = app.logger.warningCount;
-  app.validate(project);
-  const validationWarningCount = Math.max(
-    app.logger.warningCount - preValidationWarningCount,
-    app.logger.validationWarningCount,
-  );
-
-  if (app.logger.hasErrors()) throw new Error(describeFailure('validation', app));
-  if (
-    validationWarningCount > 0 &&
-    (app.options.getValue('treatWarningsAsErrors') ||
-      app.options.getValue('treatValidationWarningsAsErrors'))
-  ) {
-    throw new Error(
-      `TypeDoc validation failed with ${app.logger.errorCount} errors and ${validationWarningCount} warnings`,
-    );
-  }
-
-  const preOutputWarningCount = app.logger.warningCount;
   try {
+    const app = await runtime.bootstrap(options);
+    if (app.logger.hasErrors() || app.logger.hasWarnings()) {
+      throw new Error(describeFailure('bootstrap', app));
+    }
+
+    const project = await app.convert();
+    if (!project || app.logger.hasErrors() || app.logger.hasWarnings()) {
+      throw new Error(describeFailure('conversion', app));
+    }
+
+    app.validate(project);
+    if (app.logger.hasErrors() || app.logger.hasWarnings()) {
+      throw new Error(describeFailure('validation', app));
+    }
+
     await app.generateOutputs(project);
-    const outputWarningCount = app.logger.warningCount - preOutputWarningCount;
-    if (app.logger.hasErrors()) throw new Error(describeFailure('output', app));
-    if (outputWarningCount > 0 && app.options.getValue('treatWarningsAsErrors')) {
+    if (app.logger.hasErrors() || app.logger.hasWarnings()) {
       throw new Error(describeFailure('output', app));
     }
   } catch (error) {

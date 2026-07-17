@@ -18,6 +18,7 @@ const typedocOptions = {
     notDocumented: true,
     notExported: true,
   },
+  treatWarningsAsErrors: true,
   treatValidationWarningsAsErrors: true,
   requiredToBeDocumented: [
     'Class',

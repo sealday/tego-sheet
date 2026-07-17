@@ -89,6 +89,7 @@ describe('documentation site contract', () => {
     expect(typedocOptions.entryPoints).toEqual(['src/index.ts']);
     expect(typedocOptions.entryPoints).not.toContain('src/core/index.ts');
     expect(typedocOptions.out).toBe('website/docs/api');
+    expect(typedocOptions.treatWarningsAsErrors).toBe(true);
     expect(typedocOptions.treatValidationWarningsAsErrors).toBe(true);
   });
 

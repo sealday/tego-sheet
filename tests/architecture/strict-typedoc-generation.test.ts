@@ -1,7 +1,9 @@
+import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   generateTypeDoc,
@@ -10,6 +12,8 @@ import {
 } from '../../website/plugins/strict-typedoc-generation';
 
 const temporaryDirectories: string[] = [];
+const execFileAsync = promisify(execFile);
+const root = process.cwd();
 
 afterEach(async () => {
   await Promise.all(
@@ -20,6 +24,7 @@ afterEach(async () => {
 });
 
 interface FakeApplicationOptions {
+  bootstrapWarnings?: number;
   conversionErrors?: number;
   conversionWarnings?: number;
   outputErrors?: number;
@@ -38,7 +43,7 @@ const createFakeApplication = (options: FakeApplicationOptions = {}) => {
   const logger = {
     errorCount: 0,
     validationWarningCount: 0,
-    warningCount: 0,
+    warningCount: options.bootstrapWarnings ?? 0,
     hasErrors: () => logger.errorCount > 0,
     hasWarnings: () => logger.warningCount > 0,
   };
@@ -95,6 +100,47 @@ const createProjectOutput = async () => {
 };
 
 describe('strict TypeDoc generation', () => {
+  it('loads one TypeDoc runtime across the Docusaurus and native ESM plugin boundary', async () => {
+    const pluginPath = join(root, 'website/plugins/strict-typedoc-generation.ts');
+    const script = `
+      import { loadFreshModule } from '@docusaurus/utils';
+      await loadFreshModule(${JSON.stringify(pluginPath)});
+      await import('typedoc-plugin-markdown');
+      const paths = globalThis[Symbol.for('typedoc_paths')] ?? [];
+      process.stdout.write(JSON.stringify({
+        loads: globalThis[Symbol.for('typedoc_loads')] ?? 0,
+        pathCount: paths.length,
+        uniquePathCount: new Set(paths).size,
+      }));
+    `;
+
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      ['--input-type=module', '--eval', script],
+      { cwd: root },
+    );
+
+    expect(JSON.parse(stdout)).toEqual({ loads: 1, pathCount: 1, uniquePathCount: 1 });
+  });
+
+  it('rejects bootstrap warnings before conversion even without TypeDoc strict flags', async () => {
+    const { app, calls, events } = createFakeApplication({
+      bootstrapWarnings: 1,
+      strictValidation: false,
+      strictWarnings: false,
+    });
+
+    await expect(
+      generateTypeDoc(
+        { out: 'website/docs/api' },
+        { bootstrap: fakeBootstrap(app), clearOutput: async () => undefined },
+      ),
+    ).rejects.toThrow('TypeDoc bootstrap failed with 0 errors and 1 warnings');
+
+    expect(calls).toEqual({ convert: 0, generateOutputs: 0, validate: 0 });
+    expect(events).toEqual([]);
+  });
+
   it('converts once and validates before generating successful output', async () => {
     const { app, calls, events } = createFakeApplication();
 
