@@ -115,48 +115,55 @@ export function createLegacyJsonFixture(): WorkbookData {
   ];
 }
 
+function freezePreset<const Preset extends PlaygroundPreset>(preset: Preset): Preset {
+  Object.freeze(preset.publicApis);
+  return Object.freeze(preset);
+}
+
 export const PLAYGROUND_PRESETS = {
-  uncontrolled: {
+  uncontrolled: freezePreset({
     mode: 'uncontrolled',
     label: 'Uncontrolled',
     description: 'Let TegoSheet own edits after reading defaultValue once at mount.',
     docsLink: '/docs/concepts/controlled-and-uncontrolled',
     publicApis: ['TegoSheet', 'defaultValue', 'onChange'],
     createFixture: createUncontrolledFixture,
-  },
-  controlled: {
+  }),
+  controlled: freezePreset({
     mode: 'controlled',
     label: 'Controlled',
     description: 'Accept each onChange snapshot into a parent-owned value.',
     docsLink: '/docs/concepts/controlled-and-uncontrolled',
     publicApis: ['TegoSheet', 'value', 'onChange'],
     createFixture: createControlledFixture,
-  },
-  'custom-chrome': {
+  }),
+  'custom-chrome': freezePreset({
     mode: 'custom-chrome',
     label: 'Custom Chrome',
     description: 'Replace built-in chrome with typed toolbar and sheet-tab renderers.',
     docsLink: '/docs/guides/custom-chrome',
     publicApis: ['TegoSheet', 'toolbar', 'sheetTabs'],
     createFixture: createCustomChromeFixture,
-  },
-  locales: {
+  }),
+  locales: freezePreset({
     mode: 'locales',
     label: 'Locales',
     description: 'Switch one spreadsheet among the four published locale dictionaries.',
     docsLink: '/docs/guides/locales',
     publicApis: ['TegoSheet', 'locale'],
     createFixture: createLocalesFixture,
-  },
-  'legacy-json': {
+  }),
+  'legacy-json': freezePreset({
     mode: 'legacy-json',
     label: 'Legacy JSON',
     description: 'Load compatible sparse workbook JSON and inspect its public snapshot.',
     docsLink: '/docs/migration/from-x-data-spreadsheet',
     publicApis: ['TegoSheet', 'WorkbookInput', 'TegoSheetHandle.getValue'],
     createFixture: createLegacyJsonFixture,
-  },
+  }),
 } as const satisfies { readonly [Mode in PlaygroundMode]: PlaygroundPreset };
+
+Object.freeze(PLAYGROUND_PRESETS);
 
 export function createFixture(mode: PlaygroundMode): WorkbookData {
   return PLAYGROUND_PRESETS[mode].createFixture();

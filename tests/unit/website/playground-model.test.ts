@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import type { WorkbookData } from 'tego-sheet';
 import {
@@ -91,6 +93,26 @@ describe('playground event history', () => {
     expect(Object.isFrozen(appended.payload)).toBe(true);
     expect(Object.isFrozen((appended.payload as { readonly nested: object }).nested)).toBe(true);
   });
+
+  it('preserves an own __proto__ JSON key without changing object prototypes', () => {
+    const payload = JSON.parse('{"__proto__":{"polluted":true}}') as {
+      readonly __proto__: { readonly polluted: boolean };
+    };
+    const [event] = appendPlaygroundEvent([], {
+      sequence: 1,
+      callback: 'onChange',
+      payload,
+    });
+    if (!event || typeof event.payload !== 'object' || event.payload === null) {
+      throw new Error('the appended object payload must be retained');
+    }
+
+    expect(Object.hasOwn(event.payload, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(event.payload)).toBe(Object.prototype);
+    expect(JSON.stringify(event.payload)).toBe('{"__proto__":{"polluted":true}}');
+    expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
+    expect(Object.isFrozen(event.payload)).toBe(true);
+  });
 });
 
 describe('playground preset registry', () => {
@@ -143,6 +165,12 @@ describe('playground preset registry', () => {
         publicApis: ['TegoSheet', 'WorkbookInput', 'TegoSheetHandle.getValue'],
       },
     ]);
+
+    expect(Object.isFrozen(PLAYGROUND_PRESETS)).toBe(true);
+    for (const preset of Object.values(PLAYGROUND_PRESETS)) {
+      expect(Object.isFrozen(preset)).toBe(true);
+      expect(Object.isFrozen(preset.publicApis)).toBe(true);
+    }
   });
 
   it('maps locales only to the four published package subpaths', () => {
@@ -202,36 +230,13 @@ describe('playground preset registry', () => {
   });
 
   it('uses the established compatible sparse legacy JSON shape', () => {
-    expect(createLegacyJsonFixture()).toEqual([
-      {
-        name: '',
-        freeze: 'A1',
-        styles: [{ strike: false, textwrap: false, underline: false }],
-        rows: {
-          len: 80,
-          0: {
-            height: 0,
-            hide: false,
-            style: 0,
-            cells: {
-              0: {
-                text: '',
-                style: 0,
-                editable: false,
-                printable: false,
-                value: 0,
-              },
-              12: { text: 'edge' },
-            },
-          },
-          47: { hide: true, cells: { 31: { text: 'sparse' } } },
-        },
-        cols: {
-          len: 50,
-          0: { width: 0, hide: false, style: 0 },
-          23: { width: 64, hide: true },
-        },
-      },
-    ]);
+    const fixturePath = fileURLToPath(
+      new URL('../../parity/fixtures/workbooks/sparse-falsy.json', import.meta.url),
+    );
+    const canonical = JSON.parse(readFileSync(fixturePath, 'utf8')) as {
+      readonly input: WorkbookData[number];
+    };
+
+    expect(createLegacyJsonFixture()).toEqual([canonical.input]);
   });
 });

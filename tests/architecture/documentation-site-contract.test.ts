@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -20,6 +21,7 @@ const root = process.cwd();
 const read = (path: string) => readFileSync(join(root, path), 'utf8');
 const configUrl = pathToFileURL(join(root, 'website/docusaurus.config.ts')).href;
 const sidebarStructureUrl = pathToFileURL(join(root, 'website/sidebar-structure.ts')).href;
+const jitiPath = createRequire(import.meta.url).resolve('jiti');
 
 const publishedPackagePaths = new Set([
   'tego-sheet',
@@ -31,6 +33,7 @@ const publishedPackagePaths = new Set([
 ]);
 
 const publishedStylesDeclaration = 'website/src/types/tego-sheet-styles.d.ts';
+const toPosixPath = (path: string): string => path.replace(/\\/g, '/');
 
 interface SitePackageExport {
   readonly specifier: string;
@@ -696,7 +699,12 @@ describe('documentation site contract', () => {
       packageEntries.flatMap(({ specifier, typeTarget }) =>
         typeTarget === undefined
           ? []
-          : [[specifier, [relative(join(root, 'website'), resolveTarget(typeTarget))]]],
+          : [
+              [
+                specifier,
+                [toPosixPath(relative(join(root, 'website'), resolveTarget(typeTarget)))],
+              ],
+            ],
       ),
     );
     const expectedRuntimeAliases = Object.fromEntries(
@@ -743,6 +751,32 @@ describe('documentation site contract', () => {
     }
 
     expect(read(publishedStylesDeclaration)).toBe("declare module 'tego-sheet/styles.css';\n");
+  });
+
+  it('anchors public runtime aliases to the config instead of the process cwd', () => {
+    const script = `
+      const { createJiti } = require(${JSON.stringify(jitiPath)});
+      const configPath = ${JSON.stringify(join(root, 'website/docusaurus.config.ts'))};
+      const jiti = createJiti(configPath, { interopDefault: true });
+      Promise.resolve(jiti.import(configPath, { default: true })).then((config) => {
+        const plugin = config.plugins.find(
+          (candidate) => typeof candidate === 'function' && candidate.name === 'publicPackageExportsPlugin',
+        );
+        if (!plugin) throw new Error('public package exports plugin missing');
+        process.stdout.write(JSON.stringify(plugin().configureWebpack().resolve.alias));
+      });
+    `;
+    const loaded = spawnSync(process.execPath, ['-e', script], {
+      cwd: join(root, 'website'),
+      encoding: 'utf8',
+    });
+
+    expect(loaded.status, loaded.stderr).toBe(0);
+    const aliases = JSON.parse(loaded.stdout) as Record<string, string>;
+    expect(Object.values(aliases).every((target) => target.startsWith(join(root, 'dist')))).toBe(
+      true,
+    );
+    expect(Object.values(aliases).every(existsSync)).toBe(true);
   });
 
   it('rejects site package export drift and missing conditional targets', () => {

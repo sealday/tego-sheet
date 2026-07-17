@@ -39,10 +39,9 @@ function cloneAndFreezeJson(value: JsonValue): JsonValue {
     return Object.freeze(value.map((entry) => cloneAndFreezeJson(entry)));
   }
 
-  const clone: Record<string, JsonValue> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    clone[key] = cloneAndFreezeJson(entry);
-  }
+  const clone = Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, cloneAndFreezeJson(entry)]),
+  ) as Record<string, JsonValue>;
   return Object.freeze(clone);
 }
 
