@@ -57,6 +57,9 @@ it('supports default, hidden and custom toolbar hosts without leaking a controll
   expect('renderer' in props).toBe(false);
   expect(props.disabledActions).not.toBeInstanceOf(Set);
   expect('add' in props.disabledActions).toBe(false);
+  expect(props.disabledActions.size).toBeGreaterThan(0);
+  expect(Array.from(props.disabledActions)).toContain('undo');
+  expect(Array.from(props.disabledActions)).toHaveLength(props.disabledActions.size);
 });
 
 it('@parity:formatting.toolbar dispatches public actions through the command pipeline and reports forced disabled actions', async () => {

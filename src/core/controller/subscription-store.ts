@@ -30,7 +30,7 @@ export class SubscriptionStore<Value> {
     try {
       while (this.queue.length > 0) {
         const next = this.queue.shift() as Value;
-        const current = [...this.listeners.entries()];
+        const current = Array.from(this.listeners.entries());
         for (const [id, listener] of current) {
           if (this.listeners.get(id) !== listener) continue;
           try {

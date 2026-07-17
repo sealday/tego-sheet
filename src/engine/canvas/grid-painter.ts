@@ -221,7 +221,7 @@ function boundaries(
     values.add(rect.start);
     values.add(rect.start + rect.size);
   }
-  return [...values].sort((first, second) => first - second);
+  return Array.from(values).sort((first, second) => first - second);
 }
 
 export function paintGrid(

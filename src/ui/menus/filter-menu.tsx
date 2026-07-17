@@ -44,7 +44,7 @@ export function FilterMenu(props: {
           props.onApply({
             column: props.column,
             operator: selected.size === props.values.length ? 'all' : 'in',
-            value: [...selected],
+            value: Array.from(selected),
           })
         }
       >

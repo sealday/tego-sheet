@@ -5,15 +5,41 @@ import { CanvasEngine, createSheetGridModel, createViewportMetrics } from '../..
 import type { SheetData } from '../../../src/core';
 import {
   hasVisibleRowInRange,
+  paintGrid,
   paneCells,
   paneGridIndexes,
 } from '../../../src/engine/canvas/grid-painter';
+import { DrawContext } from '../../../src/engine/canvas/draw-context';
 import { frozenQuadrants } from '../../../src/engine/geometry/frozen-pane-geometry';
 import { createCanvasHarness } from '../../helpers/canvas-harness';
 import { deepFreeze } from '../../helpers/deep-freeze';
 import { buildStyledWorkbook } from '../../helpers/workbook-builders';
 
 describe('read-only Canvas rendering', () => {
+  it('draws every finite row and column boundary for a visible grid', () => {
+    const sheet: SheetData = { rows: { len: 2 }, cols: { len: 2 } };
+    const viewport = createViewportMetrics(createSheetGridModel(sheet), {
+      width: 320,
+      height: 180,
+    });
+    const harness = createCanvasHarness();
+    const draw = new DrawContext(harness.canvas, 1, harness.measurement);
+
+    paintGrid(draw, { rows: [0, 1], columns: [0, 1] }, viewport);
+
+    const starts = harness.operations.filter((operation) => operation.name === 'moveTo');
+    const ends = harness.operations.filter((operation) => operation.name === 'lineTo');
+    expect(starts).toHaveLength(6);
+    expect(ends).toHaveLength(6);
+    expect(
+      new Set(starts.map((operation, index) => JSON.stringify([operation.args, ends[index]?.args])))
+        .size,
+    ).toBe(6);
+    expect([...starts, ...ends].every((operation) => operation.args.every(Number.isFinite))).toBe(
+      true,
+    );
+  });
+
   it('materializes visible header sets for downlevel consumers', () => {
     const sheet: SheetData = { rows: { len: 4 }, cols: { len: 3 } };
     const viewport = createViewportMetrics(createSheetGridModel(sheet), {

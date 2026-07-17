@@ -261,7 +261,7 @@ function disabledToolbarActions(runtime: SlotRuntime): Set<ToolbarAction['type']
 }
 
 function readonlySet<Value>(source: ReadonlySet<Value>): ReadonlySet<Value> {
-  const values = [...source];
+  const values = Array.from(source);
   return Object.freeze({
     get size() {
       return values.length;
