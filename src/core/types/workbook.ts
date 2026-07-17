@@ -10,6 +10,9 @@ export type VerticalAlign = 'top' | 'middle' | 'bottom';
 /** A serialized border line containing a style name and optional CSS color. */
 export type BorderLine = readonly [style: string, color?: string];
 
+// Maintainers: `@interface` changes TypeDoc display only; these compiler declarations stay aliases
+// and intersections so their emitted public signatures remain unchanged.
+
 /**
  * Font overrides stored in a cell style.
  *

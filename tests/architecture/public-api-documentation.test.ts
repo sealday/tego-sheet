@@ -1,7 +1,11 @@
-import { join } from 'node:path';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import ts from 'typescript';
-import { Application, normalizePath, TSConfigReader } from 'typedoc';
+import { Application, normalizePath } from 'typedoc';
+import type { TypeDocOptions } from 'typedoc';
 import { describe, expect, it } from 'vitest';
+import { publicApiProjectionPluginPath } from '../../website/plugins/strict-typedoc-generation';
 
 const root = process.cwd();
 const entryPoint = join(root, 'src/index.ts');
@@ -65,21 +69,60 @@ const expectedPublicExports = [
 ] as const;
 
 const structuredAliases = {
-  AutoFilterData: 'ref',
-  AutoFilterItemData: 'ci',
-  AutoFilterSortData: 'ci',
-  CellBorders: 'top',
-  CellData: 'text',
-  CellStyle: 'format',
-  CellsData: null,
-  ColsData: 'len',
-  ColumnData: 'width',
-  FontStyle: 'name',
-  RowData: 'cells',
-  RowsData: 'len',
-  SheetData: 'rows',
-  ValidationData: 'refs',
+  AutoFilterData: ['filters', 'ref', 'sort'],
+  AutoFilterItemData: ['ci', 'operator', 'value'],
+  AutoFilterSortData: ['ci', 'order'],
+  CellBorders: ['bottom', 'left', 'right', 'top'],
+  CellData: ['editable', 'merge', 'printable', 'style', 'text', 'value'],
+  CellStyle: [
+    'align',
+    'bgcolor',
+    'border',
+    'color',
+    'font',
+    'format',
+    'strike',
+    'textwrap',
+    'underline',
+    'valign',
+  ],
+  CellsData: [],
+  ColsData: ['len'],
+  ColumnData: ['hide', 'style', 'width'],
+  FontStyle: ['bold', 'italic', 'name', 'size'],
+  RowData: ['cells', 'height', 'hide', 'style'],
+  RowsData: ['len'],
+  SheetData: ['autofilter', 'cols', 'freeze', 'merges', 'name', 'rows', 'styles', 'validations'],
+  ValidationData: ['mode', 'operator', 'refs', 'required', 'type', 'value'],
 } as const;
+
+const tegoSheetPropNames = [
+  'className',
+  'defaultValue',
+  'initialActiveSheetIndex',
+  'locale',
+  'onActiveSheetChange',
+  'onCellEdit',
+  'onChange',
+  'onError',
+  'onPaste',
+  'onSelectionChange',
+  'options',
+  'readOnly',
+  'sheetTabs',
+  'style',
+  'toolbar',
+  'value',
+] as const;
+
+const callbackNames = [
+  'onActiveSheetChange',
+  'onCellEdit',
+  'onChange',
+  'onError',
+  'onPaste',
+  'onSelectionChange',
+] as const;
 
 interface PublicDeclaration {
   readonly name: string;
@@ -186,6 +229,123 @@ const findNested = (
   return undefined;
 };
 
+const visitRecords = (
+  value: unknown,
+  visitor: (record: Readonly<Record<string, unknown>>) => void,
+): void => {
+  if (Array.isArray(value)) {
+    for (const item of value) visitRecords(item, visitor);
+    return;
+  }
+  if (!isRecord(value)) return;
+  visitor(value);
+  for (const item of Object.values(value)) visitRecords(item, visitor);
+};
+
+const directRecords = (
+  reflection: Readonly<Record<string, unknown>> | undefined,
+  key: 'children' | 'indexSignatures',
+): readonly Readonly<Record<string, unknown>>[] => {
+  const values = reflection?.[key];
+  return Array.isArray(values) ? values.filter(isRecord) : [];
+};
+
+const localDeclarationNames = (program: ts.Program): ReadonlySet<string> => {
+  const names = new Set<string>();
+  for (const source of program.getSourceFiles()) {
+    if (!source.fileName.startsWith(join(root, 'src'))) continue;
+    const visit = (node: ts.Node): void => {
+      if (
+        (ts.isClassDeclaration(node) ||
+          ts.isEnumDeclaration(node) ||
+          ts.isFunctionDeclaration(node) ||
+          ts.isInterfaceDeclaration(node) ||
+          ts.isTypeAliasDeclaration(node)) &&
+        node.name !== undefined
+      ) {
+        names.add(node.name.text);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+  }
+  return names;
+};
+
+const referenceRoot = (name: string): string => {
+  const packageImport = name.match(/^import\(["']tego-sheet["']\)\.([^.[<]+)/u)?.[1];
+  if (packageImport !== undefined) return packageImport;
+  return name.replace(/^tego-sheet[./:#]+/u, '').split(/[.[<]/u, 1)[0] ?? name;
+};
+
+const localReferenceViolations = (
+  serialized: Readonly<Record<string, unknown>>,
+  localNames: ReadonlySet<string>,
+): readonly string[] => {
+  const allowed = new Set<string>(expectedPublicExports);
+  const rootNameById = new Map<number, string>();
+  for (const child of directRecords(serialized, 'children')) {
+    if (typeof child.name !== 'string') continue;
+    visitRecords(child, (record) => {
+      if (typeof record.id === 'number') rootNameById.set(record.id, child.name as string);
+    });
+  }
+
+  const symbolIdMap = isRecord(serialized.symbolIdMap) ? serialized.symbolIdMap : {};
+  const violations = new Set<string>();
+  visitRecords(serialized, (record) => {
+    if (record.type !== 'reference' || typeof record.name !== 'string') return;
+    const target = record.target;
+    let localRoot: string | undefined;
+
+    if (typeof target === 'number' && target >= 0) {
+      localRoot = rootNameById.get(target);
+      if (localRoot === undefined) {
+        const symbol = symbolIdMap[String(target)];
+        if (isRecord(symbol) && symbol.packageName === 'tego-sheet') {
+          const qualifiedName =
+            typeof symbol.qualifiedName === 'string' ? symbol.qualifiedName : record.name;
+          localRoot = referenceRoot(qualifiedName);
+        }
+      }
+    } else if (isRecord(target) && target.packageName === 'tego-sheet') {
+      const qualifiedName =
+        typeof target.qualifiedName === 'string' ? target.qualifiedName : record.name;
+      localRoot = referenceRoot(qualifiedName);
+    } else {
+      const nameRoot = referenceRoot(record.name);
+      const packageName = typeof record.package === 'string' ? record.package : undefined;
+      const hasLocalPrefix =
+        record.name.startsWith('tego-sheet') || record.name.includes('import("tego-sheet")');
+      if (
+        packageName === 'tego-sheet' ||
+        hasLocalPrefix ||
+        (target === -1 && localNames.has(nameRoot))
+      ) {
+        localRoot = nameRoot;
+      }
+    }
+
+    if (localRoot !== undefined && !allowed.has(localRoot)) {
+      violations.add(`${record.name} -> ${localRoot}`);
+    }
+  });
+  return [...violations].sort();
+};
+
+const findFile = async (directory: string, fileName: string): Promise<string | undefined> => {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      const nested = await findFile(path, fileName);
+      if (nested !== undefined) return nested;
+    } else if (basename(path) === fileName) {
+      return path;
+    }
+  }
+  return undefined;
+};
+
 const summaryText = (reflection: Readonly<Record<string, unknown>>): string => {
   const comment = reflection.comment;
   if (!isRecord(comment) || !Array.isArray(comment.summary)) return '';
@@ -221,65 +381,148 @@ describe('public API documentation', () => {
     expect(undocumented).toEqual([]);
   });
 
-  it('converts structured aliases into documented TypeDoc members instead of self references', async () => {
-    const app = await Application.bootstrap(
-      {
+  it('@interface is TypeDoc display-only and keeps all 14 compiler declarations as type aliases', () => {
+    const program = createPublicProgram();
+    const source = program.getSourceFile(join(root, 'src/core/types/workbook.ts'));
+    if (source === undefined)
+      throw new Error('workbook types must be part of the TypeScript program');
+    const declarations = new Map(
+      source.statements
+        .filter(ts.isTypeAliasDeclaration)
+        .map((declaration) => [declaration.name.text, declaration]),
+    );
+
+    expect(
+      [...declarations.keys()].filter((name) => Object.hasOwn(structuredAliases, name)).sort(),
+    ).toEqual(Object.keys(structuredAliases).sort());
+    for (const name of Object.keys(structuredAliases)) {
+      expect(ts.isTypeAliasDeclaration(declarations.get(name) as ts.Node), name).toBe(true);
+    }
+  });
+
+  it('generates importable Markdown with exact direct TypeDoc display projections', async () => {
+    const temporaryRoot = await mkdtemp(join(tmpdir(), 'tego-sheet-typedoc-'));
+    const outputDirectory = join(temporaryRoot, 'api');
+    try {
+      const typeDocOptions = {
+        docsPath: temporaryRoot,
         entryPoints: ['src/index.ts'],
         excludeInternal: true,
         excludePrivate: true,
         excludeProtected: true,
+        out: outputDirectory,
+        plugin: [
+          'typedoc-plugin-markdown',
+          'typedoc-docusaurus-theme',
+          publicApiProjectionPluginPath,
+        ],
         readme: 'none',
-        skipErrorChecking: true,
+        treatValidationWarningsAsErrors: true,
+        treatWarningsAsErrors: true,
         tsconfig: 'tsconfig.json',
-      },
-      [new TSConfigReader()],
-    );
-    const project = await app.convert();
-    if (project === undefined) throw new Error('TypeDoc must convert the public entry point');
-    const serialized = app.serializer.projectToObject(project, normalizePath(root));
-    const aliases = new Map(
-      (serialized.children ?? [])
-        .filter((child) => Object.hasOwn(structuredAliases, child.name))
-        .map((child) => [child.name, child]),
-    );
+      } as TypeDocOptions & { docsPath: string };
+      const app = await Application.bootstrapWithPlugins(typeDocOptions);
+      expect([app.logger.errorCount, app.logger.warningCount], 'TypeDoc bootstrap logger').toEqual([
+        0, 0,
+      ]);
 
-    expect([...aliases.keys()].sort()).toEqual(Object.keys(structuredAliases).sort());
-
-    const selfReferences: string[] = [];
-    const missingDocumentedMembers: string[] = [];
-    for (const [name, member] of Object.entries(structuredAliases)) {
-      const reflection = aliases.get(name);
-      if (reflection?.type?.type === 'reference' && reflection.type.name === name) {
-        selfReferences.push(name);
-      }
-      if (member === null) {
-        const indexSignature = findNested(
-          reflection,
-          (value) => Array.isArray(value.indexSignatures) && value.indexSignatures.length > 0,
-        );
-        if (indexSignature === undefined) missingDocumentedMembers.push(`${name}.[key]`);
-        continue;
-      }
-      const documentedMember = findNested(
-        reflection,
-        (value) => value.variant === 'declaration' && value.name === member && hasSummary(value),
+      const project = await app.convert();
+      if (project === undefined) throw new Error('TypeDoc must convert the public entry point');
+      expect([app.logger.errorCount, app.logger.warningCount], 'TypeDoc conversion logger').toEqual(
+        [0, 0],
       );
-      if (documentedMember === undefined) missingDocumentedMembers.push(`${name}.${member}`);
+      app.validate(project);
+      expect([app.logger.errorCount, app.logger.warningCount], 'TypeDoc validation logger').toEqual(
+        [0, 0],
+      );
+
+      const serialized = app.serializer.projectToObject(project, normalizePath(root));
+      const serializedRecord = serialized as unknown as Readonly<Record<string, unknown>>;
+      const rootChildren = directRecords(serializedRecord, 'children');
+      expect(rootChildren.map((child) => child.name).sort()).toEqual([...expectedPublicExports]);
+      expect(rootChildren).toHaveLength(55);
+
+      const aliases = new Map(
+        rootChildren
+          .filter(
+            (child) =>
+              typeof child.name === 'string' && Object.hasOwn(structuredAliases, child.name),
+          )
+          .map((child) => [child.name as string, child]),
+      );
+      expect([...aliases.keys()].sort()).toEqual(Object.keys(structuredAliases).sort());
+
+      for (const [name, expectedChildren] of Object.entries(structuredAliases)) {
+        const reflection = aliases.get(name);
+        const children = directRecords(reflection, 'children');
+        expect(children.map((child) => child.name).sort(), `${name} direct children`).toEqual([
+          ...expectedChildren,
+        ]);
+        expect(
+          children.filter((child) => !hasSummary(child)).map((child) => child.name),
+          `${name} direct child summaries`,
+        ).toEqual([]);
+
+        const indexSignatures = directRecords(reflection, 'indexSignatures');
+        expect(indexSignatures, `${name} direct index signature`).toHaveLength(1);
+        expect(summaryText(indexSignatures[0] ?? {}), `${name} index summary`).not.toBe('');
+        if (name === 'CellsData') {
+          expect(summaryText(indexSignatures[0] ?? {})).toBe(
+            'Cell data stored at a zero-based decimal column index.',
+          );
+        }
+
+        const selfReferences: string[] = [];
+        visitRecords(reflection, (record) => {
+          if (record.type === 'reference' && record.name === name) selfReferences.push(name);
+        });
+        expect(selfReferences, `${name} recursive same-name references`).toEqual([]);
+      }
+
+      const tegoSheetProps = rootChildren.find((child) => child.name === 'TegoSheetProps');
+      const propChildren = directRecords(tegoSheetProps, 'children');
+      expect(propChildren.map((child) => child.name).sort()).toEqual([...tegoSheetPropNames]);
+      expect(propChildren.filter((child) => !hasSummary(child)).map((child) => child.name)).toEqual(
+        [],
+      );
+      expect(JSON.stringify(tegoSheetProps)).not.toContain('TegoSheetCallbacks');
+      expect(
+        localReferenceViolations(serializedRecord, localDeclarationNames(createPublicProgram())),
+      ).toEqual([]);
+
+      const activeSheetChange = rootChildren.find(
+        (child) => child.name === 'ActiveSheetChangeEvent',
+      );
+      const activeSheet = findNested(
+        activeSheetChange,
+        (value) => value.variant === 'declaration' && value.name === 'sheet',
+      );
+      expect(activeSheet).toBeDefined();
+      expect(summaryText(activeSheet ?? {})).toBe(
+        'Worksheet reported as active by the activation event.',
+      );
+
+      await app.generateOutputs(project);
+      expect([app.logger.errorCount, app.logger.warningCount], 'TypeDoc output logger').toEqual([
+        0, 0,
+      ]);
+      const propsPath = await findFile(outputDirectory, 'TegoSheetProps.md');
+      if (propsPath === undefined) throw new Error('TypeDoc must generate TegoSheetProps.md');
+      const propsMarkdown = await readFile(propsPath, 'utf8');
+      expect(propsMarkdown).not.toContain('TegoSheetCallbacks');
+      expect(propsMarkdown).not.toMatch(/Inherited from/iu);
+      for (const callback of callbackNames) {
+        expect(propsMarkdown, `${callback} Markdown heading`).toMatch(
+          new RegExp(`^#+ ${callback}\\??(?:\\(.*\\))?$`, 'mu'),
+        );
+      }
+
+      const cellsPath = await findFile(outputDirectory, 'CellsData.md');
+      if (cellsPath === undefined) throw new Error('TypeDoc must generate CellsData.md');
+      const cellsMarkdown = await readFile(cellsPath, 'utf8');
+      expect(cellsMarkdown).toContain('Cell data stored at a zero-based decimal column index.');
+    } finally {
+      await rm(temporaryRoot, { force: true, recursive: true });
     }
-
-    expect(selfReferences).toEqual([]);
-    expect(missingDocumentedMembers).toEqual([]);
-
-    const activeSheetChange = (serialized.children ?? []).find(
-      (child) => child.name === 'ActiveSheetChangeEvent',
-    );
-    const activeSheet = findNested(
-      activeSheetChange,
-      (value) => value.variant === 'declaration' && value.name === 'sheet',
-    );
-    expect(activeSheet).toBeDefined();
-    expect(summaryText(activeSheet ?? {})).toBe(
-      'Worksheet reported as active by the activation event.',
-    );
-  }, 15_000);
+  }, 30_000);
 });

@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   generateTypeDoc,
+  publicApiProjectionPluginPath,
   toTypeDocGenerationOptions,
   type StrictTypeDocApplication,
 } from '../../website/plugins/strict-typedoc-generation';
@@ -362,6 +363,7 @@ describe('strict TypeDoc generation', () => {
     expect(options.plugin).toEqual([
       'typedoc-plugin-markdown',
       'typedoc-docusaurus-theme',
+      publicApiProjectionPluginPath,
       'custom-typedoc-plugin',
     ]);
     expect(options).not.toHaveProperty('id');

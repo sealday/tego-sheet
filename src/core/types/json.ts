@@ -27,5 +27,6 @@ export type JsonExtensible<Known extends object> = Readonly<Known> & JsonObject;
  * @inline
  */
 export type SparseJsonCollection<Known extends object = object> = Readonly<Known> & {
+  /** Cell data stored at a zero-based decimal column index. */
   readonly [key: string]: JsonValue | undefined;
 };

@@ -1,11 +1,20 @@
 import { rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { LoadContext, Plugin } from '@docusaurus/types';
 import type { PluginOptions as DocusaurusTypeDocOptions } from 'docusaurus-plugin-typedoc';
 import type { TypeDocOptions } from 'typedoc';
 
-const requiredPlugins = ['typedoc-plugin-markdown', 'typedoc-docusaurus-theme'];
+export const publicApiProjectionPluginPath = fileURLToPath(
+  new URL('./public-api-projection.cjs', import.meta.url),
+);
+
+const requiredPlugins = [
+  'typedoc-plugin-markdown',
+  'typedoc-docusaurus-theme',
+  publicApiProjectionPluginPath,
+];
 const require = createRequire(import.meta.url);
 
 interface TypeDocGenerationContext {
