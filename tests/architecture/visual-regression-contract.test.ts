@@ -71,6 +71,6 @@ describe('visual regression release contract', () => {
     expect(docsVisualConfig).toContain("outputFolder: 'playwright-report/docs-visual'");
     expect(docsVisualSpec).toContain('document.fonts.ready');
     expect(docsVisualSpec).toContain("reducedMotion: 'reduce'");
-    expect(docsVisualSpec.match(/toHaveScreenshot\(/g)).toHaveLength(4);
+    expect(docsVisualSpec.match(/toHaveScreenshot\(/g)).toHaveLength(5);
   });
 });

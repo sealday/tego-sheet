@@ -58,6 +58,11 @@ const resources = [
     to: '/playground',
   },
   {
+    label: 'Product roadmap',
+    description: 'Follow template printing, document generation, and the planned SDK direction.',
+    to: '/roadmap',
+  },
+  {
     label: 'GitHub',
     description: 'Read the source, report issues, and follow releases.',
     href: 'https://github.com/sealday/tego-sheet',

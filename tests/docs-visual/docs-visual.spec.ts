@@ -56,6 +56,17 @@ test('Quick Start desktop', async ({ page }) => {
   });
 });
 
+test('Roadmap desktop', async ({ page }) => {
+  await page.setViewportSize(DESKTOP);
+  await page.goto('roadmap');
+  await expect(page.getByRole('heading', { level: 1, name: 'Product roadmap' })).toBeVisible();
+  await waitForFonts(page);
+  await expect(page).toHaveScreenshot('roadmap-desktop.png', {
+    animations: 'disabled',
+    fullPage: true,
+  });
+});
+
 test('Playground desktop Controlled', async ({ page }) => {
   await page.setViewportSize(DESKTOP);
   await page.goto('playground?mode=controlled');

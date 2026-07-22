@@ -103,6 +103,7 @@ const config: Config = {
         },
         { to: '/docs/api', label: 'API', position: 'left' },
         { to: '/playground', label: 'Playground', position: 'left' },
+        { to: '/roadmap', label: 'Roadmap', position: 'left' },
         {
           href: 'https://github.com/sealday/tego-sheet',
           label: 'GitHub',

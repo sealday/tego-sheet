@@ -58,7 +58,7 @@ async function openNavigation(page: Page): Promise<void> {
   if (await toggle.isVisible()) await toggle.click();
 }
 
-test('project-subpath navigation loads Docs, API, and Playground assets without 404s', async ({
+test('project-subpath navigation loads Docs, API, Playground, and Roadmap assets without 404s', async ({
   page,
 }) => {
   const missingAssets: string[] = [];
@@ -79,6 +79,7 @@ test('project-subpath navigation loads Docs, API, and Playground assets without 
     ['Docs', 'docs/getting-started/installation'],
     ['API', 'docs/api'],
     ['Playground', 'playground'],
+    ['Roadmap', 'roadmap'],
   ] as const) {
     await openNavigation(page);
     await page.getByRole('link', { name: label, exact: true }).click();
@@ -88,6 +89,25 @@ test('project-subpath navigation loads Docs, API, and Playground assets without 
   }
 
   expect(missingAssets).toEqual([]);
+});
+
+test('Roadmap exposes five dependency phases and 33 non-interactive planned items', async ({
+  page,
+}) => {
+  await page.goto('roadmap');
+
+  await expect(page.getByRole('heading', { level: 1, name: 'Product roadmap' })).toBeVisible();
+  await expect(page.locator('[data-roadmap-phase]')).toHaveCount(5);
+  await expect(page.locator('[data-roadmap-item]')).toHaveCount(33);
+  await expect(page.getByText('Planned', { exact: true })).toHaveCount(33);
+  await expect(page.getByRole('checkbox')).toHaveCount(0);
+  await expect(
+    page.getByRole('link', { name: 'Sheet, selection and range print targets' }),
+  ).toHaveAttribute('href', `${PROJECT_PATH}docs/roadmap/template-printing`);
+
+  const viewport = page.viewportSize();
+  expect(viewport).not.toBeNull();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(viewport?.width);
 });
 
 test('all five public presets follow URL history and reload behavior', async ({ page }) => {

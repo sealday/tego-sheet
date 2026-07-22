@@ -265,6 +265,19 @@ export function createDocumentationSidebars(typedocSidebar: SidebarItemConfig[])
       },
       {
         type: 'category',
+        label: 'Product Roadmap',
+        link: { type: 'doc', id: 'roadmap/index' },
+        items: [
+          'roadmap/foundation',
+          'roadmap/template-printing',
+          'roadmap/formulas-data',
+          'roadmap/analysis-visualization',
+          'roadmap/extensibility',
+          'roadmap/host-integrations',
+        ],
+      },
+      {
+        type: 'category',
         label: 'API Reference',
         link: { type: 'doc', id: 'api/index' },
         items: typedocSidebar,
