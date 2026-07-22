@@ -126,6 +126,13 @@ const manualDocumentation = [
 const approvedHandWrittenDocumentation = [
   'website/docs/getting-started/installation.md',
   ...manualDocumentation.map(([path]) => path),
+  'website/docs/roadmap/analysis-visualization.md',
+  'website/docs/roadmap/extensibility.md',
+  'website/docs/roadmap/formulas-data.md',
+  'website/docs/roadmap/foundation.md',
+  'website/docs/roadmap/host-integrations.md',
+  'website/docs/roadmap/index.md',
+  'website/docs/roadmap/template-printing.md',
 ].sort();
 
 const collectHandWrittenDocumentation = (directory = 'website/docs'): string[] =>
@@ -477,6 +484,7 @@ describe('documentation site contract', () => {
       },
       { to: '/docs/api', label: 'API', position: 'left' },
       { to: '/playground', label: 'Playground', position: 'left' },
+      { to: '/roadmap', label: 'Roadmap', position: 'left' },
       {
         href: 'https://github.com/sealday/tego-sheet',
         label: 'GitHub',
@@ -634,6 +642,19 @@ describe('documentation site contract', () => {
           type: 'category',
           label: 'Migration',
           items: ['migration/from-x-data-spreadsheet'],
+        },
+        {
+          type: 'category',
+          label: 'Product Roadmap',
+          link: { type: 'doc', id: 'roadmap/index' },
+          items: [
+            'roadmap/foundation',
+            'roadmap/template-printing',
+            'roadmap/formulas-data',
+            'roadmap/analysis-visualization',
+            'roadmap/extensibility',
+            'roadmap/host-integrations',
+          ],
         },
         {
           type: 'category',
