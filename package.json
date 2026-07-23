@@ -55,6 +55,11 @@
       "import": "./dist/locales/zh-cn.js",
       "require": "./dist/locales/zh-cn.cjs"
     },
+    "./interchange": {
+      "types": "./dist/interchange/index.d.ts",
+      "import": "./dist/interchange.js",
+      "require": "./dist/interchange.cjs"
+    },
     "./output/pdf": {
       "types": "./dist/output/pdf/index.d.ts",
       "import": "./dist/output/pdf.js",

@@ -173,6 +173,7 @@ it('[ARCH-1] publishes only the approved package entry points', () => {
 
   expect(Object.keys(packageJson.exports ?? {}).sort()).toEqual([
     '.',
+    './interchange',
     './locales/de',
     './locales/en',
     './locales/nl',

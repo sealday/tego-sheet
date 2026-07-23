@@ -3,4 +3,4 @@ export {
   createOdsReader,
   createTsvReader,
   createXlsxReader,
-} from '../../../../src/interchange';
+} from 'tego-sheet/interchange';

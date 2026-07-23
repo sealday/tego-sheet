@@ -19,6 +19,7 @@ const PUBLIC_PACKAGE_RUNTIME_ALIASES = Object.freeze({
   'tego-sheet/output/pdf$': resolve(projectRoot, 'dist/output/pdf.js'),
   'tego-sheet/output/xlsx$': resolve(projectRoot, 'dist/output/xlsx.js'),
   'tego-sheet/output/image$': resolve(projectRoot, 'dist/output/image.js'),
+  'tego-sheet/interchange$': resolve(projectRoot, 'dist/interchange.js'),
 });
 
 function publicPackageExportsPlugin() {

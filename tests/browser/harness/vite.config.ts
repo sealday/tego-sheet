@@ -22,6 +22,10 @@ export default defineConfig({
         replacement: resolve(projectRoot, 'src/output/image/index.ts'),
       },
       {
+        find: 'tego-sheet/interchange',
+        replacement: resolve(projectRoot, 'src/interchange/index.ts'),
+      },
+      {
         find: 'tego-sheet/styles.css',
         replacement: resolve(projectRoot, 'src/ui/styles/index.less'),
       },

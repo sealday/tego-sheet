@@ -13,6 +13,7 @@ const expectedExports = [
   './locales/de',
   './locales/nl',
   './locales/zh-cn',
+  './interchange',
   './output/pdf',
   './output/xlsx',
   './output/image',
@@ -201,6 +202,33 @@ test('the optional image subpath exposes only its adapter contract', () => {
       if (JSON.stringify(Object.keys(image)) !== JSON.stringify(expected)) {
         throw new Error('Unexpected image exports: ' + Object.keys(image).join(','));
       }
+    `,
+    ],
+    { cwd: consumer, stdio: 'pipe' },
+  );
+});
+
+test('the interchange subpath exposes only Worker-safe reader and writer contracts', () => {
+  execFileSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '--eval',
+      `
+      const interchange = await import('tego-sheet/interchange');
+      const expected = [
+        'InterchangeError',
+        'createCsvReader',
+        'createCsvWriter',
+        'createOdsReader',
+        'createTsvReader',
+        'createTsvWriter',
+        'createXlsxReader',
+      ];
+      if (JSON.stringify(Object.keys(interchange)) !== JSON.stringify(expected)) {
+        throw new Error('Unexpected interchange exports: ' + Object.keys(interchange).join(','));
+      }
+      if ('document' in globalThis) throw new Error('interchange created a DOM global');
     `,
     ],
     { cwd: consumer, stdio: 'pipe' },
