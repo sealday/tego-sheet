@@ -40,7 +40,7 @@ function sizeRoot(root: HTMLElement, width = 500, height = 300): void {
   fireEvent(window, new Event('resize'));
 }
 
-function validatedDocument(): SpreadsheetDocument {
+function validatedDocument(behavior: 'reject' | 'warn' = 'reject'): SpreadsheetDocument {
   const parsed = parseSpreadsheetDocument({
     schemaVersion: 2,
     id: 'validated-editor',
@@ -67,7 +67,7 @@ function validatedDocument(): SpreadsheetDocument {
             id: 'amount',
             type: 'number',
             predicate: { operator: 'between', minimum: 0, maximum: 100 },
-            behavior: 'reject',
+            behavior,
             allowBlank: false,
           },
         },
@@ -128,6 +128,96 @@ it('validates editor commits asynchronously before one controlled callback seque
   validation.release({ status: 'accepted', diagnostics: [] });
   await waitFor(() => expect(rendered.queryByRole('textbox', { name: /cell editor/i })).toBeNull());
   expect(order).toEqual(['change', 'cell-edit', 'selection']);
+  expect(legacyProjection(ref.current!.getDocument())[0]?.rows?.['0']).toMatchObject({
+    cells: { 0: { text: '12' } },
+  });
+});
+
+it('gates imperative cell edits through the same asynchronous validation path', async () => {
+  const ref = createRef<TegoSheetHandle>();
+  const validation = deferredValidation();
+  render(
+    <TegoSheet
+      ref={ref}
+      defaultDocument={validatedDocument()}
+      validationEngine={validation.engine}
+    />,
+  );
+  await waitFor(() => expect(ref.current).not.toBeNull());
+
+  ref.current!.setCellText(
+    { sheet: ref.current!.getDocument().workbook.sheets[0]!.id as never, row: 0, column: 0 },
+    '12',
+  );
+  expect(legacyProjection(ref.current!.getDocument())[0]?.rows?.['0']).toMatchObject({
+    cells: { 0: { type: 'number', value: 1 } },
+  });
+
+  validation.release({ status: 'accepted', diagnostics: [] });
+  await waitFor(() =>
+    expect(legacyProjection(ref.current!.getDocument())[0]?.rows?.['0']).toMatchObject({
+      cells: { 0: { text: '12' } },
+    }),
+  );
+});
+
+it('aborts pending imperative validation when the component is disposed', async () => {
+  const ref = createRef<TegoSheetHandle>();
+  let observedSignal: AbortSignal | undefined;
+  const validation = deferredValidation();
+  const rendered = render(
+    <TegoSheet
+      ref={ref}
+      defaultDocument={validatedDocument()}
+      validationEngine={{
+        validate: (request) => {
+          observedSignal = request.signal;
+          return validation.engine.validate(request);
+        },
+      }}
+    />,
+  );
+  await waitFor(() => expect(ref.current).not.toBeNull());
+
+  ref.current!.setCellText(
+    { sheet: ref.current!.getDocument().workbook.sheets[0]!.id as never, row: 0, column: 0 },
+    '12',
+  );
+  expect(observedSignal?.aborted).toBe(false);
+  rendered.unmount();
+  expect(observedSignal?.aborted).toBe(true);
+  validation.release({ status: 'accepted', diagnostics: [] });
+  await Promise.resolve();
+});
+
+it('requires explicit host confirmation before committing a warning-mode editor value', async () => {
+  const ref = createRef<TegoSheetHandle>();
+  const confirmValidationWarning = vi.fn(() => true);
+  const rendered = render(
+    <TegoSheet
+      ref={ref}
+      defaultDocument={validatedDocument('warn')}
+      validationEngine={{
+        validate: async () => ({
+          status: 'warning',
+          code: 'VALIDATION_REJECTED',
+          diagnostics: [{ code: 'VALIDATION_REJECTED', ruleId: 'amount' }],
+        }),
+      }}
+      confirmValidationWarning={confirmValidationWarning}
+    />,
+  );
+  await waitFor(() => expect(ref.current).not.toBeNull());
+  const root = rendered.container.querySelector<HTMLElement>('[data-tego-sheet]')!;
+  sizeRoot(root);
+  fireEvent.focusIn(root);
+  fireEvent.keyDown(window, { key: 'F2' });
+  const editor = await rendered.findByRole('textbox', { name: /cell editor/i });
+  fireEvent.change(editor, { target: { value: '12' } });
+  fireEvent.keyDown(editor, { key: 'Enter' });
+
+  await waitFor(() => expect(confirmValidationWarning).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(rendered.queryByRole('textbox', { name: /cell editor/i })).toBeNull());
   expect(legacyProjection(ref.current!.getDocument())[0]?.rows?.['0']).toMatchObject({
     cells: { 0: { text: '12' } },
   });

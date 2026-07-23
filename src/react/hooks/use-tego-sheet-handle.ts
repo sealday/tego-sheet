@@ -13,6 +13,12 @@ import type { ControllerEpoch } from './use-controller-epoch';
 import type { EventDispatcher } from '../adapters/event-dispatcher';
 import type { EngineAdapterSlot } from './use-canvas-engine';
 import type { TegoSheetHandle } from '../tego-sheet.types';
+import type {
+  ValidationEngine,
+  ValidationResult as AdvancedValidationResult,
+} from '../../validation';
+import { documentValidationRequest } from '../../validation/document-rule';
+import { beginCellValidation } from '../../validation/edit-gate';
 
 function invalid(message: string): TegoSheetException {
   return new TegoSheetException({
@@ -41,6 +47,10 @@ export interface TegoSheetHandleRuntime {
   readonly root: HTMLDivElement | null;
   readonly setActiveSheet: (sheet: SheetId | null) => void;
   readonly refreshFilterView?: () => void;
+  readonly validationEngine: ValidationEngine;
+  readonly confirmValidationWarning?: (
+    result: AdvancedValidationResult,
+  ) => boolean | Promise<boolean>;
 }
 
 export interface RuntimeCapture<Runtime extends TegoSheetHandleRuntime> {
@@ -60,6 +70,7 @@ export interface TegoSheetRuntimeAuthority<Runtime extends TegoSheetHandleRuntim
   readonly patchRoot: (root: HTMLDivElement) => boolean;
   readonly require: () => Runtime;
   readonly activate: (sheet: SheetId | null) => void;
+  readonly trackValidation: (controller: { readonly abort: () => void }) => () => void;
 }
 
 function createRuntimeAuthority<
@@ -68,6 +79,7 @@ function createRuntimeAuthority<
   let current: Runtime | null = null;
   let activeDecisionVersion = 0;
   const committedTokens = new WeakSet<object>();
+  const pendingValidations = new Set<{ readonly abort: () => void }>();
   const requireRuntime = () => {
     if (current === null || !current.isActive()) {
       throw invalid('TegoSheet handle runtime is inactive');
@@ -110,6 +122,8 @@ function createRuntimeAuthority<
     deactivate() {
       activeDecisionVersion += 1;
       current = null;
+      for (const controller of pendingValidations) controller.abort();
+      pendingValidations.clear();
     },
     patchRoot(root) {
       const runtime = current;
@@ -120,6 +134,10 @@ function createRuntimeAuthority<
     require: requireRuntime,
     activate(sheet) {
       applyActiveSheet(requireRuntime(), sheet);
+    },
+    trackValidation(controller) {
+      pendingValidations.add(controller);
+      return () => pendingValidations.delete(controller);
     },
   };
 }
@@ -155,7 +173,49 @@ function createStableHandle<Runtime extends TegoSheetHandleRuntime>(
       );
     },
     setCellText(address, text) {
-      authority.require().dispatcher.dispatchRef({ type: 'set-cell-text', address, text }, 'ref');
+      const runtime = authority.require();
+      const validationAddress = {
+        sheetId: address.sheet as unknown as import('../../document').DocumentSheetId,
+        row: address.row,
+        column: address.column,
+      };
+      const unresolvedRequest = documentValidationRequest(
+        runtime.controller.getDocument(),
+        validationAddress,
+        text,
+      );
+      if (unresolvedRequest === undefined) {
+        runtime.dispatcher.dispatchRef({ type: 'set-cell-text', address, text }, 'ref');
+        return;
+      }
+      const lease = beginCellValidation(runtime.controller, validationAddress);
+      const request = { ...unresolvedRequest, signal: lease.signal };
+      const untrack = authority.trackValidation(lease);
+      void runtime.dispatcher
+        .dispatchValidatedUi(
+          {
+            engine: runtime.validationEngine,
+            request,
+            text,
+            ...(runtime.confirmValidationWarning === undefined
+              ? {}
+              : { confirmWarning: runtime.confirmValidationWarning }),
+            canCommit: () =>
+              runtime.isActive() &&
+              lease.isCurrent() &&
+              runtime.controller === authority.require().controller,
+          },
+          'ref',
+        )
+        .then((outcome) => {
+          if (outcome.status === 'rejected' && runtime.isActive()) {
+            runtime.dispatcher.reportUiError(outcome.error);
+          }
+        })
+        .finally(() => {
+          untrack();
+          lease.release();
+        });
     },
     addSheet(name) {
       const capture = authority.capture();

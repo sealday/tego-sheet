@@ -253,13 +253,20 @@ export type {
   ValidatedCellEditResult,
   ValidationEngine,
   ValidationEngineOptions,
+  ValidationFormulaContext,
+  ValidationFormulaEvaluator,
+  ValidationComparison,
+  ValidationComparisonOperator,
   ValidationListSource,
+  ValidationRangeComparison,
   ValidationRequest as AdvancedValidationRequest,
   ValidationResolver,
   ValidationResolverContext,
   ValidationResolverRegistry,
   ValidationResult as AdvancedValidationResult,
   ValidationRule as AdvancedValidationRule,
+  ValidationRuleBase,
+  ValidationScalarComparison,
 } from './validation';
 export { applyFilterView, createFilterViewSession } from './views';
 export type {

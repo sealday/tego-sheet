@@ -22,4 +22,19 @@ describe('validated editor mutation boundary', () => {
     expect(edit).toContain('input.controller.transact(');
     expect(edit).not.toContain('input.controller.execute(');
   });
+
+  it('routes the imperative cell edit entry through the validated transaction path', () => {
+    const handle = readFileSync(resolve(root, 'src/react/hooks/use-tego-sheet-handle.ts'), 'utf8');
+    const entry = handle.indexOf('setCellText(address, text)');
+    const request = handle.indexOf('documentValidationRequest(', entry);
+    const validatedDispatch = handle.indexOf('.dispatchValidatedUi(', request);
+    const directDispatch = handle.indexOf('.dispatcher.dispatchRef(', entry);
+    expect(entry).toBeGreaterThan(-1);
+    expect(request).toBeGreaterThan(entry);
+    expect(validatedDispatch).toBeGreaterThan(request);
+    expect(directDispatch).toBeGreaterThan(entry);
+    expect(handle.slice(entry, validatedDispatch)).toContain(
+      'if (unresolvedRequest === undefined)',
+    );
+  });
 });

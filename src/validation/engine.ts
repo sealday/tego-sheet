@@ -58,8 +58,11 @@ export interface ValidationEngineOptions {
   readonly evaluateCustomFormula?: ValidationFormulaEvaluator;
   /** Resource limits for dynamic validation sources. */
   readonly limits?: {
+    /** Maximum number of values accepted from a static or resolved list. */
     readonly maxListItems?: number;
+    /** Hard deadline for a resolver or custom-formula evaluator. */
     readonly resolverTimeoutMs?: number;
+    /** Maximum custom-formula source length. */
     readonly maxFormulaLength?: number;
   };
 }

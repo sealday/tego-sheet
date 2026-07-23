@@ -16,6 +16,7 @@ import type {
   ValidationResult as AdvancedValidationResult,
 } from '../../validation';
 import { documentValidationRequest } from '../../validation/document-rule';
+import { beginCellValidation, type CellValidationLease } from '../../validation/edit-gate';
 
 export interface ActiveCellEditor extends ChromeEditor {
   readonly address: CellAddress;
@@ -81,11 +82,11 @@ export function useCellEditorRuntime<Runtime extends CellEditorRuntime>(
   const { editorRef, isActive, replaceEditor, runtimeAuthority, setSelection } = options;
   const pendingValidation = useRef<{
     readonly token: object;
-    readonly controller: AbortController;
+    readonly lease: CellValidationLease;
   } | null>(null);
   useEffect(
     () => () => {
-      pendingValidation.current?.controller.abort();
+      pendingValidation.current?.lease.abort();
       pendingValidation.current = null;
     },
     [],
@@ -118,21 +119,22 @@ export function useCellEditorRuntime<Runtime extends CellEditorRuntime>(
           ? proposedTarget
           : null;
       let selectionHandled = nextTarget === null;
-      const abortController = new AbortController();
-      const validationRequest = documentValidationRequest(
+      const validationAddress = {
+        sheetId: current.address.sheet as unknown as import('../../document').DocumentSheetId,
+        row: current.address.row,
+        column: current.address.column,
+      };
+      const unresolvedValidationRequest = documentValidationRequest(
         runtime.controller.getDocument(),
-        {
-          sheetId: current.address.sheet as unknown as import('../../document').DocumentSheetId,
-          row: current.address.row,
-          column: current.address.column,
-        },
+        validationAddress,
         current.value,
-        abortController.signal,
       );
-      if (validationRequest !== undefined) {
+      if (unresolvedValidationRequest !== undefined) {
         if (pendingValidation.current !== null) return { allow: false };
+        const lease = beginCellValidation(runtime.controller, validationAddress);
+        const validationRequest = { ...unresolvedValidationRequest, signal: lease.signal };
         const token = {};
-        pendingValidation.current = { token, controller: abortController };
+        pendingValidation.current = { token, lease };
         void runtime.dispatcher
           .dispatchValidatedUi(
             {
@@ -144,6 +146,7 @@ export function useCellEditorRuntime<Runtime extends CellEditorRuntime>(
                 : { confirmWarning: runtime.confirmValidationWarning }),
               canCommit: () =>
                 isActive() &&
+                lease.isCurrent() &&
                 pendingValidation.current?.token === token &&
                 editorRef.current === current,
             },
@@ -162,6 +165,7 @@ export function useCellEditorRuntime<Runtime extends CellEditorRuntime>(
           .then((outcome) => {
             if (pendingValidation.current?.token !== token) return;
             pendingValidation.current = null;
+            lease.release();
             if (!isActive() || editorRef.current !== current) return;
             if (outcome.status === 'validation-rejected') return;
             if (outcome.status === 'rejected') {
@@ -180,7 +184,6 @@ export function useCellEditorRuntime<Runtime extends CellEditorRuntime>(
           });
         return { allow: false };
       }
-      abortController.abort();
       // Cells without a typed async rule use the prevalidated/internal synchronous dispatch path.
       replaceEditor(null);
       const outcome = runtime.dispatcher.dispatchUi(
@@ -242,7 +245,7 @@ export function useCellEditorRuntime<Runtime extends CellEditorRuntime>(
     (point: CellPoint, initialText: string | undefined, source: ChangeSource) => {
       if (!isActive()) return;
       const runtime = runtimeAuthority.require();
-      pendingValidation.current?.controller.abort();
+      pendingValidation.current?.lease.abort();
       pendingValidation.current = null;
       if (
         runtime.readOnly ||
@@ -261,7 +264,7 @@ export function useCellEditorRuntime<Runtime extends CellEditorRuntime>(
         source,
         value: initialText ?? original,
         onCancel: () => {
-          pendingValidation.current?.controller.abort();
+          pendingValidation.current?.lease.abort();
           pendingValidation.current = null;
           replaceEditor(null);
           runtime.root?.focus();
