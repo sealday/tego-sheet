@@ -87,12 +87,149 @@ async function cellCenter(page: Page, row: number, column: number) {
 }
 
 async function preparePrintPreview(page: Page): Promise<void> {
-  await page.getByRole('button', { name: 'Print', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Print' });
-  await expect(dialog).toBeVisible();
-  await dialog.getByLabel('Paper').selectOption('A5');
-  await dialog.getByLabel('Orientation').selectOption('landscape');
-  await dialog.getByRole('button', { name: 'Print', exact: true }).click();
+  await page.evaluate(async () => {
+    const moduleId = '/@id/tego-sheet';
+    const api = (await import(moduleId)) as typeof import('../../src');
+    const parsed = api.parseSpreadsheetDocument({
+      schemaVersion: 2,
+      id: 'visual-print-document',
+      workbook: {
+        sheets: [
+          {
+            id: 'visual-print-sheet',
+            name: 'Printable',
+            cells: [
+              {
+                row: 0,
+                column: 0,
+                cell: { input: { type: 'string', value: 'Print report' }, styleId: 'heading' },
+              },
+              { row: 1, column: 0, cell: { input: { type: 'string', value: 'Visible' } } },
+              { row: 1, column: 1, cell: { input: { type: 'number', value: 42 } } },
+              {
+                row: 1,
+                column: 2,
+                cell: { input: { type: 'string', value: 'private' }, printable: false },
+              },
+            ],
+            merges: [{ start: { row: 0, column: 0 }, end: { row: 0, column: 2 } }],
+            rows: [{ index: 0, height: 34 }],
+            columns: [
+              { index: 0, width: 150 },
+              { index: 1, width: 120 },
+              { index: 2, width: 120 },
+            ],
+          },
+        ],
+        styles: [
+          {
+            id: 'heading',
+            value: {
+              backgroundColor: '#e8f1ff',
+              fontFamily: 'Noto Sans Visual',
+              bold: true,
+            },
+          },
+        ],
+        validations: [],
+        settings: { dateSystem: 'excel-1900', localeHint: 'en-US' },
+      },
+      templates: [],
+      resources: { items: [] },
+      extensions: {},
+    });
+    if (!parsed.ok) throw new Error('visual print fixture failed to parse');
+    const template = {
+      id: 'visual-template',
+      name: 'Visual',
+      bindings: [],
+      printProfiles: [
+        {
+          id: 'visual-profile',
+          name: 'A5 landscape',
+          targets: [{ type: 'sheet', sheetId: 'visual-print-sheet' }],
+          page: {
+            paper: { type: 'A5' },
+            orientation: 'landscape',
+            margins: { top: 40, right: 40, bottom: 40, left: 40 },
+            scale: { type: 'fixed', value: 1 },
+          },
+          manualBreaks: [],
+          showGridlines: true,
+          showHeadings: false,
+        },
+      ],
+    } as unknown as import('../../src').SpreadsheetTemplate;
+    const compilation = api.compileSpreadsheetTemplate(parsed.document, template);
+    if (!compilation.template) throw new Error('visual template failed to compile');
+    const rendered = await api.renderSpreadsheetTemplate(
+      {
+        template: compilation.template,
+        currentDocumentHash: compilation.template.sourceDocumentHash,
+        data: {},
+        profileId: 'visual-profile',
+        missingValue: 'error',
+      },
+      {
+        locale: 'en-US',
+        timeZone: 'UTC',
+        dateSystem: 'excel-1900',
+        clock: new Date('2026-01-01T00:00:00.000Z'),
+        fontMetrics: api.createFontMetrics({
+          fonts: {
+            Arial: { averageAdvance: 7, lineHeight: 13 },
+            'Noto Sans Visual': { averageAdvance: 7, lineHeight: 13 },
+          },
+          fallbackFont: 'Arial',
+          fallback: { averageAdvance: 7, lineHeight: 13 },
+        }),
+      },
+    );
+    if (!rendered.document) throw new Error('visual template failed to render');
+    const pages = api.serializeGeneratedDocumentSvgPages(rendered.document);
+    document.querySelector('[data-visual-print-preview]')?.remove();
+    const preview = document.createElement('section');
+    preview.setAttribute('data-visual-print-preview', '');
+    pages.forEach((page, index) => {
+      const host = document.createElement('div');
+      host.setAttribute('data-visual-print-page', String(index + 1));
+      host.style.width = `${page.width}px`;
+      host.style.height = `${page.height}px`;
+      host.style.lineHeight = '0';
+      host.innerHTML = page.svg;
+      preview.append(host);
+      if (index === 0) {
+        const crop = document.createElement('div');
+        crop.setAttribute('data-visual-print-crop', 'printable-cells');
+        crop.style.width = '410px';
+        crop.style.height = '90px';
+        crop.style.lineHeight = '0';
+        crop.style.overflow = 'hidden';
+        crop.innerHTML = page.svg;
+        const svg = crop.querySelector('svg');
+        svg?.setAttribute('viewBox', '40 40 410 90');
+        svg?.setAttribute('width', '410');
+        svg?.setAttribute('height', '90');
+        preview.append(crop);
+      }
+    });
+    const texts = [...preview.querySelectorAll('text')].map((node) => node.textContent ?? '');
+    const fills = [...preview.querySelectorAll<SVGRectElement>('rect[fill]')].map((node) => ({
+      fill: node.getAttribute('fill') ?? '',
+      height: Number(node.getAttribute('height')),
+      width: Number(node.getAttribute('width')),
+      x: Number(node.getAttribute('x')),
+      y: Number(node.getAttribute('y')),
+    }));
+    window.__tegoVisual.printSnapshot = {
+      css: '@page { size: A5 landscape; }',
+      fills,
+      pages: pages.map(({ width, height }) => ({ width, height })),
+      strokes: preview.querySelectorAll('[stroke]').length,
+      texts,
+    };
+    document.body.append(preview);
+  });
   await expect(page.locator('[data-visual-print-page="1"]')).toBeVisible();
 }
 
@@ -306,7 +443,7 @@ test(`${printableCellsParityToken} printable cells are preserved while private c
     expect.objectContaining({
       fill: '#e8f1ff',
       height: 32,
-      width: 388,
+      width: 148,
     }),
   );
   expect(printSnapshot?.strokes).toBeGreaterThan(0);

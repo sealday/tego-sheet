@@ -46,7 +46,7 @@ export function ObservedSheet() {
 
 export function safelyPrint(handle: TegoSheetHandle | null) {
   try {
-    handle?.print();
+    handle?.focus();
   } catch (error) {
     if (error instanceof TegoSheetException) {
       console.error(error.code, error.message, error.recoverable);

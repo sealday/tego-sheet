@@ -86,7 +86,7 @@ export const parityManifest: readonly ParityRow[] = [
     id: 'output',
     unit: { assertions: ['output.print-layout'] },
     component: { assertions: ['output.print-dialog'] },
-    browser: { assertions: ['output.export-download'] },
+    browser: { assertions: ['output.browser-print', 'output.export-download'] },
     visual: { assertions: ['output.print-preview'] },
   },
   {

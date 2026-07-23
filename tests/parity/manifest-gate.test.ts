@@ -115,7 +115,7 @@ const expectedCatalog: readonly CatalogRow[] = [
     id: 'output',
     unit: ['output.print-layout'],
     component: ['output.print-dialog'],
-    browser: ['output.export-download'],
+    browser: ['output.browser-print', 'output.export-download'],
     visual: ['output.print-preview'],
   },
   {
@@ -692,7 +692,7 @@ test('@parity:manifest.catalog is complete and uses stable assertion prefixes', 
   const projection = projectCatalog(parityManifest);
   assert.deepEqual(projection, expectedCatalog);
   assert.equal(projection.length, 19);
-  assert.equal(projection.flatMap((row) => lanes.flatMap((lane) => row[lane] ?? [])).length, 64);
+  assert.equal(projection.flatMap((row) => lanes.flatMap((lane) => row[lane] ?? [])).length, 65);
   assert.equal(
     projection.flatMap((row) => lanes.map((lane) => row[lane])).filter((lane) => lane === null)
       .length,

@@ -1,51 +1,69 @@
 ---
-title: Printing
+title: Template printing
 ---
 
-# Printing
+# Template printing
 
-Printing is an imperative command on `TegoSheetHandle`. It renders the active worksheet for A4 portrait
-output and opens the browser print flow. Call it directly from a user gesture so browser policies can
-allow the dialog.
+Printing is a compiler pipeline. Compile an explicit template, render it against structured data and
+deterministic environment inputs, then pass the immutable `GeneratedDocument` to preview or browser
+output. The adapter never reads the editor DOM, selection, scroll position, zoom, or Canvas pixels.
 
-```tsx
-import { useRef } from 'react';
+```ts
 import {
-  createSpreadsheetDocument,
-  TegoSheet,
-  type TegoSheetError,
-  type TegoSheetHandle,
+  compileSpreadsheetTemplate,
+  createFontMetrics,
+  hashSpreadsheetDocument,
+  IsolatedBrowserPrintAdapter,
+  renderSpreadsheetTemplate,
+  type SpreadsheetDocument,
+  type SpreadsheetTemplate,
 } from 'tego-sheet';
-import 'tego-sheet/styles.css';
 
-export function PrintableSheet() {
-  const ref = useRef<TegoSheetHandle>(null);
+export async function printInvoice(
+  document: SpreadsheetDocument,
+  template: SpreadsheetTemplate,
+  data: unknown,
+) {
+  const compilation = compileSpreadsheetTemplate(document, template);
+  if (!compilation.template)
+    throw new Error(compilation.diagnostics.map((item) => item.message).join('\n'));
 
-  function handlePrintError(error: TegoSheetError) {
-    if (error.code === 'PRINT_FAILED') alert(error.message);
-  }
-
-  return (
-    <>
-      <button type="button" onClick={() => ref.current?.print()}>
-        Print active sheet
-      </button>
-      <div style={{ height: 480 }}>
-        <TegoSheet
-          ref={ref}
-          defaultDocument={createSpreadsheetDocument({ sheetName: 'Report' })}
-          onError={handlePrintError}
-        />
-      </div>
-    </>
+  const rendered = await renderSpreadsheetTemplate(
+    {
+      template: compilation.template,
+      currentDocumentHash: hashSpreadsheetDocument(document),
+      data,
+      profileId: template.printProfiles[0]!.id,
+      missingValue: 'error',
+    },
+    {
+      locale: 'en-US',
+      timeZone: 'UTC',
+      dateSystem: document.workbook.settings.dateSystem,
+      clock: new Date(),
+      fontMetrics: createFontMetrics({
+        fonts: { Arial: { averageAdvance: 6, lineHeight: 12 } },
+        fallbackFont: 'Arial',
+        fallback: { averageAdvance: 6, lineHeight: 12 },
+      }),
+    },
   );
+  if (!rendered.document)
+    throw new Error(rendered.diagnostics.map((item) => item.message).join('\n'));
+
+  const adapter = new IsolatedBrowserPrintAdapter();
+  try {
+    await adapter.print(rendered.document);
+  } finally {
+    adapter.dispose();
+  }
 }
 ```
 
-The default and custom toolbar can also invoke the supported `print` action. Printing remains available
-in `readOnly` mode. A cell with `printable: false` omits its content while preserving grid geometry,
-style, and merged-cell layout. Printing failures handled by the component arrive through `onError` as
-`PRINT_FAILED`; invalid handle use can throw `TegoSheetException` synchronously.
+`TegoSheet` also supports `mode="template"` with a `template` and `onTemplateChange`, plus
+`mode="preview"` with `sampleData`, `renderEnvironment`, and `onDiagnostics`. Preview and browser
+print serialize the same page IDs, sizes, and `PrintDisplayList`.
 
-See the [TegoSheetHandle API](/docs/api/interfaces/TegoSheetHandle) and
-[TegoSheetError API](/docs/api/interfaces/TegoSheetError).
+An old compiled template is rejected with `TEMPLATE_SOURCE_STALE` when its canonical document hash
+does not match the current snapshot. Browser printing uses a hidden same-origin iframe and removes it
+after `afterprint`, cancellation, explicit disposal, or a bounded timeout.

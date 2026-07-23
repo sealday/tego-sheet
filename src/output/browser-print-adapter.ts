@@ -6,9 +6,13 @@ export interface GeneratedDocumentForBrowserPrint {
   readonly print: {
     /** Compiler-issued semantic page identities. */
     readonly pages: readonly {
+      /** Stable semantic identity shared with preview output. */
       readonly id: string;
+      /** Zero-based page position in the generated document. */
       readonly index: number;
+      /** Page width in print-profile units. */
       readonly width: number;
+      /** Page height in print-profile units. */
       readonly height: number;
     }[];
     /** Exact display list shared with SVG preview and browser output. */
