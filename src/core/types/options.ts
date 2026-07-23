@@ -70,8 +70,8 @@ export type BorderMode =
 /** Command that a custom toolbar can request through `execute`. */
 export type ToolbarAction =
   | {
-      /** History or print command. */
-      readonly type: 'undo' | 'redo' | 'print';
+      /** History command. */
+      readonly type: 'undo' | 'redo';
     }
   | {
       /** Format-paint or format-clearing command. */

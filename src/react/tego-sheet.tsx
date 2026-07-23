@@ -1,6 +1,7 @@
 import {
   forwardRef,
   useCallback,
+  useEffect,
   useId,
   useLayoutEffect,
   useMemo,
@@ -25,7 +26,7 @@ import {
   type ValidationRule,
 } from '../core';
 import type { WorkbookCommand } from '../core/commands/workbook-command';
-import { createEventDispatcher, printWorkbook } from './adapters/event-dispatcher';
+import { createEventDispatcher } from './adapters/event-dispatcher';
 import { deletionSplitsMerge } from '../core/operations/structure';
 import { createEngineAdapterSlot, useCanvasEngine } from './hooks/use-canvas-engine';
 import { useControllerEpoch, type ControllerEpoch } from './hooks/use-controller-epoch';
@@ -51,16 +52,17 @@ import { EmptyWorkbook } from '../ui/empty-workbook';
 import { SheetChrome } from '../ui/sheet-chrome';
 import type { ContextMenuAction } from '../ui/menus/context-menu';
 import { createTranslator } from '../ui/translate';
-import { type PrintWorkbookOptions } from '../ui/print-workbook';
 import {
   activeSheetData,
   filterCommandSelection,
   filterValuesForSelection,
-  mountActiveSheetPrint,
 } from './sheet-chrome-runtime';
 import { AccessibilityGrid } from './accessibility/accessibility-grid';
 import { createPresentationCache, createPresentationResolver } from '../presentation';
 import { createPresentationValidationResolver } from './adapters/presentation-adapter';
+import { compileSpreadsheetTemplate, renderSpreadsheetTemplate } from '../template';
+import { TemplateDesigner } from './template-designer';
+import { TemplatePreview } from './preview';
 
 function callbacksFromProps(props: TegoSheetProps): TegoSheetCallbacks {
   return {
@@ -217,7 +219,6 @@ function disabledToolbarActions(runtime: SlotRuntime): Set<ToolbarAction['type']
     for (const action of SELECTION_ACTIONS) disabled.add(action);
   }
   if (sheet === null) {
-    disabled.add('print');
     disabled.add('clear-filter');
     disabled.add('sort');
     disabled.add('unfreeze');
@@ -287,7 +288,6 @@ function readonlySet<Value>(source: ReadonlySet<Value>): ReadonlySet<Value> {
 function toolbarCommand(runtime: SlotRuntime, action: ToolbarAction): WorkbookCommand | null {
   const selection = runtime.selection;
   switch (action.type) {
-    case 'print':
     case 'paint-format':
       return null;
     case 'undo':
@@ -404,10 +404,6 @@ function executeAction(
     );
     return;
   }
-  if (action.type === 'print') {
-    printRuntime(runtime, { paper: 'A4', orientation: 'portrait' });
-    return;
-  }
   const command = toolbarCommand(actionRuntime, action);
   if (command === null) {
     uiError(
@@ -417,23 +413,6 @@ function executeAction(
     return;
   }
   runtime.dispatcher.dispatchUi(command, source);
-}
-
-function printRuntime(runtime: SlotRuntime, options: PrintWorkbookOptions): void {
-  if (runtimeSheet(runtime) === null) {
-    uiError(runtime, 'Print is unavailable without an active sheet');
-    return;
-  }
-  printWorkbook(
-    runtime.dispatcher,
-    () =>
-      mountActiveSheetPrint(
-        runtime.controller.getSnapshot(),
-        runtime.activeSheet,
-        options,
-        runtime.defaultStyle,
-      ) ?? (() => undefined),
-  );
 }
 
 function addSheetFromTabs(authority: SlotRuntimeAuthority, name?: string): void {
@@ -563,7 +542,6 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
     contextMenu,
     filterOpen,
     validationOpen,
-    printOpen,
     notification,
     paintSource,
     replaceEditor,
@@ -572,10 +550,8 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
     closeContextMenu,
     closeFilter,
     closeValidation,
-    closePrint,
     openFilter,
     openValidation,
-    setPrintOpen,
     setNotification,
     togglePaintSource,
     consumePaintSource,
@@ -655,16 +631,6 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
     dispatcher,
     engineSlot,
     isActive: props.epoch.isActive,
-    preparePrint: () => {
-      const cleanup = mountActiveSheetPrint(
-        props.epoch.controller.getSnapshot(),
-        activeSheet,
-        { paper: 'A4', orientation: 'portrait' },
-        initialOptions.defaultStyle,
-      );
-      if (cleanup === null) throw contractViolation('Print is unavailable without an active sheet');
-      return cleanup;
-    },
     readOnly: props.readOnly ?? false,
     root: null,
     selection,
@@ -1121,14 +1087,12 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
         filterOpen={filterOpen}
         notification={notification}
         paintFormatActive={paintSource !== null}
-        printOpen={printOpen}
         validationOpen={validationOpen}
         onCloseContextMenu={closeContextMenu}
         onCloseFilter={() => {
           setFilterAuthority(null);
           closeFilter();
         }}
-        onClosePrint={closePrint}
         onCloseValidation={closeValidation}
         onDismissNotification={() => setNotification(null)}
         onExecute={execute}
@@ -1149,14 +1113,8 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
         }}
         onOpenFilter={openToolbarFilter}
         onOpenContextFilter={openContextFilter}
-        onOpenPrint={() => setPrintOpen(true)}
         onOpenValidation={openToolbarValidation}
         onOpenContextValidation={openContextValidation}
-        onPrint={(options: PrintWorkbookOptions) => {
-          closePrint();
-          const runtime = runtimeAuthority.committed(renderToken);
-          if (runtime !== null) printRuntime(runtime, options);
-        }}
         onRemoveValidation={() => {
           const authority = validationAuthorityRef.current;
           closeValidation();
@@ -1249,9 +1207,86 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
 
 const ForwardedRuntime = forwardRef(Runtime);
 
+function PreviewRenderSession(props: {
+  readonly compiled: NonNullable<ReturnType<typeof compileSpreadsheetTemplate>['template']>;
+  readonly profileId: string;
+  readonly sampleData: unknown;
+  readonly environment: NonNullable<TegoSheetProps['renderEnvironment']>;
+  readonly onDiagnostics: TegoSheetProps['onDiagnostics'];
+}) {
+  const [result, setResult] = useState<Awaited<
+    ReturnType<typeof renderSpreadsheetTemplate>
+  > | null>(null);
+  const { compiled, environment, onDiagnostics, profileId, sampleData } = props;
+  useEffect(() => {
+    const controller = new AbortController();
+    void renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: sampleData,
+        profileId,
+        missingValue: 'warning-and-blank',
+        signal: controller.signal,
+      },
+      environment,
+    ).then((next) => {
+      if (controller.signal.aborted) return;
+      onDiagnostics?.(next.diagnostics);
+      setResult(next);
+    });
+    return () => controller.abort();
+  }, [compiled, environment, onDiagnostics, profileId, sampleData]);
+  if (result?.document !== undefined) return <TemplatePreview document={result.document} />;
+  return (
+    <section aria-label="Template preview diagnostics" aria-live="polite">
+      {result?.diagnostics.map((diagnostic, index) => (
+        <p key={`${diagnostic.code}-${index}`}>{diagnostic.message}</p>
+      ))}
+    </section>
+  );
+}
+
+function TemplateSurface(props: {
+  readonly document: import('../document').SpreadsheetDocument;
+  readonly template: NonNullable<TegoSheetProps['template']>;
+  readonly sampleData: unknown;
+  readonly environment: NonNullable<TegoSheetProps['renderEnvironment']>;
+  readonly onDiagnostics: TegoSheetProps['onDiagnostics'];
+}) {
+  const { document, environment, onDiagnostics, sampleData, template } = props;
+  const compilation = useMemo(
+    () => compileSpreadsheetTemplate(document, template),
+    [document, template],
+  );
+  useEffect(() => {
+    onDiagnostics?.(compilation.diagnostics);
+  }, [compilation.diagnostics, onDiagnostics]);
+  const profile = template.printProfiles[0];
+  if (compilation.template !== undefined && profile !== undefined) {
+    return (
+      <PreviewRenderSession
+        key={`${compilation.template.sourceDocumentHash}:${template.id}:${profile.id}`}
+        compiled={compilation.template}
+        profileId={profile.id}
+        sampleData={sampleData}
+        environment={environment}
+        onDiagnostics={onDiagnostics}
+      />
+    );
+  }
+  return (
+    <section aria-label="Template preview diagnostics" aria-live="polite">
+      {compilation.diagnostics.map((diagnostic, index) => (
+        <p key={`${diagnostic.code}-${index}`}>{diagnostic.message}</p>
+      ))}
+    </section>
+  );
+}
+
 /**
  * Renders an interactive spreadsheet with controlled or uncontrolled document ownership.
- * Use a {@link TegoSheetHandle} ref for cell, sheet, validation, print, and layout operations.
+ * Use a {@link TegoSheetHandle} ref for cell, sheet, validation, and layout operations.
  *
  * @example
  * ```tsx
@@ -1286,7 +1321,25 @@ export const TegoSheet = forwardRef<TegoSheetHandle, TegoSheetProps>(
         />
       );
     }
-    return (
+    if (props.mode === 'preview') {
+      if (props.template === undefined || props.renderEnvironment === undefined) {
+        return (
+          <section aria-label="Template preview diagnostics">
+            Preview mode requires a template and deterministic render environment.
+          </section>
+        );
+      }
+      return (
+        <TemplateSurface
+          document={epoch.snapshot.document}
+          template={props.template}
+          sampleData={props.sampleData}
+          environment={props.renderEnvironment}
+          onDiagnostics={props.onDiagnostics}
+        />
+      );
+    }
+    const runtime = (
       <ForwardedRuntime
         {...props}
         controlled={controlled}
@@ -1296,6 +1349,19 @@ export const TegoSheet = forwardRef<TegoSheetHandle, TegoSheetProps>(
         ref={ref}
       />
     );
+    if (props.mode === 'template' && props.template !== undefined) {
+      return (
+        <div data-tego-template-mode="">
+          {runtime}
+          <TemplateDesigner
+            template={props.template}
+            diagnostics={[]}
+            onChange={props.onTemplateChange ?? (() => undefined)}
+          />
+        </div>
+      );
+    }
+    return runtime;
   },
 );
 

@@ -11,7 +11,6 @@ import type {
 } from '../core';
 import type { CssPoint, OverlayAnchor } from '../engine';
 import type { SheetTabsRenderer, ToolbarRenderer } from './slot-types';
-import { PrintDialog } from './dialogs/print-dialog';
 import { ValidationDialog } from './dialogs/validation-dialog';
 import { CellEditor } from './editor/cell-editor';
 import { ContextMenu, type ContextMenuAction } from './menus/context-menu';
@@ -20,7 +19,6 @@ import { NotificationHost } from './notifications/notification-host';
 import { SheetTabs } from './tabs/sheet-tabs';
 import { DefaultToolbar } from './toolbar/default-toolbar';
 import { createTranslator } from './translate';
-import type { PrintWorkbookOptions } from './print-workbook';
 
 export interface ChromeEditor {
   readonly anchor: OverlayAnchor;
@@ -50,22 +48,18 @@ export interface SheetChromeProps {
   readonly filterOpen: boolean;
   readonly notification: TegoSheetError | null;
   readonly paintFormatActive: boolean;
-  readonly printOpen: boolean;
   readonly validationOpen: boolean;
   readonly onCloseContextMenu: () => void;
   readonly onCloseFilter: () => void;
-  readonly onClosePrint: () => void;
   readonly onCloseValidation: () => void;
   readonly onDismissNotification: () => void;
   readonly onExecute: (action: ToolbarAction) => void;
   readonly onExecuteContext: (action: ContextMenuAction) => void;
   readonly onFilter: (filter: FilterDefinition) => void;
   readonly onOpenFilter: () => void;
-  readonly onOpenPrint: () => void;
   readonly onOpenValidation: () => void;
   readonly onOpenContextFilter: () => void;
   readonly onOpenContextValidation: () => void;
-  readonly onPrint: (options: PrintWorkbookOptions) => void;
   readonly onRemoveValidation: () => void;
   readonly onValidation: (rule: ValidationRule) => void;
 }
@@ -81,7 +75,6 @@ export function SheetChrome(props: SheetChromeProps) {
         t={t}
         paintFormatActive={props.paintFormatActive}
         onOpenFilter={props.onOpenFilter}
-        onOpenPrint={props.onOpenPrint}
         onOpenValidation={props.onOpenValidation}
       />
     );
@@ -127,9 +120,6 @@ export function SheetChrome(props: SheetChromeProps) {
           onClose={props.onCloseFilter}
           onApply={props.onFilter}
         />
-      ) : null}
-      {props.printOpen ? (
-        <PrintDialog t={t} onClose={props.onClosePrint} onPrint={props.onPrint} />
       ) : null}
       <NotificationHost error={props.notification} onDismiss={props.onDismissNotification} />
     </>

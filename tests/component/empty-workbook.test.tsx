@@ -55,11 +55,10 @@ it('@parity:correction.empty-workbook-component preserves an empty array and let
   expect(requestAnimationFrame).toHaveBeenCalled();
 });
 
-it('disables print in the default and custom toolbar while no active sheet exists', async () => {
+it('omits legacy print and disables history while no active sheet exists', async () => {
   let disabledActions: ReadonlySet<string> | undefined;
   const rendered = render(<TegoSheet defaultDocument={testDocument([])} />);
-  await waitFor(() => expect(rendered.getByRole('button', { name: /print/i })).toBeTruthy());
-  expect(rendered.getByRole('button', { name: /print/i }).hasAttribute('disabled')).toBe(true);
+  expect(rendered.queryByRole('button', { name: /print/i })).toBeNull();
 
   rendered.rerender(
     <TegoSheet
@@ -70,7 +69,7 @@ it('disables print in the default and custom toolbar while no active sheet exist
       }}
     />,
   );
-  await waitFor(() => expect(disabledActions?.has('print')).toBe(true));
+  await waitFor(() => expect(disabledActions?.has('undo')).toBe(true));
 });
 
 it('disposes the canvas runtime when deleting the final sheet', async () => {

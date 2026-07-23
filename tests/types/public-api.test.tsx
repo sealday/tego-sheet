@@ -348,7 +348,6 @@ describe('the public type contract', () => {
     const actions: readonly ToolbarAction[] = [
       { type: 'undo' },
       { type: 'redo' },
-      { type: 'print' },
       { type: 'paint-format' },
       { type: 'clear-format' },
       { type: 'set-style', patch: { boldVendorFlag: false, font: { bold: true } } },

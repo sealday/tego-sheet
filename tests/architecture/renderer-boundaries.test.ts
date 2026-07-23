@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import ts from 'typescript';
 import { expect, it } from 'vitest';
@@ -12,7 +12,7 @@ function trackedSources(...directories: string[]): readonly string[] {
     encoding: 'utf8',
   })
     .split('\0')
-    .filter((file) => /\.(?:ts|tsx)$/u.test(file));
+    .filter((file) => /\.(?:ts|tsx)$/u.test(file) && existsSync(resolve(root, file)));
 }
 
 it('[ARCH-F4] keeps shared presentation and display-list modules browser and React independent', () => {
@@ -57,11 +57,13 @@ it('[ARCH-F4] prevents Canvas and print renderers from owning formula formatting
 
 it('[ARCH-F4] wires production Canvas and print adapters through shared presentation artifacts', () => {
   const engineAdapter = readFileSync(resolve(root, 'src/react/adapters/engine-adapter.ts'), 'utf8');
-  const printAdapter = readFileSync(resolve(root, 'src/react/sheet-chrome-runtime.ts'), 'utf8');
+  const printCompiler = readFileSync(resolve(root, 'src/template/render.ts'), 'utf8');
+  const printAdapter = readFileSync(resolve(root, 'src/output/browser-print-adapter.ts'), 'utf8');
 
   expect(engineAdapter).toContain('createPresentationResolver');
   expect(engineAdapter).toContain('presentations:');
-  expect(printAdapter).toContain('createPrintDisplayList');
-  expect(printAdapter).toContain('mountPrintDisplayPages');
+  expect(printCompiler).toContain('createPrintDisplayList');
+  expect(printAdapter).toContain('displayList');
+  expect(printAdapter).toContain('iframe');
   expect(printAdapter).not.toContain('mountPrintPages');
 });

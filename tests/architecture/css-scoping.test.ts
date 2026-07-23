@@ -33,10 +33,10 @@ it('keeps every emitted stylesheet selector beneath the tego-sheet namespace', a
 });
 
 it('does not inject global body, html, or unscoped form-control selectors at runtime', () => {
-  const printSource = readFileSync(resolve(root, 'src/ui/print-workbook.ts'), 'utf8');
+  const printSource = readFileSync(resolve(root, 'src/output/browser-print-adapter.ts'), 'utf8');
 
-  expect(printSource).not.toMatch(/(?:^|[\s'"`{;,])(?:body|html)\s*(?:[>+~.#:[{]|$)/im);
-  expect(printSource).not.toMatch(/@media\s+print[\s\S]*?\b(?:button|input|select|textarea)\b/i);
+  expect(printSource).not.toContain('this.#document.head.append');
+  expect(printSource).not.toMatch(/@media\s+print[\s\S]*?\b(?:button|input|select|textarea)\b/iu);
 });
 
 it('renders toolbar icons as component-owned SVG without a global icon font', async () => {

@@ -15,6 +15,7 @@ import type {
   WorkbookChange,
 } from '../core';
 import type { SpreadsheetDocument } from '../document';
+import type { RenderEnvironment, SpreadsheetTemplate } from '../template';
 import type { SheetTabsRenderer, ToolbarRenderer } from '../ui/slot-types';
 
 export type { SheetTabsRenderer, ToolbarRenderer } from '../ui/slot-types';
@@ -37,6 +38,10 @@ export interface TegoSheetCallbacks {
   readonly onPaste?: (event: PasteEvent) => void;
   /** Runs when the component handles an operation failure and exposes its structured payload. */
   readonly onError?: (error: TegoSheetError) => void;
+  /** Receives compiler and render diagnostics from template surfaces. */
+  readonly onDiagnostics?: (diagnostics: readonly import('../document').Diagnostic[]) => void;
+  /** Receives immutable template edits from the template property panel. */
+  readonly onTemplateChange?: (template: SpreadsheetTemplate) => void;
 }
 
 /**
@@ -47,6 +52,14 @@ export interface TegoSheetCallbacks {
  * switching a mounted instance between those ownership modes, throws a `TegoSheetException`.
  */
 interface TegoSheetSharedProps extends TegoSheetCallbacks {
+  /** Active product surface; defaults to the ordinary spreadsheet editor. */
+  readonly mode?: 'spreadsheet' | 'template' | 'preview';
+  /** Full TP1 template model used by template and preview modes. */
+  readonly template?: SpreadsheetTemplate;
+  /** Sample structured data resolved by preview mode. */
+  readonly sampleData?: unknown;
+  /** Deterministic preview environment; required when mode is `preview`. */
+  readonly renderEnvironment?: RenderEnvironment;
   /** Zero-based worksheet index selected on mount. */
   readonly initialActiveSheetIndex?: number;
   /** Disables workbook mutations while preserving navigation, selection, copy, and printing. */
@@ -139,8 +152,6 @@ export interface TegoSheetHandle {
   redo(): void;
   /** Validates every configured cell rule and returns a {@link ValidationResult} with all issues. */
   validate(): ValidationResult;
-  /** Prints the active worksheet as A4 portrait and reports handled print failures through `onError`. */
-  print(): void;
   /** Recomputes canvas layout after an external container-size change. */
   recalculateLayout(): void;
 }

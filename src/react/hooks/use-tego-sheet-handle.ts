@@ -10,7 +10,7 @@ import {
 } from '../../core';
 import type { WorkbookCommand } from '../../core/commands/workbook-command';
 import type { ControllerEpoch } from './use-controller-epoch';
-import { printWorkbook, type EventDispatcher } from '../adapters/event-dispatcher';
+import type { EventDispatcher } from '../adapters/event-dispatcher';
 import type { EngineAdapterSlot } from './use-canvas-engine';
 import type { TegoSheetHandle } from '../tego-sheet.types';
 
@@ -38,7 +38,6 @@ export interface TegoSheetHandleRuntime {
   readonly dispatcher: EventDispatcher;
   readonly engineSlot: EngineAdapterSlot;
   readonly isActive: () => boolean;
-  readonly preparePrint: () => () => void;
   readonly root: HTMLDivElement | null;
   readonly setActiveSheet: (sheet: SheetId | null) => void;
 }
@@ -202,10 +201,6 @@ function createStableHandle<Runtime extends TegoSheetHandleRuntime>(
       authority.require().dispatcher.dispatchRef({ type: 'redo' }, 'ref');
     },
     validate: () => authority.require().controller.validate(),
-    print() {
-      const runtime = authority.require();
-      printWorkbook(runtime.dispatcher, runtime.preparePrint);
-    },
     recalculateLayout() {
       authority.require().engineSlot.get()?.recalculateLayout();
     },

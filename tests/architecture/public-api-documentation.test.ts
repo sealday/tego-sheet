@@ -332,26 +332,34 @@ const tegoSheetPropNames = [
   'document',
   'initialActiveSheetIndex',
   'locale',
+  'mode',
   'onActiveSheetChange',
   'onCellEdit',
+  'onDiagnostics',
   'onDocumentChange',
   'onError',
   'onPaste',
   'onSelectionChange',
+  'onTemplateChange',
   'options',
   'readOnly',
+  'renderEnvironment',
+  'sampleData',
   'sheetTabs',
   'style',
+  'template',
   'toolbar',
 ] as const;
 
 const callbackNames = [
   'onActiveSheetChange',
   'onCellEdit',
+  'onDiagnostics',
   'onDocumentChange',
   'onError',
   'onPaste',
   'onSelectionChange',
+  'onTemplateChange',
 ] as const;
 
 const sparseCollectionNames = ['CellsData', 'ColsData', 'RowsData'] as const;

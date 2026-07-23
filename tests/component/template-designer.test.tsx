@@ -1,6 +1,9 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { Diagnostic } from '../../src/document';
+import { createSpreadsheetDocument } from '../../src/document';
+import { TegoSheet } from '../../src/react/tego-sheet';
+import { createFontMetrics } from '../../src/presentation';
 import { TemplateDesigner } from '../../src/react/template-designer';
 import { TemplatePreview } from '../../src/react/preview';
 import type { GeneratedDocument, SpreadsheetTemplate } from '../../src/template';
@@ -118,5 +121,37 @@ describe('TemplatePreview', () => {
     expect(page.getAttribute('viewBox')).toBe('0 0 200 300');
     expect(page.textContent).toContain('Invoice');
     expect(JSON.stringify(document)).toBe(before);
+  });
+
+  it('is the explicit TegoSheet preview mode and reports deterministic pages', async () => {
+    const document = createSpreadsheetDocument({
+      id: 'preview-document',
+      sheetId: 'sheet-1',
+      sheetName: 'Invoice',
+    });
+    const onDiagnostics = vi.fn();
+    render(
+      <TegoSheet
+        document={document}
+        mode="preview"
+        template={template}
+        sampleData={{ customer: { name: 'Ada' } }}
+        onDiagnostics={onDiagnostics}
+        renderEnvironment={{
+          locale: 'en-US',
+          timeZone: 'UTC',
+          dateSystem: 'excel-1900',
+          clock: new Date('2026-01-01T00:00:00.000Z'),
+          fontMetrics: createFontMetrics({
+            fonts: { Arial: { averageAdvance: 6, lineHeight: 12 } },
+            fallbackFont: 'Arial',
+            fallback: { averageAdvance: 6, lineHeight: 12 },
+          }),
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByRole('img')).toBeTruthy());
+    expect(onDiagnostics).toHaveBeenCalled();
   });
 });

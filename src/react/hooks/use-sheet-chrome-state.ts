@@ -15,7 +15,6 @@ export interface SheetChromeState<Editor extends ChromeEditor> {
   readonly contextMenu: ChromeContextMenu | null;
   readonly filterOpen: boolean;
   readonly validationOpen: boolean;
-  readonly printOpen: boolean;
   readonly notification: TegoSheetError | null;
   readonly paintSource: Selection | null;
   readonly replaceEditor: (editor: Editor | null) => void;
@@ -27,10 +26,8 @@ export interface SheetChromeState<Editor extends ChromeEditor> {
   readonly closeContextMenu: () => void;
   readonly closeFilter: () => void;
   readonly closeValidation: () => void;
-  readonly closePrint: () => void;
   readonly openFilter: () => void;
   readonly openValidation: () => void;
-  readonly setPrintOpen: Dispatch<SetStateAction<boolean>>;
   readonly setNotification: Dispatch<SetStateAction<TegoSheetError | null>>;
   readonly togglePaintSource: (selection: Selection) => void;
   readonly consumePaintSource: (selection: Selection) => Selection | null;
@@ -57,7 +54,6 @@ export function useSheetChromeState<Editor extends ChromeEditor>(
   const [contextMenu, setContextMenu] = useState<ChromeContextMenu | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
   const [validationOpen, setValidationOpen] = useState(false);
-  const [printOpen, setPrintOpen] = useState(false);
   const [notification, setNotification] = useState<TegoSheetError | null>(null);
   const [paintSource, setPaintSource] = useState<Selection | null>(null);
   const paintSourceRef = useRef<Selection | null>(null);
@@ -77,7 +73,6 @@ export function useSheetChromeState<Editor extends ChromeEditor>(
     setContextMenu(null);
     setFilterOpen(false);
     setValidationOpen(false);
-    setPrintOpen(false);
   }, [isActive, replaceEditor]);
   const requestContextMenu = useCallback(
     (point: Readonly<{ readonly x: number; readonly y: number }>, selection: Selection) => {
@@ -95,10 +90,6 @@ export function useSheetChromeState<Editor extends ChromeEditor>(
   }, [requestSurfaceFocus]);
   const closeValidation = useCallback(() => {
     setValidationOpen(false);
-    requestSurfaceFocus();
-  }, [requestSurfaceFocus]);
-  const closePrint = useCallback(() => {
-    setPrintOpen(false);
     requestSurfaceFocus();
   }, [requestSurfaceFocus]);
   const openFilter = useCallback(() => {
@@ -134,7 +125,6 @@ export function useSheetChromeState<Editor extends ChromeEditor>(
     contextMenu,
     filterOpen,
     validationOpen,
-    printOpen,
     notification,
     paintSource,
     replaceEditor,
@@ -143,10 +133,8 @@ export function useSheetChromeState<Editor extends ChromeEditor>(
     closeContextMenu,
     closeFilter,
     closeValidation,
-    closePrint,
     openFilter,
     openValidation,
-    setPrintOpen,
     setNotification,
     togglePaintSource,
     consumePaintSource,

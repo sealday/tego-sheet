@@ -21,14 +21,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it('@parity:output.print-dialog runs validation, filter, sort, print, and tab operations through default React chrome', async () => {
+it('runs validation, filter, sort, and tab operations through default React chrome', async () => {
   const ref = createRef<TegoSheetHandle>();
-  let printStyle = '';
-  let printPages = 0;
-  const print = vi.spyOn(window, 'print').mockImplementation(() => {
-    printStyle = document.querySelector('[data-tego-print-style]')?.textContent ?? '';
-    printPages = document.querySelectorAll('[data-tego-print-pages] canvas').length;
-  });
   const rendered = render(
     <TegoSheet
       ref={ref}
@@ -80,17 +74,6 @@ it('@parity:output.print-dialog runs validation, filter, sort, print, and tab op
   fireEvent.click(rendered.getByRole('button', { name: /apply filter/i }));
   expect(legacyProjection(ref.current!.getDocument())[0]!.autofilter?.ref).toBeDefined();
 
-  fireEvent.click(rendered.getByRole('button', { name: /print/i }));
-  const printDialog = rendered.getByRole('dialog', { name: /print/i });
-  const printOptions = within(printDialog).getAllByRole('combobox');
-  fireEvent.change(printOptions[0]!, { target: { value: 'A3' } });
-  fireEvent.change(printOptions[1]!, { target: { value: 'landscape' } });
-  fireEvent.click(printDialog.querySelector('button')!);
-  expect(print).toHaveBeenCalledOnce();
-  expect(printStyle).toContain('A3 landscape');
-  expect(printPages).toBeGreaterThan(0);
-  expect(document.querySelector('[data-tego-print-pages]')).toBeNull();
-
   fireEvent.click(rendered.getByRole('button', { name: /add sheet/i }));
   await waitFor(() => expect(rendered.getAllByRole('tab')).toHaveLength(2));
 });
@@ -117,10 +100,7 @@ it('clears transient chrome when authority changes', async () => {
   fireEvent.click(rendered.getAllByRole('tab')[1]!);
   await waitFor(() => expect(rendered.queryByRole('dialog', { name: /^filter$/i })).toBeNull());
 
-  fireEvent.click(rendered.getByRole('button', { name: /print/i }));
-  expect(rendered.getByRole('dialog', { name: /print/i })).toBeTruthy();
   rendered.rerender(<TegoSheet document={testDocument([{ name: 'Replacement' }])} />);
-  await waitFor(() => expect(rendered.queryByRole('dialog', { name: /print/i })).toBeNull());
 });
 
 it('disables every mutating default control in read-only mode', async () => {

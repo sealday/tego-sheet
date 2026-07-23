@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import ts from 'typescript';
 import { expect, it } from 'vitest';
@@ -24,7 +24,7 @@ const browserGlobals = new Set([
 function sourceFiles(): readonly string[] {
   return execFileSync('git', ['ls-files', '-z', 'src'], { cwd: root, encoding: 'utf8' })
     .split('\0')
-    .filter((file) => /\.tsx?$/.test(file));
+    .filter((file) => /\.tsx?$/.test(file) && existsSync(resolve(root, file)));
 }
 
 interface ListedTest {

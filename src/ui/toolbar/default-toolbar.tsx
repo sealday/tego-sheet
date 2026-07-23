@@ -9,7 +9,6 @@ export interface DefaultToolbarProps {
   readonly t: Translate;
   readonly paintFormatActive: boolean;
   readonly onOpenFilter: () => void;
-  readonly onOpenPrint: () => void;
   readonly onOpenValidation: () => void;
 }
 
@@ -18,7 +17,6 @@ export function DefaultToolbar(props: DefaultToolbarProps) {
   const icons: Partial<Record<ToolbarAction['type'], ToolbarIconName>> = {
     undo: 'undo',
     redo: 'redo',
-    print: 'print',
     'paint-format': 'paint',
     'clear-format': 'clear',
     merge: 'merge',
@@ -49,13 +47,6 @@ export function DefaultToolbar(props: DefaultToolbarProps) {
     >
       {button({ type: 'undo' }, t('toolbar.undo', 'Undo'))}
       {button({ type: 'redo' }, t('toolbar.redo', 'Redo'))}
-      <ToolbarButton
-        icon="print"
-        disabled={toolbar.disabledActions.has('print')}
-        onClick={props.onOpenPrint}
-      >
-        {t('toolbar.print', 'Print')}
-      </ToolbarButton>
       {button(
         { type: 'paint-format' },
         t('toolbar.paintFormat', 'Paint format'),

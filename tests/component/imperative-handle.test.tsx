@@ -1,7 +1,7 @@
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { createRef, startTransition, StrictMode, Suspense } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { TegoSheet, type TegoSheetError, type TegoSheetHandle } from '../../src';
+import { TegoSheet, type TegoSheetHandle } from '../../src';
 import { createCanvasHarness } from '../helpers/canvas-harness';
 import { legacyProjection, testDocument } from '../helpers/workbook-builders';
 
@@ -24,12 +24,6 @@ afterEach(() => {
 it('exposes every approved command and isolated query through one stable handle', async () => {
   const ref = createRef<TegoSheetHandle>();
   const onActiveSheetChange = vi.fn();
-  let printStyle = '';
-  let printPages = 0;
-  const print = vi.spyOn(window, 'print').mockImplementation(() => {
-    printStyle = document.querySelector('[data-tego-print-style]')?.textContent ?? '';
-    printPages = document.querySelectorAll('[data-tego-print-pages] canvas').length;
-  });
   const rendered = render(
     <TegoSheet
       ref={ref}
@@ -63,11 +57,6 @@ it('exposes every approved command and isolated query through one stable handle'
   handle.focus();
   expect(document.activeElement).toBe(rendered.container.querySelector('[data-tego-sheet]'));
   expect(() => handle.recalculateLayout()).not.toThrow();
-  handle.print();
-  expect(print).toHaveBeenCalledOnce();
-  expect(printStyle).toContain('A4 portrait');
-  expect(printPages).toBeGreaterThan(0);
-  expect(document.querySelector('[data-tego-print-pages]')).toBeNull();
 
   rendered.rerender(
     <TegoSheet
@@ -118,53 +107,6 @@ it('invalidates stale sheet IDs and clips active index silently on external repl
   expect(onChange).not.toHaveBeenCalled();
   expect(onActiveSheetChange).not.toHaveBeenCalled();
   expect(onSelectionChange).not.toHaveBeenCalled();
-});
-
-it('reports ref print failures through the latest onError and propagates consumer errors', async () => {
-  const ref = createRef<TegoSheetHandle>();
-  const first: TegoSheetError[] = [];
-  const latest: TegoSheetError[] = [];
-  const printFailure = new Error('printer offline');
-  vi.spyOn(window, 'print').mockImplementation(() => {
-    throw printFailure;
-  });
-  const rendered = render(
-    <TegoSheet
-      ref={ref}
-      defaultDocument={testDocument([{ name: 'A' }])}
-      onError={(error) => first.push(error)}
-    />,
-  );
-  await waitFor(() => expect(ref.current).not.toBeNull());
-  rendered.rerender(
-    <TegoSheet
-      ref={ref}
-      defaultDocument={testDocument([])}
-      onError={(error) => latest.push(error)}
-    />,
-  );
-
-  expect(() => ref.current!.print()).not.toThrow();
-  expect(first).toEqual([]);
-  expect(latest).toEqual([
-    expect.objectContaining({
-      code: 'PRINT_FAILED',
-      recoverable: true,
-      cause: expect.objectContaining({ name: 'Error', message: 'printer offline' }),
-    }),
-  ]);
-
-  const consumerFailure = new Error('consumer onError failed');
-  rendered.rerender(
-    <TegoSheet
-      ref={ref}
-      defaultDocument={testDocument([])}
-      onError={() => {
-        throw consumerFailure;
-      }}
-    />,
-  );
-  expect(() => ref.current!.print()).toThrow(consumerFailure);
 });
 
 it.each([

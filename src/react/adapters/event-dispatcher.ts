@@ -61,38 +61,6 @@ export interface EventDispatcher {
   readonly reportUiError: (error: TegoSheetError) => void;
 }
 
-export function printWorkbook(
-  dispatcher: Pick<EventDispatcher, 'reportUiError'>,
-  prepare?: () => () => void,
-): void {
-  let failure: unknown;
-  let cleanup: (() => void) | undefined;
-  try {
-    cleanup = prepare?.();
-    window.print();
-  } catch (cause) {
-    failure = cause;
-  } finally {
-    try {
-      cleanup?.();
-    } catch (cause) {
-      failure =
-        failure === undefined
-          ? cause
-          : new AggregateError([failure, cause], 'Print and print cleanup both failed', {
-              cause: failure,
-            });
-    }
-  }
-  if (failure === undefined) return;
-  dispatcher.reportUiError({
-    code: 'PRINT_FAILED',
-    message: 'Printing the workbook failed',
-    recoverable: true,
-    cause: failure,
-  });
-}
-
 function define(output: object, key: string, value: unknown): void {
   Object.defineProperty(output, key, {
     configurable: true,

@@ -49,12 +49,6 @@ export type {
   CanvasSurfacePort,
   TextMeasurementPort,
 } from './canvas/canvas-engine';
-export {
-  PAPER_SIZES,
-  PrintRenderer,
-  createPrintLayout,
-  renderPrintPage,
-} from './canvas/print-renderer';
 export { ResourceRegistry } from './interaction/resource-registry';
 export type { EventTargetPort } from './interaction/resource-registry';
 export { createInteractionManager, InteractionManager } from './interaction/interaction-manager';
@@ -70,13 +64,3 @@ export type {
 } from './interaction/interaction-manager';
 export type { ClipboardPort, DataTransferPort } from './interaction/clipboard';
 export type { ResizeAxis, ResizeHandle } from './interaction/resize';
-export type {
-  PaperOrientation,
-  PaperSizeName,
-  PrintCellLayout,
-  PrintLayout,
-  PrintLayoutOptions,
-  PrintPageLayout,
-  PrintPaper,
-  PrintRenderOptions,
-} from './canvas/print-renderer';
