@@ -88,4 +88,27 @@ describe('deterministic template pagination', () => {
     });
     expect(result.pages).toHaveLength(1);
   });
+
+  it('revalidates rows and columns against title-reduced capacity after a page break', () => {
+    const result = paginateTemplateTargets({
+      targets: [
+        {
+          id: 'titles',
+          rows: [40, 60],
+          columns: [40, 60],
+          repeatRows: [30],
+          repeatColumns: [30],
+        },
+      ],
+      paper: { width: 100, height: 100 },
+      margins: { top: 10, right: 10, bottom: 10, left: 10 },
+      scale: { type: 'fixed', value: 1 },
+      manualBreaks: [],
+      maxPages: 10,
+    });
+    expect(result.pages).toHaveLength(1);
+    expect(result.diagnostics.map(({ code }) => code)).toEqual(
+      expect.arrayContaining(['ROW_EXCEEDS_PAGE', 'COLUMN_EXCEEDS_PAGE']),
+    );
+  });
 });

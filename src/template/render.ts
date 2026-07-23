@@ -127,8 +127,8 @@ function targets(
   insertions: ReadonlyMap<string, readonly RowInsertion[]>,
 ): readonly ResolvedTarget[] {
   const output: ResolvedTarget[] = [];
-  const append = (range: DocumentCellRange): void => {
-    const transformed = transformRange(range, insertions);
+  const append = (range: DocumentCellRange, transform = true): void => {
+    const transformed = transform ? transformRange(range, insertions) : range;
     const sheet = document.workbook.sheets.find(({ id }) => id === transformed.sheetId);
     if (sheet === undefined) return;
     output.push({
@@ -140,11 +140,11 @@ function targets(
   for (const target of profile.targets) {
     if (target.type === 'sheet') {
       const sheet = document.workbook.sheets.find(({ id }) => id === target.sheetId);
-      if (sheet !== undefined) append(usedRange(sheet));
+      if (sheet !== undefined) append(usedRange(sheet), false);
     } else if (target.type === 'range') {
       append(target.range);
     } else {
-      target.ranges.forEach(append);
+      target.ranges.forEach((range) => append(range));
     }
   }
   return output;
@@ -318,9 +318,6 @@ function displayPages(
           ({ start, end }) =>
             row >= start.row && row <= end.row && column >= start.column && column <= end.column,
         );
-        if (merge !== undefined && (row !== merge.start.row || column !== merge.start.column)) {
-          continue;
-        }
         const mergeRows =
           merge === undefined
             ? [row]
@@ -333,6 +330,11 @@ function displayPages(
             : columns.filter(
                 (candidate) => candidate >= merge.start.column && candidate <= merge.end.column,
               );
+        const mergeOrigin =
+          merge === undefined
+            ? { row, column }
+            : { row: mergeRows[0] ?? row, column: mergeColumns[0] ?? column };
+        if (row !== mergeOrigin.row || column !== mergeOrigin.column) continue;
         cells.push({
           rect: {
             x:
@@ -358,7 +360,11 @@ function displayPages(
               mergeRows.reduce((sum, candidate) => sum + rowHeight(target.sheet, candidate), 0) *
               page.scale,
           },
-          presentation: resolvePresentation(target.sheet.id, row, column),
+          presentation: resolvePresentation(
+            target.sheet.id,
+            merge?.start.row ?? row,
+            merge?.start.column ?? column,
+          ),
         });
       }
     }
@@ -512,10 +518,16 @@ export async function renderSpreadsheetTemplate(
       .flatMap((pageBreak) =>
         resolvedTargets
           .filter(({ sheet }) => sheet.id === pageBreak.sheetId)
-          .map((target) => ({
-            targetId: target.id,
-            beforeRow: Math.max(0, pageBreak.beforeRow - target.range.start.row),
-          })),
+          .map((target) => {
+            const beforeRow = mappedRow(
+              pageBreak.beforeRow,
+              expansion.insertedRows.get(pageBreak.sheetId) ?? [],
+            );
+            return {
+              targetId: target.id,
+              beforeRow: Math.max(0, beforeRow - target.range.start.row),
+            };
+          }),
       )
       .concat(
         resolvedTargets.flatMap((target) =>

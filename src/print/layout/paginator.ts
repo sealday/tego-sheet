@@ -128,6 +128,16 @@ export function paginateTemplateTargets(input: PaginationInput): PaginationResul
         columnSegments.push({ start: columnStart, end: column - 1 });
         columnStart = column;
         columnWidth = 0;
+        if (availableTargetWidth <= 0 || width > availableTargetWidth) {
+          diagnostics.push(
+            diagnostic(
+              'COLUMN_EXCEEDS_PAGE',
+              `Column ${column} in ${target.id} exceeds the printable page`,
+            ),
+          );
+          columnStart = column + 1;
+          continue;
+        }
       }
       columnWidth += width;
     }
@@ -195,6 +205,13 @@ export function paginateTemplateTargets(input: PaginationInput): PaginationResul
         emit(row - 1);
         start = row;
         height = 0;
+        if (availableTargetHeight <= 0 || rowHeight > availableTargetHeight) {
+          diagnostics.push(
+            diagnostic('ROW_EXCEEDS_PAGE', `Row ${row} in ${target.id} exceeds the printable page`),
+          );
+          start = row + 1;
+          continue;
+        }
       }
       height += rowHeight;
     }

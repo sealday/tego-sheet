@@ -287,6 +287,50 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function hasPointShape(value: unknown): boolean {
+  return isRecord(value) && typeof value.row === 'number' && typeof value.column === 'number';
+}
+
+function hasRangeShape(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.sheetId === 'string' &&
+    hasPointShape(value.start) &&
+    hasPointShape(value.end)
+  );
+}
+
+function hasPageShape(value: unknown): boolean {
+  if (
+    !isRecord(value) ||
+    !isRecord(value.paper) ||
+    !isRecord(value.margins) ||
+    !isRecord(value.scale) ||
+    (value.orientation !== 'portrait' && value.orientation !== 'landscape')
+  ) {
+    return false;
+  }
+  const margins = value.margins;
+  const paper = value.paper;
+  const scale = value.scale;
+  const validPaper =
+    paper.type === 'A4' ||
+    paper.type === 'A5' ||
+    paper.type === 'Letter' ||
+    (paper.type === 'custom' &&
+      typeof paper.width === 'number' &&
+      typeof paper.height === 'number');
+  const validScale =
+    (scale.type === 'fixed' && typeof scale.value === 'number') ||
+    (scale.type === 'fit-width' && typeof scale.pages === 'number') ||
+    scale.type === 'fit-page';
+  return (
+    validPaper &&
+    validScale &&
+    ['top', 'right', 'bottom', 'left'].every((side) => typeof margins[side] === 'number')
+  );
+}
+
 function hasRuntimeTemplateShape(value: unknown): value is SpreadsheetTemplate {
   if (!isRecord(value) || !Array.isArray(value.bindings) || !Array.isArray(value.printProfiles)) {
     return false;
@@ -296,11 +340,16 @@ function hasRuntimeTemplateShape(value: unknown): value is SpreadsheetTemplate {
       return false;
     }
     if (binding.type === 'value') {
-      return isRecord(binding.target) && typeof binding.expression === 'string';
+      return (
+        isRecord(binding.target) &&
+        typeof binding.target.sheetId === 'string' &&
+        hasPointShape(binding.target) &&
+        typeof binding.expression === 'string'
+      );
     }
     if (binding.type === 'repeat-rows') {
       return (
-        isRecord(binding.range) &&
+        hasRangeShape(binding.range) &&
         typeof binding.source === 'string' &&
         (binding.empty === 'remove' || binding.empty === 'keep-template-row') &&
         (binding.pageBreak === 'auto' || binding.pageBreak === 'before-each-item')
@@ -308,7 +357,7 @@ function hasRuntimeTemplateShape(value: unknown): value is SpreadsheetTemplate {
     }
     return (
       binding.type === 'conditional-range' &&
-      isRecord(binding.range) &&
+      hasRangeShape(binding.range) &&
       typeof binding.when === 'string'
     );
   });
@@ -317,10 +366,40 @@ function hasRuntimeTemplateShape(value: unknown): value is SpreadsheetTemplate {
     value.printProfiles.every(
       (profile) =>
         isRecord(profile) &&
+        typeof profile.id === 'string' &&
+        typeof profile.name === 'string' &&
         Array.isArray(profile.targets) &&
-        isRecord(profile.page) &&
-        Array.isArray(profile.manualBreaks),
+        profile.targets.every(
+          (target) =>
+            isRecord(target) &&
+            ((target.type === 'sheet' && typeof target.sheetId === 'string') ||
+              (target.type === 'range' && hasRangeShape(target.range)) ||
+              (target.type === 'ranges' &&
+                Array.isArray(target.ranges) &&
+                target.ranges.every(hasRangeShape))),
+        ) &&
+        hasPageShape(profile.page) &&
+        Array.isArray(profile.manualBreaks) &&
+        profile.manualBreaks.every(
+          (pageBreak) =>
+            isRecord(pageBreak) &&
+            typeof pageBreak.sheetId === 'string' &&
+            typeof pageBreak.beforeRow === 'number',
+        ) &&
+        (profile.repeatRows === undefined || hasRangeShape(profile.repeatRows)) &&
+        (profile.repeatColumns === undefined || hasRangeShape(profile.repeatColumns)) &&
+        typeof profile.showGridlines === 'boolean' &&
+        typeof profile.showHeadings === 'boolean',
     )
+  );
+}
+
+function exceedsCompilationBudget(document: SpreadsheetDocument, template: SpreadsheetTemplate) {
+  const sourceCells = document.workbook.sheets.reduce((sum, sheet) => sum + sheet.cells.length, 0);
+  return (
+    sourceCells > 1_000_000 ||
+    template.bindings.length > 10_000 ||
+    template.printProfiles.length > 1_000
   );
 }
 
@@ -340,6 +419,13 @@ export function compileSpreadsheetTemplate(
     const frozenDiagnostics = immutableClone([
       ...diagnostics,
       diagnostic('INVALID_TEMPLATE_STRUCTURE', 'Template structure is malformed'),
+    ]);
+    return immutableClone({ diagnostics: frozenDiagnostics, hasErrors: true });
+  }
+  if (exceedsCompilationBudget(resolved.document, template)) {
+    const frozenDiagnostics = immutableClone([
+      ...diagnostics,
+      diagnostic('COMPILATION_RESOURCE_LIMIT', 'Template source exceeds compilation limits'),
     ]);
     return immutableClone({ diagnostics: frozenDiagnostics, hasErrors: true });
   }

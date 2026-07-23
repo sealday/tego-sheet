@@ -166,6 +166,51 @@ describe('template compiler', () => {
     );
   });
 
+  it('rejects malformed nested print profile structures without throwing', () => {
+    const malformed = {
+      ...template(),
+      printProfiles: [
+        {
+          id: 'bad-profile',
+          name: 'Bad',
+          targets: [],
+          page: {},
+          manualBreaks: [],
+          showGridlines: true,
+          showHeadings: false,
+        },
+      ],
+    } as unknown as SpreadsheetTemplate;
+    const persisted = { ...document, templates: [malformed] } as SpreadsheetDocument;
+    expect(() => compileSpreadsheetTemplate(persisted, malformed.id)).not.toThrow();
+    expect(compileSpreadsheetTemplate(persisted, malformed.id)).toEqual(
+      expect.objectContaining({
+        hasErrors: true,
+        diagnostics: [expect.objectContaining({ code: 'INVALID_TEMPLATE_STRUCTURE' })],
+      }),
+    );
+  });
+
+  it('rejects oversized compiler input before cloning the source document', () => {
+    const binding = {
+      id: 'oversized' as never,
+      type: 'value' as const,
+      target: { sheetId: 'sheet-1' as never, row: 0, column: 0 },
+      expression: 'value',
+    };
+    const oversized = {
+      ...template(),
+      bindings: Array.from({ length: 10_001 }, () => binding),
+    };
+    const persisted = { ...document, templates: [oversized] } as SpreadsheetDocument;
+    expect(compileSpreadsheetTemplate(persisted, oversized.id)).toEqual(
+      expect.objectContaining({
+        hasErrors: true,
+        diagnostics: [expect.objectContaining({ code: 'COMPILATION_RESOURCE_LIMIT' })],
+      }),
+    );
+  });
+
   it('compiles metadata bindings into immutable IR and hashes the complete source', () => {
     const result = compileSpreadsheetTemplate(document, template());
     expect(result.hasErrors).toBe(false);

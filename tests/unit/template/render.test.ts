@@ -564,6 +564,103 @@ describe('template render pipeline', () => {
     ).toBe(true);
   });
 
+  it('maps expanded sheet targets and manual breaks exactly once', async () => {
+    const mappingTemplate: SpreadsheetTemplate = {
+      ...template,
+      bindings: [template.bindings.find(({ id }) => id === ('lines' as never))!],
+      printProfiles: [
+        {
+          ...template.printProfiles[0]!,
+          targets: [{ type: 'sheet', sheetId: 'sheet-1' as never }],
+          manualBreaks: [{ sheetId: 'sheet-1' as never, beforeRow: 3 }],
+          page: {
+            ...template.printProfiles[0]!.page,
+            paper: { type: 'custom', width: 400, height: 400 },
+          },
+        },
+      ],
+    };
+    const compiled = compileSpreadsheetTemplate(source, mappingTemplate).template!;
+    const result = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: { items: [{}, {}, {}] },
+        profileId: 'profile-1',
+        missingValue: 'error',
+      },
+      environment,
+    );
+    expect(result.diagnostics.filter(({ severity }) => severity === 'error')).toEqual([]);
+    expect(result.document?.print.pages.map(({ rowStart, rowEnd }) => [rowStart, rowEnd])).toEqual([
+      [0, 4],
+      [5, 5],
+    ]);
+  });
+
+  it('renders a stable continuation of a merge split across pages', async () => {
+    const mergeSource = {
+      ...source,
+      workbook: {
+        ...source.workbook,
+        sheets: [
+          {
+            ...source.workbook.sheets[0]!,
+            cells: [
+              { row: 0, column: 0, cell: { input: { type: 'string', value: 'Merged title' } } },
+            ],
+            merges: [{ start: { row: 0, column: 0 }, end: { row: 1, column: 0 } }],
+            rows: [
+              { index: 0, height: 60 },
+              { index: 1, height: 60 },
+            ],
+            columns: [{ index: 0, width: 100 }],
+          },
+        ],
+      },
+    } as SpreadsheetDocument;
+    const mergeTemplate: SpreadsheetTemplate = {
+      ...template,
+      bindings: [],
+      printProfiles: [
+        {
+          ...template.printProfiles[0]!,
+          targets: [
+            {
+              type: 'range',
+              range: {
+                sheetId: 'sheet-1' as never,
+                start: { row: 0, column: 0 },
+                end: { row: 1, column: 0 },
+              },
+            },
+          ],
+          page: {
+            ...template.printProfiles[0]!.page,
+            paper: { type: 'custom', width: 140, height: 100 },
+          },
+        },
+      ],
+    };
+    const compiled = compileSpreadsheetTemplate(mergeSource, mergeTemplate).template!;
+    const result = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: {},
+        profileId: 'profile-1',
+        missingValue: 'error',
+      },
+      environment,
+    );
+    expect(result.document?.print.pages).toHaveLength(2);
+    const secondPageTexts =
+      result.document?.print.displayList.pages[1]?.commands
+        .filter((command) => command.kind === 'text')
+        .map(({ text }) => text) ?? [];
+    expect(secondPageTexts).toContain('Merged title');
+  });
+
   it('returns an atomic diagnostic when a formatter is not registered', async () => {
     const formatterTemplate: SpreadsheetTemplate = {
       ...template,
