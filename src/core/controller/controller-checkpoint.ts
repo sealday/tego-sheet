@@ -1,6 +1,8 @@
 import type { WorkbookCommand } from '../commands/workbook-command';
 import type { WorkbookState } from '../model/workbook-state';
 import type { WorkbookChange } from '../types/changes';
+import type { SheetId } from '../types/coordinates';
+import type { DocumentPatch } from './document-patch';
 import type { HistoryCheckpoint } from './history';
 
 const checkpointOwner: unique symbol = Symbol('tego-sheet.controller-checkpoint-owner');
@@ -10,9 +12,13 @@ export interface HistoryMetadata {
   readonly change: WorkbookChange;
 }
 
+export interface WorkbookPatch extends DocumentPatch {
+  readonly sheetIds: readonly SheetId[];
+}
+
 export interface ControllerCheckpoint {
   readonly state: WorkbookState;
-  readonly history: HistoryCheckpoint<WorkbookState, HistoryMetadata>;
+  readonly history: HistoryCheckpoint<WorkbookPatch, HistoryMetadata>;
   readonly revision: number;
   readonly changeSequence: number;
   readonly [checkpointOwner]: object;
@@ -20,7 +26,7 @@ export interface ControllerCheckpoint {
 
 export function createControllerCheckpoint(
   state: WorkbookState,
-  history: HistoryCheckpoint<WorkbookState, HistoryMetadata>,
+  history: HistoryCheckpoint<WorkbookPatch, HistoryMetadata>,
   revision: number,
   changeSequence: number,
   owner: object,

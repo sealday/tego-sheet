@@ -15,10 +15,12 @@ import {
   hasCheckpointOwner,
   type ControllerCheckpoint,
   type HistoryMetadata,
+  type WorkbookPatch,
 } from './controller-checkpoint';
 import { History, type HistoryCheckpoint, type HistoryEntry } from './history';
 import { SubscriptionStore } from './subscription-store';
 import type { WorkbookInitializationDefaults } from '../serialization/canonicalize-workbook';
+import { applyDocumentPatch, createDocumentPatch } from './document-patch';
 
 export interface WorkbookControllerOptions {
   readonly readOnly?: boolean;
@@ -67,7 +69,7 @@ export type ControllerSubscriber = (event: ControllerEvent) => void;
 
 interface MutationTransaction {
   readonly state: WorkbookState;
-  readonly history: HistoryCheckpoint<WorkbookState, HistoryMetadata>;
+  readonly history: HistoryCheckpoint<WorkbookPatch, HistoryMetadata>;
   readonly revision: number;
   readonly changeSequence: number;
 }
@@ -122,7 +124,7 @@ function isolated<T>(value: T): T {
 
 export class WorkbookController {
   private state: WorkbookState;
-  private readonly history = new History<WorkbookState, HistoryMetadata>();
+  private readonly history = new History<WorkbookPatch, HistoryMetadata>();
   private readonly subscriptions = new SubscriptionStore<ControllerEvent>();
   private checkpointOwner: object = Object.freeze({});
   private checkpoints = new WeakSet<ControllerCheckpoint>();
@@ -251,11 +253,7 @@ export class WorkbookController {
     this.revision += 1;
     if (applied.undoable) {
       const metadata = Object.freeze<HistoryMetadata>({ command: commandSnapshot, change });
-      this.history.record({
-        before,
-        after: applied.state,
-        metadata,
-      });
+      this.history.record(this.createHistoryEntry(before, applied.state, metadata));
     }
 
     const commit = this.createCommit(
@@ -285,7 +283,7 @@ export class WorkbookController {
     this.state = after;
     this.revision += 1;
     const metadata = Object.freeze<HistoryMetadata>({ command: commandSnapshot, change });
-    this.history.record({ before, after, metadata });
+    this.history.record(this.createHistoryEntry(before, after, metadata));
     const commit = this.createCommit(commandSnapshot, change, projection.result);
     this.runBeforeNotify(commit as CommandCommit<unknown, WorkbookCommand>, options, transaction);
     this.publish(commit, options);
@@ -303,16 +301,23 @@ export class WorkbookController {
   ): void {
     this.ensureActive();
     const state = this.state.replace(input, sheetIds);
+    const operationalState = this.state;
     const checkpoint = this.history.checkpoint();
     if (direction === 'undo') {
       const redo = [...checkpoint.redo];
       const entry = redo.at(-1);
-      if (entry !== undefined) redo[redo.length - 1] = Object.freeze({ ...entry, before: state });
+      if (entry !== undefined) {
+        const after = this.applyPatchToState(operationalState, entry.after);
+        redo[redo.length - 1] = this.createHistoryEntry(state, after, entry.metadata);
+      }
       this.history.restore({ undo: checkpoint.undo, redo });
     } else {
       const undo = [...checkpoint.undo];
       const entry = undo.at(-1);
-      if (entry !== undefined) undo[undo.length - 1] = Object.freeze({ ...entry, after: state });
+      if (entry !== undefined) {
+        const before = this.applyPatchToState(operationalState, entry.before);
+        undo[undo.length - 1] = this.createHistoryEntry(before, state, entry.metadata);
+      }
       this.history.restore({ undo, redo: checkpoint.redo });
     }
     this.state = state;
@@ -389,11 +394,13 @@ export class WorkbookController {
     const commandSnapshot = this.isolateCommand(command);
     const change = this.createChange(summary.kind, source, summary.sheet, summary.range);
     this.revision += 1;
-    this.history.record({
-      before: checkpoint.state,
-      after,
-      metadata: Object.freeze({ command: commandSnapshot, change }),
-    });
+    this.history.record(
+      this.createHistoryEntry(
+        checkpoint.state,
+        after,
+        Object.freeze({ command: commandSnapshot, change }),
+      ),
+    );
     return {
       status: 'committed',
       commit: this.createCommit(commandSnapshot, change, undefined),
@@ -431,7 +438,10 @@ export class WorkbookController {
     const transaction = options.beforeNotify === undefined ? undefined : this.captureTransaction();
     const entry = direction === 'undo' ? this.history.undo() : this.history.redo();
     if (entry === null) return { status: 'noop' };
-    this.state = direction === 'undo' ? entry.before : entry.after;
+    this.state = this.applyPatchToState(
+      this.state,
+      direction === 'undo' ? entry.before : entry.after,
+    );
     this.revision += 1;
     const change = this.createChange(
       'history',
@@ -459,6 +469,29 @@ export class WorkbookController {
       sheet,
       ...(range === undefined ? {} : { range }),
     });
+  }
+
+  private createPatch(before: WorkbookState, after: WorkbookState): WorkbookPatch {
+    return Object.freeze({
+      ...createDocumentPatch(before.serialize(), after.serialize()),
+      sheetIds: Object.freeze(after.sheets.map((sheet) => sheet.id)),
+    });
+  }
+
+  private createHistoryEntry(
+    before: WorkbookState,
+    after: WorkbookState,
+    metadata: HistoryMetadata,
+  ): HistoryEntry<WorkbookPatch, HistoryMetadata> {
+    return Object.freeze({
+      before: this.createPatch(after, before),
+      after: this.createPatch(before, after),
+      metadata,
+    });
+  }
+
+  private applyPatchToState(state: WorkbookState, patch: WorkbookPatch): WorkbookState {
+    return state.replace(applyDocumentPatch(state.serialize(), patch), patch.sheetIds);
   }
 
   private captureTransaction(): MutationTransaction {
@@ -546,4 +579,4 @@ export class WorkbookController {
   }
 }
 
-export type WorkbookHistoryEntry = HistoryEntry<WorkbookState, HistoryMetadata>;
+export type WorkbookHistoryEntry = HistoryEntry<WorkbookPatch, HistoryMetadata>;

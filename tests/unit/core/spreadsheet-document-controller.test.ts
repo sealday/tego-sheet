@@ -1265,6 +1265,26 @@ describe('SpreadsheetDocumentController', () => {
     );
   });
 
+  it('stores document patches in schema history instead of full document roots', () => {
+    const controller = new SpreadsheetDocumentController(
+      createSpreadsheetDocument({ id: 'document-1', sheetId: 'sheet-1' }),
+    );
+    controller.dispatch(
+      {
+        type: 'set-cell-text',
+        address: { sheet: sheetId('sheet-1'), row: 0, column: 0 },
+        text: 'committed',
+      },
+      'ref',
+    );
+    const entry = controller.checkpoint().documentHistory.undo[0]!;
+
+    expect(entry.before).toMatchObject({ operations: expect.any(Array) });
+    expect(entry.after).toMatchObject({ operations: expect.any(Array) });
+    expect(entry.before).not.toHaveProperty('schemaVersion');
+    expect(entry.after).not.toHaveProperty('schemaVersion');
+  });
+
   it('clones dangerous JSON keys into frozen null-prototype records', () => {
     const dangerous = JSON.parse(
       '{"__proto__":{"polluted":true},"constructor":{"prototype":{"polluted":true}}}',

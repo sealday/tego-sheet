@@ -16,6 +16,7 @@ import {
 } from './workbook-controller';
 import { SubscriptionStore } from './subscription-store';
 import { History, type HistoryCheckpoint } from './history';
+import { applyDocumentPatch, createDocumentPatch, type DocumentPatch } from './document-patch';
 import {
   prepareSchemaCommand,
   prepareSchemaProjectionCommit,
@@ -53,7 +54,7 @@ export interface SpreadsheetDispatchOptions extends Omit<DispatchOptions, 'befor
 
 export interface SpreadsheetControllerCheckpoint {
   readonly legacy: ReturnType<WorkbookController['checkpoint']>;
-  readonly documentHistory: HistoryCheckpoint<SpreadsheetDocument, null>;
+  readonly documentHistory: HistoryCheckpoint<DocumentPatch, null>;
   readonly ['document']: SpreadsheetDocument;
   readonly [spreadsheetCheckpointOwner]: object;
 }
@@ -286,7 +287,7 @@ export function cloneFrozenDocumentValue<T>(value: T): T {
 export class SpreadsheetDocumentController {
   private currentDocument: SpreadsheetDocument;
   private checkpointDocument: SpreadsheetDocument | undefined;
-  private readonly documentHistory = new History<SpreadsheetDocument, null>();
+  private readonly documentHistory = new History<DocumentPatch, null>();
   private readonly legacy: WorkbookController;
   private readonly subscriptions = new SubscriptionStore<SpreadsheetControllerEvent>();
   private permissionGateActive = false;
@@ -397,11 +398,7 @@ export class SpreadsheetDocumentController {
       }
       const candidate = this.currentDocument;
       this.documentHistory.restore(checkpoint.documentHistory);
-      this.documentHistory.record({
-        before: checkpoint.document,
-        after: candidate,
-        metadata: null,
-      });
+      this.documentHistory.record(this.createDocumentHistoryEntry(checkpoint.document, candidate));
       const finalized = this.legacy.finalizeTransaction(
         checkpoint.legacy,
         lastCommit.command,
@@ -511,11 +508,11 @@ export class SpreadsheetDocumentController {
       if (command.type === 'undo') {
         const entry = this.documentHistory.undo();
         if (entry === null) throw new Error('Schema history is not aligned for undo');
-        candidate = entry.before;
+        candidate = this.applyPatchToDocument(this.currentDocument, entry.before);
       } else if (command.type === 'redo') {
         const entry = this.documentHistory.redo();
         if (entry === null) throw new Error('Schema history is not aligned for redo');
-        candidate = entry.after;
+        candidate = this.applyPatchToDocument(this.currentDocument, entry.after);
       } else {
         candidate = projectLegacyToDocument(
           plannedProjection,
@@ -525,11 +522,9 @@ export class SpreadsheetDocumentController {
           plan.authoritativeInputs,
           plan.authoritativeValidations,
         );
-        this.documentHistory.record({
-          before: this.currentDocument,
-          after: candidate,
-          metadata: null,
-        });
+        this.documentHistory.record(
+          this.createDocumentHistoryEntry(this.currentDocument, candidate),
+        );
       }
       this.legacy.reconcileProjection(
         projectDocumentToLegacy(candidate),
@@ -783,6 +778,34 @@ export class SpreadsheetDocumentController {
           : 'TRANSACTION_INVARIANT_FAILED',
       message: error instanceof Error ? error.message : 'Transaction failed',
     };
+  }
+
+  private createDocumentHistoryEntry(
+    before: SpreadsheetDocument,
+    after: SpreadsheetDocument,
+  ): {
+    readonly before: DocumentPatch;
+    readonly after: DocumentPatch;
+    readonly metadata: null;
+  } {
+    return Object.freeze({
+      before: createDocumentPatch(after, before),
+      after: createDocumentPatch(before, after),
+      metadata: null,
+    });
+  }
+
+  private applyPatchToDocument(
+    document: SpreadsheetDocument,
+    patch: DocumentPatch,
+  ): SpreadsheetDocument {
+    const parsed = parseSpreadsheetDocument(applyDocumentPatch(document, patch));
+    if (!parsed.ok) {
+      throw new TypeError(
+        `Document history patch produced an invalid spreadsheet document: ${JSON.stringify(parsed.diagnostics)}`,
+      );
+    }
+    return parsed.document;
   }
 
   private assertNoActiveCommitMutation(): void {

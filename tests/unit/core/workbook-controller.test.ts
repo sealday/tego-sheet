@@ -403,6 +403,26 @@ describe('WorkbookController command boundary', () => {
     expect(controller.getCellText(address)).toBe('committed');
   });
 
+  it('stores forward and inverse patches in history instead of workbook state roots', () => {
+    const controller = new WorkbookController({ name: 'A' });
+    const address = firstAddress(controller, 2, 3);
+    controller.dispatch({ type: 'set-cell-text', address, text: 'committed' }, 'ref', {
+      notify: false,
+    });
+    const entry = controller.checkpoint().history.undo[0]!;
+
+    expect(entry.before).toMatchObject({
+      operations: expect.any(Array),
+      sheetIds: expect.any(Array),
+    });
+    expect(entry.after).toMatchObject({
+      operations: expect.any(Array),
+      sheetIds: expect.any(Array),
+    });
+    expect(entry.before).not.toHaveProperty('serialize');
+    expect(entry.after).not.toHaveProperty('serialize');
+  });
+
   it('keeps subscription traversal safe across unsubscribe and reentrant dispatch', () => {
     const controller = new WorkbookController({ name: 'A' });
     const address = firstAddress(controller);
