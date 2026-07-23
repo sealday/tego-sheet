@@ -92,7 +92,7 @@ describe('Workbook 2.0 parsing and serialization', () => {
       freeze: { row: 2, column: 2 },
       filter: {
         range: { start: { row: 0, column: 0 }, end: { row: 4, column: 2 } },
-        filters: [{ column: 1, operator: 'in', values: ['open'] }],
+        filters: [{ column: 1, operator: 'in', values: ['open', ''] }],
         sort: { column: 2, direction: 'desc' },
       },
     });
@@ -112,7 +112,7 @@ describe('Workbook 2.0 parsing and serialization', () => {
       freeze: { row: 2, column: 2 },
       filter: {
         range: { start: { row: 0, column: 0 }, end: { row: 4, column: 2 } },
-        filters: [{ column: 1, operator: 'in', values: ['open'] }],
+        filters: [{ column: 1, operator: 'in', values: ['open', ''] }],
         sort: { column: 2, direction: 'desc' },
       },
       cells: [{ cell: expect.objectContaining({ editable: false, printable: false }) }],

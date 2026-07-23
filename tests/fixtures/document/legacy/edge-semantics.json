@@ -1,0 +1,39 @@
+{
+  "styles": [
+    {
+      "font": {
+        "size": 0
+      }
+    }
+  ],
+  "rows": {
+    "0": {
+      "height": 0,
+      "cells": {}
+    }
+  },
+  "cols": {
+    "0": {
+      "width": 0
+    }
+  },
+  "validations": [
+    {
+      "refs": ["A1"],
+      "mode": "cell",
+      "type": "list",
+      "required": false,
+      "value": "red,blue"
+    }
+  ],
+  "autofilter": {
+    "ref": "A1:A2",
+    "filters": [
+      {
+        "ci": 0,
+        "operator": "in",
+        "value": [""]
+      }
+    ]
+  }
+}

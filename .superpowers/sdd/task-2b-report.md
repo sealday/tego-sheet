@@ -185,3 +185,25 @@ fields, sparse falsy/extensions, styles, and validations.
 ### Remaining concerns
 
 None known within Task 2B scope.
+
+## Re-review edge-semantics addendum
+
+The Task 2B re-review identified three boundary contracts absent from the prior fixture
+matrix. New RED regressions produced eight focused failures before implementation:
+
+- a valid comma-separated list validation was rejected;
+- an explicit empty-string filter value failed both migration and direct schema round trip;
+- negative font size, row height, and column width passed migration, while the two
+  normalized layout dimensions also passed direct schema parsing.
+
+The follow-up normalizes a legacy list string with the current runtime's comma-splitting
+semantics into a schema 2 array payload. Filter values use the possibly-empty display
+string decoder. Font and layout geometry must be finite and non-negative in migration,
+and the schema parser independently enforces the normalized row/column invariant.
+
+`tests/fixtures/document/legacy/edge-semantics.json` tracks the supported boundaries:
+comma-separated list data, an empty filter item, and zero-valued font/row/column
+geometry. Focused GREEN after the changes was 94/94 document tests.
+
+The edge-semantics fix is committed as
+`fix(document): align legacy edge semantics` (SHA reported after commit creation).

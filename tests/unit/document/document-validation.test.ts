@@ -245,6 +245,16 @@ describe('Workbook 2.0 validation', () => {
     expect(codesOf(fixture, { limits: { maxColumns: 0 } })).toContain('DOCUMENT_LIMIT_EXCEEDED');
   });
 
+  it.each([{ rows: [{ index: 0, height: -1 }] }, { columns: [{ index: 0, width: -1 }] }])(
+    'rejects negative normalized sheet geometry: %o',
+    (layout) => {
+      const fixture = validDocument();
+      Object.assign(fixture.workbook.sheets[0]!, layout);
+
+      expect(codesOf(fixture)).toContain('DOCUMENT_SCHEMA_INVALID');
+    },
+  );
+
   it('aggregates independent diagnostics without exposing a partial document', () => {
     const fixture = validDocument();
     fixture.workbook.sheets.push({ ...fixture.workbook.sheets[0]! });

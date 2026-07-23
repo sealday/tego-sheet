@@ -373,13 +373,13 @@ function styleIds(value: unknown, path: string, context: Context): readonly (str
             );
         if (
           nested.size !== undefined &&
-          (typeof nested.size !== 'number' || !Number.isFinite(nested.size))
+          (typeof nested.size !== 'number' || !Number.isFinite(nested.size) || nested.size < 0)
         )
           fail(
             context,
             'LEGACY_VALUE_INVALID',
             `${entryPath}.font.size`,
-            `${entryPath}.font.size must be finite`,
+            `${entryPath}.font.size must be non-negative and finite`,
           );
         for (const key of ['bold', 'italic'] as const)
           if (nested[key] !== undefined && typeof nested[key] !== 'boolean')
@@ -505,12 +505,12 @@ function cells(
     unknown(row, ROW, rowPath, context);
     const layout: (typeof layouts)[number] = { index: rowEntry.index };
     if (row.height !== undefined) {
-      if (typeof row.height !== 'number' || !Number.isFinite(row.height))
+      if (typeof row.height !== 'number' || !Number.isFinite(row.height) || row.height < 0)
         fail(
           context,
           'LEGACY_VALUE_INVALID',
           `${rowPath}.height`,
-          `${rowPath}.height must be finite`,
+          `${rowPath}.height must be non-negative and finite`,
         );
       else layout.height = row.height;
     }
@@ -618,12 +618,12 @@ function columns(
     unknown(column, COLUMN, currentPath, context);
     const layout: (typeof output)[number] = { index: entry.index };
     if (column.width !== undefined) {
-      if (typeof column.width !== 'number' || !Number.isFinite(column.width))
+      if (typeof column.width !== 'number' || !Number.isFinite(column.width) || column.width < 0)
         fail(
           context,
           'LEGACY_VALUE_INVALID',
           `${currentPath}.width`,
-          `${currentPath}.width must be finite`,
+          `${currentPath}.width must be non-negative and finite`,
         );
       else layout.width = column.width;
     }
@@ -704,7 +704,9 @@ function validations(
       ((source.operator === 'in' && !Array.isArray(source.value)) ||
         ((source.operator === 'be' || source.operator === 'nbe') &&
           (!Array.isArray(source.value) || source.value.length !== 2)) ||
-        (source.type === 'list' && !Array.isArray(source.value)))
+        (source.type === 'list' &&
+          typeof source.value !== 'string' &&
+          !Array.isArray(source.value)))
     )
       fail(
         context,
@@ -717,6 +719,9 @@ function validations(
         .filter((key) => key !== 'refs' && source[key] !== undefined)
         .map((key) => [key, source[key]]),
     );
+    if (source.type === 'list' && typeof source.value === 'string') {
+      fields.value = source.value.split(',');
+    }
     const normalized = json(fields, entryPath, context);
     if (normalized === undefined) return;
     const canonical = JSON.stringify(normalized);

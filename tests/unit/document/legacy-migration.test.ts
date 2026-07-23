@@ -129,6 +129,35 @@ describe('legacy WorkbookInput migration', () => {
     });
   });
 
+  it('normalizes a comma-separated list validation into a schema 2 list payload', () => {
+    const { document } = migrated(fixture('edge-semantics'));
+
+    expect(document.workbook.validations[0]?.value).toEqual({
+      mode: 'cell',
+      type: 'list',
+      required: false,
+      value: ['red', 'blue'],
+    });
+  });
+
+  it('preserves an explicit empty-string filter value', () => {
+    const { document } = migrated(fixture('edge-semantics'));
+
+    expect(document.workbook.sheets[0]?.filter?.filters).toEqual([
+      { column: 0, operator: 'in', values: [''] },
+    ]);
+  });
+
+  it('preserves zero-valued font and layout geometry', () => {
+    const { document } = migrated(fixture('edge-semantics'));
+
+    expect(document.workbook.styles[0]?.value).toMatchObject({ font: { size: 0 } });
+    expect(document.workbook.sheets[0]).toMatchObject({
+      rows: [{ index: 0, height: 0 }],
+      columns: [{ index: 0, width: 0 }],
+    });
+  });
+
   it('reports unknown fields without copying them', () => {
     const { document, diagnostics } = migrated(fixture('complete'));
     expect(diagnostics).toContainEqual(
@@ -274,12 +303,25 @@ describe('legacy WorkbookInput migration', () => {
           type: 'list',
           required: false,
           operator: 'in',
-          value: 'not-a-list',
+          value: { invalid: true },
         },
       ],
     },
     { rows: { 0: { cells: { 0: { type: 'bogus' } } } } },
   ])('rejects invalid known legacy semantics atomically: %o', (input) => {
+    const result = migrateLegacyWorkbook(input, { ids: deterministicIds });
+
+    expect(result).toMatchObject({
+      ok: false,
+      diagnostics: [expect.objectContaining({ code: 'LEGACY_VALUE_INVALID' })],
+    });
+  });
+
+  it.each([
+    { styles: [{ font: { size: -1 } }] },
+    { rows: { 0: { height: -1, cells: {} } } },
+    { cols: { 0: { width: -1 } } },
+  ])('rejects negative legacy geometry atomically: %o', (input) => {
     const result = migrateLegacyWorkbook(input, { ids: deterministicIds });
 
     expect(result).toMatchObject({

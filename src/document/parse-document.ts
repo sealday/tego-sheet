@@ -496,6 +496,21 @@ function finiteAt(value: unknown, path: string, context: ParseContext): number {
   return value;
 }
 
+function nonNegativeFiniteAt(value: unknown, path: string, context: ParseContext): number {
+  const result = finiteAt(value, path, context);
+  if (result < 0) {
+    addDiagnostic(
+      context,
+      'DOCUMENT_SCHEMA_INVALID',
+      path,
+      `${path} must be non-negative`,
+      'document',
+      'decode',
+    );
+  }
+  return result;
+}
+
 function indexAt(value: unknown, path: string, context: ParseContext): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
     addDiagnostic(
@@ -748,7 +763,9 @@ function layoutAt<T extends SheetRow | SheetColumn>(
       index: layoutIndex,
       ...(item?.[sizeField] === undefined
         ? {}
-        : { [sizeField]: finiteAt(item[sizeField], `${entryPath}.${sizeField}`, context) }),
+        : {
+            [sizeField]: nonNegativeFiniteAt(item[sizeField], `${entryPath}.${sizeField}`, context),
+          }),
       ...(item?.hidden === undefined
         ? {}
         : { hidden: booleanAt(item.hidden, `${entryPath}.hidden`, context) }),
@@ -779,7 +796,7 @@ function filterAt(value: unknown, path: string, context: ParseContext): SheetFil
         column: indexAt(item?.column, `${entryPath}.column`, context),
         operator,
         values: arrayAt(item?.values, `${entryPath}.values`, context).map((entry, valueIndex) =>
-          stringAt(entry, `${entryPath}.values[${valueIndex}]`, context),
+          displayStringAt(entry, `${entryPath}.values[${valueIndex}]`, context),
         ),
       };
     },
