@@ -499,6 +499,21 @@ export function validateCommand(state: WorkbookState, command: WorkbookCommand):
     case 'remove-validation':
       validateSelection(state, command.selection);
       return;
+    case 'set-conditional-format':
+      validateSheet(state, command.sheet);
+      if (!Number.isSafeInteger(command.index) || command.index < 0) {
+        throw invalidCommand('conditional format index must be a non-negative safe integer');
+      }
+      if (command.format === null || typeof command.format !== 'object') {
+        throw invalidCommand('conditional format must be an object');
+      }
+      return;
+    case 'remove-conditional-format':
+      validateSheet(state, command.sheet);
+      if (!Number.isSafeInteger(command.index) || command.index < 0) {
+        throw invalidCommand('conditional format index must be a non-negative safe integer');
+      }
+      return;
     case 'set-filter-view':
       validateSheet(state, command.sheet);
       if (

@@ -762,6 +762,8 @@ export class SpreadsheetDocumentController {
           command.type !== 'autofill' &&
           command.type !== 'set-filter-view' &&
           command.type !== 'remove-filter-view' &&
+          command.type !== 'set-conditional-format' &&
+          command.type !== 'remove-conditional-format' &&
           command.type !== 'set-sheet-object' &&
           command.type !== 'remove-sheet-object'
         ) {

@@ -4,7 +4,7 @@ import type { BorderLine, CellStyle } from '../types/workbook';
 import type { FilterDefinition } from '../types/options';
 import type { ValidationRule } from '../types/validation';
 import type { PasteMode } from '../operations/clipboard';
-import type { FilterView, SheetObject } from '../../document/model/document';
+import type { ConditionalFormat, FilterView, SheetObject } from '../../document/model/document';
 
 /** Sets the user-facing text of one cell. */
 export interface SetCellTextCommand {
@@ -274,6 +274,28 @@ export interface RemoveValidationCommand {
   readonly selection: Selection;
 }
 
+/** Creates or replaces one ordered worksheet conditional-format rule. */
+export interface SetConditionalFormatCommand {
+  /** Command discriminator. */
+  readonly type: 'set-conditional-format';
+  /** Worksheet owning the rule. */
+  readonly sheet: SheetId;
+  /** Zero-based rule position; the current length appends a rule. */
+  readonly index: number;
+  /** Complete persistent conditional-format definition. */
+  readonly format: ConditionalFormat;
+}
+
+/** Removes one ordered worksheet conditional-format rule. */
+export interface RemoveConditionalFormatCommand {
+  /** Command discriminator. */
+  readonly type: 'remove-conditional-format';
+  /** Worksheet owning the rule. */
+  readonly sheet: SheetId;
+  /** Zero-based rule position to remove. */
+  readonly index: number;
+}
+
 /** Creates or replaces one persistent worksheet filter view. */
 export interface SetFilterViewCommand {
   /** Command discriminator. */
@@ -360,6 +382,8 @@ export type WorkbookCommand =
   | SortCommand
   | SetValidationCommand
   | RemoveValidationCommand
+  | SetConditionalFormatCommand
+  | RemoveConditionalFormatCommand
   | SetFilterViewCommand
   | RemoveFilterViewCommand
   | SetSheetObjectCommand

@@ -30,7 +30,10 @@ export interface SchemaCommandPlan {
 
 export interface SchemaProjectionCommit {
   readonly result: unknown;
-  readonly kind: Extract<WorkbookChangeKind, 'clipboard' | 'autofill' | 'view' | 'object'>;
+  readonly kind: Extract<
+    WorkbookChangeKind,
+    'clipboard' | 'autofill' | 'view' | 'object' | 'style'
+  >;
   readonly sheet: SheetId;
   readonly range?: CellRange;
 }
@@ -240,6 +243,34 @@ function removeFilterView(
   sheet.filterViews = (sheet.filterViews ?? []).filter((view) => view.id !== command.viewId);
 }
 
+function setConditionalFormat(
+  input: SpreadsheetDocumentInput,
+  sheetIds: readonly SheetId[],
+  command: Extract<WorkbookCommand, { readonly type: 'set-conditional-format' }>,
+): void {
+  const sheet = input.workbook.sheets[sheetIndex(sheetIds, command.sheet)];
+  if (sheet === undefined) return;
+  const formats = [...(sheet.conditionalFormatting ?? [])];
+  if (command.index > formats.length) {
+    throw new RangeError('conditional format index is outside the rule list');
+  }
+  if (command.index === formats.length) formats.push(structuredClone(command.format));
+  else formats[command.index] = structuredClone(command.format);
+  sheet.conditionalFormatting = formats;
+}
+
+function removeConditionalFormat(
+  input: SpreadsheetDocumentInput,
+  sheetIds: readonly SheetId[],
+  command: Extract<WorkbookCommand, { readonly type: 'remove-conditional-format' }>,
+): void {
+  const sheet = input.workbook.sheets[sheetIndex(sheetIds, command.sheet)];
+  if (sheet === undefined) return;
+  const formats = [...(sheet.conditionalFormatting ?? [])];
+  if (command.index < formats.length) formats.splice(command.index, 1);
+  sheet.conditionalFormatting = formats;
+}
+
 function setSheetObject(
   input: SpreadsheetDocumentInput,
   sheetIds: readonly SheetId[],
@@ -361,6 +392,8 @@ export function prepareSchemaProjectionCommit(
         | 'autofill'
         | 'set-filter-view'
         | 'remove-filter-view'
+        | 'set-conditional-format'
+        | 'remove-conditional-format'
         | 'set-sheet-object'
         | 'remove-sheet-object';
     }
@@ -371,6 +404,9 @@ export function prepareSchemaProjectionCommit(
 ): SchemaProjectionCommit {
   if (command.type === 'set-filter-view' || command.type === 'remove-filter-view') {
     return { result: undefined, kind: 'view', sheet: command.sheet };
+  }
+  if (command.type === 'set-conditional-format' || command.type === 'remove-conditional-format') {
+    return { result: undefined, kind: 'style', sheet: command.sheet };
   }
   if (command.type === 'set-sheet-object' || command.type === 'remove-sheet-object') {
     return { result: undefined, kind: 'object', sheet: command.sheet };
@@ -442,6 +478,12 @@ export function prepareSchemaCommand(
       break;
     case 'remove-filter-view':
       removeFilterView(input, sheetIds, command);
+      break;
+    case 'set-conditional-format':
+      setConditionalFormat(input, sheetIds, command);
+      break;
+    case 'remove-conditional-format':
+      removeConditionalFormat(input, sheetIds, command);
       break;
     case 'set-sheet-object':
       setSheetObject(input, sheetIds, command);

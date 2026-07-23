@@ -107,6 +107,7 @@ export function remapWorkbookCommand(
     case 'clear-filter':
     case 'sort':
     case 'remove-filter-view':
+    case 'remove-conditional-format':
     case 'remove-sheet-object':
       return { ...command, sheet: remapSheet(command.sheet, mapping) };
     case 'set-filter-view':
@@ -118,6 +119,18 @@ export function remapWorkbookCommand(
           range: {
             ...command.view.range,
             sheetId: remapDocumentSheet(command.view.range.sheetId, mapping),
+          },
+        },
+      };
+    case 'set-conditional-format':
+      return {
+        ...command,
+        sheet: remapSheet(command.sheet, mapping),
+        format: {
+          ...command.format,
+          range: {
+            ...command.format.range,
+            sheetId: remapDocumentSheet(command.format.range.sheetId, mapping),
           },
         },
       };

@@ -336,6 +336,8 @@ export function applyCommand(
       }
       case 'set-filter-view':
       case 'remove-filter-view':
+      case 'set-conditional-format':
+      case 'remove-conditional-format':
       case 'set-sheet-object':
       case 'remove-sheet-object':
         return null;
