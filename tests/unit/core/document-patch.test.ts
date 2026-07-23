@@ -76,7 +76,10 @@ describe('internal document patches', () => {
   });
 
   it('encodes a large same-length left shift as one deletion and one necessary insertion', () => {
-    const before = Array.from({ length: 1_000 }, (_, id) => ({ id, value: `value-${id}` }));
+    const before = Array.from({ length: 1_000 }, (_, id) => ({
+      id,
+      value: `value-${id}`,
+    }));
     const after = [...before.slice(1), { id: 1_000, value: 'value-1000' }];
     const patch = createDocumentPatch(before, after);
     const splices = patch.operations.filter((operation) => operation.op === 'splice');
@@ -84,6 +87,21 @@ describe('internal document patches', () => {
     expect(splices).toHaveLength(2);
     expect(splices.reduce((total, operation) => total + operation.deleteCount, 0)).toBe(1);
     expect(splices.reduce((total, operation) => total + operation.values.length, 0)).toBe(1);
+    expect(applyDocumentPatch(before, patch)).toEqual(after);
+  });
+
+  it('keeps adversarial duplicate-array shift detection linear and compact', () => {
+    const before = [
+      ...Array.from({ length: 20_000 }, () => ({ value: 'duplicate' })),
+      { value: 'tail' },
+    ];
+    const after = [...before.slice(1), { value: 'replacement' }];
+    const startedAt = performance.now();
+
+    const patch = createDocumentPatch(before, after);
+
+    expect(performance.now() - startedAt).toBeLessThan(1_000);
+    expect(patch.operations).toHaveLength(2);
     expect(applyDocumentPatch(before, patch)).toEqual(after);
   });
 });

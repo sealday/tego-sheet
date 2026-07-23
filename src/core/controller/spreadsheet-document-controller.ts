@@ -2,8 +2,12 @@ import { parseSpreadsheetDocument } from '../../document/parse-document';
 import { projectDocumentToLegacy, projectLegacyToDocument } from './runtime-projection';
 import type { SpreadsheetDocument } from '../../document/model/document';
 import type { CommandResult, WorkbookCommand } from '../commands/workbook-command';
-import type { ChangeSource } from '../types/changes';
-import type { WorkbookChange } from '../types/changes';
+import type {
+  ChangeSource,
+  TransactionChangeAggregate,
+  TransactionSheetChange,
+  WorkbookChange,
+} from '../types/changes';
 import type { JsonObject } from '../types/json';
 import { sheetId, type CellAddress, type SheetId } from '../types/coordinates';
 import type { ValidationResult } from '../types/validation';
@@ -34,7 +38,7 @@ export interface SpreadsheetControllerCommit<
   readonly change: import('../types/changes').WorkbookChange;
   readonly result: Result;
   readonly ['document']: SpreadsheetDocument;
-  readonly transaction?: SerializableTransactionEnvelope;
+  readonly transaction?: CommittedTransactionRecord;
 }
 
 export interface SpreadsheetControllerSnapshot extends Omit<ControllerSnapshot, 'value'> {
@@ -112,11 +116,35 @@ export interface TransactionRejection {
 
 export interface TransactionCommit {
   readonly status: 'committed';
-  readonly transaction: SerializableTransactionEnvelope;
+  readonly transaction: CommittedTransactionRecord;
   readonly revision: number;
   readonly change: WorkbookChange;
   readonly ['document']: SpreadsheetDocument;
   readonly notificationError?: string;
+}
+
+/** Machine-readable information produced while preparing a committed transaction. */
+export interface TransactionDiagnostic {
+  /** Stable diagnostic category. */
+  readonly code: string;
+  /** Diagnostic severity. */
+  readonly severity: 'warning' | 'error';
+  /** Human-readable diagnostic detail. */
+  readonly message: string;
+  /** Command responsible for the diagnostic when one command can be identified. */
+  readonly commandId?: string;
+}
+
+/** Immutable audit record produced for a successfully committed transaction. */
+export interface CommittedTransactionRecord extends SerializableTransactionEnvelope {
+  /** Document revision created by this commit. */
+  readonly committedRevision: number;
+  /** JSON-safe operations that transform the pre-commit document into the committed document. */
+  readonly forwardPatches: DocumentPatch['operations'];
+  /** JSON-safe operations that transform the committed document back to its pre-commit state. */
+  readonly inversePatches: DocumentPatch['operations'];
+  /** Preparation diagnostics retained with the committed audit record. */
+  readonly diagnostics: readonly TransactionDiagnostic[];
 }
 
 export interface TransactionNoop {
@@ -266,6 +294,44 @@ function snapshotTransaction(
   return transaction;
 }
 
+function aggregateTransactionChanges(
+  commits: readonly SpreadsheetControllerCommit<unknown, WorkbookCommand>[],
+): TransactionChangeAggregate {
+  const sheets = new Map<
+    SheetId,
+    {
+      kinds: Array<Exclude<WorkbookChange['kind'], 'transaction'>>;
+      ranges: NonNullable<WorkbookChange['range']>[];
+    }
+  >();
+  for (const commit of commits) {
+    const current = sheets.get(commit.change.sheet) ?? {
+      kinds: [],
+      ranges: [],
+    };
+    if (commit.change.kind !== 'transaction' && !current.kinds.includes(commit.change.kind)) {
+      current.kinds.push(commit.change.kind);
+    }
+    if (
+      commit.change.range !== undefined &&
+      !current.ranges.some((range) => sameJson(range, commit.change.range))
+    ) {
+      current.ranges.push(commit.change.range);
+    }
+    sheets.set(commit.change.sheet, current);
+  }
+  return {
+    commandCount: commits.length,
+    sheets: [...sheets].map(
+      ([sheet, detail]): TransactionSheetChange => ({
+        sheet,
+        kinds: detail.kinds,
+        ranges: detail.ranges,
+      }),
+    ),
+  };
+}
+
 /** @internal */
 export function cloneFrozenDocumentValue<T>(value: T): T {
   if (value === null || typeof value !== 'object') return value;
@@ -380,14 +446,17 @@ export class SpreadsheetDocumentController {
     const transaction = checked;
     const checkpoint = this.checkpoint();
     const source = options.source ?? 'ref';
-    let lastCommit: SpreadsheetControllerCommit<unknown, WorkbookCommand> | undefined;
+    const commits: SpreadsheetControllerCommit<unknown, WorkbookCommand>[] = [];
     let event: SpreadsheetControllerEvent;
     let result: TransactionCommit;
     try {
       for (const envelope of transaction.commands) {
-        const outcome = this.dispatch(envelope.command, source, { notify: false });
-        if (outcome.status === 'committed') lastCommit = outcome.commit;
+        const outcome = this.dispatch(envelope.command, source, {
+          notify: false,
+        });
+        if (outcome.status === 'committed') commits.push(outcome.commit);
       }
+      const lastCommit = commits.at(-1);
       if (lastCommit === undefined) {
         this.restore(checkpoint);
         return {
@@ -416,11 +485,23 @@ export class SpreadsheetDocumentController {
           revision: checkpoint.legacy.revision,
         };
       }
+      const aggregate = aggregateTransactionChanges(commits);
+      const change = cloneFrozenDocumentValue({
+        ...finalized.commit.change,
+        aggregate,
+      }) as WorkbookChange;
+      const transactionRecord = cloneFrozenDocumentValue({
+        ...transaction,
+        committedRevision: this.getSnapshot().revision,
+        forwardPatches: createDocumentPatch(checkpoint.document, candidate).operations,
+        inversePatches: createDocumentPatch(candidate, checkpoint.document).operations,
+        diagnostics: [],
+      }) as CommittedTransactionRecord;
       const commit = cloneFrozenDocumentValue({
         ...lastCommit,
-        change: finalized.commit.change,
+        change,
         ['document']: candidate,
-        transaction,
+        transaction: transactionRecord,
       }) as SpreadsheetControllerCommit<unknown, WorkbookCommand>;
       this.currentDocument = candidate;
       event = cloneFrozenDocumentValue({
@@ -429,9 +510,9 @@ export class SpreadsheetDocumentController {
       }) as SpreadsheetControllerEvent;
       result = cloneFrozenDocumentValue({
         status: 'committed',
-        transaction,
+        transaction: transactionRecord,
         revision: this.getSnapshot().revision,
-        change: finalized.commit.change,
+        change,
         ['document']: candidate,
       }) as TransactionCommit;
     } catch (error) {
@@ -461,7 +542,9 @@ export class SpreadsheetDocumentController {
     try {
       let changed = false;
       for (const envelope of transaction.commands) {
-        const outcome = this.dispatch(envelope.command, source, { notify: false });
+        const outcome = this.dispatch(envelope.command, source, {
+          notify: false,
+        });
         if (outcome.status === 'committed') changed = true;
       }
       const candidate = this.getDocument();

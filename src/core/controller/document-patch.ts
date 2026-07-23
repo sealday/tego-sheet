@@ -72,6 +72,50 @@ function sameValue(left: unknown, right: unknown): boolean {
   );
 }
 
+function canonicalFingerprint(value: unknown, memo: WeakMap<object, string>): string {
+  if (value === null) return 'null';
+  if (typeof value === 'string') return `s:${JSON.stringify(value)}`;
+  if (typeof value === 'number') return `n:${Object.is(value, -0) ? '-0' : String(value)}`;
+  if (typeof value === 'boolean') return value ? 'b:1' : 'b:0';
+  if (typeof value === 'undefined') return 'u:';
+  if (typeof value === 'bigint') return `i:${String(value)}`;
+  if (typeof value === 'symbol') return `y:${String(value.description)}`;
+  if (typeof value === 'function') return `f:${String(value)}`;
+  const cached = memo.get(value);
+  if (cached !== undefined) return cached;
+  const fingerprint = Array.isArray(value)
+    ? `a:[${value.map((item) => canonicalFingerprint(item, memo)).join(',')}]`
+    : `o:{${Object.keys(value)
+        .sort()
+        .map(
+          (key) =>
+            `${JSON.stringify(key)}:${canonicalFingerprint(
+              (value as Record<string, unknown>)[key],
+              memo,
+            )}`,
+        )
+        .join(',')}}`;
+  memo.set(value, fingerprint);
+  return fingerprint;
+}
+
+function suffixPrefixOverlap(text: readonly string[], pattern: readonly string[]): number {
+  if (pattern.length === 0) return 0;
+  const failure = Array.from({ length: pattern.length }, () => 0);
+  for (let index = 1, matched = 0; index < pattern.length; index += 1) {
+    while (matched > 0 && pattern[index] !== pattern[matched]) matched = failure[matched - 1] ?? 0;
+    if (pattern[index] === pattern[matched]) matched += 1;
+    failure[index] = matched;
+  }
+  let matched = 0;
+  for (const token of text) {
+    while (matched > 0 && token !== pattern[matched]) matched = failure[matched - 1] ?? 0;
+    if (token === pattern[matched]) matched += 1;
+    if (matched === pattern.length) matched = failure[matched - 1] ?? 0;
+  }
+  return matched;
+}
+
 function diffValue(
   before: unknown,
   after: unknown,
@@ -81,49 +125,46 @@ function diffValue(
   if (sameValue(before, after)) return;
   if (Array.isArray(before) && Array.isArray(after)) {
     if (before.length === after.length) {
-      for (let shift = 1; shift <= Math.floor(before.length / 2); shift += 1) {
-        if (
-          sameValue(before[shift], after[0]) &&
-          before.slice(shift).every((item, index) => sameValue(item, after[index]))
-        ) {
-          operations.push({
-            op: 'splice',
-            path,
-            index: 0,
-            deleteCount: shift,
-            values: [],
-          });
-          operations.push({
-            op: 'splice',
-            path,
-            index: before.length - shift,
-            deleteCount: 0,
-            values: after.slice(before.length - shift).map((item) => cloneValue(item)),
-          });
-          return;
-        }
-        if (
-          sameValue(before[0], after[shift]) &&
-          before
-            .slice(0, before.length - shift)
-            .every((item, index) => sameValue(item, after[index + shift]))
-        ) {
-          operations.push({
-            op: 'splice',
-            path,
-            index: before.length - shift,
-            deleteCount: shift,
-            values: [],
-          });
-          operations.push({
-            op: 'splice',
-            path,
-            index: 0,
-            deleteCount: 0,
-            values: after.slice(0, shift).map((item) => cloneValue(item)),
-          });
-          return;
-        }
+      const memo = new WeakMap<object, string>();
+      const beforeFingerprints = before.map((item) => canonicalFingerprint(item, memo));
+      const afterFingerprints = after.map((item) => canonicalFingerprint(item, memo));
+      const leftOverlap = suffixPrefixOverlap(beforeFingerprints, afterFingerprints);
+      const leftShift = before.length - leftOverlap;
+      if (leftOverlap > 0 && leftShift <= Math.floor(before.length / 2)) {
+        operations.push({
+          op: 'splice',
+          path,
+          index: 0,
+          deleteCount: leftShift,
+          values: [],
+        });
+        operations.push({
+          op: 'splice',
+          path,
+          index: before.length - leftShift,
+          deleteCount: 0,
+          values: after.slice(before.length - leftShift).map((item) => cloneValue(item)),
+        });
+        return;
+      }
+      const rightOverlap = suffixPrefixOverlap(afterFingerprints, beforeFingerprints);
+      const rightShift = before.length - rightOverlap;
+      if (rightOverlap > 0 && rightShift <= Math.floor(before.length / 2)) {
+        operations.push({
+          op: 'splice',
+          path,
+          index: before.length - rightShift,
+          deleteCount: rightShift,
+          values: [],
+        });
+        operations.push({
+          op: 'splice',
+          path,
+          index: 0,
+          deleteCount: 0,
+          values: after.slice(0, rightShift).map((item) => cloneValue(item)),
+        });
+        return;
       }
       for (let index = 0; index < before.length; index += 1) {
         diffValue(before[index], after[index], [...path, index], operations);

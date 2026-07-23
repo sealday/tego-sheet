@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createSpreadsheetDocument, serializeSpreadsheetDocument } from '../../../src/document';
+import {
+  createSpreadsheetDocument,
+  parseSpreadsheetDocument,
+  serializeSpreadsheetDocument,
+} from '../../../src/document';
 import { sheetId } from '../../../src/core';
 import {
   SpreadsheetDocumentController,
@@ -32,6 +36,32 @@ function transaction(
   };
 }
 
+function createMultiSheetDocument() {
+  const input = JSON.parse(
+    serializeSpreadsheetDocument(
+      createSpreadsheetDocument({ id: 'document-1', sheetId: 'sheet-1' }),
+    ),
+  ) as {
+    workbook: {
+      sheets: Array<{
+        id: string;
+        name: string;
+        cells: unknown[];
+        merges: unknown[];
+      }>;
+    };
+  };
+  input.workbook.sheets.push({
+    id: 'sheet-2',
+    name: 'Second',
+    cells: [],
+    merges: [],
+  });
+  const parsed = parseSpreadsheetDocument(input as never);
+  if (!parsed.ok) throw new TypeError('Expected test document to parse');
+  return parsed.document;
+}
+
 describe('SpreadsheetDocumentController transactions', () => {
   it('commits multiple commands as one revision, event, and undo item', () => {
     const controller = new SpreadsheetDocumentController(
@@ -52,6 +82,73 @@ describe('SpreadsheetDocumentController transactions', () => {
     expect(listener).toHaveBeenCalledTimes(1);
     expect(controller.getCellText({ sheet: sheetId('sheet-1'), row: 0, column: 0 })).toBe('alpha');
     expect(controller.getCellText({ sheet: sheetId('sheet-1'), row: 1, column: 0 })).toBe('beta');
+  });
+
+  it('returns an immutable committed record with forward, inverse, and diagnostic data', () => {
+    const controller = new SpreadsheetDocumentController(
+      createSpreadsheetDocument({ id: 'document-1', sheetId: 'sheet-1' }),
+    );
+
+    const outcome = controller.transact(
+      transaction(controller, [command('command-1', 0, 'alpha')]),
+    );
+
+    expect(outcome.status).toBe('committed');
+    if (outcome.status !== 'committed') return;
+    expect(outcome.transaction).toMatchObject({
+      id: 'transaction-1',
+      committedRevision: 1,
+      diagnostics: [],
+    });
+    expect(outcome.transaction.forwardPatches.length).toBeGreaterThan(0);
+    expect(outcome.transaction.inversePatches.length).toBeGreaterThan(0);
+    expect(JSON.parse(JSON.stringify(outcome.transaction))).toEqual(outcome.transaction);
+    expect(Object.isFrozen(outcome.transaction)).toBe(true);
+    expect(Object.isFrozen(outcome.transaction.forwardPatches)).toBe(true);
+    expect(Object.isFrozen(outcome.transaction.inversePatches)).toBe(true);
+  });
+
+  it('aggregates every affected sheet and range in one transaction change', () => {
+    const controller = new SpreadsheetDocumentController(createMultiSheetDocument());
+    const second = {
+      ...command('command-2', 3, 'beta'),
+      command: {
+        ...command('command-2', 3, 'beta').command,
+        address: { sheet: sheetId('sheet-2'), row: 3, column: 0 },
+      },
+    } as SerializableCommandEnvelope;
+
+    const outcome = controller.transact(
+      transaction(controller, [command('command-1', 1, 'alpha'), second]),
+    );
+
+    expect(outcome.status).toBe('committed');
+    if (outcome.status !== 'committed') return;
+    expect(outcome.change.aggregate).toEqual({
+      commandCount: 2,
+      sheets: [
+        {
+          sheet: sheetId('sheet-1'),
+          kinds: ['cell'],
+          ranges: [
+            {
+              start: { row: 1, column: 0 },
+              end: { row: 1, column: 0 },
+            },
+          ],
+        },
+        {
+          sheet: sheetId('sheet-2'),
+          kinds: ['cell'],
+          ranges: [
+            {
+              start: { row: 3, column: 0 },
+              end: { row: 3, column: 0 },
+            },
+          ],
+        },
+      ],
+    });
   });
 
   it('rejects revision conflicts and permission denials before mutation', () => {
@@ -88,7 +185,10 @@ describe('SpreadsheetDocumentController transactions', () => {
       },
     });
 
-    expect(outcome).toMatchObject({ status: 'rejected', code: 'COMMAND_NOT_ALLOWED' });
+    expect(outcome).toMatchObject({
+      status: 'rejected',
+      code: 'COMMAND_NOT_ALLOWED',
+    });
     expect(controller.getSnapshot().revision).toBe(0);
     expect(controller.historySize).toEqual({ undo: 0, redo: 0 });
   });
@@ -170,7 +270,10 @@ describe('SpreadsheetDocumentController transactions', () => {
       createSpreadsheetDocument({ id: 'document-1', sheetId: 'sheet-1' }),
     );
     const accessor = Object.defineProperty(
-      { schemaVersion: 1 as const, command: command('nested', 0, 'value').command },
+      {
+        schemaVersion: 1 as const,
+        command: command('nested', 0, 'value').command,
+      },
       'id',
       {
         enumerable: true,
@@ -341,7 +444,10 @@ describe('SpreadsheetDocumentController transactions', () => {
 
     for (let seed = 1; seed <= 25; seed += 1) {
       const controller = new SpreadsheetDocumentController(
-        createSpreadsheetDocument({ id: `document-${seed}`, sheetId: 'sheet-1' }),
+        createSpreadsheetDocument({
+          id: `document-${seed}`,
+          sheetId: 'sheet-1',
+        }),
       );
       const next = random(seed);
       const commands: SerializableCommandEnvelope[] = [];
@@ -396,7 +502,10 @@ describe('SpreadsheetDocumentController transactions', () => {
       const outcome = controller.transact(envelope);
       expect(outcome.status, `commit seed ${seed}`).toBe('committed');
       expect(controller.getSnapshot().revision, `revision seed ${seed}`).toBe(1);
-      expect(controller.historySize, `history seed ${seed}`).toEqual({ undo: 1, redo: 0 });
+      expect(controller.historySize, `history seed ${seed}`).toEqual({
+        undo: 1,
+        redo: 0,
+      });
       expect(listener, `events seed ${seed}`).toHaveBeenCalledTimes(1);
       expect(controller.validate().valid, `invariant seed ${seed}`).toBe(true);
       const after = serializeSpreadsheetDocument(controller.getDocument());

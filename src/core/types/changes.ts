@@ -25,6 +25,24 @@ export type ChangeSource =
   | 'clipboard'
   | 'ref';
 
+/** Per-sheet mutation details aggregated across every command in one transaction. */
+export interface TransactionSheetChange {
+  /** Worksheet affected by at least one command in the transaction. */
+  readonly sheet: SheetId;
+  /** Distinct mutation categories observed for this worksheet, in command order. */
+  readonly kinds: readonly Exclude<WorkbookChangeKind, 'transaction'>[];
+  /** Distinct inclusive cell ranges affected on this worksheet, in command order. */
+  readonly ranges: readonly CellRange[];
+}
+
+/** Complete affected-area summary for an atomic transaction. */
+export interface TransactionChangeAggregate {
+  /** Number of commands that produced committed candidate changes. */
+  readonly commandCount: number;
+  /** Every affected worksheet, preserving first-command order. */
+  readonly sheets: readonly TransactionSheetChange[];
+}
+
 /** Metadata emitted with the complete workbook after a committed mutation. */
 export interface WorkbookChange {
   /** Stable identifier shared by callbacks describing the same commit. */
@@ -37,6 +55,8 @@ export interface WorkbookChange {
   readonly sheet: SheetId;
   /** Inclusive affected range when the mutation has a cell range. */
   readonly range?: CellRange;
+  /** Complete multi-command impact when `kind` is `transaction`. */
+  readonly aggregate?: TransactionChangeAggregate;
 }
 
 /** Details emitted after a cell text edit commits. */
