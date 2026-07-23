@@ -1,111 +1,201 @@
 import type { Diagnostic } from '../../document';
 
+/** Output stage requesting a resolved resource. */
 export type ResourcePurpose = 'preview' | 'print' | 'pdf' | 'xlsx' | 'image';
+/** Supported logical resource category. */
 export type ResourceType = 'image' | 'svg' | 'font' | 'qr' | 'binary';
 
-export interface ResourceRef {
-  readonly id: string;
-  readonly type: ResourceType;
-  readonly resolverId: string;
-  readonly key: string;
-  readonly expectedMime?: string;
-  readonly qr?: {
-    readonly errorCorrection?: 'L' | 'M' | 'Q' | 'H';
-    readonly foreground?: string;
-    readonly background?: string;
-  };
+/** Deterministic QR rendering options. */
+export interface QrResourceOptions {
+  /** QR error-correction level. */
+  readonly errorCorrection?: 'L' | 'M' | 'Q' | 'H';
+  /** Foreground CSS color. */
+  readonly foreground?: string;
+  /** Background CSS color. */
+  readonly background?: string;
 }
 
+/** Persistent-safe logical reference passed to one explicit resolver. */
+export interface ResourceRef {
+  /** Logical reference identity. */
+  readonly id: string;
+  /** Logical resource category. */
+  readonly type: ResourceType;
+  /** Resolver capability identity. */
+  readonly resolverId: string;
+  /** Opaque resolver-owned key without credentials. */
+  readonly key: string;
+  /** Optional declared MIME expectation. */
+  readonly expectedMime?: string;
+  /** QR-specific deterministic style. */
+  readonly qr?: QrResourceOptions;
+}
+
+/** Resource resolution and decompression safety budgets. */
 export interface ResourceLimits {
+  /** Maximum logical references. */
   readonly maxResources: number;
+  /** Maximum bytes for one compressed resource. */
   readonly maxResourceBytes: number;
+  /** Maximum compressed bytes for the session. */
   readonly maxTotalResourceBytes: number;
+  /** Maximum concurrent resolver calls. */
   readonly maxResolveConcurrency: number;
+  /** Maximum decoded image pixels. */
   readonly maxPixels: number;
+  /** Maximum parsed SVG elements. */
   readonly maxSvgNodes: number;
+  /** Maximum resolved fonts. */
   readonly maxFonts: number;
+  /** Maximum wall-clock resolution duration. */
   readonly maxResolveTimeMs: number;
+  /** Maximum declared decompressed bytes for one resource. */
   readonly maxDecompressedBytes: number;
 }
 
+/** Capability-limited context exposed to a resolver. */
 export interface ResolveContext {
+  /** Session cancellation signal. */
   readonly signal: AbortSignal;
+  /** Effective resource safety budgets. */
   readonly limits: ResourceLimits;
+  /** Output stage requesting the resource. */
   readonly requestedPurpose: ResourcePurpose;
 }
 
+/** Font readiness handle returned by a trusted resolver. */
+export interface ResourceFontHandle {
+  /** Resolved font-family name. */
+  readonly family: string;
+  /** Waits until deterministic metrics are ready. */
+  readonly waitUntilReady: (signal: AbortSignal) => Promise<void>;
+}
+
+/** Untrusted resolver result before MIME, quota and decoder validation. */
 export interface UnverifiedResource {
+  /** Resolver-provided compressed bytes. */
   readonly bytes: Uint8Array;
+  /** Resolver-provided canonical MIME. */
   readonly mimeType: string;
+  /** Optional post-decompression byte estimate. */
   readonly decompressedBytes?: number;
+  /** Optional decoded width supplied by a trusted decoder. */
   readonly width?: number;
+  /** Optional decoded height supplied by a trusted decoder. */
   readonly height?: number;
-  readonly font?: {
-    readonly family: string;
-    readonly waitUntilReady: (signal: AbortSignal) => Promise<void>;
-  };
+  /** Optional font readiness handle. */
+  readonly font?: ResourceFontHandle;
+  /** Idempotent release callback for resolver-owned handles. */
   readonly dispose?: () => void | Promise<void>;
 }
 
+/** One host-owned, explicitly registered resource capability. */
 export interface ResourceResolver {
+  /** Stable resolver identity. */
   readonly id: string;
+  /** Reports whether this resolver owns a logical reference. */
   supports(ref: ResourceRef): boolean;
+  /** Resolves one reference with restricted context. */
   resolve(ref: ResourceRef, context: ResolveContext): Promise<UnverifiedResource>;
 }
 
+/** Ordered immutable collection of explicit resolvers. */
 export interface ResourceResolverRegistry {
+  /** Resolver snapshot in declaration order. */
   readonly resolvers: readonly ResourceResolver[];
+  /** Resolves an exact declared resolver without fallback network access. */
   resolve(ref: ResourceRef): ResourceResolver | undefined;
 }
 
+/** Sanitized immutable vector representation. */
+export interface ResolvedResourceVector {
+  /** Device-independent vector bounds. */
+  readonly viewBox: readonly [number, number, number, number];
+  /** Restricted SVG path commands. */
+  readonly paths: readonly string[];
+  /** Foreground CSS color. */
+  readonly foreground: string;
+  /** Background CSS color. */
+  readonly background: string;
+}
+
+/** Immutable result returned by a host image decoder. */
+export interface DecodedResourceImage {
+  /** Decoded pixel width. */
+  readonly width: number;
+  /** Decoded pixel height. */
+  readonly height: number;
+  /** Host-owned read-only decoded representation. */
+  readonly representation: unknown;
+}
+
+/** Validated content-addressed resource shared by output adapters. */
 export interface ResolvedResource {
+  /** SHA-256 content identity. */
   readonly contentHash: string;
+  /** Validated canonical MIME. */
   readonly mimeType: string;
-  readonly bytes: Uint8Array;
+  /** Immutable byte snapshot; adapters create their own typed view when needed. */
+  readonly bytes: readonly number[];
+  /** Validated pixel width. */
   readonly width?: number;
+  /** Validated pixel height. */
   readonly height?: number;
+  /** Host decoder's read-only representation. */
   readonly decoded?: unknown;
-  readonly vector?: {
-    readonly viewBox: readonly [number, number, number, number];
-    readonly paths: readonly string[];
-    readonly foreground: string;
-    readonly background: string;
-  };
+  /** Sanitized vector representation. */
+  readonly vector?: ResolvedResourceVector;
+  /** Ready font-family name. */
   readonly fontFamily?: string;
 }
 
+/** Session-owned immutable resource mapping with idempotent cleanup. */
 export interface ResolvedResourceStore {
+  /** Unique resources keyed by content hash. */
   readonly byHash: Readonly<Record<string, ResolvedResource>>;
+  /** Logical references mapped to deduplicated resources. */
   readonly byReference: Readonly<Record<string, ResolvedResource>>;
+  /** Total fetched compressed bytes. */
   readonly totalBytes: number;
+  /** Releases every resolver-owned handle exactly once. */
   dispose(): Promise<void>;
 }
 
+/** Explicit inputs for one atomic resolution session. */
 export interface ResourcePipelineOptions {
+  /** Explicit resolver registry. */
   readonly registry: ResourceResolverRegistry;
+  /** Shared render cancellation signal. */
   readonly signal: AbortSignal;
+  /** Output stage requesting resources. */
   readonly purpose: ResourcePurpose;
+  /** Optional downward or explicit upward budget overrides. */
   readonly limits?: Partial<ResourceLimits>;
+  /** Optional host image decoder. */
   readonly decodeImage?: (
     bytes: Uint8Array,
     mimeType: string,
     signal: AbortSignal,
-  ) => Promise<{
-    readonly width: number;
-    readonly height: number;
-    readonly representation: unknown;
-  }>;
+  ) => Promise<DecodedResourceImage>;
 }
 
+/** Atomic resource result; a store is absent whenever an error is present. */
 export interface ResourceResolutionResult {
+  /** Complete ready store. */
   readonly store?: ResolvedResourceStore;
+  /** Ordered stable diagnostics. */
   readonly diagnostics: readonly Diagnostic[];
 }
 
+/** Byte-budgeted cross-session content cache. */
 export interface ResolvedResourceCache {
+  /** Reads and promotes one cached resource. */
   get(contentHash: string): ResolvedResource | undefined;
+  /** Inserts a resource and evicts least-recently-used entries. */
   put(resource: ResolvedResource, release?: () => void | Promise<void>): Promise<void>;
+  /** Releases and removes all cached entries. */
   clear(): Promise<void>;
+  /** Current immutable byte footprint. */
   readonly byteLength: number;
 }
 
@@ -144,7 +234,7 @@ export function createResolvedResourceCache(maximumBytes: number): ResolvedResou
         | undefined;
       if (oldest === undefined) return;
       entries.delete(oldest[0]);
-      bytes -= oldest[1].resource.bytes.byteLength;
+      bytes -= oldest[1].resource.bytes.length;
       await oldest[1].release?.();
     }
   };
@@ -160,14 +250,14 @@ export function createResolvedResourceCache(maximumBytes: number): ResolvedResou
       const previous = entries.get(resource.contentHash);
       if (previous !== undefined) {
         entries.delete(resource.contentHash);
-        bytes -= previous.resource.bytes.byteLength;
+        bytes -= previous.resource.bytes.length;
         await previous.release?.();
       }
       entries.set(resource.contentHash, {
         resource,
         ...(release === undefined ? {} : { release }),
       });
-      bytes += resource.bytes.byteLength;
+      bytes += resource.bytes.length;
       await evict();
     },
     async clear() {
@@ -253,62 +343,290 @@ function sniffMime(bytes: Uint8Array): string | undefined {
   return undefined;
 }
 
-function safeSvg(bytes: Uint8Array, maxNodes: number): boolean {
+function encodedImageDimensions(
+  bytes: Uint8Array,
+  mimeType: string,
+): { readonly width: number; readonly height: number } | undefined {
+  if (mimeType === 'image/png' && bytes.length >= 24) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    return { width: view.getUint32(16), height: view.getUint32(20) };
+  }
+  if (mimeType === 'image/gif' && bytes.length >= 10) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    return { width: view.getUint16(6, true), height: view.getUint16(8, true) };
+  }
+  return undefined;
+}
+
+function safeSvg(bytes: Uint8Array, maxNodes: number): ResolvedResourceVector | undefined {
   const source = new TextDecoder().decode(bytes);
   const nodes = source.match(/<\s*[a-zA-Z][^>]*>/gu) ?? [];
-  if (nodes.length > maxNodes) return false;
-  return !(
+  if (nodes.length > maxNodes) return undefined;
+  if (
     /<\s*(?:script|foreignObject|iframe|object|embed|audio|video)\b/iu.test(source) ||
     /\bon[a-z]+\s*=/iu.test(source) ||
     /\b(?:href|src)\s*=\s*["']\s*(?!#|data:image\/(?:png|jpeg|gif);base64,)/iu.test(source) ||
     /\burl\s*\(\s*["']?\s*(?!#)/iu.test(source) ||
     /<!DOCTYPE|<!ENTITY/iu.test(source)
+  ) {
+    return undefined;
+  }
+  const allowedElements = new Set([
+    'svg',
+    'g',
+    'path',
+    'rect',
+    'circle',
+    'ellipse',
+    'line',
+    'polyline',
+    'polygon',
+    'defs',
+    'clipPath',
+    'linearGradient',
+    'radialGradient',
+    'stop',
+    'title',
+    'desc',
+  ]);
+  const tags = [...source.matchAll(/<\s*\/?\s*([a-zA-Z][\w-]*)\b([^>]*)>/gu)];
+  if (tags.some((match) => !allowedElements.has(match[1]!))) return undefined;
+  const allowedAttributes = new Set([
+    'viewBox',
+    'd',
+    'x',
+    'y',
+    'x1',
+    'x2',
+    'y1',
+    'y2',
+    'width',
+    'height',
+    'cx',
+    'cy',
+    'r',
+    'rx',
+    'ry',
+    'points',
+    'fill',
+    'fill-rule',
+    'stroke',
+    'stroke-width',
+    'stroke-linecap',
+    'stroke-linejoin',
+    'opacity',
+    'transform',
+    'id',
+    'offset',
+    'stop-color',
+    'stop-opacity',
+    'clip-path',
+    'xmlns',
+  ]);
+  for (const match of tags) {
+    const attributes = match[2] ?? '';
+    for (const attribute of attributes.matchAll(/\s+([:\w-]+)\s*=/gu)) {
+      if (!allowedAttributes.has(attribute[1]!)) return undefined;
+    }
+  }
+  const viewBoxText = /\bviewBox\s*=\s*["']([^"']+)["']/u.exec(source)?.[1];
+  const values = viewBoxText?.trim().split(/\s+/u).map(Number);
+  const viewBox =
+    values?.length === 4 && values.every(Number.isFinite)
+      ? (values as [number, number, number, number])
+      : ([0, 0, 1, 1] as const);
+  const paths = [...source.matchAll(/<\s*path\b[^>]*\bd\s*=\s*["']([^"']*)["']/giu)].map(
+    (match) => match[1]!,
   );
+  return freeze({
+    viewBox,
+    paths,
+    foreground: '#000000',
+    background: 'transparent',
+  });
 }
 
 function makeQr(
   ref: ResourceRef,
 ): UnverifiedResource & { readonly vector: ResolvedResource['vector'] } {
-  const size = 21;
-  let state = 2166136261;
-  for (const value of new TextEncoder().encode(ref.key)) {
-    state ^= value;
-    state = Math.imul(state, 16777619) >>> 0;
+  const canonical = JSON.stringify({
+    value: ref.key,
+    errorCorrection: ref.qr?.errorCorrection ?? 'M',
+    foreground: ref.qr?.foreground ?? '#000000',
+    background: ref.qr?.background ?? '#ffffff',
+  });
+  const level = ref.qr?.errorCorrection ?? 'M';
+  const configuration = {
+    L: { dataCodewords: 19, errorCodewords: 7, formatBits: 1 },
+    M: { dataCodewords: 16, errorCodewords: 10, formatBits: 0 },
+    Q: { dataCodewords: 13, errorCodewords: 13, formatBits: 3 },
+    H: { dataCodewords: 9, errorCodewords: 17, formatBits: 2 },
+  }[level];
+  const payload = new TextEncoder().encode(ref.key);
+  const bits: number[] = [0, 1, 0, 0];
+  for (let bit = 7; bit >= 0; bit -= 1) bits.push((payload.length >>> bit) & 1);
+  for (const byte of payload) {
+    for (let bit = 7; bit >= 0; bit -= 1) bits.push((byte >>> bit) & 1);
   }
-  const occupied = new Set<string>();
-  const paths: string[] = [];
-  const module = (x: number, y: number): void => {
-    const key = `${x}:${y}`;
-    if (occupied.has(key)) return;
-    occupied.add(key);
-    paths.push(`M${x} ${y}h1v1h-1z`);
+  const capacityBits = configuration.dataCodewords * 8;
+  if (bits.length > capacityBits) {
+    throw new RangeError(`QR payload exceeds version 1 ${level} capacity`);
+  }
+  bits.push(...Array(Math.min(4, capacityBits - bits.length)).fill(0));
+  while (bits.length % 8 !== 0) bits.push(0);
+  const dataCodewords: number[] = [];
+  for (let offset = 0; offset < bits.length; offset += 8) {
+    dataCodewords.push(
+      bits.slice(offset, offset + 8).reduce((value, bit) => (value << 1) | bit, 0),
+    );
+  }
+  for (let pad = 0; dataCodewords.length < configuration.dataCodewords; pad += 1) {
+    dataCodewords.push(pad % 2 === 0 ? 0xec : 0x11);
+  }
+  const exponent = Array<number>(512).fill(0);
+  const logarithm = Array<number>(256).fill(0);
+  let value = 1;
+  for (let index = 0; index < 255; index += 1) {
+    exponent[index] = value;
+    logarithm[value] = index;
+    value <<= 1;
+    if ((value & 0x100) !== 0) value ^= 0x11d;
+  }
+  for (let index = 255; index < exponent.length; index += 1) {
+    exponent[index] = exponent[index - 255]!;
+  }
+  const multiply = (left: number, right: number): number =>
+    left === 0 || right === 0 ? 0 : exponent[logarithm[left]! + logarithm[right]!]!;
+  let generator = [1];
+  for (let degree = 0; degree < configuration.errorCodewords; degree += 1) {
+    const next = Array<number>(generator.length + 1).fill(0);
+    generator.forEach((coefficient, index) => {
+      next[index] ^= coefficient;
+      next[index + 1] ^= multiply(coefficient, exponent[degree]!);
+    });
+    generator = next;
+  }
+  const remainder = Array<number>(configuration.errorCodewords).fill(0);
+  for (const byte of dataCodewords) {
+    const factor = byte ^ remainder.shift()!;
+    remainder.push(0);
+    for (let index = 0; index < remainder.length; index += 1) {
+      remainder[index] ^= multiply(generator[index + 1]!, factor);
+    }
+  }
+  const codewordBits = [...dataCodewords, ...remainder].flatMap((byte) =>
+    Array.from({ length: 8 }, (_, bit) => (byte >>> (7 - bit)) & 1),
+  );
+  const size = 21;
+  const base = Array.from({ length: size }, () => Array<number>(size).fill(-1));
+  const set = (x: number, y: number, dark: boolean): void => {
+    if (x >= 0 && y >= 0 && x < size && y < size) base[y]![x] = dark ? 1 : 0;
   };
-  for (const [originX, originY] of [
-    [0, 0],
-    [14, 0],
-    [0, 14],
-  ] as const) {
-    for (let y = 0; y < 7; y += 1) {
-      for (let x = 0; x < 7; x += 1) {
-        if (x === 0 || y === 0 || x === 6 || y === 6 || (x >= 2 && x <= 4 && y >= 2 && y <= 4)) {
-          module(originX + x, originY + y);
-        }
+  const finder = (centerX: number, centerY: number): void => {
+    for (let deltaY = -4; deltaY <= 4; deltaY += 1) {
+      for (let deltaX = -4; deltaX <= 4; deltaX += 1) {
+        const distance = Math.max(Math.abs(deltaX), Math.abs(deltaY));
+        set(centerX + deltaX, centerY + deltaY, distance !== 2 && distance !== 4);
       }
     }
+  };
+  finder(3, 3);
+  finder(size - 4, 3);
+  finder(3, size - 4);
+  for (let index = 8; index < size - 8; index += 1) {
+    set(6, index, index % 2 === 0);
+    set(index, 6, index % 2 === 0);
   }
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
-      if ((state & 3) === 0) module(x, y);
+  const formatCoordinates = [
+    ...Array.from({ length: 6 }, (_, index) => [8, index] as const),
+    [8, 7] as const,
+    [8, 8] as const,
+    [7, 8] as const,
+    ...Array.from({ length: 6 }, (_, index) => [5 - index, 8] as const),
+    ...Array.from({ length: 8 }, (_, index) => [size - 1 - index, 8] as const),
+    ...Array.from({ length: 7 }, (_, index) => [8, size - 7 + index] as const),
+  ];
+  formatCoordinates.forEach(([x, y]) => set(x, y, false));
+  set(8, size - 8, true);
+  const maskBit = (mask: number, x: number, y: number): boolean =>
+    [
+      (x + y) % 2 === 0,
+      y % 2 === 0,
+      x % 3 === 0,
+      (x + y) % 3 === 0,
+      (Math.floor(y / 2) + Math.floor(x / 3)) % 2 === 0,
+      ((x * y) % 2) + ((x * y) % 3) === 0,
+      (((x * y) % 2) + ((x * y) % 3)) % 2 === 0,
+      (((x + y) % 2) + ((x * y) % 3)) % 2 === 0,
+    ][mask]!;
+  const candidates = Array.from({ length: 8 }, (_, mask) => {
+    const matrix = base.map((row) => [...row]);
+    let bitIndex = 0;
+    let upward = true;
+    for (let right = size - 1; right >= 1; right -= 2) {
+      if (right === 6) right -= 1;
+      for (let step = 0; step < size; step += 1) {
+        const y = upward ? size - 1 - step : step;
+        for (const x of [right, right - 1]) {
+          if (matrix[y]![x] !== -1) continue;
+          const bit = codewordBits[bitIndex++] ?? 0;
+          matrix[y]![x] = bit ^ (maskBit(mask, x, y) ? 1 : 0);
+        }
+      }
+      upward = !upward;
     }
-  }
+    const formatData = (configuration.formatBits << 3) | mask;
+    let remainderBits = formatData << 10;
+    for (let bit = 14; bit >= 10; bit -= 1) {
+      if (((remainderBits >>> bit) & 1) !== 0) remainderBits ^= 0x537 << (bit - 10);
+    }
+    const format = ((formatData << 10) | remainderBits) ^ 0x5412;
+    const first = [
+      ...Array.from({ length: 6 }, (_, index) => [8, index] as const),
+      [8, 7] as const,
+      [8, 8] as const,
+      [7, 8] as const,
+      ...Array.from({ length: 6 }, (_, index) => [5 - index, 8] as const),
+    ];
+    const second = [
+      ...Array.from({ length: 8 }, (_, index) => [size - 1 - index, 8] as const),
+      ...Array.from({ length: 7 }, (_, index) => [8, size - 7 + index] as const),
+    ];
+    first.forEach(([x, y], index) => {
+      matrix[y]![x] = (format >>> index) & 1;
+    });
+    second.forEach(([x, y], index) => {
+      matrix[y]![x] = (format >>> index) & 1;
+    });
+    matrix[size - 8]![8] = 1;
+    let penalty = 0;
+    for (const row of matrix) {
+      for (let index = 1, run = 1; index < size; index += 1) {
+        run = row[index] === row[index - 1] ? run + 1 : 1;
+        if (run === 5) penalty += 3;
+        else if (run > 5) penalty += 1;
+      }
+    }
+    for (let y = 0; y < size - 1; y += 1) {
+      for (let x = 0; x < size - 1; x += 1) {
+        const sum =
+          matrix[y]![x]! + matrix[y]![x + 1]! + matrix[y + 1]![x]! + matrix[y + 1]![x + 1]!;
+        if (sum === 0 || sum === 4) penalty += 3;
+      }
+    }
+    return { matrix, penalty };
+  });
+  const matrix = candidates.sort((left, right) => left.penalty - right.penalty)[0]!.matrix;
+  const paths = matrix.flatMap((row, y) =>
+    row.flatMap((dark, x) => (dark === 1 ? [`M${x} ${y}h1v1h-1z`] : [])),
+  );
   const vector = freeze({
     viewBox: [0, 0, size, size] as const,
     paths,
     foreground: ref.qr?.foreground ?? '#000000',
     background: ref.qr?.background ?? '#ffffff',
   });
-  return { bytes: new TextEncoder().encode(ref.key), mimeType: 'image/x-tego-qr', vector };
+  return { bytes: new TextEncoder().encode(canonical), mimeType: 'image/x-tego-qr', vector };
 }
 
 async function controlled<T>(
@@ -363,9 +681,19 @@ export function createDataUrlResourceResolver(): ResourceResolver {
   return {
     id: 'core:data-url',
     supports: ({ resolverId }) => resolverId === 'core:data-url',
-    async resolve(ref) {
+    async resolve(ref, context) {
       const match = /^data:([^;,]+)(;base64)?,([\s\S]*)$/u.exec(ref.key);
       if (match === null) throw new Error('Invalid data URL');
+      const estimatedBytes =
+        match[2] === undefined
+          ? match[3]!.length
+          : Math.floor((match[3]!.replace(/=+$/u, '').length * 3) / 4);
+      if (
+        estimatedBytes > context.limits.maxResourceBytes ||
+        estimatedBytes > context.limits.maxTotalResourceBytes
+      ) {
+        throw new RangeError('Data URL exceeds resource limits');
+      }
       const bytes =
         match[2] === undefined
           ? new TextEncoder().encode(decodeURIComponent(match[3]!))
@@ -380,9 +708,15 @@ export function createBlobResourceResolver(blobs: ReadonlyMap<string, Blob>): Re
   return {
     id: 'core:blob',
     supports: ({ resolverId, key }) => resolverId === 'core:blob' && blobs.has(key),
-    async resolve(ref) {
+    async resolve(ref, context) {
       const blob = blobs.get(ref.key);
       if (blob === undefined) throw new Error('Unknown Blob handle');
+      if (
+        blob.size > context.limits.maxResourceBytes ||
+        blob.size > context.limits.maxTotalResourceBytes
+      ) {
+        throw new RangeError('Blob exceeds resource limits');
+      }
       return {
         bytes: new Uint8Array(await blob.arrayBuffer()),
         mimeType: blob.type || 'application/octet-stream',
@@ -452,12 +786,19 @@ export async function resolveTemplateResources(
             );
             return;
           }
+          const pendingResource = resolver.resolve(ref, {
+            signal: sessionController.signal,
+            limits,
+            requestedPurpose: options.purpose,
+          });
+          void pendingResource.then(
+            (late) => {
+              if (sessionController.signal.aborted) void late.dispose?.();
+            },
+            () => undefined,
+          );
           raw = await controlled(
-            resolver.resolve(ref, {
-              signal: sessionController.signal,
-              limits,
-              requestedPurpose: options.purpose,
-            }),
+            pendingResource,
             sessionController.signal,
             limits.maxResolveTimeMs - (Date.now() - started),
           );
@@ -485,8 +826,22 @@ export async function resolveTemplateResources(
         return;
       }
       const sniffed = sniffMime(raw.bytes);
+      const expectedCategory =
+        ref.type === 'image'
+          ? 'image/'
+          : ref.type === 'svg'
+            ? 'image/svg+xml'
+            : ref.type === 'font'
+              ? 'font/'
+              : undefined;
       if (
         (ref.expectedMime !== undefined && raw.mimeType !== ref.expectedMime) ||
+        (expectedCategory !== undefined &&
+          (expectedCategory.endsWith('/')
+            ? !raw.mimeType.startsWith(expectedCategory)
+            : raw.mimeType !== expectedCategory)) ||
+        ((ref.type === 'image' || ref.type === 'svg' || ref.type === 'font') &&
+          sniffed === undefined) ||
         (sniffed !== undefined &&
           raw.mimeType !== sniffed &&
           !(raw.mimeType === 'font/otf' && sniffed === 'font/ttf')) ||
@@ -495,7 +850,8 @@ export async function resolveTemplateResources(
         fail('RESOURCE_MIME_MISMATCH', `Resource ${ref.id} MIME does not match its content`, ref);
         return;
       }
-      if (ref.type === 'svg' && !safeSvg(raw.bytes, limits.maxSvgNodes)) {
+      const svgVector = ref.type === 'svg' ? safeSvg(raw.bytes, limits.maxSvgNodes) : undefined;
+      if (ref.type === 'svg' && svgVector === undefined) {
         fail('UNSAFE_SVG', `Resource ${ref.id} contains unsafe SVG content`, ref);
         return;
       }
@@ -506,14 +862,34 @@ export async function resolveTemplateResources(
           return;
         }
       }
+      const encodedDimensions =
+        ref.type === 'image' ? encodedImageDimensions(raw.bytes, raw.mimeType) : undefined;
+      const declaredWidth = raw.width ?? encodedDimensions?.width;
+      const declaredHeight = raw.height ?? encodedDimensions?.height;
+      if (
+        declaredWidth !== undefined &&
+        declaredHeight !== undefined &&
+        declaredWidth * declaredHeight > limits.maxPixels
+      ) {
+        fail('RESOURCE_TOO_LARGE', `Resource ${ref.id} exceeds its pixel quota`, ref);
+        return;
+      }
       totalBytes += raw.bytes.byteLength;
       const hash = await contentHash(raw.bytes);
-      let resolution = decodeByHash.get(hash);
+      const semanticKey = [
+        ref.type,
+        raw.mimeType,
+        hash,
+        raw.font?.family ?? '',
+        raw.vector?.foreground ?? svgVector?.foreground ?? '',
+        raw.vector?.background ?? svgVector?.background ?? '',
+      ].join('\u0000');
+      let resolution = decodeByHash.get(semanticKey);
       if (resolution === undefined) {
         resolution = (async (): Promise<ResolvedResource> => {
           let decoded: unknown;
-          let width = raw.width;
-          let height = raw.height;
+          let width = declaredWidth;
+          let height = declaredHeight;
           if (ref.type === 'image' && options.decodeImage !== undefined) {
             const image = await controlled(
               options.decodeImage(raw.bytes, raw.mimeType, sessionController.signal),
@@ -544,15 +920,17 @@ export async function resolveTemplateResources(
           return freeze({
             contentHash: hash,
             mimeType: raw.mimeType,
-            bytes: raw.bytes.slice(),
+            bytes: Object.freeze([...raw.bytes]),
             ...(width === undefined ? {} : { width }),
             ...(height === undefined ? {} : { height }),
             ...(decoded === undefined ? {} : { decoded }),
-            ...(raw.vector === undefined ? {} : { vector: raw.vector }),
+            ...(raw.vector === undefined && svgVector === undefined
+              ? {}
+              : { vector: raw.vector ?? svgVector }),
             ...(raw.font === undefined ? {} : { fontFamily: raw.font.family }),
           });
         })();
-        decodeByHash.set(hash, resolution);
+        decodeByHash.set(semanticKey, resolution);
       }
       try {
         const resolved = await resolution!;

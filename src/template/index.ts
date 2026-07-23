@@ -11,6 +11,7 @@ export {
   createBlobResourceResolver,
   createDataUrlResourceResolver,
   createResourceResolverRegistry,
+  createResourceResolverRegistryFromKernel,
   createResolvedResourceCache,
   resolveTemplateResources,
 } from './resources';
@@ -25,7 +26,10 @@ export type { AdvancedExpansionResult, StructuralMapping } from './expand';
 export type {
   ResolvedResource,
   ResolvedResourceCache,
+  ResolvedResourceVector,
   ResolvedResourceStore,
+  DecodedResourceImage,
+  QrResourceOptions,
   ResolveContext,
   ResourceLimits,
   ResourcePipelineOptions,
@@ -34,12 +38,16 @@ export type {
   ResourceResolutionResult,
   ResourceResolver,
   ResourceResolverRegistry,
+  ResourceFontHandle,
+  ResourceCapabilityRegistry,
+  ResourceKernelEnvironment,
   ResourceType,
   UnverifiedResource,
 } from './resources';
 export type {
   CompilationResult,
   AdvancedCompileOptions,
+  AdvancedRepeatBase,
   CompiledTemplate,
   ConditionalRangeBinding,
   GeneratedDocument,
@@ -62,6 +70,7 @@ export type {
   RepeatSheetBinding,
   SubtemplateBinding,
   ObjectRepeatPolicy,
+  RepeatedObjectRef,
   SpreadsheetTemplate,
   TemplateBinding,
   TemplateIR,

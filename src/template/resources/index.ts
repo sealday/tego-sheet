@@ -5,10 +5,15 @@ export {
   createResolvedResourceCache,
   resolveTemplateResources,
 } from './resource-pipeline';
+export { createResourceResolverRegistryFromKernel } from './kernel-bridge';
+export type { ResourceCapabilityRegistry, ResourceKernelEnvironment } from './kernel-bridge';
 export type {
   ResolvedResource,
   ResolvedResourceCache,
+  ResolvedResourceVector,
   ResolvedResourceStore,
+  DecodedResourceImage,
+  QrResourceOptions,
   ResolveContext,
   ResourceLimits,
   ResourcePipelineOptions,
@@ -17,6 +22,7 @@ export type {
   ResourceResolutionResult,
   ResourceResolver,
   ResourceResolverRegistry,
+  ResourceFontHandle,
   ResourceType,
   UnverifiedResource,
 } from './resource-pipeline';

@@ -59,6 +59,7 @@ test('the built root has only the approved runtime exports and internal subpaths
         'createPrintDisplayList',
         'createResolvedResourceCache',
         'createResourceResolverRegistry',
+        'createResourceResolverRegistryFromKernel',
         'createSpreadsheetDocument',
         'evaluateTemplateExpression',
         'expandAdvancedTemplate',

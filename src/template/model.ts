@@ -12,6 +12,7 @@ import type { FontMetrics } from '../presentation';
 import type { PrintDisplayList } from '../print';
 import type { CompiledTemplateExpression, TemplateFormatterRegistry } from './expression';
 import type {
+  DecodedResourceImage,
   ResolvedResourceStore,
   ResourcePurpose,
   ResourceRef,
@@ -59,49 +60,75 @@ export interface RepeatRowsBinding {
   readonly pageBreak: 'auto' | 'before-each-item';
 }
 
+/** Explicit floating-object behavior for a repeated structural region. */
 export type ObjectRepeatPolicy = 'per-item' | 'shared' | 'forbidden';
 
-interface AdvancedRepeatBase {
+/** Stable floating-object reference intersecting a structural region. */
+export interface RepeatedObjectRef {
+  /** Stable object identity. */
+  readonly id: string;
+}
+
+/** Shared structural-repeat source and policy fields. */
+export interface AdvancedRepeatBase {
+  /** Stable binding identity. */
   readonly id: BindingId;
+  /** Inclusive source region. */
   readonly range: DocumentCellRange;
+  /** Restricted collection expression. */
   readonly source: string;
+  /** Empty-collection behavior. */
   readonly empty: 'remove' | 'keep-template-row';
+  /** Explicit object-copy behavior. */
   readonly objectPolicy?: ObjectRepeatPolicy;
   /** Compiler-visible object references intersecting this region. */
-  readonly objects?: readonly { readonly id: string }[];
+  readonly objects?: readonly RepeatedObjectRef[];
 }
 
 /** Repeats a source range along the column axis. */
 export interface RepeatColumnsBinding extends AdvancedRepeatBase {
+  /** Horizontal-repeat discriminator. */
   readonly type: 'repeat-columns';
 }
 
 /** Repeats a source rectangle along one or both axes. */
 export interface RepeatRangeBinding extends AdvancedRepeatBase {
+  /** Rectangular-repeat discriminator. */
   readonly type: 'repeat-range';
+  /** Axes along which copies are created. */
   readonly axis: 'vertical' | 'horizontal' | 'both';
 }
 
 /** Repeats one logical fragment with a hard boundary before every later item. */
 export interface RepeatPageBinding extends AdvancedRepeatBase {
+  /** Per-item-page discriminator. */
   readonly type: 'repeat-page';
 }
 
 /** Clones a source sheet once per item. */
 export interface RepeatSheetBinding extends AdvancedRepeatBase {
+  /** Per-item-sheet discriminator. */
   readonly type: 'repeat-sheet';
+  /** Restricted expression producing the visible sheet name. */
   readonly name: string;
 }
 
 /** Inserts one explicitly registered compatible template. */
 export interface SubtemplateBinding {
+  /** Stable binding identity. */
   readonly id: BindingId;
+  /** Subtemplate discriminator. */
   readonly type: 'subtemplate';
+  /** Target region receiving the child template. */
   readonly range: DocumentCellRange;
+  /** Explicitly registered child template identity. */
   readonly templateId: TemplateId;
+  /** Restricted expression producing child-template data. */
   readonly source: string;
+  /** Explicit object-copy behavior. */
   readonly objectPolicy?: ObjectRepeatPolicy;
-  readonly objects?: readonly { readonly id: string }[];
+  /** Compiler-visible intersecting objects. */
+  readonly objects?: readonly RepeatedObjectRef[];
 }
 
 /** Removes a range when its predicate resolves false. */
@@ -250,19 +277,25 @@ export type TemplateIRBinding =
       readonly source: CompiledTemplateExpression;
     })
   | (Omit<RepeatColumnsBinding, 'source'> & {
+      /** Parsed collection expression. */
       readonly source: CompiledTemplateExpression;
     })
   | (Omit<RepeatRangeBinding, 'source'> & {
+      /** Parsed collection expression. */
       readonly source: CompiledTemplateExpression;
     })
   | (Omit<RepeatPageBinding, 'source'> & {
+      /** Parsed collection expression. */
       readonly source: CompiledTemplateExpression;
     })
   | (Omit<RepeatSheetBinding, 'source' | 'name'> & {
+      /** Parsed collection expression. */
       readonly source: CompiledTemplateExpression;
+      /** Parsed generated-sheet-name expression. */
       readonly name: CompiledTemplateExpression;
     })
   | (Omit<SubtemplateBinding, 'source'> & {
+      /** Parsed child-data expression. */
       readonly source: CompiledTemplateExpression;
     })
   | (Omit<ConditionalRangeBinding, 'when'> & {
@@ -284,10 +317,15 @@ export interface TemplateIR {
   readonly subtemplates?: readonly SpreadsheetTemplate[];
 }
 
+/** One immutable node in the validated structural-containment forest. */
 export interface TemplateRegionNode {
+  /** Structural binding represented by this node. */
   readonly bindingId: BindingId;
+  /** Original source region. */
   readonly range: DocumentCellRange;
+  /** One-based containment depth. */
   readonly depth: number;
+  /** Deterministically ordered fully-contained children. */
   readonly children: readonly TemplateRegionNode[];
 }
 
@@ -333,14 +371,21 @@ export interface RenderLimits {
   readonly maxLayoutTimeMs: number;
   /** Maximum structural nesting depth. */
   readonly maxNestingDepth?: number;
+  /** Maximum logical resource references. */
   readonly maxResources?: number;
+  /** Maximum compressed bytes for one resource. */
   readonly maxResourceBytes?: number;
+  /** Maximum compressed bytes for the session. */
   readonly maxTotalResourceBytes?: number;
+  /** Maximum concurrent resolver calls. */
   readonly maxResolveConcurrency?: number;
 }
 
+/** Additional inputs required to compile TP2 structural templates. */
 export interface AdvancedCompileOptions {
+  /** Explicit schema-compatible child templates keyed by stable ID. */
   readonly subtemplates: ReadonlyMap<TemplateId, SpreadsheetTemplate>;
+  /** Compile and expansion safety budgets. */
   readonly limits: RenderLimits;
 }
 
@@ -387,11 +432,7 @@ export interface RenderEnvironment {
     bytes: Uint8Array,
     mimeType: string,
     signal: AbortSignal,
-  ) => Promise<{
-    readonly width: number;
-    readonly height: number;
-    readonly representation: unknown;
-  }>;
+  ) => Promise<DecodedResourceImage>;
 }
 
 /** Semantic identity and geometry for one generated page. */

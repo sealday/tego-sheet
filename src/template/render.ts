@@ -182,6 +182,19 @@ function targets(
   };
   for (const target of profile.targets) {
     if (target.type === 'sheet') {
+      const generatedSheetIds = structuralMappings
+        .filter(
+          ({ source, generated }) =>
+            source.sheetId === target.sheetId && generated.sheetId !== target.sheetId,
+        )
+        .map(({ generated }) => generated.sheetId);
+      if (generatedSheetIds.length > 0) {
+        for (const sheetId of generatedSheetIds) {
+          const generatedSheet = document.workbook.sheets.find(({ id }) => id === sheetId);
+          if (generatedSheet !== undefined) append(usedRange(generatedSheet), false);
+        }
+        continue;
+      }
       const sheet = document.workbook.sheets.find(({ id }) => id === target.sheetId);
       if (sheet !== undefined) append(usedRange(sheet), false);
     } else if (target.type === 'range') {
@@ -519,235 +532,241 @@ export async function renderSpreadsheetTemplate(
     await resources?.dispose();
     return result;
   };
-  const profile = request.template.ir.profiles.find(({ id }) => id === request.profileId);
-  if (profile === undefined) {
-    return failAfterResources(
-      freeze({
-        diagnostics: [
-          renderDiagnostic('INVALID_PRINT_TARGET', `Unknown print profile: ${request.profileId}`),
-        ],
-      }),
-    );
-  }
-  let expansion;
+  let transferred = false;
   try {
-    const hasAdvanced =
-      request.template.ir.regionTree !== undefined ||
-      request.template.ir.bindings.some(
-        ({ type }) =>
-          type === 'repeat-columns' ||
-          type === 'repeat-range' ||
-          type === 'repeat-page' ||
-          type === 'repeat-sheet' ||
-          type === 'subtemplate',
+    const profile = request.template.ir.profiles.find(({ id }) => id === request.profileId);
+    if (profile === undefined) {
+      return failAfterResources(
+        freeze({
+          diagnostics: [
+            renderDiagnostic('INVALID_PRINT_TARGET', `Unknown print profile: ${request.profileId}`),
+          ],
+        }),
       );
-    if (hasAdvanced) {
-      const advanced = expandAdvancedTemplate(
-        request.template,
-        request.data,
-        limits,
-        environment.formatters ?? {},
-        request.signal,
-      );
-      expansion = {
-        document: advanced.document,
-        diagnostics: advanced.diagnostics,
-        insertedRows: new Map<string, readonly RowInsertion[]>(),
-        repeatPageBreaks: advanced.forcedPageBreaks,
-        structuralMappings: advanced.structuralMappings,
-      };
-    } else {
-      expansion = expandTemplate(
-        request.template.sourceDocument,
-        request.template.ir.template,
-        request.template.ir.bindings,
-        request.data,
-        environment.formatters ?? {},
-        limits,
-        request.signal,
-      );
-      expansion = { ...expansion, structuralMappings: [] };
     }
-  } catch (cause) {
-    if (!(cause instanceof TemplateExpressionError)) throw cause;
-    return failAfterResources(
-      freeze({
-        diagnostics: [
-          renderDiagnostic(
-            cause.code,
-            cause.code === 'FORMATTER_FAILED'
-              ? 'A template formatter failed during rendering'
-              : cause.message,
-          ),
-        ],
-      }),
+    let expansion;
+    try {
+      const hasAdvanced =
+        request.template.ir.regionTree !== undefined ||
+        request.template.ir.bindings.some(
+          ({ type }) =>
+            type === 'repeat-columns' ||
+            type === 'repeat-range' ||
+            type === 'repeat-page' ||
+            type === 'repeat-sheet' ||
+            type === 'subtemplate',
+        );
+      if (hasAdvanced) {
+        const advanced = expandAdvancedTemplate(
+          request.template,
+          request.data,
+          limits,
+          environment.formatters ?? {},
+          request.signal,
+        );
+        expansion = {
+          document: advanced.document,
+          diagnostics: advanced.diagnostics,
+          insertedRows: new Map<string, readonly RowInsertion[]>(),
+          repeatPageBreaks: advanced.forcedPageBreaks,
+          structuralMappings: advanced.structuralMappings,
+        };
+      } else {
+        expansion = expandTemplate(
+          request.template.sourceDocument,
+          request.template.ir.template,
+          request.template.ir.bindings,
+          request.data,
+          environment.formatters ?? {},
+          limits,
+          request.signal,
+        );
+        expansion = { ...expansion, structuralMappings: [] };
+      }
+    } catch (cause) {
+      if (!(cause instanceof TemplateExpressionError)) throw cause;
+      return failAfterResources(
+        freeze({
+          diagnostics: [
+            renderDiagnostic(
+              cause.code,
+              cause.code === 'FORMATTER_FAILED'
+                ? 'A template formatter failed during rendering'
+                : cause.message,
+            ),
+          ],
+        }),
+      );
+    }
+    if (isAborted(request.signal)) return failAfterResources(abortResult());
+    if (expansion.document === undefined)
+      return failAfterResources(freeze({ diagnostics: expansion.diagnostics }));
+    const expansionDiagnostics = expansion.diagnostics.map((diagnostic) =>
+      request.missingValue === 'warning-and-blank' && diagnostic.code === 'MISSING_DATA'
+        ? { ...diagnostic, severity: 'warning' as const }
+        : diagnostic,
     );
-  }
-  if (isAborted(request.signal)) return failAfterResources(abortResult());
-  if (expansion.document === undefined)
-    return failAfterResources(freeze({ diagnostics: expansion.diagnostics }));
-  const expansionDiagnostics = expansion.diagnostics.map((diagnostic) =>
-    request.missingValue === 'warning-and-blank' && diagnostic.code === 'MISSING_DATA'
-      ? { ...diagnostic, severity: 'warning' as const }
-      : diagnostic,
-  );
-  if (expansionDiagnostics.some(({ severity }) => severity === 'error')) {
-    return failAfterResources(freeze({ diagnostics: expansionDiagnostics }));
-  }
-  const formulaEngine = createFormulaEngine();
-  const formulaProgram = formulaEngine.compile(expansion.document);
-  const calculation = formulaEngine.recalculate(formulaProgram, [], {
-    locale: environment.locale,
-    timeZone: environment.timeZone,
-    dateSystem: environment.dateSystem,
-    clock: { now: () => environment.clock.getTime() },
-    tick: 0,
-    functionRegistryVersion: 'builtin-1',
-  });
-  const resolvedTargets = targets(
-    expansion.document,
-    profile,
-    expansion.insertedRows,
-    expansion.structuralMappings,
-  );
-  const pageSize = paper(profile);
-  const headingSize = profile.showHeadings ? 20 : 0;
-  const pagination = paginateTemplateTargets({
-    targets: paginationTargets(
-      resolvedTargets,
-      profile,
-      expansion.insertedRows,
-      expansion.structuralMappings,
-    ),
-    paper: pageSize,
-    margins: {
-      ...profile.page.margins,
-      top: profile.page.margins.top + headingSize,
-      left: profile.page.margins.left + headingSize,
-    },
-    scale: profile.page.scale,
-    manualBreaks: profile.manualBreaks
-      .flatMap((pageBreak) =>
-        resolvedTargets
-          .filter(({ sheet }) => sheet.id === pageBreak.sheetId)
-          .map((target) => {
-            const beforeRow = mappedRow(
-              pageBreak.beforeRow,
-              expansion.insertedRows.get(pageBreak.sheetId) ?? [],
-            );
-            return {
-              targetId: target.id,
-              beforeRow: Math.max(0, beforeRow - target.range.start.row),
-            };
-          }),
-      )
-      .concat(
-        resolvedTargets.flatMap((target) =>
-          (expansion.repeatPageBreaks.get(target.sheet.id) ?? [])
-            .filter(
-              (beforeRow) =>
-                beforeRow >= target.range.start.row && beforeRow <= target.range.end.row,
-            )
-            .map((beforeRow) => ({
-              targetId: target.id,
-              beforeRow: beforeRow - target.range.start.row,
-            })),
-        ),
-      ),
-    maxPages: limits.maxPages,
-    signal: request.signal,
-    deadline: start + limits.maxLayoutTimeMs,
-  });
-  if (Date.now() - start > limits.maxLayoutTimeMs || isAborted(request.signal)) {
-    return failAfterResources(
-      isAborted(request.signal)
-        ? abortResult()
-        : freeze({
-            diagnostics: [
-              renderDiagnostic('LAYOUT_TIME_EXCEEDED', 'Template layout exceeded its time limit'),
-            ],
-          }),
-    );
-  }
-  if (pagination.diagnostics.some(({ severity }) => severity === 'error')) {
-    return failAfterResources(
-      freeze({ diagnostics: [...expansionDiagnostics, ...pagination.diagnostics] }),
-    );
-  }
-  const cache = createPresentationCache({
-    maximumEntries: Math.max(1, limits.maxExpandedCells),
-    maximumBytes: Math.max(1_024, limits.maxExpandedCells * 1_024),
-  });
-  const presentation = createPresentationResolver({
-    document: expansion.document,
-    formulaProgram,
-    formulaValues: calculation.values,
-    cache,
-    revisions: {
-      document: 1,
-      calculation: 1,
-      condition: 1,
-      style: 1,
-      environment: 1,
-    },
-    environment: {
+    if (expansionDiagnostics.some(({ severity }) => severity === 'error')) {
+      return failAfterResources(freeze({ diagnostics: expansionDiagnostics }));
+    }
+    const formulaEngine = createFormulaEngine();
+    const formulaProgram = formulaEngine.compile(expansion.document);
+    const calculation = formulaEngine.recalculate(formulaProgram, [], {
       locale: environment.locale,
       timeZone: environment.timeZone,
       dateSystem: environment.dateSystem,
-      target: 'print',
-    },
-  });
-  const pageInputs = displayPages(
-    pagination.pages,
-    resolvedTargets,
-    profile,
-    (sheetId, row, column) => presentation.resolve({ sheetId, row, column }),
-    expansion.insertedRows,
-    expansion.structuralMappings,
-    request.data,
-    environment.clock,
-  );
-  const displayList = createPrintDisplayList({
-    pages: pageInputs,
-    fontMetrics: environment.fontMetrics,
-    signal: request.signal,
-    deadline: start + limits.maxLayoutTimeMs,
-  });
-  const diagnostics = [
-    ...request.template.diagnostics,
-    ...expansionDiagnostics,
-    ...pagination.diagnostics,
-    ...displayList.diagnostics,
-  ];
-  if (diagnostics.some(({ severity }) => severity === 'error')) {
-    return failAfterResources(freeze({ diagnostics }));
+      clock: { now: () => environment.clock.getTime() },
+      tick: 0,
+      functionRegistryVersion: 'builtin-1',
+    });
+    const resolvedTargets = targets(
+      expansion.document,
+      profile,
+      expansion.insertedRows,
+      expansion.structuralMappings,
+    );
+    const pageSize = paper(profile);
+    const headingSize = profile.showHeadings ? 20 : 0;
+    const pagination = paginateTemplateTargets({
+      targets: paginationTargets(
+        resolvedTargets,
+        profile,
+        expansion.insertedRows,
+        expansion.structuralMappings,
+      ),
+      paper: pageSize,
+      margins: {
+        ...profile.page.margins,
+        top: profile.page.margins.top + headingSize,
+        left: profile.page.margins.left + headingSize,
+      },
+      scale: profile.page.scale,
+      manualBreaks: profile.manualBreaks
+        .flatMap((pageBreak) =>
+          resolvedTargets
+            .filter(({ sheet }) => sheet.id === pageBreak.sheetId)
+            .map((target) => {
+              const beforeRow = mappedRow(
+                pageBreak.beforeRow,
+                expansion.insertedRows.get(pageBreak.sheetId) ?? [],
+              );
+              return {
+                targetId: target.id,
+                beforeRow: Math.max(0, beforeRow - target.range.start.row),
+              };
+            }),
+        )
+        .concat(
+          resolvedTargets.flatMap((target) =>
+            (expansion.repeatPageBreaks.get(target.sheet.id) ?? [])
+              .filter(
+                (beforeRow) =>
+                  beforeRow >= target.range.start.row && beforeRow <= target.range.end.row,
+              )
+              .map((beforeRow) => ({
+                targetId: target.id,
+                beforeRow: beforeRow - target.range.start.row,
+              })),
+          ),
+        ),
+      maxPages: limits.maxPages,
+      signal: request.signal,
+      deadline: start + limits.maxLayoutTimeMs,
+    });
+    if (Date.now() - start > limits.maxLayoutTimeMs || isAborted(request.signal)) {
+      return failAfterResources(
+        isAborted(request.signal)
+          ? abortResult()
+          : freeze({
+              diagnostics: [
+                renderDiagnostic('LAYOUT_TIME_EXCEEDED', 'Template layout exceeded its time limit'),
+              ],
+            }),
+      );
+    }
+    if (pagination.diagnostics.some(({ severity }) => severity === 'error')) {
+      return failAfterResources(
+        freeze({ diagnostics: [...expansionDiagnostics, ...pagination.diagnostics] }),
+      );
+    }
+    const cache = createPresentationCache({
+      maximumEntries: Math.max(1, limits.maxExpandedCells),
+      maximumBytes: Math.max(1_024, limits.maxExpandedCells * 1_024),
+    });
+    const presentation = createPresentationResolver({
+      document: expansion.document,
+      formulaProgram,
+      formulaValues: calculation.values,
+      cache,
+      revisions: {
+        document: 1,
+        calculation: 1,
+        condition: 1,
+        style: 1,
+        environment: 1,
+      },
+      environment: {
+        locale: environment.locale,
+        timeZone: environment.timeZone,
+        dateSystem: environment.dateSystem,
+        target: 'print',
+      },
+    });
+    const pageInputs = displayPages(
+      pagination.pages,
+      resolvedTargets,
+      profile,
+      (sheetId, row, column) => presentation.resolve({ sheetId, row, column }),
+      expansion.insertedRows,
+      expansion.structuralMappings,
+      request.data,
+      environment.clock,
+    );
+    const displayList = createPrintDisplayList({
+      pages: pageInputs,
+      fontMetrics: environment.fontMetrics,
+      signal: request.signal,
+      deadline: start + limits.maxLayoutTimeMs,
+    });
+    const diagnostics = [
+      ...request.template.diagnostics,
+      ...expansionDiagnostics,
+      ...pagination.diagnostics,
+      ...displayList.diagnostics,
+    ];
+    if (diagnostics.some(({ severity }) => severity === 'error')) {
+      return failAfterResources(freeze({ diagnostics }));
+    }
+    const document: GeneratedDocument = freeze({
+      workbook: expansion.document.workbook,
+      print: {
+        pages: pagination.pages.map((page) => ({
+          id: page.id,
+          index: page.index,
+          targetId: page.targetId,
+          width: page.width,
+          height: page.height,
+          rowStart: page.rowStart,
+          rowEnd: page.rowEnd,
+          columnStart: page.columnStart,
+          columnEnd: page.columnEnd,
+        })),
+        displayList,
+      },
+      resources,
+      diagnostics,
+      metadata: {
+        templateId: request.template.templateId,
+        profileId: profile.id,
+        sourceDocumentHash: request.template.sourceDocumentHash,
+        locale: environment.locale,
+        timeZone: environment.timeZone,
+        generatedAt: environment.clock.toISOString(),
+      },
+    });
+    transferred = true;
+    return freeze({ document, diagnostics });
+  } finally {
+    if (!transferred) await resources.dispose();
   }
-  const document: GeneratedDocument = freeze({
-    workbook: expansion.document.workbook,
-    print: {
-      pages: pagination.pages.map((page) => ({
-        id: page.id,
-        index: page.index,
-        targetId: page.targetId,
-        width: page.width,
-        height: page.height,
-        rowStart: page.rowStart,
-        rowEnd: page.rowEnd,
-        columnStart: page.columnStart,
-        columnEnd: page.columnEnd,
-      })),
-      displayList,
-    },
-    resources,
-    diagnostics,
-    metadata: {
-      templateId: request.template.templateId,
-      profileId: profile.id,
-      sourceDocumentHash: request.template.sourceDocumentHash,
-      locale: environment.locale,
-      timeZone: environment.timeZone,
-      generatedAt: environment.clock.toISOString(),
-    },
-  });
-  return freeze({ document, diagnostics });
 }

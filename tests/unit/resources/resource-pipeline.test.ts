@@ -18,7 +18,7 @@ describe('TP3 resource pipeline', () => {
     const decode = vi.fn(async () => ({ width: 1, height: 1, representation: 'pixel' }));
     const registry = createResourceResolverRegistry([
       resolver('app', async (ref) => ({
-        bytes: bytes(1, 2, 3),
+        bytes: bytes(0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0),
         mimeType: ref.expectedMime ?? 'image/png',
       })),
     ]);
@@ -111,11 +111,26 @@ describe('TP3 resource pipeline', () => {
   });
 
   it('bounds resolvers that ignore cancellation with a stable timeout', async () => {
+    const lateDispose = vi.fn();
     const result = await resolveTemplateResources(
       [{ id: 'hung', type: 'binary', resolverId: 'hung', key: 'hung' }],
       {
         registry: createResourceResolverRegistry([
-          resolver('hung', async () => new Promise(() => {})),
+          resolver(
+            'hung',
+            async () =>
+              new Promise((resolve) =>
+                setTimeout(
+                  () =>
+                    resolve({
+                      bytes: bytes(1),
+                      mimeType: 'application/octet-stream',
+                      dispose: lateDispose,
+                    }),
+                  20,
+                ),
+              ),
+          ),
         ]),
         signal: new AbortController().signal,
         purpose: 'preview',
@@ -136,6 +151,8 @@ describe('TP3 resource pipeline', () => {
     expect(result.diagnostics).toContainEqual(
       expect.objectContaining({ code: 'RESOURCE_TIMEOUT' }),
     );
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(lateDispose).toHaveBeenCalledOnce();
   });
 
   it('waits for fonts, creates deterministic QR vectors, and disposes on cancellation', async () => {
@@ -217,7 +234,7 @@ describe('TP3 resource pipeline', () => {
     const second = right.store!.byReference.value!;
     await cache.put(first, releaseFirst);
     expect(cache.get(first.contentHash)).toBe(first);
-    await cache.put({ ...second, bytes: bytes(1, 2, 3, 4) });
+    await cache.put({ ...second, bytes: [1, 2, 3, 4] });
     expect(releaseFirst).toHaveBeenCalledOnce();
     expect(cache.byteLength).toBe(0);
   });
