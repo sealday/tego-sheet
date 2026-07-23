@@ -8,6 +8,17 @@ import {
   type SpreadsheetTemplate,
 } from '../../../src/template';
 
+function png(): Uint8Array {
+  const value = new Uint8Array(45);
+  value.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  new DataView(value.buffer).setUint32(8, 13);
+  value.set(new TextEncoder().encode('IHDR'), 12);
+  new DataView(value.buffer).setUint32(16, 1);
+  new DataView(value.buffer).setUint32(20, 1);
+  value.set(new TextEncoder().encode('IEND'), 37);
+  return value;
+}
+
 const source = {
   schemaVersion: 2,
   id: 'document-resource-render',
@@ -85,7 +96,7 @@ describe('resource/render atomic boundary', () => {
             id: 'app',
             supports: () => true,
             resolve: async () => ({
-              bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0]),
+              bytes: png(),
               mimeType: 'image/png',
               width: 1,
               height: 1,

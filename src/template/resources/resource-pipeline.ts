@@ -127,6 +127,8 @@ export interface DecodedResourceImage {
   readonly height: number;
   /** Host-owned read-only decoded representation. */
   readonly representation: unknown;
+  /** Idempotent release callback for decoder-owned handles. */
+  readonly dispose?: () => void | Promise<void>;
 }
 
 /** Validated content-addressed resource shared by output adapters. */
@@ -334,13 +336,47 @@ function sniffMime(bytes: Uint8Array): string | undefined {
   if (prefix.startsWith('<svg') || prefix.startsWith('<?xml')) return 'image/svg+xml';
   if (
     (bytes[0] === 0x00 && bytes[1] === 0x01 && bytes[2] === 0x00 && bytes[3] === 0x00) ||
-    new TextDecoder().decode(bytes.slice(0, 4)) === 'OTTO' ||
-    new TextDecoder().decode(bytes.slice(0, 4)) === 'wOFF' ||
-    new TextDecoder().decode(bytes.slice(0, 4)) === 'wOF2'
+    new TextDecoder().decode(bytes.slice(0, 4)) === 'OTTO'
   ) {
-    return 'font/ttf';
+    return new TextDecoder().decode(bytes.slice(0, 4)) === 'OTTO' ? 'font/otf' : 'font/ttf';
   }
+  if (new TextDecoder().decode(bytes.slice(0, 4)) === 'wOFF') return 'font/woff';
+  if (new TextDecoder().decode(bytes.slice(0, 4)) === 'wOF2') return 'font/woff2';
   return undefined;
+}
+
+function completeRasterImage(bytes: Uint8Array, mimeType: string): boolean {
+  if (mimeType === 'image/png') {
+    if (bytes.length < 45) return false;
+    let offset = 8;
+    let sawHeader = false;
+    while (offset + 12 <= bytes.length) {
+      const length = new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0);
+      const end = offset + 12 + length;
+      if (end > bytes.length) return false;
+      const type = new TextDecoder().decode(bytes.subarray(offset + 4, offset + 8));
+      if (!sawHeader) {
+        if (type !== 'IHDR' || length !== 13) return false;
+        sawHeader = true;
+      }
+      if (type === 'IEND') return length === 0 && end === bytes.length;
+      offset = end;
+    }
+    return false;
+  }
+  if (mimeType === 'image/gif') {
+    return bytes.length >= 14 && bytes[bytes.length - 1] === 0x3b;
+  }
+  if (mimeType === 'image/jpeg') {
+    return (
+      bytes.length >= 4 &&
+      bytes[0] === 0xff &&
+      bytes[1] === 0xd8 &&
+      bytes[bytes.length - 2] === 0xff &&
+      bytes[bytes.length - 1] === 0xd9
+    );
+  }
+  return false;
 }
 
 function encodedImageDimensions(
@@ -738,6 +774,21 @@ export async function resolveTemplateResources(
       ],
     });
   }
+  const resourceIds = new Set<string>();
+  for (const ref of refs) {
+    if (resourceIds.has(ref.id)) {
+      return freeze({
+        diagnostics: [
+          diagnostic(
+            'DUPLICATE_RESOURCE_ID',
+            `Logical resource ID ${ref.id} is duplicated`,
+            ref.id,
+          ),
+        ],
+      });
+    }
+    resourceIds.add(ref.id);
+  }
   if (options.signal.aborted) return aborted();
   const started = Date.now();
   const sessionController = new AbortController();
@@ -816,16 +867,17 @@ export async function resolveTemplateResources(
       }
       if (raw.dispose !== undefined) disposers.add(raw.dispose);
       if (sessionController.signal.aborted) return;
-      const decompressed = raw.decompressedBytes ?? raw.bytes.byteLength;
+      const verifiedBytes = Uint8Array.from(raw.bytes);
+      const decompressed = raw.decompressedBytes ?? verifiedBytes.byteLength;
       if (
-        raw.bytes.byteLength > limits.maxResourceBytes ||
+        verifiedBytes.byteLength > limits.maxResourceBytes ||
         decompressed > limits.maxDecompressedBytes ||
-        totalBytes + raw.bytes.byteLength > limits.maxTotalResourceBytes
+        totalBytes + verifiedBytes.byteLength > limits.maxTotalResourceBytes
       ) {
         fail('RESOURCE_TOO_LARGE', `Resource ${ref.id} exceeds its byte quota`, ref);
         return;
       }
-      const sniffed = sniffMime(raw.bytes);
+      const sniffed = sniffMime(verifiedBytes);
       const expectedCategory =
         ref.type === 'image'
           ? 'image/'
@@ -850,7 +902,7 @@ export async function resolveTemplateResources(
         fail('RESOURCE_MIME_MISMATCH', `Resource ${ref.id} MIME does not match its content`, ref);
         return;
       }
-      const svgVector = ref.type === 'svg' ? safeSvg(raw.bytes, limits.maxSvgNodes) : undefined;
+      const svgVector = ref.type === 'svg' ? safeSvg(verifiedBytes, limits.maxSvgNodes) : undefined;
       if (ref.type === 'svg' && svgVector === undefined) {
         fail('UNSAFE_SVG', `Resource ${ref.id} contains unsafe SVG content`, ref);
         return;
@@ -862,8 +914,12 @@ export async function resolveTemplateResources(
           return;
         }
       }
+      if (ref.type === 'image' && !completeRasterImage(verifiedBytes, raw.mimeType)) {
+        fail('RESOURCE_DECODE_FAILED', `Resource ${ref.id} has incomplete image data`, ref);
+        return;
+      }
       const encodedDimensions =
-        ref.type === 'image' ? encodedImageDimensions(raw.bytes, raw.mimeType) : undefined;
+        ref.type === 'image' ? encodedImageDimensions(verifiedBytes, raw.mimeType) : undefined;
       const declaredWidth = raw.width ?? encodedDimensions?.width;
       const declaredHeight = raw.height ?? encodedDimensions?.height;
       if (
@@ -874,8 +930,8 @@ export async function resolveTemplateResources(
         fail('RESOURCE_TOO_LARGE', `Resource ${ref.id} exceeds its pixel quota`, ref);
         return;
       }
-      totalBytes += raw.bytes.byteLength;
-      const hash = await contentHash(raw.bytes);
+      totalBytes += verifiedBytes.byteLength;
+      const hash = await contentHash(verifiedBytes);
       const semanticKey = [
         ref.type,
         raw.mimeType,
@@ -892,10 +948,15 @@ export async function resolveTemplateResources(
           let height = declaredHeight;
           if (ref.type === 'image' && options.decodeImage !== undefined) {
             const image = await controlled(
-              options.decodeImage(raw.bytes, raw.mimeType, sessionController.signal),
+              options.decodeImage(
+                Uint8Array.from(verifiedBytes),
+                raw.mimeType,
+                sessionController.signal,
+              ),
               sessionController.signal,
               limits.maxResolveTimeMs - (Date.now() - started),
             );
+            if (image.dispose !== undefined) disposers.add(image.dispose);
             width = image.width;
             height = image.height;
             decoded = image.representation;
@@ -920,7 +981,7 @@ export async function resolveTemplateResources(
           return freeze({
             contentHash: hash,
             mimeType: raw.mimeType,
-            bytes: Object.freeze([...raw.bytes]),
+            bytes: Object.freeze([...verifiedBytes]),
             ...(width === undefined ? {} : { width }),
             ...(height === undefined ? {} : { height }),
             ...(decoded === undefined ? {} : { decoded }),

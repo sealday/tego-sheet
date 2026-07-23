@@ -9,6 +9,18 @@ import {
 
 const bytes = (...values: number[]) => new Uint8Array(values);
 
+function png(width = 1, height = 1): Uint8Array {
+  const value = new Uint8Array(45);
+  value.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  new DataView(value.buffer).setUint32(8, 13);
+  value.set(new TextEncoder().encode('IHDR'), 12);
+  new DataView(value.buffer).setUint32(16, width);
+  new DataView(value.buffer).setUint32(20, height);
+  new DataView(value.buffer).setUint32(33, 0);
+  value.set(new TextEncoder().encode('IEND'), 37);
+  return value;
+}
+
 function resolver(id: string, resolve: ResourceResolver['resolve']): ResourceResolver {
   return { id, supports: (ref) => ref.resolverId === id, resolve };
 }
@@ -18,7 +30,7 @@ describe('TP3 resource pipeline', () => {
     const decode = vi.fn(async () => ({ width: 1, height: 1, representation: 'pixel' }));
     const registry = createResourceResolverRegistry([
       resolver('app', async (ref) => ({
-        bytes: bytes(0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0),
+        bytes: png(),
         mimeType: ref.expectedMime ?? 'image/png',
       })),
     ]);
@@ -32,19 +44,118 @@ describe('TP3 resource pipeline', () => {
       purpose: 'preview',
       limits: {
         maxResources: 3,
-        maxResourceBytes: 10,
-        maxTotalResourceBytes: 20,
+        maxResourceBytes: 100,
+        maxTotalResourceBytes: 200,
         maxResolveConcurrency: 2,
         maxPixels: 10,
         maxSvgNodes: 10,
         maxFonts: 2,
         maxResolveTimeMs: 1_000,
-        maxDecompressedBytes: 20,
+        maxDecompressedBytes: 200,
       },
       decodeImage: decode,
     });
     expect(result.store?.byReference.a).toBe(result.store?.byReference.b);
     expect(decode).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a raster image that has a signature but no complete image structure', async () => {
+    const result = await resolveTemplateResources(
+      [{ id: 'truncated', type: 'image', resolverId: 'app', key: 'truncated' }],
+      {
+        registry: createResourceResolverRegistry([
+          resolver('app', async () => ({
+            bytes: bytes(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a),
+            mimeType: 'image/png',
+          })),
+        ]),
+        signal: new AbortController().signal,
+        purpose: 'preview',
+      },
+    );
+
+    expect(result.store).toBeUndefined();
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'RESOURCE_DECODE_FAILED' }),
+    );
+  });
+
+  it('snapshots resolver bytes before decoding and disposes decoded handles with the session', async () => {
+    const decodedDispose = vi.fn();
+    const source = png();
+    const result = await resolveTemplateResources(
+      [{ id: 'logo', type: 'image', resolverId: 'app', key: 'logo' }],
+      {
+        registry: createResourceResolverRegistry([
+          resolver('app', async () => ({ bytes: source, mimeType: 'image/png' })),
+        ]),
+        signal: new AbortController().signal,
+        purpose: 'preview',
+        decodeImage: async (input) => {
+          input[16] = 0xff;
+          return { width: 1, height: 1, representation: {}, dispose: decodedDispose };
+        },
+      },
+    );
+
+    const stored = result.store?.byReference.logo;
+    expect(stored).toBeDefined();
+    const digest = await crypto.subtle.digest('SHA-256', Uint8Array.from(stored!.bytes));
+    const actual = `sha256:${[...new Uint8Array(digest)]
+      .map((value) => value.toString(16).padStart(2, '0'))
+      .join('')}`;
+    expect(stored?.contentHash).toBe(actual);
+    expect(stored?.bytes[16]).toBe(0);
+    await result.store?.dispose();
+    await result.store?.dispose();
+    expect(decodedDispose).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['font/woff', [0x77, 0x4f, 0x46, 0x46]],
+    ['font/woff2', [0x77, 0x4f, 0x46, 0x32]],
+  ] as const)('accepts the canonical %s MIME for matching font bytes', async (mimeType, prefix) => {
+    const result = await resolveTemplateResources(
+      [{ id: mimeType, type: 'font', resolverId: 'font', key: mimeType, expectedMime: mimeType }],
+      {
+        registry: createResourceResolverRegistry([
+          resolver('font', async () => ({
+            bytes: bytes(...prefix),
+            mimeType,
+            font: { family: 'Test', waitUntilReady: async () => {} },
+          })),
+        ]),
+        signal: new AbortController().signal,
+        purpose: 'preview',
+      },
+    );
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.store?.byReference[mimeType]?.mimeType).toBe(mimeType);
+  });
+
+  it('rejects duplicate logical resource IDs before invoking a resolver', async () => {
+    const resolve = vi.fn(async () => ({
+      bytes: bytes(1),
+      mimeType: 'application/octet-stream',
+    }));
+    const result = await resolveTemplateResources(
+      [
+        { id: 'same', type: 'binary', resolverId: 'app', key: 'first' },
+        { id: 'same', type: 'binary', resolverId: 'app', key: 'second' },
+      ],
+      {
+        registry: createResourceResolverRegistry([resolver('app', resolve)]),
+        signal: new AbortController().signal,
+        purpose: 'preview',
+      },
+    );
+
+    expect(result.store).toBeUndefined();
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'DUPLICATE_RESOURCE_ID' }),
+    );
+    expect(resolve).not.toHaveBeenCalled();
   });
 
   it('rejects forged MIME, oversized/decompression-bomb content and unsafe SVG', async () => {
