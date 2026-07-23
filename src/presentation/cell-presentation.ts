@@ -89,6 +89,10 @@ export interface CellPresentation {
     readonly readOnly: boolean;
     /** Whether the value or validation state is erroneous. */
     readonly invalid: boolean;
+    /** Optional semantic role supplied by a built-in cell type. */
+    readonly role?: 'text' | 'checkbox' | 'combobox';
+    /** Checked state for checkbox presentations. */
+    readonly checked?: boolean;
   };
   /** Recoverable presentation diagnostics. */
   readonly diagnostics?: readonly Diagnostic[];

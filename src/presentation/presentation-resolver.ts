@@ -8,6 +8,9 @@ import type {
 } from '../document';
 import { formulaAddressKey, type FormulaProgram, type FormulaValue } from '../formula';
 import { createNumberFormatter } from '../format';
+import { checkboxCellType } from '../extensions/cell-types/checkbox';
+import { dropdownCellType } from '../extensions/cell-types/dropdown';
+import type { BuiltInCellTypeDefinition, CellTypeScalar } from '../extensions/kernel/capabilities';
 import type {
   CellPresentation,
   PresentationAnnotation,
@@ -134,6 +137,53 @@ function inputValue(cell: Cell | undefined): FormulaValue {
   return { type: 'error', value: '#VALUE!' };
 }
 
+interface CustomPresentation {
+  readonly value: FormulaValue;
+  readonly formattedText: string;
+  readonly label: string;
+  readonly role: 'text' | 'checkbox' | 'combobox';
+  readonly checked?: boolean;
+}
+
+function scalarValue(value: CellTypeScalar): FormulaValue {
+  if (value === null) return { type: 'blank' };
+  if (typeof value === 'string') return { type: 'string', value };
+  if (typeof value === 'number') return { type: 'number', value };
+  return { type: 'boolean', value };
+}
+
+function customPresentation(
+  cell: Cell | undefined,
+  environment: PresentationEnvironment,
+): CustomPresentation | undefined {
+  if (cell?.input.type !== 'custom') return undefined;
+  if (cell.input.cellType === 'checkbox')
+    return describeCustom(checkboxCellType, cell.input, environment);
+  if (cell.input.cellType === 'dropdown')
+    return describeCustom(dropdownCellType, cell.input, environment);
+  return undefined;
+}
+
+function describeCustom<Value extends JsonValue>(
+  definition: BuiltInCellTypeDefinition<Value>,
+  input: Extract<Cell['input'], { readonly type: 'custom' }>,
+  environment: PresentationEnvironment,
+): CustomPresentation | undefined {
+  const value =
+    input.schemaVersion === definition.schemaVersion && definition.validate(input.value)
+      ? input.value
+      : definition.migrate?.(input.value, input.schemaVersion);
+  if (value === undefined || !definition.validate(value)) return undefined;
+  const semantics = definition.describe(value, environment);
+  return {
+    value: scalarValue(definition.toFormulaScalar(value)),
+    formattedText: semantics.formattedText,
+    label: semantics.accessibilityLabel,
+    role: semantics.role,
+    ...(semantics.checked === undefined ? {} : { checked: semantics.checked }),
+  };
+}
+
 function plain(value: FormulaValue): string {
   if (value.type === 'blank') return '';
   if (value.type === 'array') return '#SPILL!';
@@ -202,11 +252,13 @@ export function createPresentationResolver(
       const resolvedStyle = style(options, cell);
       const formulaKey = formulaAddressKey(address);
       const formulaValue = options.formulaProgram.values.get(formulaKey);
+      const custom = customPresentation(cell, options.environment);
       const value =
-        cell?.input.type === 'formula' ? (formulaValue ?? inputValue(cell)) : inputValue(cell);
-      let formattedText = plain(value);
+        custom?.value ??
+        (cell?.input.type === 'formula' ? (formulaValue ?? inputValue(cell)) : inputValue(cell));
+      let formattedText = custom?.formattedText ?? plain(value);
       const diagnostics: Diagnostic[] = [];
-      if (resolvedStyle.numberFormat !== undefined) {
+      if (custom === undefined && resolvedStyle.numberFormat !== undefined) {
         try {
           formattedText = formatter.format(value, resolvedStyle.numberFormat, options.environment);
         } catch (cause) {
@@ -236,10 +288,15 @@ export function createPresentationResolver(
         annotations,
         visibility: { hidden, printable: cell?.printable !== false },
         accessibility: {
-          label: description === undefined ? formattedText : `${formattedText}, ${description}`,
+          label:
+            description === undefined
+              ? (custom?.label ?? formattedText)
+              : `${custom?.label ?? formattedText}, ${description}`,
           ...(description === undefined ? {} : { description }),
           readOnly: cell?.editable === false,
           invalid: validation.status === 'error' || value.type === 'error',
+          ...(custom === undefined ? {} : { role: custom.role }),
+          ...(custom?.checked === undefined ? {} : { checked: custom.checked }),
         },
         ...(diagnostics.length === 0 ? {} : { diagnostics }),
       });

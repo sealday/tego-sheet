@@ -41,6 +41,30 @@ function documentFixture() {
                 printable: false,
               },
             },
+            {
+              row: 2,
+              column: 0,
+              cell: {
+                input: {
+                  type: 'custom',
+                  cellType: 'checkbox',
+                  schemaVersion: 1,
+                  value: { checked: true, label: 'Approved' },
+                },
+              },
+            },
+            {
+              row: 2,
+              column: 1,
+              cell: {
+                input: {
+                  type: 'custom',
+                  cellType: 'dropdown',
+                  schemaVersion: 1,
+                  value: { value: 'paid', label: 'Paid' },
+                },
+              },
+            },
           ],
           merges: [],
           rows: [{ index: 1, hidden: true }],
@@ -165,6 +189,32 @@ describe('shared cell presentation', () => {
     expect(second).toBe(first);
     expect(Object.isFrozen(first)).toBe(true);
     expect(Object.isFrozen(first.style)).toBe(true);
+  });
+
+  it('composes built-in checkbox and dropdown semantics from the F5 definitions', () => {
+    const { resolver } = resolverFixture();
+
+    expect(resolver.resolve({ sheetId: 'sheet-1' as never, row: 2, column: 0 })).toEqual(
+      expect.objectContaining({
+        value: { type: 'boolean', value: true },
+        formattedText: 'Approved',
+        accessibility: expect.objectContaining({
+          label: 'Approved: checked',
+          role: 'checkbox',
+          checked: true,
+        }),
+      }),
+    );
+    expect(resolver.resolve({ sheetId: 'sheet-1' as never, row: 2, column: 1 })).toEqual(
+      expect.objectContaining({
+        value: { type: 'string', value: 'paid' },
+        formattedText: 'Paid',
+        accessibility: expect.objectContaining({
+          label: 'Paid',
+          role: 'combobox',
+        }),
+      }),
+    );
   });
 
   it('enforces entry and byte budgets with deterministic least-recently-used eviction', () => {
