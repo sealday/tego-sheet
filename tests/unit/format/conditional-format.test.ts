@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
+import type { DocumentSheetId } from '../../../src/document';
 import { createConditionalFormatEvaluator } from '../../../src/format/conditional';
 
 describe('FMT-01 conditional formatting foundation', () => {
+  const sheetId = 'sheet-1' as DocumentSheetId;
+
   it('applies ordered rules without mutating the base presentation', () => {
     const baseStyle = Object.freeze({ color: '#111111', bold: false });
     const evaluator = createConditionalFormatEvaluator({ maxRules: 10, maxCells: 100 });
     const result = evaluator.evaluate({
-      address: { sheetId: 'sheet-1', row: 1, column: 0 },
+      address: { sheetId, row: 1, column: 0 },
       value: { type: 'number', value: 12 },
       text: '12',
       baseStyle,
@@ -17,7 +20,7 @@ describe('FMT-01 conditional formatting foundation', () => {
           stopIfTrue: true,
           ranges: [
             {
-              sheetId: 'sheet-1',
+              sheetId,
               start: { row: 0, column: 0 },
               end: { row: 9, column: 0 },
             },
@@ -31,7 +34,7 @@ describe('FMT-01 conditional formatting foundation', () => {
           stopIfTrue: false,
           ranges: [
             {
-              sheetId: 'sheet-1',
+              sheetId,
               start: { row: 0, column: 0 },
               end: { row: 9, column: 0 },
             },
@@ -53,7 +56,7 @@ describe('FMT-01 conditional formatting foundation', () => {
   it('rejects unsafe formulas and resource-limit overflows deterministically', () => {
     const evaluator = createConditionalFormatEvaluator({ maxRules: 1, maxCells: 1 });
     const input = {
-      address: { sheetId: 'sheet-1', row: 0, column: 0 },
+      address: { sheetId, row: 0, column: 0 },
       value: { type: 'number' as const, value: 1 },
       text: '1',
       baseStyle: {},
@@ -68,7 +71,7 @@ describe('FMT-01 conditional formatting foundation', () => {
             stopIfTrue: false,
             ranges: [
               {
-                sheetId: 'sheet-1',
+                sheetId,
                 start: { row: 0, column: 0 },
                 end: { row: 0, column: 0 },
               },
@@ -78,7 +81,7 @@ describe('FMT-01 conditional formatting foundation', () => {
           },
         ],
       }),
-    ).toMatchObject({ code: 'INVALID_CONDITIONAL_EXPRESSION' });
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_CONDITIONAL_EXPRESSION' }));
     expect(() =>
       evaluator.evaluate({
         ...input,
@@ -101,6 +104,6 @@ describe('FMT-01 conditional formatting foundation', () => {
           },
         ],
       }),
-    ).toMatchObject({ code: 'CONDITIONAL_RANGE_TOO_LARGE' });
+    ).toThrowError(expect.objectContaining({ code: 'CONDITIONAL_RANGE_TOO_LARGE' }));
   });
 });
