@@ -9,6 +9,7 @@ import {
   type ToolbarRenderProps,
 } from '../../src';
 import { createCanvasHarness } from '../helpers/canvas-harness';
+import { legacyProjection, testDocument } from '../helpers/workbook-builders';
 
 beforeEach(() => {
   const context = createCanvasHarness().canvas.getContext('2d');
@@ -33,7 +34,9 @@ it('keeps viewing, selection, navigation and copy available while rejecting ever
   const rendered = render(
     <TegoSheet
       ref={ref}
-      defaultValue={[{ name: 'A', rows: { 0: { cells: { 0: { text: 'copy me' } } } } }]}
+      defaultDocument={testDocument([
+        { name: 'A', rows: { 0: { cells: { 0: { text: 'copy me' } } } } },
+      ])}
       readOnly
       onSelectionChange={(event) => {
         sheet = event.sheet;
@@ -46,7 +49,7 @@ it('keeps viewing, selection, navigation and copy available while rejecting ever
   fireEvent.focusIn(root);
   fireEvent.keyDown(window, { key: 'ArrowRight' });
   expect(onSelectionChange).toHaveBeenCalledOnce();
-  expect(ref.current!.getValue()[0]?.name).toBe('A');
+  expect(legacyProjection(ref.current!.getDocument())[0]?.name).toBe('A');
   expect(ref.current!.getCell({ sheet, row: 0, column: 0 })?.text).toBe('copy me');
 
   const clipboard = { setData: vi.fn(), getData: vi.fn(() => '') };
@@ -72,7 +75,7 @@ it('keeps viewing, selection, navigation and copy available while rejecting ever
     rendered.rerender(
       <TegoSheet
         ref={ref}
-        defaultValue={[]}
+        defaultDocument={testDocument([])}
         readOnly={false}
         onSelectionChange={onSelectionChange}
       />,
@@ -108,12 +111,12 @@ it('commits the false-to-true read-only gate before custom child layout commands
   const rendered = render(
     <TegoSheet
       ref={ref}
-      defaultValue={[{ name: 'A' }]}
+      defaultDocument={testDocument([{ name: 'A' }])}
       toolbar={(props) => {
         toolbar = props;
         return <Probe {...props} />;
       }}
-      onChange={changes}
+      onDocumentChange={changes}
       onError={(error) => errors.push(error)}
     />,
   );
@@ -125,13 +128,13 @@ it('commits the false-to-true read-only gate before custom child layout commands
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      defaultValue={[]}
+      defaultDocument={testDocument([])}
       readOnly
       toolbar={(props) => {
         toolbar = props;
         return <Probe {...props} />;
       }}
-      onChange={changes}
+      onDocumentChange={changes}
       onError={(error) => errors.push(error)}
     />,
   );
@@ -169,13 +172,13 @@ it('commits the true-to-false read-only gate before custom child layout commands
   const rendered = render(
     <TegoSheet
       ref={ref}
-      defaultValue={[{ name: 'A' }]}
+      defaultDocument={testDocument([{ name: 'A' }])}
       readOnly
       toolbar={(props) => {
         toolbar = props;
         return <Probe {...props} />;
       }}
-      onChange={changes}
+      onDocumentChange={changes}
     />,
   );
   await waitFor(() => expect(toolbar.selection).not.toBeNull());
@@ -184,13 +187,13 @@ it('commits the true-to-false read-only gate before custom child layout commands
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      defaultValue={[]}
+      defaultDocument={testDocument([])}
       readOnly={false}
       toolbar={(props) => {
         toolbar = props;
         return <Probe {...props} />;
       }}
-      onChange={changes}
+      onDocumentChange={changes}
     />,
   );
 

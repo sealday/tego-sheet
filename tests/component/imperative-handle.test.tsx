@@ -3,6 +3,7 @@ import { createRef, startTransition, StrictMode, Suspense } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { TegoSheet, type TegoSheetError, type TegoSheetHandle } from '../../src';
 import { createCanvasHarness } from '../helpers/canvas-harness';
+import { legacyProjection, testDocument } from '../helpers/workbook-builders';
 
 beforeEach(() => {
   const context = createCanvasHarness().canvas.getContext('2d');
@@ -32,7 +33,7 @@ it('exposes every approved command and isolated query through one stable handle'
   const rendered = render(
     <TegoSheet
       ref={ref}
-      defaultValue={[{ name: 'A', rows: { len: 2 }, cols: { len: 2 } }]}
+      defaultDocument={testDocument([{ name: 'A', rows: { len: 2 }, cols: { len: 2 } }])}
       options={{ defaultStyle: { color: '#123456' } }}
       onActiveSheetChange={onActiveSheetChange}
     />,
@@ -40,7 +41,7 @@ it('exposes every approved command and isolated query through one stable handle'
   await waitFor(() => expect(ref.current).not.toBeNull());
   const handle = ref.current!;
   const firstId = onActiveSheetChange.mock.lastCall?.[0].sheet ?? handle.addSheet('temporary');
-  if (handle.getValue().length > 1) handle.deleteSheet(firstId);
+  if (legacyProjection(handle.getDocument()).length > 1) handle.deleteSheet(firstId);
   const sheet = handle.addSheet('B');
 
   act(() => {
@@ -50,15 +51,15 @@ it('exposes every approved command and isolated query through one stable handle'
   });
   expect(handle.getCell({ sheet, row: 0, column: 0 })?.text).toBe('value');
   expect(handle.getCellStyle({ sheet, row: 0, column: 0 })).toMatchObject({ color: '#123456' });
-  const value = handle.getValue() as Array<{ name?: string }>;
+  const value = legacyProjection(handle.getDocument()) as Array<{ name?: string }>;
   value[0]!.name = 'caller mutation';
-  expect(handle.getValue()[0]?.name).not.toBe('caller mutation');
+  expect(legacyProjection(handle.getDocument())[0]?.name).not.toBe('caller mutation');
   expect(handle.validate()).toEqual({ valid: true, issues: [] });
 
   act(() => handle.undo());
-  expect(handle.getValue().at(-1)?.name).toBe('B');
+  expect(legacyProjection(handle.getDocument()).at(-1)?.name).toBe('B');
   act(() => handle.redo());
-  expect(handle.getValue().at(-1)?.name).toBe('Renamed');
+  expect(legacyProjection(handle.getDocument()).at(-1)?.name).toBe('Renamed');
   handle.focus();
   expect(document.activeElement).toBe(rendered.container.querySelector('[data-tego-sheet]'));
   expect(() => handle.recalculateLayout()).not.toThrow();
@@ -69,7 +70,11 @@ it('exposes every approved command and isolated query through one stable handle'
   expect(document.querySelector('[data-tego-print-pages]')).toBeNull();
 
   rendered.rerender(
-    <TegoSheet ref={ref} defaultValue={[]} options={{ defaultStyle: { color: 'red' } }} />,
+    <TegoSheet
+      ref={ref}
+      defaultDocument={testDocument([])}
+      options={{ defaultStyle: { color: 'red' } }}
+    />,
   );
   expect(ref.current).toBe(handle);
 });
@@ -83,9 +88,9 @@ it('invalidates stale sheet IDs and clips active index silently on external repl
   const rendered = render(
     <TegoSheet
       ref={ref}
-      value={first}
+      document={testDocument(first)}
       initialActiveSheetIndex={1}
-      onChange={onChange}
+      onDocumentChange={onChange}
       onActiveSheetChange={onActiveSheetChange}
       onSelectionChange={onSelectionChange}
     />,
@@ -97,14 +102,16 @@ it('invalidates stale sheet IDs and clips active index silently on external repl
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      value={[{ name: 'Replacement' }]}
+      document={testDocument([{ name: 'Replacement' }])}
       initialActiveSheetIndex={99}
-      onChange={onChange}
+      onDocumentChange={onChange}
       onActiveSheetChange={onActiveSheetChange}
       onSelectionChange={onSelectionChange}
     />,
   );
-  await waitFor(() => expect(ref.current!.getValue()[0]?.name).toBe('Replacement'));
+  await waitFor(() =>
+    expect(legacyProjection(ref.current!.getDocument())[0]?.name).toBe('Replacement'),
+  );
   expect(() => ref.current!.getCell({ sheet: stale, row: 0, column: 0 })).toThrowError(
     expect.objectContaining({ code: 'INVALID_COMMAND' }),
   );
@@ -122,11 +129,19 @@ it('reports ref print failures through the latest onError and propagates consume
     throw printFailure;
   });
   const rendered = render(
-    <TegoSheet ref={ref} defaultValue={[{ name: 'A' }]} onError={(error) => first.push(error)} />,
+    <TegoSheet
+      ref={ref}
+      defaultDocument={testDocument([{ name: 'A' }])}
+      onError={(error) => first.push(error)}
+    />,
   );
   await waitFor(() => expect(ref.current).not.toBeNull());
   rendered.rerender(
-    <TegoSheet ref={ref} defaultValue={[]} onError={(error) => latest.push(error)} />,
+    <TegoSheet
+      ref={ref}
+      defaultDocument={testDocument([])}
+      onError={(error) => latest.push(error)}
+    />,
   );
 
   expect(() => ref.current!.print()).not.toThrow();
@@ -143,7 +158,7 @@ it('reports ref print failures through the latest onError and propagates consume
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      defaultValue={[]}
+      defaultDocument={testDocument([])}
       onError={() => {
         throw consumerFailure;
       }}
@@ -160,7 +175,7 @@ it.each([
   let focused: Element | null = null;
   const rendered = render(
     <TegoSheet
-      defaultValue={value}
+      defaultDocument={testDocument(value)}
       ref={(next) => {
         if (next === null) return;
         handle = next;
@@ -182,7 +197,7 @@ it('keeps callback-ref roots isolated across StrictMode teardown and unmount', (
   const rendered = render(
     <StrictMode>
       <TegoSheet
-        defaultValue={[]}
+        defaultDocument={testDocument([])}
         ref={(next) => {
           attachments.push(next);
           if (next === null) return;
@@ -217,7 +232,7 @@ it('does not attach an imperative root from an aborted render', () => {
       <Suspense fallback={<output data-suspended="" />}>
         <TegoSheet
           key={props.pending ? 'pending' : 'committed'}
-          defaultValue={[{ name: props.pending ? 'Pending' : 'Committed' }]}
+          defaultDocument={testDocument([{ name: props.pending ? 'Pending' : 'Committed' }])}
           ref={(next) => {
             if (next === null) return;
             if (props.pending) pendingAttachments += 1;

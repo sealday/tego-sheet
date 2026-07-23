@@ -1095,7 +1095,7 @@ export const TegoSheet = forwardRef<TegoSheetHandle, TegoSheetProps>(
     const epoch = useControllerEpoch(props);
     const controlled = useControlledWorkbook({
       epoch,
-      document: props.document,
+      controlledDocument: props.document,
       onError: props.onError,
     });
     if (epoch === null) {

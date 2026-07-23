@@ -1,9 +1,9 @@
 import BrowserOnly from '@docusaurus/BrowserOnly';
-import { TegoSheet, type WorkbookData } from 'tego-sheet';
+import { migrateLegacyWorkbook, TegoSheet } from 'tego-sheet';
 import 'tego-sheet/styles.css';
 import { useState, type ReactElement } from 'react';
 
-const previewFixture: WorkbookData = [
+const migratedPreview = migrateLegacyWorkbook([
   {
     name: 'Release plan',
     freeze: 'A2',
@@ -44,14 +44,16 @@ const previewFixture: WorkbookData = [
     },
     cols: { len: 8 },
   },
-];
+]);
+if (!migratedPreview.ok) throw new Error('Homepage preview fixture migration failed');
+const previewFixture = migratedPreview.document;
 
 function LivePreview(): ReactElement {
   const [value, setValue] = useState(previewFixture);
 
   return (
     <div className="tego-home-preview__sheet-host">
-      <TegoSheet value={value} onChange={setValue} toolbar={false} sheetTabs={false} />
+      <TegoSheet document={value} onDocumentChange={setValue} toolbar={false} sheetTabs={false} />
     </div>
   );
 }

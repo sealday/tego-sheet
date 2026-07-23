@@ -7,16 +7,20 @@ import {
   type ForwardedRef,
   type ReactNode,
 } from 'react';
-import type { TegoSheetHandle, WorkbookData } from 'tego-sheet';
+import {
+  createSpreadsheetDocument,
+  type SpreadsheetDocument,
+  type TegoSheetHandle,
+} from 'tego-sheet';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 interface SheetDoubleProps {
-  readonly value?: unknown;
-  readonly defaultValue?: unknown;
+  readonly document?: SpreadsheetDocument;
+  readonly defaultDocument?: SpreadsheetDocument;
   readonly locale?: { readonly id: string };
   readonly toolbar?: ((props: Record<string, unknown>) => ReactNode) | string | false;
   readonly sheetTabs?: ((props: Record<string, unknown>) => ReactNode) | string | false;
-  readonly onChange?: (value: unknown, change: unknown) => void;
+  readonly onDocumentChange?: (value: SpreadsheetDocument, change: unknown) => void;
   readonly onActiveSheetChange?: (event: unknown) => void;
   readonly onSelectionChange?: (event: unknown) => void;
   readonly onCellEdit?: (event: unknown) => void;
@@ -35,7 +39,8 @@ const sheetMock = vi.hoisted(() => ({
 
 let originalClipboardDescriptor: PropertyDescriptor | undefined;
 
-vi.mock('tego-sheet', async () => {
+vi.mock('tego-sheet', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('tego-sheet')>();
   const React = await import('react');
 
   const TegoSheet = forwardRef(function TegoSheetMock(
@@ -48,10 +53,13 @@ vi.mock('tego-sheet', async () => {
 
     const [mountId] = useState(() => String(++sheetMock.mountSequence));
     sheetMock.recordProps(props);
-    const workbook = (props.value ?? props.defaultValue ?? []) as WorkbookData;
+    const workbook =
+      props.document ??
+      props.defaultDocument ??
+      createSpreadsheetDocument({ id: 'mock-document', sheetId: 'mock-sheet' });
     useImperativeHandle(ref, () => ({
       focus: () => undefined,
-      getValue: () => workbook,
+      getDocument: () => workbook,
       getCell: () => null,
       getCellStyle: () => ({}),
       setCellText: () => undefined,
@@ -99,7 +107,7 @@ vi.mock('tego-sheet', async () => {
         'data-testid': 'tego-sheet-double',
         'data-locale': props.locale?.id ?? 'default',
         'data-mount-id': mountId,
-        'data-ownership': props.value === undefined ? 'uncontrolled' : 'controlled',
+        'data-ownership': props.document === undefined ? 'uncontrolled' : 'controlled',
       },
       toolbar,
       sheetTabs,
@@ -108,8 +116,12 @@ vi.mock('tego-sheet', async () => {
         {
           type: 'button',
           onClick: () =>
-            props.onChange?.(
-              [{ name: 'Accepted callback value', rows: { len: sheetMock.mountSequence } }],
+            props.onDocumentChange?.(
+              createSpreadsheetDocument({
+                id: 'callback-document',
+                sheetId: 'callback-sheet',
+                sheetName: 'Accepted callback value',
+              }),
               { id: `change-${sheetMock.mountSequence}`, kind: 'cell', source: 'keyboard' },
             ),
         },
@@ -131,7 +143,7 @@ vi.mock('tego-sheet', async () => {
     );
   });
 
-  return { TegoSheet };
+  return { ...actual, TegoSheet };
 });
 
 vi.mock('tego-sheet/locales/en', () => ({ en: { id: 'en', messages: {} } }));
@@ -199,8 +211,8 @@ it('selects Controlled from the initial mode query', async () => {
     true,
   );
   expect(screen.getByTestId('tego-sheet-double').getAttribute('data-ownership')).toBe('controlled');
-  expect(latestSheetProps()?.value).toBeDefined();
-  expect(latestSheetProps()?.defaultValue).toBeUndefined();
+  expect(latestSheetProps()?.document).toBeDefined();
+  expect(latestSheetProps()?.defaultDocument).toBeUndefined();
 });
 
 it('canonicalizes an invalid mode while preserving the path and unrelated parameters', async () => {
@@ -277,14 +289,14 @@ it('Reset mode recreates the current fixture without reloading the page', async 
   const onReload = vi.fn();
   await renderPlayground(onReload);
   const firstMount = screen.getByTestId('tego-sheet-double').getAttribute('data-mount-id');
-  const firstFixture = latestSheetProps()?.defaultValue;
+  const firstFixture = latestSheetProps()?.defaultDocument;
 
   fireEvent.click(screen.getByRole('button', { name: 'Reset mode' }));
 
   expect(screen.getByTestId('tego-sheet-double').getAttribute('data-mount-id')).not.toBe(
     firstMount,
   );
-  expect(latestSheetProps()?.defaultValue).not.toBe(firstFixture);
+  expect(latestSheetProps()?.defaultDocument).not.toBe(firstFixture);
   expect(onReload).not.toHaveBeenCalled();
   expect(screen.getByRole('status').textContent).toContain('Uncontrolled reset');
 });
@@ -295,7 +307,7 @@ it('accepts controlled callbacks into the displayed workbook JSON', async () => 
 
   fireEvent.click(screen.getByRole('button', { name: 'Commit mock change' }));
 
-  expect(screen.getByLabelText('Workbook JSON').textContent).toContain('Accepted callback value');
+  expect(screen.getByLabelText('Document JSON').textContent).toContain('Accepted callback value');
   expect(screen.getByTestId('tego-sheet-double').getAttribute('data-ownership')).toBe('controlled');
 });
 
@@ -307,8 +319,8 @@ it('retains only the newest 50 callback events in newest-first order', async () 
 
   const events = screen.getAllByRole('listitem', { name: /event/i });
   expect(events).toHaveLength(50);
-  expect(events[0]?.textContent).toContain('#55 onChange');
-  expect(events.at(-1)?.textContent).toContain('#6 onChange');
+  expect(events[0]?.textContent).toContain('#55 onDocumentChange');
+  expect(events.at(-1)?.textContent).toContain('#6 onDocumentChange');
 });
 
 it('switches among all four public locale dictionaries per instance', async () => {
@@ -455,14 +467,14 @@ it.each(['resolve', 'reject'] as const)(
     fireEvent.click(screen.getByRole('button', { name: 'Copy JSON' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Refresh JSON' }));
-    expect(screen.getByRole('status').textContent).toContain('Workbook JSON refreshed');
+    expect(screen.getByRole('status').textContent).toContain('Document JSON refreshed');
     await act(async () => {
       if (settlement === 'resolve') pending.resolve();
       else pending.reject(new Error('clipboard failed'));
       await pending.promise.catch(() => undefined);
     });
 
-    expect(screen.getByRole('status').textContent).toContain('Workbook JSON refreshed');
+    expect(screen.getByRole('status').textContent).toContain('Document JSON refreshed');
   },
 );
 
@@ -480,15 +492,15 @@ it('lets only the latest copy request announce after promises settle in reverse 
     second.resolve();
     await second.promise;
   });
-  expect(screen.getByRole('status').textContent).toContain('Workbook JSON copied');
+  expect(screen.getByRole('status').textContent).toContain('Document JSON copied');
   fireEvent.click(screen.getByRole('button', { name: 'Refresh JSON' }));
-  expect(screen.getByRole('status').textContent).toContain('Workbook JSON refreshed');
+  expect(screen.getByRole('status').textContent).toContain('Document JSON refreshed');
 
   await act(async () => {
     first.resolve();
     await first.promise;
   });
-  expect(screen.getByRole('status').textContent).toContain('Workbook JSON refreshed');
+  expect(screen.getByRole('status').textContent).toContain('Document JSON refreshed');
 });
 
 it('copies formatted JSON and announces the result', async () => {
@@ -500,6 +512,6 @@ it('copies formatted JSON and announces the result', async () => {
 
   expect(writeText).toHaveBeenCalledWith(expect.stringContaining('"name": "Budget"'));
   await waitFor(() =>
-    expect(screen.getByRole('status').textContent).toContain('Workbook JSON copied'),
+    expect(screen.getByRole('status').textContent).toContain('Document JSON copied'),
   );
 });

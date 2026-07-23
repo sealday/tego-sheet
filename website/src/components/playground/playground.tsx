@@ -1,4 +1,4 @@
-import { TegoSheet, type TegoSheetHandle, type WorkbookData } from 'tego-sheet';
+import { TegoSheet, type SpreadsheetDocument, type TegoSheetHandle } from 'tego-sheet';
 import { en } from 'tego-sheet/locales/en';
 import { zhCN } from 'tego-sheet/locales/zh-cn';
 import { de } from 'tego-sheet/locales/de';
@@ -27,7 +27,12 @@ import styles from './playground.module.css';
 type SheetProps = ComponentProps<typeof TegoSheet>;
 type SheetCallbacks = Pick<
   SheetProps,
-  'onChange' | 'onActiveSheetChange' | 'onSelectionChange' | 'onCellEdit' | 'onPaste' | 'onError'
+  | 'onDocumentChange'
+  | 'onActiveSheetChange'
+  | 'onSelectionChange'
+  | 'onCellEdit'
+  | 'onPaste'
+  | 'onError'
 >;
 type ToolbarRenderer = Exclude<SheetProps['toolbar'], 'default' | false | undefined>;
 type SheetTabsRenderer = Exclude<SheetProps['sheetTabs'], 'default' | false | undefined>;
@@ -74,21 +79,27 @@ export interface PlaygroundProps {
 }
 
 interface PresetSheetProps {
-  readonly fixture: WorkbookData;
+  readonly fixture: SpreadsheetDocument;
   readonly locale: (typeof LOCALES)[LocaleId];
   readonly callbacks: SheetCallbacks;
   readonly sheetRef: React.RefObject<TegoSheetHandle | null>;
 }
 
 function ControlledSheet({ fixture, locale, callbacks, sheetRef }: PresetSheetProps): ReactElement {
-  const [value, setValue] = useState<WorkbookData>(fixture);
-  const onChange: NonNullable<SheetCallbacks['onChange']> = (nextValue, change) => {
+  const [value, setValue] = useState<SpreadsheetDocument>(fixture);
+  const onChange: NonNullable<SheetCallbacks['onDocumentChange']> = (nextValue, change) => {
     setValue(nextValue);
-    callbacks.onChange?.(nextValue, change);
+    callbacks.onDocumentChange?.(nextValue, change);
   };
 
   return (
-    <TegoSheet ref={sheetRef} value={value} locale={locale} {...callbacks} onChange={onChange} />
+    <TegoSheet
+      ref={sheetRef}
+      document={value}
+      locale={locale}
+      {...callbacks}
+      onDocumentChange={onChange}
+    />
   );
 }
 
@@ -137,7 +148,7 @@ function UncontrolledSheet({
   return (
     <TegoSheet
       ref={sheetRef}
-      defaultValue={fixture}
+      defaultDocument={fixture}
       locale={locale}
       toolbar={mode === 'custom-chrome' ? CustomToolbar : 'default'}
       sheetTabs={mode === 'custom-chrome' ? CustomSheetTabs : 'default'}
@@ -161,7 +172,7 @@ function PresetSession({ mode, presetKey, setStatus, onReset }: PresetSessionPro
   const copyRequest = useRef(0);
   const mounted = useRef(false);
   const [events, setEvents] = useState<readonly PlaygroundEvent[]>([]);
-  const [snapshot, setSnapshot] = useState<WorkbookData>(fixture);
+  const [snapshot, setSnapshot] = useState<SpreadsheetDocument>(fixture);
   const [localeId, setLocaleId] = useState<LocaleId>('en');
 
   useEffect(() => {
@@ -185,9 +196,9 @@ function PresetSession({ mode, presetKey, setStatus, onReset }: PresetSessionPro
 
   const callbacks = useMemo<SheetCallbacks>(
     () => ({
-      onChange: (value, change) => {
+      onDocumentChange: (value, change) => {
         setSnapshot(value);
-        record('onChange', change);
+        record('onDocumentChange', change);
       },
       onActiveSheetChange: (event) => record('onActiveSheetChange', event),
       onSelectionChange: (event) => record('onSelectionChange', event),
@@ -216,7 +227,7 @@ function PresetSession({ mode, presetKey, setStatus, onReset }: PresetSessionPro
     try {
       await navigator.clipboard.writeText(formattedSnapshot);
       if (mounted.current && request === copyRequest.current) {
-        setStatus('Workbook JSON copied');
+        setStatus('Document JSON copied');
       }
     } catch {
       if (mounted.current && request === copyRequest.current) {
@@ -225,9 +236,9 @@ function PresetSession({ mode, presetKey, setStatus, onReset }: PresetSessionPro
     }
   };
   const refreshSnapshot = (): void => {
-    const currentValue = sheetRef.current?.getValue();
+    const currentValue = sheetRef.current?.getDocument();
     if (currentValue) setSnapshot(currentValue);
-    announceNewStatus('Workbook JSON refreshed from TegoSheetHandle.getValue()');
+    announceNewStatus('Document JSON refreshed from TegoSheetHandle.getDocument()');
   };
 
   return (
@@ -299,7 +310,7 @@ function PresetSession({ mode, presetKey, setStatus, onReset }: PresetSessionPro
         </button>
         <div>
           <div className={styles.inspectorHeading}>
-            <h3>Workbook JSON</h3>
+            <h3>Document JSON</h3>
             <div className={styles.buttonRow}>
               <button type="button" onClick={refreshSnapshot}>
                 Refresh JSON
@@ -309,7 +320,7 @@ function PresetSession({ mode, presetKey, setStatus, onReset }: PresetSessionPro
               </button>
             </div>
           </div>
-          <pre className={styles.json} aria-label="Workbook JSON" tabIndex={0}>
+          <pre className={styles.json} aria-label="Document JSON" tabIndex={0}>
             {formattedSnapshot}
           </pre>
         </div>
@@ -391,7 +402,7 @@ export function Playground({ onReload = reloadWindow }: PlaygroundProps = {}): R
         <div>
           <p className={styles.eyebrow}>Live public API examples</p>
           <h1>Playground</h1>
-          <p>Switch presets without leaving the page, then inspect workbook data and callbacks.</p>
+          <p>Switch presets without leaving the page, then inspect document data and callbacks.</p>
         </div>
         <fieldset className={styles.modePicker}>
           <legend>Playground mode</legend>

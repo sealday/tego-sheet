@@ -3,7 +3,7 @@
 const callbackNames = [
   'onActiveSheetChange',
   'onCellEdit',
-  'onChange',
+  'onDocumentChange',
   'onError',
   'onPaste',
   'onSelectionChange',

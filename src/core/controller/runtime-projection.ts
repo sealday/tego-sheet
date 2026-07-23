@@ -8,11 +8,15 @@ import type {
   SheetData,
   ValidationData,
   WorkbookData,
-} from '../core';
-import type { SheetId } from '../core/types/coordinates';
-import { migrateLegacyWorkbook } from './migrate-legacy';
-import type { CellInput, SpreadsheetDocument, SpreadsheetDocumentInput } from './model/document';
-import { parseSpreadsheetDocument } from './parse-document';
+} from '..';
+import type { SheetId } from '../types/coordinates';
+import { migrateLegacyWorkbook } from '../../document/migrate-legacy';
+import type {
+  CellInput,
+  SpreadsheetDocument,
+  SpreadsheetDocumentInput,
+} from '../../document/model/document';
+import { parseSpreadsheetDocument } from '../../document/parse-document';
 
 function columnName(column: number): string {
   let value = column + 1;
@@ -137,8 +141,8 @@ export function projectDocumentToLegacy(document: SpreadsheetDocument): Workbook
     return {
       name: sheet.name,
       styles,
-      rows: rows as RowsData,
-      cols: cols as ColsData,
+      ...(Object.keys(rows).length === 0 ? {} : { rows: rows as RowsData }),
+      ...(Object.keys(cols).length === 0 ? {} : { cols: cols as ColsData }),
       merges: sheet.merges.map(rangeA1),
       validations: [...validations.values()],
       ...(sheet.freeze === undefined ? {} : { freeze: a1(sheet.freeze) }),

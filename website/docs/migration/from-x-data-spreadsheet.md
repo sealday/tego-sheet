@@ -9,35 +9,37 @@ constructor, event emitter, and mutable internals with a React-only public API. 
 code; do not rewrite stored workbook data.
 
 ```tsx
-import { TegoSheet, type WorkbookData, type WorkbookInput } from 'tego-sheet';
+import { migrateLegacyWorkbook, TegoSheet, type SpreadsheetDocument } from 'tego-sheet';
 import 'tego-sheet/styles.css';
 
 interface EditorProps {
-  legacyJson: WorkbookInput;
-  saveWorkbook(value: WorkbookData): void;
+  legacyJson: unknown;
+  saveDocument(document: SpreadsheetDocument): void;
 }
 
-export function Editor({ legacyJson, saveWorkbook }: EditorProps) {
+export function Editor({ legacyJson, saveDocument }: EditorProps) {
+  const migrated = migrateLegacyWorkbook(legacyJson);
+  if (!migrated.ok) return <p>Legacy workbook could not be migrated.</p>;
   return (
     <div style={{ height: 520 }}>
-      <TegoSheet defaultValue={legacyJson} onChange={saveWorkbook} />
+      <TegoSheet defaultDocument={migrated.document} onDocumentChange={saveDocument} />
     </div>
   );
 }
 ```
 
-| x-data-spreadsheet integration                              | tego-sheet React API                                                 |
-| ----------------------------------------------------------- | -------------------------------------------------------------------- |
-| `new Spreadsheet(element, options)` or `x_spreadsheet(...)` | render `<TegoSheet>`                                                 |
-| `.loadData(data)`                                           | controlled `value`, or remount with a new `key` and `defaultValue`   |
-| `.getData()`                                                | `onChange` snapshots or `TegoSheetHandle.getValue()`                 |
-| `.on('change', listener)`                                   | typed callback props such as `onChange` and `onCellEdit`             |
-| `showToolbar: false`                                        | `toolbar={false}`                                                    |
-| `showBottomBar: false`                                      | `sheetTabs={false}`                                                  |
-| `mode: 'read'`                                              | `readOnly`                                                           |
-| global locale registration                                  | per-instance `locale` with an explicit locale subpath import         |
-| custom toolbar or tabs DOM                                  | typed `ToolbarRenderProps` and `SheetTabsRenderProps` renderers      |
-| resize callback                                             | a sized parent and `TegoSheetHandle.recalculateLayout()` when needed |
+| x-data-spreadsheet integration                              | tego-sheet React API                                                       |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `new Spreadsheet(element, options)` or `x_spreadsheet(...)` | render `<TegoSheet>`                                                       |
+| `.loadData(data)`                                           | migrate, then pass controlled `document` or remount with `defaultDocument` |
+| `.getData()`                                                | `onDocumentChange` snapshots or `TegoSheetHandle.getDocument()`            |
+| `.on('change', listener)`                                   | typed callback props such as `onDocumentChange` and `onCellEdit`           |
+| `showToolbar: false`                                        | `toolbar={false}`                                                          |
+| `showBottomBar: false`                                      | `sheetTabs={false}`                                                        |
+| `mode: 'read'`                                              | `readOnly`                                                                 |
+| global locale registration                                  | per-instance `locale` with an explicit locale subpath import               |
+| custom toolbar or tabs DOM                                  | typed `ToolbarRenderProps` and `SheetTabsRenderProps` renderers            |
+| resize callback                                             | a sized parent and `TegoSheetHandle.recalculateLayout()` when needed       |
 
 There is no public controller, renderer, mutable sheet object, `DataProxy`, internal emitter, or manual
 destroy method. Choose controlled or uncontrolled ownership at mount and do not switch modes while the

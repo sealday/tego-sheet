@@ -9,7 +9,13 @@ column A visible while the rest of the sheet scrolls. `A1` means that no rows or
 
 ```tsx
 import { useRef } from 'react';
-import { TegoSheet, type SheetData, type SheetOptions, type TegoSheetHandle } from 'tego-sheet';
+import {
+  migrateLegacyWorkbook,
+  TegoSheet,
+  type SheetData,
+  type SheetOptions,
+  type TegoSheetHandle,
+} from 'tego-sheet';
 import 'tego-sheet/styles.css';
 
 const sheet: SheetData = {
@@ -24,6 +30,9 @@ const options: SheetOptions = {
   columns: { defaultWidth: 120, minimumWidth: 48 },
   rowHeaderWidth: 52,
 };
+const migrated = migrateLegacyWorkbook([sheet]);
+if (!migrated.ok) throw new Error('Example workbook migration failed');
+const document = migrated.document;
 
 export function FrozenSchedule() {
   const ref = useRef<TegoSheetHandle>(null);
@@ -34,7 +43,7 @@ export function FrozenSchedule() {
         Recalculate after panel resize
       </button>
       <div style={{ height: 'min(70vh, 720px)', minWidth: 0 }}>
-        <TegoSheet ref={ref} defaultValue={[sheet]} options={options} />
+        <TegoSheet ref={ref} defaultDocument={document} options={options} />
       </div>
     </>
   );

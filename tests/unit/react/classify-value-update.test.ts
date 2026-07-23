@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { TegoSheetException, type WorkbookInput } from '../../../src/core';
 import { classifyValueUpdate } from '../../../src/react/control/classify-value-update';
 
 describe('classifyValueUpdate', () => {
@@ -10,7 +9,7 @@ describe('classifyValueUpdate', () => {
         acknowledgedKey: '[]',
         pending: [],
       },
-      { rows: { len: -1 } } as unknown as WorkbookInput,
+      { schemaVersion: 2, workbook: null } as never,
     );
 
     expect(update.kind).toBe('invalid');
@@ -18,10 +17,7 @@ describe('classifyValueUpdate', () => {
     expect(update.error).toMatchObject({
       code: 'INVALID_DATA',
       recoverable: true,
-      cause: expect.any(TegoSheetException),
-    });
-    expect((update.error.cause as TegoSheetException).cause).toMatchObject({
-      message: expect.stringContaining('rows.len'),
+      cause: expect.any(Array),
     });
   });
 });

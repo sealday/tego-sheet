@@ -6,6 +6,7 @@ import { en } from 'tego-sheet/locales/en';
 import 'tego-sheet/styles.css';
 import { visualFixture } from '../../fixtures';
 import './visual.css';
+import { testDocument } from '../../../helpers/workbook-builders';
 
 interface FillRecord {
   readonly fill: string;
@@ -233,7 +234,7 @@ await document.fonts.ready;
 createRoot(root).render(
   <StrictMode>
     <main className="visual-harness" data-visual-fixture={fixture.name}>
-      <TegoSheet defaultValue={fixture.workbook} locale={locale} />
+      <TegoSheet defaultDocument={testDocument(fixture.workbook)} locale={locale} />
     </main>
   </StrictMode>,
 );

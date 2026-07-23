@@ -114,9 +114,7 @@ export type { CellPoint as DocumentCellPoint } from './document';
 export { TegoSheet } from './react/tego-sheet';
 export type {
   SheetTabsRenderer,
-  ControlledTegoSheetProps,
   TegoSheetHandle,
   TegoSheetProps,
   ToolbarRenderer,
-  UncontrolledTegoSheetProps,
 } from './react/tego-sheet.types';

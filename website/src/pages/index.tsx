@@ -5,24 +5,22 @@ import { HomepagePreview } from '../components/homepage-preview';
 import styles from './index.module.css';
 
 const controlledExample = `import { useState } from 'react';
-import { TegoSheet, type WorkbookData } from 'tego-sheet';
+import { createSpreadsheetDocument, TegoSheet } from 'tego-sheet';
 import 'tego-sheet/styles.css';
 
-const initialWorkbook: WorkbookData = [
-  { name: 'Budget', rows: { len: 100 }, cols: { len: 20 } },
-];
+const initialDocument = createSpreadsheetDocument({ sheetName: 'Budget' });
 
 export function BudgetSheet() {
-  const [value, setValue] = useState(initialWorkbook);
+  const [document, setDocument] = useState(initialDocument);
 
-  return <TegoSheet value={value} onChange={setValue} />;
+  return <TegoSheet document={document} onDocumentChange={setDocument} />;
 }`;
 
 const capabilities = [
   {
     number: '01',
     title: 'Typed React state',
-    description: 'Choose a controlled value or an isolated uncontrolled defaultValue.',
+    description: 'Choose a controlled document or an isolated uncontrolled defaultDocument.',
   },
   {
     number: '02',
@@ -130,7 +128,7 @@ export default function Home(): ReactElement {
             <p className={styles.sectionLabel}>A predictable boundary</p>
             <h2 id="controlled-example-title">Keep workbook state in React.</h2>
             <p>
-              Pass a controlled value, accept each onChange snapshot, and use the same JSON shape
+              Pass a controlled document, accept each onDocumentChange snapshot, and use schema 2
               everywhere else in your application.
             </p>
             <Link to="/docs/concepts/controlled-and-uncontrolled">

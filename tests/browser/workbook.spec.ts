@@ -15,11 +15,9 @@ test('@parity:workbook.import-export imports controlled data and exports canonic
     },
   ]);
   expect(alternate[0]).toMatchObject({
-    freeze: 'A1',
     merges: [],
     styles: [],
     validations: [],
-    autofilter: {},
   });
 
   await page.getByRole('button', { name: 'Import workbook' }).click();

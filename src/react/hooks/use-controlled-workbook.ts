@@ -23,18 +23,18 @@ export interface ControlledWorkbookRuntime {
 
 export interface UseControlledWorkbookOptions {
   readonly epoch: ControllerEpoch | null;
-  readonly document: SpreadsheetDocument | undefined;
+  readonly controlledDocument: SpreadsheetDocument | undefined;
   readonly onError: TegoSheetCallbacks['onError'];
 }
 
 export function useControlledWorkbook(
   options: UseControlledWorkbookOptions,
 ): ControlledWorkbookRuntime {
-  const { document, epoch, onError } = options;
+  const { controlledDocument, epoch, onError } = options;
   const slot = useRef<ControlledSlot | null>(null);
 
   useLayoutEffect(() => {
-    if (epoch === null || epoch.mode !== 'controlled' || document === undefined) return;
+    if (epoch === null || epoch.mode !== 'controlled' || controlledDocument === undefined) return;
     let current = slot.current;
     if (current === null || current.controller !== epoch.controller) {
       current = {
@@ -43,10 +43,10 @@ export function useControlledWorkbook(
       };
       slot.current = current;
     }
-    const result = current.reconciler.reconcile(document);
+    const result = current.reconciler.reconcile(controlledDocument);
     if (result.refresh) epoch.store.refresh();
     if (result.error !== undefined) onError?.(result.error);
-  }, [document, epoch, onError]);
+  }, [controlledDocument, epoch, onError]);
 
   useLayoutEffect(() => {
     const controller = epoch?.controller;

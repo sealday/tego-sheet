@@ -1,4 +1,8 @@
-import type { WorkbookData, WorkbookInput } from 'tego-sheet';
+import {
+  migrateLegacyWorkbook,
+  parseSpreadsheetDocument,
+  type SpreadsheetDocument,
+} from 'tego-sheet';
 
 export const PREVIEW_EVENT_LIMIT = 12;
 
@@ -12,7 +16,7 @@ export interface PreviewEvent extends PreviewEventInput {
   readonly id: string;
 }
 
-const EXAMPLE_WORKBOOK: WorkbookData = [
+const EXAMPLE_WORKBOOK = [
   {
     name: 'Budget',
     freeze: 'B2',
@@ -25,9 +29,9 @@ const EXAMPLE_WORKBOOK: WorkbookData = [
     },
     cols: { len: 4 },
   },
-];
+] as const;
 
-function isSheetData(value: unknown): value is WorkbookData[number] {
+function isSheetData(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
@@ -35,7 +39,7 @@ function invalidKnownField(index: number, field: string, expectation: string): n
   throw new TypeError(`Workbook data is invalid: workbook[${index}].${field} ${expectation}.`);
 }
 
-function validateKnownSheetFields(sheet: WorkbookData[number], index: number): void {
+function validateKnownSheetFields(sheet: Record<string, unknown>, index: number): void {
   if (sheet.name !== undefined && typeof sheet.name !== 'string') {
     invalidKnownField(index, 'name', 'must be a string');
   }
@@ -63,12 +67,20 @@ function createEventId(logs: readonly PreviewEvent[], timestamp: string): string
   return id;
 }
 
-export function cloneExampleWorkbook(): WorkbookData {
-  return JSON.parse(JSON.stringify(EXAMPLE_WORKBOOK)) as WorkbookData;
+function migrate(input: unknown): SpreadsheetDocument {
+  const result = migrateLegacyWorkbook(input);
+  if (!result.ok) throw new TypeError('Workbook JSON could not be migrated to schema 2.');
+  return result.document;
 }
 
-export function parseWorkbookJson(source: string): WorkbookInput {
+export function cloneExampleWorkbook(): SpreadsheetDocument {
+  return migrate(EXAMPLE_WORKBOOK);
+}
+
+export function parseWorkbookJson(source: string): SpreadsheetDocument {
   const parsed: unknown = JSON.parse(source);
+  const schema = parseSpreadsheetDocument(parsed);
+  if (schema.ok) return schema.document;
 
   if (Array.isArray(parsed)) {
     if (!parsed.every(isSheetData)) {
@@ -76,7 +88,7 @@ export function parseWorkbookJson(source: string): WorkbookInput {
     }
 
     parsed.forEach(validateKnownSheetFields);
-    return parsed;
+    return migrate(parsed);
   }
 
   if (!isSheetData(parsed)) {
@@ -84,11 +96,11 @@ export function parseWorkbookJson(source: string): WorkbookInput {
   }
 
   validateKnownSheetFields(parsed, 0);
-  return parsed;
+  return migrate(parsed);
 }
 
-export function formatWorkbookJson(workbook: WorkbookInput): string {
-  return JSON.stringify(workbook, null, 2);
+export function formatWorkbookJson(document: SpreadsheetDocument): string {
+  return JSON.stringify(document, null, 2);
 }
 
 export function appendPreviewEvent(

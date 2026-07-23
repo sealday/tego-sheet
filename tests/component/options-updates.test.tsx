@@ -8,6 +8,7 @@ import {
   type ToolbarRenderProps,
 } from '../../src';
 import { createCanvasHarness } from '../helpers/canvas-harness';
+import { legacyProjection, testDocument } from '../helpers/workbook-builders';
 
 beforeEach(() => {
   const context = createCanvasHarness().canvas.getContext('2d');
@@ -30,7 +31,7 @@ it('applies mount geometry, default style and autofocus', async () => {
   const toolbar = vi.fn(({ activeStyle }) => <output>{activeStyle.color}</output>);
   const rendered = render(
     <TegoSheet
-      defaultValue={[{ name: 'A' }]}
+      defaultDocument={testDocument([{ name: 'A' }])}
       options={{
         rows: { initialCount: 2, defaultHeight: 30 },
         columns: { initialCount: 2, defaultWidth: 50, minimumWidth: 120 },
@@ -63,13 +64,15 @@ it('reconciles live flags but warns once per changed mount-only option without r
     rows: { initialCount: 2 },
     defaultStyle: { color: 'red' },
   };
-  const rendered = render(<TegoSheet defaultValue={[{ name: 'A' }]} options={first} />);
+  const rendered = render(
+    <TegoSheet defaultDocument={testDocument([{ name: 'A' }])} options={first} />,
+  );
   await waitFor(() => expect(rendered.container.querySelector('canvas')).not.toBeNull());
   const root = rendered.container.querySelector<HTMLElement>('[data-tego-sheet]')!;
 
   rendered.rerender(
     <TegoSheet
-      defaultValue={[{ name: 'ignored' }]}
+      defaultDocument={testDocument([{ name: 'ignored' }])}
       options={{
         showGrid: false,
         showContextMenu: false,
@@ -85,7 +88,7 @@ it('reconciles live flags but warns once per changed mount-only option without r
   const calls = warn.mock.calls.length;
   rendered.rerender(
     <TegoSheet
-      defaultValue={[]}
+      defaultDocument={testDocument([])}
       options={{
         showGrid: false,
         showContextMenu: false,
@@ -97,28 +100,39 @@ it('reconciles live flags but warns once per changed mount-only option without r
   expect(warn).toHaveBeenCalledTimes(calls);
 });
 
-it('applies initial counts before canonical defaults for mount, replacement and added sheets', async () => {
+it('keeps session initial counts out of document snapshots while preserving explicit counts', async () => {
   const ref = createRef<TegoSheetHandle>();
-  const options = { rows: { initialCount: 0 }, columns: { initialCount: 0 } };
-  const rendered = render(<TegoSheet ref={ref} value={[{ name: 'A' }]} options={options} />);
+  const options = { rows: { initialCount: 2 }, columns: { initialCount: 3 } };
+  const rendered = render(
+    <TegoSheet ref={ref} document={testDocument([{ name: 'A' }])} options={options} />,
+  );
   await waitFor(() => expect(ref.current).not.toBeNull());
-  expect(ref.current!.getValue()[0]).toMatchObject({ rows: { len: 0 }, cols: { len: 0 } });
+  expect(legacyProjection(ref.current!.getDocument())[0]?.rows).toBeUndefined();
+  expect(legacyProjection(ref.current!.getDocument())[0]?.cols).toBeUndefined();
 
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      value={[{ name: 'explicit', rows: { len: 3 }, cols: { len: 4 } }]}
+      document={testDocument([{ name: 'explicit', rows: { len: 3 }, cols: { len: 4 } }])}
       options={options}
     />,
   );
-  await waitFor(() => expect(ref.current!.getValue()[0]?.name).toBe('explicit'));
-  expect(ref.current!.getValue()[0]).toMatchObject({ rows: { len: 3 }, cols: { len: 4 } });
+  await waitFor(() =>
+    expect(legacyProjection(ref.current!.getDocument())[0]?.name).toBe('explicit'),
+  );
+  expect(legacyProjection(ref.current!.getDocument())[0]).toMatchObject({
+    rows: { len: 3 },
+    cols: { len: 4 },
+  });
 
   let added!: ReturnType<TegoSheetHandle['addSheet']>;
   act(() => {
     added = ref.current!.addSheet('added');
   });
-  expect(ref.current!.getValue().at(-1)).toMatchObject({ rows: { len: 0 }, cols: { len: 0 } });
+  expect(legacyProjection(ref.current!.getDocument()).at(-1)).toMatchObject({
+    rows: { len: 2 },
+    cols: { len: 3 },
+  });
   expect(() => ref.current!.getCell({ sheet: added, row: 0, column: 0 })).not.toThrow();
 });
 
@@ -130,7 +144,7 @@ it('updates live visibility without rebuilding the engine or losing selection', 
   };
   const rendered = render(
     <TegoSheet
-      defaultValue={[{ name: 'A', rows: { len: 2 }, cols: { len: 3 } }]}
+      defaultDocument={testDocument([{ name: 'A', rows: { len: 2 }, cols: { len: 3 } }])}
       options={{ showGrid: true, showContextMenu: true }}
       toolbar={renderer}
     />,
@@ -143,7 +157,7 @@ it('updates live visibility without rebuilding the engine or losing selection', 
 
   rendered.rerender(
     <TegoSheet
-      defaultValue={[]}
+      defaultDocument={testDocument([])}
       options={{ showGrid: false, showContextMenu: false }}
       toolbar={renderer}
     />,
@@ -164,9 +178,9 @@ it('rejects invalid mount dimensions even for an empty workbook', () => {
     { rowHeaderWidth: Number.NaN },
   ];
   for (const options of invalid) {
-    expect(() => render(<TegoSheet defaultValue={[]} options={options} />)).toThrowError(
-      expect.objectContaining({ code: 'INVALID_COMMAND', recoverable: false }),
-    );
+    expect(() =>
+      render(<TegoSheet defaultDocument={testDocument([])} options={options} />),
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND', recoverable: false }));
   }
 });
 
@@ -175,7 +189,7 @@ it('uses minimumWidth only as the interaction resize floor', async () => {
   const rendered = render(
     <TegoSheet
       ref={ref}
-      defaultValue={[{ name: 'A', rows: { len: 2 }, cols: { len: 2 } }]}
+      defaultDocument={testDocument([{ name: 'A', rows: { len: 2 }, cols: { len: 2 } }])}
       options={{
         rowHeaderWidth: 20,
         columns: { defaultWidth: 50, minimumWidth: 120 },
@@ -194,6 +208,6 @@ it('uses minimumWidth only as the interaction resize floor', async () => {
   fireEvent.pointerMove(window, { buttons: 1, clientX: 75, clientY: 10 });
   fireEvent.pointerUp(window, { button: 0, buttons: 0, clientX: 75, clientY: 10 });
 
-  expect(ref.current!.getValue()[0]?.cols?.[0]).toMatchObject({ width: 120 });
-  expect(ref.current!.getValue()[0]?.cols?.[1]).toBeUndefined();
+  expect(legacyProjection(ref.current!.getDocument())[0]?.cols?.[0]).toMatchObject({ width: 120 });
+  expect(legacyProjection(ref.current!.getDocument())[0]?.cols?.[1]).toBeUndefined();
 });

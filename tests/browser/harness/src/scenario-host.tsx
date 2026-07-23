@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { legacyProjection, testDocument } from '../../../helpers/workbook-builders';
 import {
   TegoSheet,
   type Selection,
   type TegoSheetError,
   type TegoSheetHandle,
   type ValidationResult,
-  type WorkbookData,
 } from 'tego-sheet';
+import type { WorkbookData } from '../../../../src/core';
 
 interface PrintSnapshot {
   readonly css: string;
@@ -192,7 +193,7 @@ export function ScenarioHost() {
   const [showGrid, setShowGrid] = useState(true);
 
   const takeSnapshot = useCallback(() => {
-    const next = sheet.current?.getValue() ?? [];
+    const next = legacyProjection(sheet.current!.getDocument()) ?? [];
     setCapture(next);
     return next;
   }, []);
@@ -211,7 +212,7 @@ export function ScenarioHost() {
   }, [takeSnapshot]);
 
   const download = () => {
-    const blob = new Blob([JSON.stringify(sheet.current?.getValue() ?? [])], {
+    const blob = new Blob([JSON.stringify(legacyProjection(sheet.current!.getDocument()) ?? [])], {
       type: 'application/json',
     });
     const link = document.createElement('a');
@@ -268,10 +269,10 @@ export function ScenarioHost() {
         {mounted ? (
           <TegoSheet
             ref={sheet}
-            value={value}
+            document={testDocument(value)}
             readOnly={readOnly}
             options={{ showGrid }}
-            onChange={(next) => setValue(next)}
+            onDocumentChange={(next) => setValue(legacyProjection(next))}
             onSelectionChange={(next) => {
               selectionRef.current = next;
               setSelection(next);

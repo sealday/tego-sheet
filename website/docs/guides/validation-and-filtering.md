@@ -12,10 +12,10 @@ application needs a complete validation report.
 import { useRef } from 'react';
 import {
   TegoSheet,
+  migrateLegacyWorkbook,
   type AutoFilterData,
   type TegoSheetHandle,
   type ValidationData,
-  type WorkbookData,
 } from 'tego-sheet';
 import 'tego-sheet/styles.css';
 
@@ -34,7 +34,7 @@ const categoryFilter: AutoFilterData = {
   sort: { ci: 1, order: 'desc' },
 };
 
-const workbook: WorkbookData = [
+const migrated = migrateLegacyWorkbook([
   {
     name: 'Expenses',
     rows: {
@@ -45,7 +45,9 @@ const workbook: WorkbookData = [
     validations: [amountRule],
     autofilter: categoryFilter,
   },
-];
+]);
+if (!migrated.ok) throw new Error('Example workbook migration failed');
+const document = migrated.document;
 
 export function ValidatedSheet() {
   const ref = useRef<TegoSheetHandle>(null);
@@ -56,7 +58,7 @@ export function ValidatedSheet() {
         Validate workbook
       </button>
       <div style={{ height: 480 }}>
-        <TegoSheet ref={ref} defaultValue={workbook} />
+        <TegoSheet ref={ref} defaultDocument={document} />
       </div>
     </>
   );

@@ -1,15 +1,10 @@
 import { useRef } from 'react';
-import { TegoSheet, type TegoSheetHandle, type WorkbookData } from 'tego-sheet';
+import { createSpreadsheetDocument, TegoSheet, type TegoSheetHandle } from 'tego-sheet';
 import { zhCN } from 'tego-sheet/locales/zh-cn';
 
-const workbook: WorkbookData = [
-  {
-    name: 'Consumer',
-    rows: { 0: { cells: { 0: { text: 'Packed artifact' } } } },
-  },
-];
+const document = createSpreadsheetDocument({ sheetName: 'Consumer' });
 
 export function App() {
   const sheet = useRef<TegoSheetHandle>(null);
-  return <TegoSheet ref={sheet} defaultValue={workbook} locale={zhCN} />;
+  return <TegoSheet ref={sheet} defaultDocument={document} locale={zhCN} />;
 }

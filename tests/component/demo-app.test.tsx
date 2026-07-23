@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { TegoSheet, WorkbookData } from 'tego-sheet';
+import { createSpreadsheetDocument, type SpreadsheetDocument, type TegoSheet } from 'tego-sheet';
 import { PREVIEW_EVENT_LIMIT } from '../../demo/src/workbench-model';
 
 type SheetProps = ComponentProps<typeof TegoSheet>;
@@ -10,16 +10,17 @@ const sheetMock = vi.hoisted(() => ({
   currentProps: undefined as SheetProps | undefined,
   delayedRefAttachments: 0,
   delayNextRef: false,
-  handleValue: undefined as WorkbookData | undefined,
+  handleValue: undefined as SpreadsheetDocument | undefined,
   mounts: 0,
 }));
 
-vi.mock('tego-sheet', async () => {
+vi.mock('tego-sheet', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('tego-sheet')>();
   const React = await import('react');
 
   const MockTegoSheet = React.forwardRef<unknown, SheetProps>((props, ref) => {
-    const workbook = props.value ?? props.defaultValue ?? [];
-    const sheets = Array.isArray(workbook) ? workbook : [workbook];
+    const workbook = props.document ?? props.defaultDocument;
+    const sheets = workbook?.workbook.sheets ?? [];
     const delayRef = React.useRef(sheetMock.delayNextRef).current;
     const [refReady, setRefReady] = React.useState(!delayRef);
 
@@ -40,7 +41,7 @@ vi.mock('tego-sheet', async () => {
     }, [delayRef, refReady]);
 
     React.useImperativeHandle(refReady ? ref : null, () => ({
-      getValue: () => sheetMock.handleValue ?? sheets,
+      getDocument: () => sheetMock.handleValue ?? workbook,
     }));
 
     if (sheets.some((sheet) => typeof Reflect.get(sheet.rows ?? {}, 'len') === 'string')) {
@@ -51,7 +52,7 @@ vi.mock('tego-sheet', async () => {
       <div
         data-testid="tego-sheet"
         data-locale={props.locale?.id ?? 'en'}
-        data-mode={props.value === undefined ? 'uncontrolled' : 'controlled'}
+        data-mode={props.document === undefined ? 'uncontrolled' : 'controlled'}
         data-read-only={String(props.readOnly ?? false)}
         data-workbook={JSON.stringify(workbook)}
       />
@@ -59,7 +60,7 @@ vi.mock('tego-sheet', async () => {
   });
   MockTegoSheet.displayName = 'MockTegoSheet';
 
-  return { TegoSheet: MockTegoSheet };
+  return { ...actual, TegoSheet: MockTegoSheet };
 });
 
 import { App } from '../../demo/src/app';
@@ -71,6 +72,14 @@ function currentSheetProps(): SheetProps {
 
 function workbookFromBoundary(boundary: HTMLElement): unknown {
   return JSON.parse(boundary.dataset.workbook ?? 'null') as unknown;
+}
+
+function documentNamed(name: string): SpreadsheetDocument {
+  return createSpreadsheetDocument({
+    id: 'demo-document',
+    sheetId: 'demo-sheet',
+    sheetName: name,
+  });
 }
 
 beforeEach(() => {
@@ -93,20 +102,22 @@ describe('demo workbench', () => {
 
     expect(boundaries).toHaveLength(1);
     expect(boundaries[0]?.getAttribute('data-mode')).toBe('uncontrolled');
-    expect(currentSheetProps().defaultValue).toBeDefined();
-    expect(currentSheetProps().value).toBeUndefined();
+    expect(currentSheetProps().defaultDocument).toBeDefined();
+    expect(currentSheetProps().document).toBeUndefined();
     expect(sheetMock.mounts).toBe(1);
 
     act(() =>
-      currentSheetProps().onChange?.([{ name: 'Uncontrolled internal update' }], {
+      currentSheetProps().onDocumentChange?.(documentNamed('Uncontrolled internal update'), {
         id: 'change-0',
         kind: 'cell',
         source: 'keyboard',
         sheet: 'sheet-1' as never,
       }),
     );
-    expect(currentSheetProps().defaultValue).toEqual([{ name: 'Uncontrolled internal update' }]);
-    expect(currentSheetProps().value).toBeUndefined();
+    expect(currentSheetProps().defaultDocument?.workbook.sheets[0]?.name).toBe(
+      'Uncontrolled internal update',
+    );
+    expect(currentSheetProps().document).toBeUndefined();
     expect(rendered.getByText(/workbook: uncontrolled internal update/i)).toBeTruthy();
     expect(sheetMock.mounts).toBe(1);
 
@@ -115,21 +126,24 @@ describe('demo workbench', () => {
     });
 
     expect(rendered.getByTestId('tego-sheet').getAttribute('data-mode')).toBe('controlled');
-    expect(currentSheetProps().value).toEqual([{ name: 'Uncontrolled internal update' }]);
-    expect(currentSheetProps().defaultValue).toBeUndefined();
+    expect(currentSheetProps().document?.workbook.sheets[0]?.name).toBe(
+      'Uncontrolled internal update',
+    );
+    expect(currentSheetProps().defaultDocument).toBeUndefined();
     expect(sheetMock.mounts).toBe(2);
 
     act(() =>
-      currentSheetProps().onChange?.([{ name: 'Controlled update' }], {
+      currentSheetProps().onDocumentChange?.(documentNamed('Controlled update'), {
         id: 'change-1',
         kind: 'cell',
         source: 'keyboard',
         sheet: 'sheet-1' as never,
       }),
     );
-    expect(workbookFromBoundary(rendered.getByTestId('tego-sheet'))).toEqual([
-      { name: 'Controlled update' },
-    ]);
+    expect(
+      (workbookFromBoundary(rendered.getByTestId('tego-sheet')) as SpreadsheetDocument).workbook
+        .sheets[0]?.name,
+    ).toBe('Controlled update');
   });
 
   it('passes read-only and locale selections through public props', () => {
@@ -173,20 +187,25 @@ describe('demo workbench', () => {
 
     fireEvent.change(json, { target: { value: '{"name":"Imported"}' } });
     fireEvent.click(rendered.getByRole('button', { name: 'Import JSON' }));
-    expect(workbookFromBoundary(rendered.getByTestId('tego-sheet'))).toEqual({ name: 'Imported' });
+    expect(workbookFromBoundary(rendered.getByTestId('tego-sheet'))).toMatchObject({
+      schemaVersion: 2,
+      workbook: { sheets: [expect.objectContaining({ name: 'Imported' })] },
+    });
     expect(sheetMock.mounts).toBe(2);
 
     fireEvent.click(rendered.getByRole('button', { name: 'Reset workbook' }));
-    expect(workbookFromBoundary(rendered.getByTestId('tego-sheet'))).toEqual(
-      expect.arrayContaining([expect.objectContaining({ name: 'Budget' })]),
-    );
+    expect(workbookFromBoundary(rendered.getByTestId('tego-sheet'))).toMatchObject({
+      schemaVersion: 2,
+      workbook: { sheets: expect.arrayContaining([expect.objectContaining({ name: 'Budget' })]) },
+    });
     expect(sheetMock.mounts).toBe(3);
 
-    sheetMock.handleValue = [{ name: 'From handle', rows: { len: 1 } }];
+    sheetMock.handleValue = documentNamed('From handle');
     fireEvent.click(rendered.getByRole('button', { name: 'Export JSON' }));
-    expect((json as HTMLTextAreaElement).value).toBe(
-      '[\n  {\n    "name": "From handle",\n    "rows": {\n      "len": 1\n    }\n  }\n]',
-    );
+    expect(JSON.parse((json as HTMLTextAreaElement).value)).toMatchObject({
+      schemaVersion: 2,
+      workbook: { sheets: [expect.objectContaining({ name: 'From handle' })] },
+    });
   });
 
   it('records callback events newest-first and bounds the event log', () => {
@@ -194,7 +213,7 @@ describe('demo workbench', () => {
 
     act(() => {
       for (let index = 0; index < PREVIEW_EVENT_LIMIT; index += 1) {
-        currentSheetProps().onChange?.([{ name: `Change ${index}` }], {
+        currentSheetProps().onDocumentChange?.(documentNamed(`Change ${index}`), {
           id: `change-${index}`,
           kind: 'cell',
           source: 'keyboard',
@@ -280,19 +299,21 @@ describe('demo workbench', () => {
     fireEvent.click(rendered.getByRole('button', { name: 'Import JSON' }));
 
     await waitFor(() => {
-      expect(workbookFromBoundary(rendered.getByTestId('tego-sheet'))).toEqual([
-        { name: 'Last good' },
-      ]);
+      expect(workbookFromBoundary(rendered.getByTestId('tego-sheet'))).toMatchObject({
+        schemaVersion: 2,
+        workbook: { sheets: [expect.objectContaining({ name: 'Last good' })] },
+      });
     });
     expect(rendered.getByText(/mode: controlled/i)).toBeTruthy();
     expect(rendered.getByText(/workbook: last good/i)).toBeTruthy();
-    expect(rendered.getByRole('alert').textContent).toMatch(/rows\.len must be a number/i);
-    expect(sheetMock.mounts).toBe(stableMounts + 1);
+    expect(rendered.getByRole('alert').textContent).toMatch(/could not be migrated to schema 2/i);
+    expect(sheetMock.mounts).toBe(stableMounts);
 
     fireEvent.click(rendered.getByRole('button', { name: 'Reset workbook' }));
-    expect(workbookFromBoundary(rendered.getByTestId('tego-sheet'))).toEqual(
-      expect.arrayContaining([expect.objectContaining({ name: 'Budget' })]),
-    );
+    expect(workbookFromBoundary(rendered.getByTestId('tego-sheet'))).toMatchObject({
+      schemaVersion: 2,
+      workbook: { sheets: expect.arrayContaining([expect.objectContaining({ name: 'Budget' })]) },
+    });
   });
 
   it('provides disclosure state and keeps primary status available when controls collapse', () => {

@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { TegoSheet } from '../../src';
 import { createCanvasHarness } from '../helpers/canvas-harness';
+import { testDocument } from '../helpers/workbook-builders';
 
 beforeEach(() => {
   const context = createCanvasHarness().canvas.getContext('2d');
@@ -31,12 +32,14 @@ it('reports a recoverable UI failure through the latest callback and default not
     </button>
   );
   const rendered = render(
-    <TegoSheet defaultValue={[{}]} readOnly toolbar={toolbar} onError={first} />,
+    <TegoSheet defaultDocument={testDocument([{}])} readOnly toolbar={toolbar} onError={first} />,
   );
   await waitFor(() =>
     expect(rendered.getByRole('button', { name: /force unavailable/i })).toBeTruthy(),
   );
-  rendered.rerender(<TegoSheet defaultValue={[{}]} readOnly toolbar={toolbar} onError={latest} />);
+  rendered.rerender(
+    <TegoSheet defaultDocument={testDocument([{}])} readOnly toolbar={toolbar} onError={latest} />,
+  );
 
   fireEvent.click(rendered.getByRole('button', { name: /force unavailable/i }));
   expect(first).not.toHaveBeenCalled();
@@ -65,7 +68,7 @@ it('routes animation-frame render failures through onError and the default notif
     return 7;
   });
   const onError = vi.fn();
-  const rendered = render(<TegoSheet defaultValue={[{}]} onError={onError} />);
+  const rendered = render(<TegoSheet defaultDocument={testDocument([{}])} onError={onError} />);
 
   expect(frame).toBeDefined();
   act(() => {

@@ -2,8 +2,9 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import ts from 'typescript';
 import { expect, it } from 'vitest';
-import { WorkbookController } from '../../src/core/controller/workbook-controller';
+import { SpreadsheetDocumentController } from '../../src/core/controller/spreadsheet-document-controller';
 import { createControlledReconciler } from '../../src/react/control/controlled-reconciler';
+import { testDocument } from '../helpers/workbook-builders';
 import {
   ARCHITECTURE_TEST_TIMEOUT_MS,
   execArchitectureChild,
@@ -68,7 +69,7 @@ it('keeps operations and painters outside the controller mutation boundary', () 
 });
 
 it('[ARCH-7] preserves runtime IDs and history when a controlled checkpoint is acknowledged', () => {
-  const controller = new WorkbookController([{ name: 'Controlled' }]);
+  const controller = new SpreadsheetDocumentController(testDocument([{ name: 'Controlled' }]));
   const reconciler = createControlledReconciler(controller);
   const sheet = controller.getSheetIds()[0]!;
   const outcome = controller.dispatch(
@@ -81,7 +82,7 @@ it('[ARCH-7] preserves runtime IDs and history when a controlled checkpoint is a
   );
   if (outcome.status !== 'committed') throw new Error('fixture command must commit');
   reconciler.record(outcome.commit);
-  const acknowledged = structuredClone(outcome.commit.value);
+  const acknowledged = structuredClone(outcome.commit.document);
   const historyBefore = controller.historySize;
 
   expect(reconciler.reconcile(acknowledged)).toEqual({ refresh: true });

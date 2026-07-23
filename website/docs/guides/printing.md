@@ -10,7 +10,12 @@ allow the dialog.
 
 ```tsx
 import { useRef } from 'react';
-import { TegoSheet, type TegoSheetError, type TegoSheetHandle } from 'tego-sheet';
+import {
+  createSpreadsheetDocument,
+  TegoSheet,
+  type TegoSheetError,
+  type TegoSheetHandle,
+} from 'tego-sheet';
 import 'tego-sheet/styles.css';
 
 export function PrintableSheet() {
@@ -26,7 +31,11 @@ export function PrintableSheet() {
         Print active sheet
       </button>
       <div style={{ height: 480 }}>
-        <TegoSheet ref={ref} defaultValue={[{ name: 'Report' }]} onError={handlePrintError} />
+        <TegoSheet
+          ref={ref}
+          defaultDocument={createSpreadsheetDocument({ sheetName: 'Report' })}
+          onError={handlePrintError}
+        />
       </div>
     </>
   );

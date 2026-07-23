@@ -14,8 +14,7 @@ import {
   type TegoSheetError,
   type TegoSheetHandle,
   type WorkbookChange,
-  type WorkbookData,
-  type WorkbookInput,
+  type SpreadsheetDocument,
 } from 'tego-sheet';
 import { zhCN } from 'tego-sheet/locales/zh-cn';
 import {
@@ -58,8 +57,8 @@ function eventDetails(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function workbookStatus(workbook: WorkbookInput): string {
-  const sheets = Array.isArray(workbook) ? workbook : [workbook];
+function workbookStatus(workbook: SpreadsheetDocument): string {
+  const sheets = workbook.workbook.sheets;
   const firstName = sheets[0]?.name?.trim() || 'Untitled';
   const suffix = sheets.length === 1 ? 'sheet' : 'sheets';
   return `${firstName} · ${sheets.length} ${suffix}`;
@@ -68,7 +67,7 @@ function workbookStatus(workbook: WorkbookInput): string {
 export function App() {
   const initialWorkbook = useMemo(cloneExampleWorkbook, []);
   const sheetRef = useRef<TegoSheetHandle>(null);
-  const lastStableRef = useRef<{ workbook: WorkbookData; mode: PreviewMode }>({
+  const lastStableRef = useRef<{ workbook: SpreadsheetDocument; mode: PreviewMode }>({
     workbook: initialWorkbook,
     mode: 'uncontrolled',
   });
@@ -76,7 +75,7 @@ export function App() {
   const [mode, setMode] = useState<PreviewMode>('uncontrolled');
   const [readOnly, setReadOnly] = useState(false);
   const [localeCode, setLocaleCode] = useState<LocaleCode>('en');
-  const [workbook, setWorkbook] = useState<WorkbookInput>(initialWorkbook);
+  const [workbook, setWorkbook] = useState<SpreadsheetDocument>(initialWorkbook);
   const [jsonText, setJsonText] = useState(() => formatWorkbookJson(initialWorkbook));
   const [mountEpoch, setMountEpoch] = useState(0);
   const [controlsCollapsed, setControlsCollapsed] = useState(false);
@@ -88,7 +87,7 @@ export function App() {
   const locale = useMemo(() => (localeCode === 'zh-CN' ? zhCN : undefined), [localeCode]);
 
   useEffect(() => {
-    const stableWorkbook = sheetRef.current?.getValue();
+    const stableWorkbook = sheetRef.current?.getDocument();
     if (stableWorkbook === undefined) return;
 
     lastStableRef.current = { workbook: stableWorkbook, mode };
@@ -113,7 +112,7 @@ export function App() {
   const importJson = () => {
     try {
       const imported = parseWorkbookJson(jsonText);
-      const currentWorkbook = sheetRef.current?.getValue();
+      const currentWorkbook = sheetRef.current?.getDocument();
       if (currentWorkbook !== undefined) {
         lastStableRef.current = { workbook: currentWorkbook, mode };
       }
@@ -138,7 +137,7 @@ export function App() {
   };
 
   const exportJson = () => {
-    const exported = sheetRef.current?.getValue();
+    const exported = sheetRef.current?.getDocument();
     if (exported === undefined) {
       setError('The spreadsheet is not ready to export.');
       return;
@@ -148,7 +147,7 @@ export function App() {
     setError(null);
   };
 
-  const handleChange = (nextWorkbook: WorkbookData, change: WorkbookChange) => {
+  const handleChange = (nextWorkbook: SpreadsheetDocument, change: WorkbookChange) => {
     setWorkbook(nextWorkbook);
     recordEvent({ label: 'Workbook changed', details: eventDetails(change) });
   };
@@ -311,10 +310,10 @@ export function App() {
           <TegoSheet
             key={mountEpoch}
             ref={sheetRef}
-            {...(mode === 'controlled' ? { value: workbook } : { defaultValue: workbook })}
+            {...(mode === 'controlled' ? { document: workbook } : { defaultDocument: workbook })}
             readOnly={readOnly}
             locale={locale}
-            onChange={handleChange}
+            onDocumentChange={handleChange}
             onActiveSheetChange={handleActiveSheetChange}
             onSelectionChange={handleSelectionChange}
             onError={handleError}

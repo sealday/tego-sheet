@@ -8,7 +8,7 @@ Bundled dictionaries are separate package exports. Import only the languages use
 and pass one `LocaleDefinition` to each component instance.
 
 ```tsx
-import { TegoSheet, type LocaleDefinition } from 'tego-sheet';
+import { createSpreadsheetDocument, TegoSheet, type LocaleDefinition } from 'tego-sheet';
 import 'tego-sheet/styles.css';
 import { de } from 'tego-sheet/locales/de';
 import { en } from 'tego-sheet/locales/en';
@@ -25,7 +25,10 @@ const locales = {
 export function LocalizedSheet({ language }: { language: keyof typeof locales }) {
   return (
     <div style={{ height: 480 }}>
-      <TegoSheet defaultValue={[{ name: 'Locale demo' }]} locale={locales[language]} />
+      <TegoSheet
+        defaultDocument={createSpreadsheetDocument({ sheetName: 'Locale demo' })}
+        locale={locales[language]}
+      />
     </div>
   );
 }

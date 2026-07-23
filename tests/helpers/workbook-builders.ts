@@ -1,4 +1,21 @@
-import type { SheetData } from '../../src/core';
+import type { SheetData, WorkbookInput } from '../../src/core';
+import { migrateLegacyWorkbook, type SpreadsheetDocument } from '../../src/document';
+import { projectDocumentToLegacy } from '../../src/core/controller/runtime-projection';
+
+export function testDocument(input: WorkbookInput): SpreadsheetDocument {
+  const migrated = migrateLegacyWorkbook(input, {
+    ids: {
+      documentId: () => 'test-document',
+      sheetId: (index) => `test-sheet-${index + 1}`,
+    },
+  });
+  if (!migrated.ok) return input as unknown as SpreadsheetDocument;
+  return migrated.document;
+}
+
+export function legacyProjection(document: SpreadsheetDocument) {
+  return projectDocumentToLegacy(document);
+}
 
 export function buildStyledWorkbook(): SheetData {
   return {

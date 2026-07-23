@@ -673,6 +673,7 @@ it('[ARCH-5] separates browser API implementations from section 6.6 lifetime own
     [
       'subscription',
       new Set([
+        'src/core/controller/spreadsheet-document-controller.ts',
         'src/core/controller/workbook-controller.ts',
         'src/react/adapters/controller-external-store.ts',
         'src/react/hooks/use-canvas-engine.ts',
@@ -691,13 +692,7 @@ it('[ARCH-5] separates browser API implementations from section 6.6 lifetime own
     ['observer', new Set(['src/engine/interaction/interaction-manager.ts'])],
     ['animation-frame', new Set(['src/engine/canvas/render-scheduler.ts'])],
     ['timer', new Set(['src/engine/interaction/interaction-manager.ts'])],
-    [
-      'subscription',
-      new Set([
-        'src/react/adapters/controller-external-store.ts',
-        'src/react/hooks/use-canvas-engine.ts',
-      ]),
-    ],
+    ['subscription', new Set(['src/react/hooks/use-canvas-engine.ts'])],
     ['overlay', new Set(['src/ui/print-workbook.ts'])],
     ['portal', new Set()],
   ]);

@@ -1,9 +1,10 @@
 import {
   TegoSheet,
   TegoSheetException,
+  createSpreadsheetDocument,
   type LocaleDefinition,
+  type SpreadsheetDocument,
   type TegoSheetProps,
-  type WorkbookData,
 } from 'tego-sheet';
 import packageJson from 'tego-sheet/package.json' with { type: 'json' };
 import { de } from 'tego-sheet/locales/de';
@@ -12,8 +13,8 @@ import { nl } from 'tego-sheet/locales/nl';
 import { zhCN } from 'tego-sheet/locales/zh-cn';
 
 const component: typeof TegoSheet = TegoSheet;
-const props: TegoSheetProps = { defaultValue: [] };
-const workbook: WorkbookData = [];
+const document: SpreadsheetDocument = createSpreadsheetDocument();
+const props: TegoSheetProps = { defaultDocument: document };
 const locales: readonly LocaleDefinition[] = [en, de, nl, zhCN];
 const exception = new TegoSheetException({
   code: 'INVALID_COMMAND',
@@ -24,7 +25,7 @@ const packageName: string = packageJson.name;
 
 void component;
 void props;
-void workbook;
+void document;
 void locales;
 void exception;
 void packageName;

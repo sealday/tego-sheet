@@ -8,7 +8,12 @@ Pass a typed renderer to `toolbar` or `sheetTabs` to replace the built-in chrome
 immutable public state and actions; they do not expose a controller or mutable sheet model.
 
 ```tsx
-import { TegoSheet, type SheetTabsRenderProps, type ToolbarRenderProps } from 'tego-sheet';
+import {
+  createSpreadsheetDocument,
+  TegoSheet,
+  type SheetTabsRenderProps,
+  type ToolbarRenderProps,
+} from 'tego-sheet';
 import 'tego-sheet/styles.css';
 
 function Toolbar({ canUndo, canRedo, disabledActions, execute }: ToolbarRenderProps) {
@@ -64,7 +69,7 @@ export function CustomChromeSheet() {
   return (
     <div style={{ height: 480 }}>
       <TegoSheet
-        defaultValue={[{ name: 'Overview' }]}
+        defaultDocument={createSpreadsheetDocument({ sheetName: 'Overview' })}
         toolbar={(props) => <Toolbar {...props} />}
         sheetTabs={(props) => <SheetTabs {...props} />}
       />

@@ -10,6 +10,7 @@ import {
   type TegoSheetHandle,
 } from '../../src';
 import { createCanvasHarness } from '../helpers/canvas-harness';
+import { testDocument } from '../helpers/workbook-builders';
 
 beforeEach(() => {
   const context = createCanvasHarness().canvas.getContext('2d');
@@ -28,17 +29,17 @@ afterEach(() => {
 });
 
 it('@parity:structure.sheet-tabs supports default, hidden and isolated custom sheet-tab hosts', async () => {
-  const rendered = render(<TegoSheet defaultValue={[{ name: 'A' }]} />);
+  const rendered = render(<TegoSheet defaultDocument={testDocument([{ name: 'A' }])} />);
   await waitFor(() =>
     expect(rendered.container.querySelector('[data-tego-sheet-tabs="default"]')).not.toBeNull(),
   );
-  rendered.rerender(<TegoSheet defaultValue={[]} sheetTabs={false} />);
+  rendered.rerender(<TegoSheet defaultDocument={testDocument([])} sheetTabs={false} />);
   expect(rendered.container.querySelector('[data-tego-sheet-tabs]')).toBeNull();
 
   let props!: SheetTabsRenderProps;
   rendered.rerender(
     <TegoSheet
-      defaultValue={[]}
+      defaultDocument={testDocument([])}
       sheetTabs={(value) => {
         props = value;
         return <span>custom tabs</span>;
@@ -57,7 +58,7 @@ it('@parity:workbook.sheet-lifecycle uses sheet-tab actions for add, rename, act
   const errors: TegoSheetError[] = [];
   const rendered = render(
     <TegoSheet
-      defaultValue={[]}
+      defaultDocument={testDocument([])}
       sheetTabs={(value) => {
         props = value;
         return null;
@@ -79,7 +80,7 @@ it('@parity:workbook.sheet-lifecycle uses sheet-tab actions for add, rename, act
 
   rendered.rerender(
     <TegoSheet
-      defaultValue={[]}
+      defaultDocument={testDocument([])}
       readOnly
       sheetTabs={(value) => {
         props = value;
@@ -93,13 +94,13 @@ it('@parity:workbook.sheet-lifecycle uses sheet-tab actions for add, rename, act
   expect(errors.at(-1)).toMatchObject({ code: 'INVALID_COMMAND' });
 });
 
-it('routes retained stale tab actions to the current onError and makes them inert after unmount', async () => {
+it('keeps retained tab actions valid across replacements with stable sheet IDs and inert after unmount', async () => {
   let retained!: SheetTabsRenderProps;
   const firstError = vi.fn();
   const latestError = vi.fn();
   const rendered = render(
     <TegoSheet
-      value={[{ name: 'A' }]}
+      document={testDocument([{ name: 'A' }])}
       sheetTabs={(props) => {
         retained = props;
         return null;
@@ -114,7 +115,7 @@ it('routes retained stale tab actions to the current onError and makes them iner
 
   rendered.rerender(
     <TegoSheet
-      value={[{ name: 'Replacement' }]}
+      document={testDocument([{ name: 'Replacement' }])}
       sheetTabs={(props) => {
         latest = props;
         return null;
@@ -125,7 +126,7 @@ it('routes retained stale tab actions to the current onError and makes them iner
   await waitFor(() => expect(latest.sheets[0]?.name).toBe('Replacement'));
   act(() => staleActivate(stale));
   expect(firstError).not.toHaveBeenCalled();
-  expect(latestError).toHaveBeenCalledWith(expect.objectContaining({ code: 'INVALID_COMMAND' }));
+  expect(latestError).not.toHaveBeenCalled();
 
   const calls = latestError.mock.calls.length;
   rendered.unmount();
@@ -140,12 +141,12 @@ it('does not let an outer add overwrite a nested add/delete activation decision'
   render(
     <TegoSheet
       ref={ref}
-      defaultValue={[]}
+      defaultDocument={testDocument([])}
       sheetTabs={(props) => {
         tabs = props;
         return null;
       }}
-      onChange={() => {
+      onDocumentChange={() => {
         if (nested) return;
         nested = true;
         const temporary = ref.current!.addSheet('Temporary');
@@ -169,13 +170,13 @@ it('does not let an outer delete overwrite a reentrant tab activation', async ()
   let reenter = false;
   render(
     <TegoSheet
-      defaultValue={[{ name: 'A' }, { name: 'B' }, { name: 'C' }]}
+      defaultDocument={testDocument([{ name: 'A' }, { name: 'B' }, { name: 'C' }])}
       initialActiveSheetIndex={1}
       sheetTabs={(props) => {
         tabs = props;
         return null;
       }}
-      onChange={() => {
+      onDocumentChange={() => {
         if (!reenter) return;
         reenter = false;
         tabs.activate(tabs.sheets[0]!.id);
@@ -200,13 +201,13 @@ it('keeps the latest controlled replacement activation during a reentrant delete
     const [value, setValue] = useState([{ name: 'A' }, { name: 'B' }, { name: 'C' }]);
     return (
       <TegoSheet
-        value={value}
+        document={testDocument(value)}
         initialActiveSheetIndex={1}
         sheetTabs={(props) => {
           tabs = props;
           return null;
         }}
-        onChange={() => {
+        onDocumentChange={() => {
           if (!replace) return;
           replace = false;
           flushSync(() => setValue([{ name: 'R1' }, { name: 'R2' }, { name: 'R3' }]));
@@ -233,12 +234,12 @@ it('drops add/delete post-dispatch decisions after synchronous unmount', async (
     const [shown, setShown] = useState(true);
     return shown ? (
       <TegoSheet
-        defaultValue={[]}
+        defaultDocument={testDocument([])}
         sheetTabs={(props) => {
           tabs = props;
           return null;
         }}
-        onChange={() => flushSync(() => setShown(false))}
+        onDocumentChange={() => flushSync(() => setShown(false))}
       />
     ) : null;
   }

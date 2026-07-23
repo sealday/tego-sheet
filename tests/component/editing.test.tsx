@@ -2,8 +2,10 @@ import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { createRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { TegoSheet, type TegoSheetHandle, type WorkbookInput } from '../../src';
+import { TegoSheet, type SpreadsheetDocument, type TegoSheetHandle } from '../../src';
+import type { WorkbookInput } from '../../src/core';
 import { createCanvasHarness } from '../helpers/canvas-harness';
+import { legacyProjection, testDocument } from '../helpers/workbook-builders';
 
 beforeEach(() => {
   const context = createCanvasHarness().canvas.getContext('2d');
@@ -35,8 +37,8 @@ it('@parity:formulas.editor-display keeps typing local, commits once, creates on
   const rendered = render(
     <TegoSheet
       ref={ref}
-      defaultValue={[{ rows: { 0: { cells: { 0: { text: 'old' } } } } }]}
-      onChange={() => order.push('change')}
+      defaultDocument={testDocument([{ rows: { 0: { cells: { 0: { text: 'old' } } } } }])}
+      onDocumentChange={() => order.push('change')}
       onCellEdit={() => order.push('cell-edit')}
       onSelectionChange={() => order.push('selection')}
     />,
@@ -49,35 +51,39 @@ it('@parity:formulas.editor-display keeps typing local, commits once, creates on
   const editor = await rendered.findByRole('textbox', { name: /cell editor/i });
 
   fireEvent.change(editor, { target: { value: '=SUM(A1:A2)' } });
-  const sheet = ref.current!.getValue()[0]!;
+  const sheet = legacyProjection(ref.current!.getDocument())[0]!;
   expect(sheet.rows?.['0']).toMatchObject({ cells: { 0: { text: 'old' } } });
   expect(rendered.getByRole('listbox', { name: /formula suggestions/i })).toBeTruthy();
 
   fireEvent.keyDown(editor, { key: 'Enter' });
   await waitFor(() => expect(rendered.queryByRole('textbox', { name: /cell editor/i })).toBeNull());
-  expect(ref.current!.getValue()[0]!.rows?.['0']).toMatchObject({
+  expect(legacyProjection(ref.current!.getDocument())[0]!.rows?.['0']).toMatchObject({
     cells: { 0: { text: '=SUM(A1:A2)' } },
   });
   expect(order).toEqual(['change', 'cell-edit', 'selection']);
 
   order.length = 0;
   ref.current!.undo();
-  expect(ref.current!.getValue()[0]!.rows?.['0']).toMatchObject({ cells: { 0: { text: 'old' } } });
+  expect(legacyProjection(ref.current!.getDocument())[0]!.rows?.['0']).toMatchObject({
+    cells: { 0: { text: 'old' } },
+  });
   expect(order).toEqual(['change']);
   await waitFor(() =>
     expect(rendered.getByRole('button', { name: 'Undo' }).hasAttribute('disabled')).toBe(true),
   );
-  const afterFirstUndo = ref.current!.getValue();
+  const afterFirstUndo = legacyProjection(ref.current!.getDocument());
   const notifications = order.length;
   ref.current!.undo();
-  expect(ref.current!.getValue()).toEqual(afterFirstUndo);
+  expect(legacyProjection(ref.current!.getDocument())).toEqual(afterFirstUndo);
   expect(order).toHaveLength(notifications);
 });
 
 it('@parity:editing.inline-editor cancels on Escape and commits exactly once on blur', async () => {
   const ref = createRef<TegoSheetHandle>();
   const onChange = vi.fn();
-  const rendered = render(<TegoSheet ref={ref} defaultValue={[{}]} onChange={onChange} />);
+  const rendered = render(
+    <TegoSheet ref={ref} defaultDocument={testDocument([{}])} onDocumentChange={onChange} />,
+  );
   await waitFor(() => expect(ref.current).not.toBeNull());
   const root = rendered.container.querySelector<HTMLElement>('[data-tego-sheet]')!;
   sizeRoot(root);
@@ -104,8 +110,8 @@ it('@parity:input.desktop-editing commits once on Tab and pointer navigation wit
   const rendered = render(
     <TegoSheet
       ref={ref}
-      defaultValue={[{ rows: { len: 2 }, cols: { len: 3 } }]}
-      onChange={() => order.push('change')}
+      defaultDocument={testDocument([{ rows: { len: 2 }, cols: { len: 3 } }])}
+      onDocumentChange={() => order.push('change')}
       onCellEdit={() => order.push('cell-edit')}
       onSelectionChange={(selection) => {
         order.push('selection');
@@ -134,7 +140,7 @@ it('@parity:input.desktop-editing commits once on Tab and pointer navigation wit
 
   expect(order).toEqual(['change', 'cell-edit', 'selection']);
   expect(selections).toEqual([2]);
-  expect(ref.current!.getValue()[0]!.rows?.['0']).toMatchObject({
+  expect(legacyProjection(ref.current!.getDocument())[0]!.rows?.['0']).toMatchObject({
     cells: { 1: { text: 'pointed' } },
   });
 });
@@ -143,9 +149,9 @@ it('preserves selection, scroll, and active editing across controlled acknowledg
   const ref = createRef<TegoSheetHandle>();
   const value: WorkbookInput = [{ name: 'Controlled', rows: { len: 5 }, cols: { len: 20 } }];
   let sheet: Parameters<TegoSheetHandle['setCellText']>[0]['sheet'] | undefined;
-  let checkpoint: WorkbookInput | undefined;
+  let checkpoint: SpreadsheetDocument | undefined;
   let selectedColumn = -1;
-  const onChange = (next: WorkbookInput) => {
+  const onChange = (next: SpreadsheetDocument) => {
     checkpoint = next;
   };
   const onSelectionChange: NonNullable<Parameters<typeof TegoSheet>[0]['onSelectionChange']> = (
@@ -155,7 +161,12 @@ it('preserves selection, scroll, and active editing across controlled acknowledg
     selectedColumn = next.active.column;
   };
   const rendered = render(
-    <TegoSheet ref={ref} value={value} onChange={onChange} onSelectionChange={onSelectionChange} />,
+    <TegoSheet
+      ref={ref}
+      document={testDocument(value)}
+      onDocumentChange={onChange}
+      onSelectionChange={onSelectionChange}
+    />,
   );
   const root = rendered.container.querySelector<HTMLElement>('[data-tego-sheet]')!;
   sizeRoot(root, 300, 200);
@@ -178,8 +189,8 @@ it('preserves selection, scroll, and active editing across controlled acknowledg
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      value={acknowledgement}
-      onChange={onChange}
+      document={acknowledgement}
+      onDocumentChange={onChange}
       onSelectionChange={onSelectionChange}
     />,
   );
@@ -199,18 +210,22 @@ it('preserves selection, scroll, and active editing across controlled acknowledg
   fireEvent.keyDown(window, { key: 'x' });
   expect(await rendered.findByRole('textbox', { name: /cell editor/i })).toBeTruthy();
 
-  rendered.rerender(<TegoSheet ref={ref} value={[{ name: 'Replacement' }]} />);
+  rendered.rerender(<TegoSheet ref={ref} document={testDocument([{ name: 'Replacement' }])} />);
   await waitFor(() => expect(rendered.queryByRole('textbox', { name: /cell editor/i })).toBeNull());
 
   fireEvent.focusIn(root);
   fireEvent.keyDown(window, { key: 'y' });
   expect(await rendered.findByRole('textbox', { name: /cell editor/i })).toBeTruthy();
-  rendered.rerender(<TegoSheet ref={ref} value={[{ name: 'Replacement' }]} readOnly />);
+  rendered.rerender(
+    <TegoSheet ref={ref} document={testDocument([{ name: 'Replacement' }])} readOnly />,
+  );
   await waitFor(() => expect(rendered.queryByRole('textbox', { name: /cell editor/i })).toBeNull());
 });
 
 it('keeps the editor anchored to engine geometry through scroll and resize', async () => {
-  const rendered = render(<TegoSheet defaultValue={[{ rows: { len: 5 }, cols: { len: 10 } }]} />);
+  const rendered = render(
+    <TegoSheet defaultDocument={testDocument([{ rows: { len: 5 }, cols: { len: 10 } }])} />,
+  );
   const root = rendered.container.querySelector<HTMLElement>('[data-tego-sheet]')!;
   sizeRoot(root, 300, 200);
   fireEvent.focusIn(root);
@@ -236,8 +251,8 @@ it('does not apply a stale Tab selection when onChange synchronously replaces co
     const [value, setValue] = useState<WorkbookInput>([{ name: 'Before' }]);
     return (
       <TegoSheet
-        value={value}
-        onChange={() => flushSync(() => setValue([{ name: 'Replacement' }]))}
+        document={testDocument(value)}
+        onDocumentChange={() => flushSync(() => setValue([{ name: 'Replacement' }]))}
         onSelectionChange={selections}
       />
     );
@@ -264,8 +279,8 @@ it('does not finish stale Enter selection work after onChange unmounts the sheet
   const selections = vi.fn();
   const rendered = render(
     <TegoSheet
-      defaultValue={[{}]}
-      onChange={() => rendered.unmount()}
+      defaultDocument={testDocument([{}])}
+      onDocumentChange={() => rendered.unmount()}
       onSelectionChange={selections}
     />,
   );
@@ -284,15 +299,15 @@ it('does not finish stale Enter selection work after onChange unmounts the sheet
   expect(rendered.container.childElementCount).toBe(0);
 });
 
-it.each(['onChange', 'onCellEdit'] as const)(
+it.each(['onDocumentChange', 'onCellEdit'] as const)(
   'closes the editor and preserves the original %s exception after commit',
   async (callback) => {
     const ref = createRef<TegoSheetHandle>();
     const consumerError = new Error(`${callback} failed`);
     const callbacks =
-      callback === 'onChange'
+      callback === 'onDocumentChange'
         ? {
-            onChange: () => {
+            onDocumentChange: () => {
               throw consumerError;
             },
           }
@@ -301,7 +316,9 @@ it.each(['onChange', 'onCellEdit'] as const)(
               throw consumerError;
             },
           };
-    const rendered = render(<TegoSheet ref={ref} defaultValue={[{}]} {...callbacks} />);
+    const rendered = render(
+      <TegoSheet ref={ref} defaultDocument={testDocument([{}])} {...callbacks} />,
+    );
     await waitFor(() => expect(ref.current).not.toBeNull());
     const root = rendered.container.querySelector<HTMLElement>('[data-tego-sheet]')!;
     sizeRoot(root);
@@ -324,7 +341,7 @@ it.each(['onChange', 'onCellEdit'] as const)(
 
     expect(reported).toEqual([consumerError]);
     expect(rendered.queryByRole('textbox', { name: /cell editor/i })).toBeNull();
-    expect(ref.current!.getValue()[0]!.rows?.['0']).toMatchObject({
+    expect(legacyProjection(ref.current!.getDocument())[0]!.rows?.['0']).toMatchObject({
       cells: { 0: { text: 'committed before callback failure' } },
     });
     expect(() => rendered.unmount()).not.toThrow();
@@ -338,8 +355,8 @@ it('clears with Delete without reporting a paste event', async () => {
   const rendered = render(
     <TegoSheet
       ref={ref}
-      defaultValue={[{ rows: { 0: { cells: { 0: { text: 'erase me' } } } } }]}
-      onChange={(_value, change) => changes.push(change.kind)}
+      defaultDocument={testDocument([{ rows: { 0: { cells: { 0: { text: 'erase me' } } } } }])}
+      onDocumentChange={(_value, change) => changes.push(change.kind)}
       onPaste={onPaste}
     />,
   );
@@ -348,15 +365,21 @@ it('clears with Delete without reporting a paste event', async () => {
   fireEvent.focusIn(root);
   fireEvent.keyDown(window, { key: 'Delete' });
 
-  expect(ref.current!.getValue()[0]!.rows?.['0']).toMatchObject({ cells: { 0: {} } });
-  expect(ref.current!.getValue()[0]!.rows?.['0']).not.toHaveProperty('cells.0.text');
+  expect(legacyProjection(ref.current!.getDocument())[0]!.rows?.['0']).toMatchObject({
+    cells: { 0: {} },
+  });
+  expect(legacyProjection(ref.current!.getDocument())[0]!.rows?.['0']).not.toHaveProperty(
+    'cells.0.text',
+  );
   expect(changes).toEqual(['cell']);
   expect(onPaste).not.toHaveBeenCalled();
 });
 
 it('does not notify or repaint React selection for an identical engine selection', () => {
   const onSelectionChange = vi.fn();
-  const rendered = render(<TegoSheet defaultValue={[{}]} onSelectionChange={onSelectionChange} />);
+  const rendered = render(
+    <TegoSheet defaultDocument={testDocument([{}])} onSelectionChange={onSelectionChange} />,
+  );
   const root = rendered.container.querySelector<HTMLElement>('[data-tego-sheet]')!;
   sizeRoot(root);
   fireEvent.focusIn(root);

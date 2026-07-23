@@ -26,7 +26,7 @@ export interface TegoSheetCallbacks {
    * `value` is the complete workbook snapshot and `change` is its {@link WorkbookChange} metadata.
    * External controlled-value replacements do not emit this callback.
    */
-  readonly onDocumentChange?: (document: SpreadsheetDocument, change: WorkbookChange) => void;
+  readonly onDocumentChange?: (nextDocument: SpreadsheetDocument, change: WorkbookChange) => void;
   /** Runs after a worksheet is activated and reports its identifier, index, and source. */
   readonly onActiveSheetChange?: (event: ActiveSheetChangeEvent) => void;
   /** Runs after the active selection changes, including selection changes caused by a commit. */
@@ -46,11 +46,14 @@ export interface TegoSheetCallbacks {
  * Choose controlled `document` or uncontrolled `defaultDocument` when mounting. Supplying both, or
  * switching a mounted instance between those ownership modes, throws a `TegoSheetException`.
  */
-interface TegoSheetBaseProps extends TegoSheetCallbacks {
+export interface TegoSheetProps extends TegoSheetCallbacks {
   /**
-   * Controlled workbook input owned by the parent.
+   * Controlled schema 2 document owned by the parent.
    * Apply `onDocumentChange` snapshots to this prop to accept user and imperative mutations.
    */
+  readonly ['document']?: SpreadsheetDocument;
+  /** Schema 2 document read once when mounting an uncontrolled spreadsheet. */
+  readonly defaultDocument?: SpreadsheetDocument;
   /** Zero-based worksheet index selected on mount. */
   readonly initialActiveSheetIndex?: number;
   /** Disables workbook mutations while preserving navigation, selection, copy, and printing. */
@@ -68,20 +71,6 @@ interface TegoSheetBaseProps extends TegoSheetCallbacks {
   /** Inline styles applied to the root spreadsheet element. */
   readonly style?: CSSProperties;
 }
-
-/** Controlled props whose schema 2 document is owned by the parent. */
-export interface ControlledTegoSheetProps extends TegoSheetBaseProps {
-  readonly document: SpreadsheetDocument;
-  readonly defaultDocument?: never;
-}
-
-/** Uncontrolled props initialized from one schema 2 document snapshot. */
-export interface UncontrolledTegoSheetProps extends TegoSheetBaseProps {
-  readonly document?: never;
-  readonly defaultDocument: SpreadsheetDocument;
-}
-
-export type TegoSheetProps = ControlledTegoSheetProps | UncontrolledTegoSheetProps;
 
 /**
  * Imperative API exposed through a React ref while `TegoSheet` is mounted.

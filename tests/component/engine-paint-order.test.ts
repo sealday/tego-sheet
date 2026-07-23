@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { WorkbookController } from '../../src/core/controller/workbook-controller';
+import { SpreadsheetDocumentController } from '../../src/core/controller/spreadsheet-document-controller';
+import { testDocument } from '../helpers/workbook-builders';
 import { createSelectionState } from '../../src/engine';
 import { createEngineAdapter } from '../../src/react/adapters/engine-adapter';
 import { createEventDispatcher } from '../../src/react/adapters/event-dispatcher';
@@ -23,7 +24,9 @@ it('stages the target selection before callbacks and paints only that target sna
     clientHeight: { configurable: true, value: 300 },
   });
   const canvas = createCanvasHarness();
-  const controller = new WorkbookController({ rows: { len: 2 }, cols: { len: 3 } });
+  const controller = new SpreadsheetDocumentController(
+    testDocument({ rows: { len: 2 }, cols: { len: 3 } }),
+  );
   const sheet = controller.getSheetIds()[0]!;
   const engine = createEngineAdapter({
     root,
@@ -38,7 +41,7 @@ it('stages the target selection before callbacks and paints only that target sna
   const dispatcher = createEventDispatcher({
     controller,
     getCallbacks: () => ({
-      onChange: () => order.push('change'),
+      onDocumentChange: () => order.push('change'),
       onCellEdit: () => order.push('cell-edit'),
       onSelectionChange: () => {
         expect(engine.publicSelection()?.active.column).toBe(1);
@@ -83,7 +86,9 @@ it('@parity:view.scroll-sync stages offscreen selection and scroll together with
     clientHeight: { configurable: true, value: 100 },
   });
   const canvas = createCanvasHarness();
-  const controller = new WorkbookController({ rows: { len: 2 }, cols: { len: 3 } });
+  const controller = new SpreadsheetDocumentController(
+    testDocument({ rows: { len: 2 }, cols: { len: 3 } }),
+  );
   const sheet = controller.getSheetIds()[0]!;
   const engine = createEngineAdapter({
     root,
@@ -124,7 +129,9 @@ it('suppresses repeated paints for a failed controller snapshot and retries on e
       throw failure;
     },
   });
-  const controller = new WorkbookController({ rows: { len: 2 }, cols: { len: 3 } });
+  const controller = new SpreadsheetDocumentController(
+    testDocument({ rows: { len: 2 }, cols: { len: 3 } }),
+  );
   const sheet = controller.getSheetIds()[0]!;
   const onRenderError = vi.fn();
   const engine = createEngineAdapter({

@@ -3,6 +3,7 @@ import { createRef } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { TegoSheet, type Selection, type TegoSheetHandle, type WorkbookChange } from '../../src';
 import { createCanvasHarness } from '../helpers/canvas-harness';
+import { legacyProjection, testDocument } from '../helpers/workbook-builders';
 
 beforeEach(() => {
   const context = createCanvasHarness().canvas.getContext('2d');
@@ -35,7 +36,7 @@ function renderBoundarySheet() {
   const rendered = render(
     <TegoSheet
       ref={ref}
-      defaultValue={[
+      defaultDocument={testDocument([
         {
           rows: {
             len: 2,
@@ -44,8 +45,8 @@ function renderBoundarySheet() {
           },
           cols: { len: 2 },
         },
-      ]}
-      onChange={(_value, change) => changes.push(change)}
+      ])}
+      onDocumentChange={(_value, change) => changes.push(change)}
       onSelectionChange={(selection) => selections.push(selection)}
     />,
   );
@@ -77,7 +78,7 @@ it('does not let toolbar pointer/focus events pre-commit the editor or navigate 
 
   expect(selections).toEqual([]);
   expect(changes.map((change) => change.kind)).toEqual(['cell', 'style']);
-  expect(ref.current!.getValue()[0]).toMatchObject({
+  expect(legacyProjection(ref.current!.getDocument())[0]).toMatchObject({
     rows: { 0: { cells: { 0: { text: 'draft' } } } },
     styles: [{ font: { bold: true } }],
   });
@@ -106,7 +107,7 @@ it('keeps editor pointer and Enter handling inside the editor transaction', asyn
   expect(changes[0]).toMatchObject({ kind: 'cell' });
   expect(selections).toHaveLength(1);
   expect(selections[0]!.active).toEqual({ row: 1, column: 0 });
-  expect(ref.current!.getValue()[0]).toMatchObject({
+  expect(legacyProjection(ref.current!.getDocument())[0]).toMatchObject({
     rows: { 0: { cells: { 0: { text: 'entered' } } } },
   });
 });
@@ -128,7 +129,7 @@ it('keeps context-menu pointer and keyboard events out of grid selection', async
   fireEvent.click(disableExport);
   expect(changes).toHaveLength(1);
   expect(changes[0]).toMatchObject({ kind: 'cell', source: 'context-menu' });
-  expect(ref.current!.getValue()[0]).toMatchObject({
+  expect(legacyProjection(ref.current!.getDocument())[0]).toMatchObject({
     rows: {
       0: {
         cells: {
@@ -293,7 +294,7 @@ it('keeps dialog controls out of grid selection and applies their action once', 
   expect(selections).toEqual([]);
   expect(changes).toHaveLength(1);
   expect(changes[0]).toMatchObject({ kind: 'validation', source: 'toolbar' });
-  expect(ref.current!.getValue()[0]!.validations).toEqual([
+  expect(legacyProjection(ref.current!.getDocument())[0]!.validations).toEqual([
     expect.objectContaining({ refs: ['A1'], type: 'number' }),
   ]);
 });
@@ -328,7 +329,7 @@ it('@parity:tools.filter-controls isolates source and opening selection across i
   expect(changes).toHaveLength(2);
   expect(changes[0]).toMatchObject({ kind: 'validation', source: 'context-menu' });
   expect(changes[1]).toMatchObject({ kind: 'filter', source: 'toolbar' });
-  expect(ref.current!.getValue()[0]).toMatchObject({
+  expect(legacyProjection(ref.current!.getDocument())[0]).toMatchObject({
     validations: [expect.objectContaining({ refs: ['A1'], type: 'number' })],
     autofilter: expect.objectContaining({
       ref: 'B1:B2',

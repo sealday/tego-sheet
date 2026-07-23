@@ -2,13 +2,13 @@ import { cleanup, render, type RenderResult } from '@testing-library/react';
 import { StrictMode, Suspense, useLayoutEffect, useMemo, useState } from 'react';
 import { afterEach } from 'vitest';
 import type { WorkbookCommand } from '../../src/core/commands/workbook-command';
-import type { CommandCommit } from '../../src/core/commands/command-result';
 import type {
-  WorkbookController,
-  WorkbookControllerOptions,
-} from '../../src/core/controller/workbook-controller';
-import type { WorkbookInput } from '../../src/core';
+  SpreadsheetControllerCommit,
+  SpreadsheetDocumentController,
+} from '../../src/core/controller/spreadsheet-document-controller';
+import type { WorkbookControllerOptions } from '../../src/core/controller/workbook-controller';
 import type { ChangeSource, Selection } from '../../src/core';
+import type { SpreadsheetDocument } from '../../src/document';
 import {
   createEventDispatcher,
   type EventDispatcher,
@@ -19,13 +19,15 @@ import type { TegoSheetCallbacks, TegoSheetProps } from '../../src/react/tego-sh
 afterEach(cleanup);
 
 export interface RenderSheetOptions {
-  readonly recordControlledCheckpoint?: (commit: CommandCommit<unknown, WorkbookCommand>) => void;
+  readonly recordControlledCheckpoint?: (
+    commit: SpreadsheetControllerCommit<unknown, WorkbookCommand>,
+  ) => void;
   readonly schedulePaint?: () => void;
   readonly strict?: boolean;
   readonly createController?: (
-    input: WorkbookInput,
+    input: SpreadsheetDocument,
     options: WorkbookControllerOptions,
-  ) => WorkbookController;
+  ) => SpreadsheetDocumentController;
   readonly onParentLayout?: (runtime: SheetRuntime | null) => void;
   readonly suspendWhen?: () => boolean;
 }
@@ -51,7 +53,7 @@ function callbacksFromProps(props: TegoSheetProps): TegoSheetCallbacks {
   return {
     onActiveSheetChange: props.onActiveSheetChange,
     onCellEdit: props.onCellEdit,
-    onChange: props.onChange,
+    onDocumentChange: props.onDocumentChange,
     onError: props.onError,
     onPaste: props.onPaste,
     onSelectionChange: props.onSelectionChange,
@@ -126,7 +128,7 @@ export function renderSheet(
         data-revision={epoch?.snapshot.revision ?? -1}
         data-sheets={epoch?.snapshot.sheets.length ?? -1}
       >
-        {JSON.stringify(epoch?.snapshot.value ?? null)}
+        {JSON.stringify(epoch?.snapshot.projection ?? null)}
       </output>
     );
   }

@@ -5,6 +5,7 @@ import { de, nl } from '../../src/locales';
 import { createCanvasHarness } from '../helpers/canvas-harness';
 import { FormulaSuggestions } from '../../src/ui/editor/formula-suggestions';
 import { createTranslator } from '../../src/ui/translate';
+import { testDocument } from '../helpers/workbook-builders';
 
 beforeEach(() => {
   const context = createCanvasHarness().canvas.getContext('2d');
@@ -26,10 +27,10 @@ it('@parity:locale.switch-language uses live recursive overlays with per-instanc
   const rendered = render(
     <>
       <TegoSheet
-        defaultValue={[{}]}
+        defaultDocument={testDocument([{}])}
         locale={{ id: 'de', messages: { toolbar: { undo: 'Rückgängig' } } }}
       />
-      <TegoSheet defaultValue={[{}]} />
+      <TegoSheet defaultDocument={testDocument([{}])} />
     </>,
   );
   await waitFor(() => expect(rendered.getByRole('button', { name: 'Rückgängig' })).toBeTruthy());
@@ -38,7 +39,7 @@ it('@parity:locale.switch-language uses live recursive overlays with per-instanc
 
   rendered.rerender(
     <TegoSheet
-      defaultValue={[{}]}
+      defaultDocument={testDocument([{}])}
       locale={{ id: 'fr', messages: { toolbar: { undo: 'Annuler' } } }}
     />,
   );
@@ -46,7 +47,7 @@ it('@parity:locale.switch-language uses live recursive overlays with per-instanc
 });
 
 it('renders German format and validation choices without internal option ids', async () => {
-  const rendered = render(<TegoSheet defaultValue={[{}]} locale={de} />);
+  const rendered = render(<TegoSheet defaultDocument={testDocument([{}])} locale={de} />);
   const format = await rendered.findByRole('combobox', { name: 'Zahlenformat' });
   expect(within(format).getByRole('option', { name: 'Nummer' })).toBeTruthy();
   expect(within(format).queryByRole('option', { name: 'number' })).toBeNull();
@@ -61,7 +62,7 @@ it('renders German format and validation choices without internal option ids', a
 });
 
 it('renders Dutch format labels and localized formula suggestions', async () => {
-  const rendered = render(<TegoSheet defaultValue={[{}]} locale={nl} />);
+  const rendered = render(<TegoSheet defaultDocument={testDocument([{}])} locale={nl} />);
   const format = await rendered.findByRole('combobox', { name: 'Getalnotatie' });
   expect(within(format).getByRole('option', { name: 'Nummer' })).toBeTruthy();
   expect(within(format).queryByRole('option', { name: 'number' })).toBeNull();

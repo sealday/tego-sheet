@@ -24,9 +24,8 @@ import type {
   ValidationResult,
   ValidationRule,
   WorkbookChange,
-  WorkbookData,
-  WorkbookInput,
 } from '../../src/index';
+import type { WorkbookData, WorkbookInput } from '../../src/core';
 import type { SheetId } from '../../src/index';
 import type { CellsData, ColsData, ColumnData, ValidationData } from '../../src/index';
 

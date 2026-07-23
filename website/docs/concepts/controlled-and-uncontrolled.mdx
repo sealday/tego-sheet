@@ -4,52 +4,52 @@ title: Controlled and Uncontrolled Workbooks
 
 # Controlled and Uncontrolled Workbooks
 
-Choose one ownership model when `TegoSheet` mounts. Never pass both `value` and `defaultValue`, and
+Choose one ownership model when `TegoSheet` mounts. Never pass both `document` and `defaultDocument`, and
 never switch a mounted instance between controlled and uncontrolled mode. A mode change is a new
 spreadsheet instance: unmount the old one or give the replacement a new React `key`.
 
 ## Uncontrolled ownership
 
-With `defaultValue`, the component owns subsequent workbook state. Use `onChange` to persist snapshots
+With `defaultDocument`, the component owns subsequent state. Use `onDocumentChange` to persist snapshots
 and a ref for occasional reads or commands.
 
 ```tsx
-import { TegoSheet, type WorkbookData } from 'tego-sheet';
+import { createSpreadsheetDocument, TegoSheet, type SpreadsheetDocument } from 'tego-sheet';
 import 'tego-sheet/styles.css';
 
-const initialWorkbook: WorkbookData = [{ name: 'Notes' }];
+const initialDocument = createSpreadsheetDocument({ sheetName: 'Notes' });
 
 export function UncontrolledSheet() {
   return (
     <div style={{ height: 480 }}>
-      <TegoSheet defaultValue={initialWorkbook} onChange={(value) => saveDraft(value)} />
+      <TegoSheet defaultDocument={initialDocument} onDocumentChange={saveDraft} />
     </div>
   );
 }
 
-function saveDraft(value: WorkbookData) {
-  localStorage.setItem('notes-workbook', JSON.stringify(value));
+function saveDraft(document: SpreadsheetDocument) {
+  localStorage.setItem('notes-workbook', JSON.stringify(document));
 }
 ```
 
 ## Controlled ownership
 
-With `value`, the parent owns the accepted snapshot. Apply the `onChange` value to state. Keeping the
+With `document`, the parent owns the accepted snapshot. Apply the `onDocumentChange` snapshot to state. Keeping the
 same object reference during unrelated parent renders avoids unnecessary external replacement work.
 
 ```tsx
 import { useState } from 'react';
-import { TegoSheet, type WorkbookData } from 'tego-sheet';
+import { createSpreadsheetDocument, TegoSheet, type SpreadsheetDocument } from 'tego-sheet';
 import 'tego-sheet/styles.css';
 
-const initialWorkbook: WorkbookData = [{ name: 'Plan' }];
+const initialDocument = createSpreadsheetDocument({ sheetName: 'Plan' });
 
 export function ControlledSheet() {
-  const [workbook, setWorkbook] = useState<WorkbookData>(initialWorkbook);
+  const [document, setDocument] = useState<SpreadsheetDocument>(initialDocument);
 
   return (
     <div style={{ height: 480 }}>
-      <TegoSheet value={workbook} onChange={(nextWorkbook) => setWorkbook(nextWorkbook)} />
+      <TegoSheet document={document} onDocumentChange={setDocument} />
     </div>
   );
 }

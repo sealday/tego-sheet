@@ -109,10 +109,10 @@ const websiteProgramDiagnostics = (probeSource: string): readonly ts.Diagnostic[
 };
 
 const manualDocumentation = [
-  ['website/docs/getting-started/quick-start.mdx', ['TegoSheet', 'WorkbookData']],
+  ['website/docs/getting-started/quick-start.mdx', ['TegoSheet', 'SpreadsheetDocument']],
   ['website/docs/getting-started/styling-and-sizing.md', ['TegoSheet']],
-  ['website/docs/concepts/controlled-and-uncontrolled.mdx', ['TegoSheet', 'WorkbookData']],
-  ['website/docs/concepts/workbook-data.md', ['WorkbookData', 'WorkbookInput']],
+  ['website/docs/concepts/controlled-and-uncontrolled.mdx', ['TegoSheet', 'SpreadsheetDocument']],
+  ['website/docs/concepts/workbook-data.md', ['SpreadsheetDocument']],
   ['website/docs/concepts/refs-and-commands.mdx', ['TegoSheetHandle']],
   ['website/docs/concepts/callbacks-and-errors.mdx', ['WorkbookChange', 'TegoSheetException']],
   ['website/docs/guides/custom-chrome.mdx', ['ToolbarRenderProps', 'SheetTabsRenderProps']],
@@ -120,7 +120,10 @@ const manualDocumentation = [
   ['website/docs/guides/validation-and-filtering.md', ['ValidationData', 'AutoFilterData']],
   ['website/docs/guides/frozen-panes-and-layout.md', ['SheetData', 'SheetOptions']],
   ['website/docs/guides/printing.md', ['TegoSheetHandle']],
-  ['website/docs/migration/from-x-data-spreadsheet.md', ['TegoSheet', 'TegoSheetHandle']],
+  [
+    'website/docs/migration/from-x-data-spreadsheet.md',
+    ['TegoSheet', 'SpreadsheetDocument', 'migrateLegacyWorkbook'],
+  ],
 ] as const;
 
 const approvedHandWrittenDocumentation = [
@@ -132,6 +135,7 @@ const approvedHandWrittenDocumentation = [
   'website/docs/roadmap/foundation.md',
   'website/docs/roadmap/host-integrations.md',
   'website/docs/roadmap/index.md',
+  'website/docs/roadmap/shipped.md',
   'website/docs/roadmap/template-printing.md',
 ].sort();
 
@@ -717,16 +721,21 @@ describe('documentation site contract', () => {
 
   it('typechecks every published package import in the real website program', () => {
     const diagnostics = websiteProgramDiagnostics(`
-      import { TegoSheet, type LocaleDefinition, type WorkbookData } from 'tego-sheet';
+      import {
+        createSpreadsheetDocument,
+        TegoSheet,
+        type LocaleDefinition,
+        type SpreadsheetDocument,
+      } from 'tego-sheet';
       import 'tego-sheet/styles.css';
       import { en } from 'tego-sheet/locales/en';
       import { zhCN } from 'tego-sheet/locales/zh-cn';
       import { de } from 'tego-sheet/locales/de';
       import { nl } from 'tego-sheet/locales/nl';
 
-      const workbook: WorkbookData = [];
+      const document: SpreadsheetDocument = createSpreadsheetDocument();
       const locales: readonly LocaleDefinition[] = [en, zhCN, de, nl];
-      void [TegoSheet, workbook, locales];
+      void [TegoSheet, document, locales];
     `);
 
     expect(

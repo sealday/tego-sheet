@@ -9,14 +9,14 @@ height; otherwise the browser cannot resolve that percentage to a useful grid vi
 has a 240px minimum height, but that minimum is not a replacement for a deliberate application layout.
 
 ```tsx
-import { TegoSheet } from 'tego-sheet';
+import { createSpreadsheetDocument, TegoSheet } from 'tego-sheet';
 import 'tego-sheet/styles.css';
 import './sheet-panel.css';
 
 export function SheetPanel() {
   return (
     <section className="sheet-panel" aria-label="Inventory workbook">
-      <TegoSheet defaultValue={[{ name: 'Inventory' }]} />
+      <TegoSheet defaultDocument={createSpreadsheetDocument({ sheetName: 'Inventory' })} />
     </section>
   );
 }

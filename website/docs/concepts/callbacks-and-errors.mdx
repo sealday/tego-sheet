@@ -5,22 +5,23 @@ title: Callbacks and Errors
 # Callbacks and Errors
 
 Callbacks expose committed workbook state and public interaction details without an event emitter or
-internal controller. `onChange` receives the complete snapshot and its `WorkbookChange` metadata.
+internal controller. `onDocumentChange` receives the complete snapshot and its `WorkbookChange` metadata.
 More specific callbacks follow the commit callback for the same user action.
 
 ```tsx
 import {
   TegoSheet,
   TegoSheetException,
+  createSpreadsheetDocument,
+  type SpreadsheetDocument,
   type TegoSheetError,
   type TegoSheetHandle,
   type WorkbookChange,
-  type WorkbookData,
 } from 'tego-sheet';
 import 'tego-sheet/styles.css';
 
-function recordChange(value: WorkbookData, change: WorkbookChange) {
-  console.log(change.id, change.kind, change.source, value);
+function recordChange(document: SpreadsheetDocument, change: WorkbookChange) {
+  console.log(change.id, change.kind, change.source, document);
 }
 
 function reportHandledError(error: TegoSheetError) {
@@ -31,8 +32,8 @@ export function ObservedSheet() {
   return (
     <div style={{ height: 480 }}>
       <TegoSheet
-        defaultValue={[{ name: 'Observed' }]}
-        onChange={recordChange}
+        defaultDocument={createSpreadsheetDocument({ sheetName: 'Observed' })}
+        onDocumentChange={recordChange}
         onCellEdit={(event) => console.log(event.address, event.text)}
         onPaste={(event) => console.log(event.target, event.values)}
         onSelectionChange={(selection) => console.log(selection.active)}
@@ -61,7 +62,7 @@ print failure. Invalid props and imperative contract violations throw `TegoSheet
 synchronously. Its `code`, `message`, `recoverable`, `cause`, and structured `error` fields are public.
 Do not catch and discard unknown exceptions from your own callbacks.
 
-External controlled-value replacements do not emit `onChange`. Event payloads and workbook snapshots
+External controlled-document replacements do not emit `onDocumentChange`. Event payloads and snapshots
 are isolated values; do not depend on object identity across commits.
 
 See [WorkbookChange](/docs/api/interfaces/WorkbookChange),

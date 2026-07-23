@@ -1,19 +1,18 @@
 import { parseSpreadsheetDocument } from '../../document/parse-document';
-import {
-  projectDocumentToLegacy,
-  projectLegacyToDocument,
-} from '../../document/runtime-projection';
+import { projectDocumentToLegacy, projectLegacyToDocument } from './runtime-projection';
 import type { SpreadsheetDocument } from '../../document/model/document';
 import type { CommandResult, WorkbookCommand } from '../commands/workbook-command';
 import type { ChangeSource } from '../types/changes';
 import { sheetId, type CellAddress, type SheetId } from '../types/coordinates';
 import type { ValidationResult } from '../types/validation';
+import { TegoSheetException } from '../errors/tego-sheet-exception';
 import {
   WorkbookController,
   type ControllerSnapshot,
   type DispatchOptions,
   type WorkbookControllerOptions,
 } from './workbook-controller';
+import { SubscriptionStore } from './subscription-store';
 
 export interface SpreadsheetControllerCommit<
   Result = void,
@@ -22,11 +21,11 @@ export interface SpreadsheetControllerCommit<
   readonly command: Command;
   readonly change: import('../types/changes').WorkbookChange;
   readonly result: Result;
-  readonly document: SpreadsheetDocument;
+  readonly ['document']: SpreadsheetDocument;
 }
 
 export interface SpreadsheetControllerSnapshot extends Omit<ControllerSnapshot, 'value'> {
-  readonly document: SpreadsheetDocument;
+  readonly ['document']: SpreadsheetDocument;
   /** Read-only projection consumed only by the current engine boundary. */
   readonly projection: ControllerSnapshot['value'];
 }
@@ -42,7 +41,7 @@ export interface SpreadsheetDispatchOptions extends Omit<DispatchOptions, 'befor
 
 export interface SpreadsheetControllerCheckpoint {
   readonly legacy: ReturnType<WorkbookController['checkpoint']>;
-  readonly document: SpreadsheetDocument;
+  readonly ['document']: SpreadsheetDocument;
 }
 
 function cloneFrozen<T>(value: T): T {
@@ -56,18 +55,27 @@ function cloneFrozen<T>(value: T): T {
  * Owns the single schema 2 runtime truth while adapting existing operations at one private boundary.
  */
 export class SpreadsheetDocumentController {
-  private document: SpreadsheetDocument;
+  private currentDocument: SpreadsheetDocument;
   private readonly legacy: WorkbookController;
-  private readonly subscribers = new Set<(event: SpreadsheetControllerEvent) => void>();
+  private readonly subscriptions = new SubscriptionStore<SpreadsheetControllerEvent>();
 
   constructor(input: SpreadsheetDocument, options: WorkbookControllerOptions = {}) {
     const parsed = parseSpreadsheetDocument(input);
-    if (!parsed.ok) throw new TypeError('A valid spreadsheet document is required');
-    this.document = parsed.document;
-    this.legacy = new WorkbookController(projectDocumentToLegacy(this.document), {
+    if (!parsed.ok) {
+      throw new TegoSheetException({
+        code: 'INVALID_DATA',
+        message: 'Spreadsheet document is invalid',
+        recoverable: false,
+        cause: parsed.diagnostics,
+      });
+    }
+    const { ['document']: parsedDocument } = parsed;
+    this.currentDocument = parsedDocument;
+    this.legacy = new WorkbookController(projectDocumentToLegacy(this.currentDocument), {
       ...options,
-      sheetIds: this.document.workbook.sheets.map((sheet) => sheetId(sheet.id)),
+      sheetIds: this.currentDocument.workbook.sheets.map((sheet) => sheetId(sheet.id)),
     });
+    this.refreshDocument();
   }
 
   get historySize() {
@@ -83,11 +91,7 @@ export class SpreadsheetDocumentController {
   }
 
   getDocument(): SpreadsheetDocument {
-    return cloneFrozen(this.document);
-  }
-
-  getValue() {
-    return this.legacy.getValue();
+    return cloneFrozen(this.currentDocument);
   }
 
   getSheetIds(): readonly SheetId[] {
@@ -107,7 +111,7 @@ export class SpreadsheetDocumentController {
     const { value: projection, ...metadata } = snapshot;
     return cloneFrozen({
       ...metadata,
-      document: this.document,
+      ['document']: this.currentDocument,
       projection,
     });
   }
@@ -117,8 +121,7 @@ export class SpreadsheetDocumentController {
   }
 
   subscribe(subscriber: (event: SpreadsheetControllerEvent) => void): () => void {
-    this.subscribers.add(subscriber);
-    return () => this.subscribers.delete(subscriber);
+    return this.subscriptions.subscribe(subscriber);
   }
 
   dispatch<Command extends WorkbookCommand>(
@@ -143,7 +146,7 @@ export class SpreadsheetDocumentController {
       command: outcome.commit.command,
       change: outcome.commit.change,
       result: outcome.commit.result,
-      document: this.document,
+      ['document']: this.currentDocument,
     }) as SpreadsheetControllerCommit<CommandResult<Command>, Command>;
     try {
       options.beforeNotify?.(commit as never);
@@ -156,7 +159,7 @@ export class SpreadsheetDocumentController {
         snapshot: this.getSnapshot(),
         commit,
       }) as SpreadsheetControllerEvent;
-      for (const subscriber of this.subscribers) subscriber(event);
+      this.subscriptions.publish(event);
     }
     return { status: 'committed', commit };
   }
@@ -172,22 +175,31 @@ export class SpreadsheetDocumentController {
   checkpoint(): SpreadsheetControllerCheckpoint {
     return {
       legacy: this.legacy.checkpoint(),
-      document: this.document,
+      ['document']: this.currentDocument,
     };
   }
 
   restore(checkpoint: SpreadsheetControllerCheckpoint): void {
     this.legacy.restore(checkpoint.legacy);
-    this.document = checkpoint.document;
+    const { ['document']: checkpointDocument } = checkpoint;
+    this.currentDocument = checkpointDocument;
   }
 
   replace(input: SpreadsheetDocument): void {
     const parsed = parseSpreadsheetDocument(input);
-    if (!parsed.ok) throw new TypeError('A valid spreadsheet document is required');
-    this.document = parsed.document;
+    if (!parsed.ok) {
+      throw new TegoSheetException({
+        code: 'INVALID_DATA',
+        message: 'Spreadsheet document is invalid',
+        recoverable: true,
+        cause: parsed.diagnostics,
+      });
+    }
+    const { ['document']: parsedDocument } = parsed;
+    this.currentDocument = parsedDocument;
     this.legacy.replace(
-      projectDocumentToLegacy(this.document),
-      this.document.workbook.sheets.map((sheet) => sheetId(sheet.id)),
+      projectDocumentToLegacy(this.currentDocument),
+      this.currentDocument.workbook.sheets.map((sheet) => sheetId(sheet.id)),
     );
   }
 
@@ -196,14 +208,14 @@ export class SpreadsheetDocumentController {
   }
 
   dispose(): void {
-    this.subscribers.clear();
+    this.subscriptions.dispose();
     this.legacy.dispose();
   }
 
   private refreshDocument(): void {
-    this.document = projectLegacyToDocument(
+    this.currentDocument = projectLegacyToDocument(
       this.legacy.getValue(),
-      this.document,
+      this.currentDocument,
       this.legacy.getSheetIds(),
     );
   }

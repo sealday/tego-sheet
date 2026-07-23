@@ -11,7 +11,7 @@ export const PLAYGROUND_MODES = Object.freeze([
 export type PlaygroundMode = (typeof PLAYGROUND_MODES)[number];
 
 export type PlaygroundCallbackName =
-  | 'onChange'
+  | 'onDocumentChange'
   | 'onActiveSheetChange'
   | 'onSelectionChange'
   | 'onCellEdit'

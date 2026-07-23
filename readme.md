@@ -1,6 +1,6 @@
 # tego-sheet
 
-`tego-sheet` is a React, TypeScript, and Canvas spreadsheet component. It keeps the sparse workbook JSON used by x-data-spreadsheet while replacing the constructor, global locale registry, and event emitter with a React-only API.
+`tego-sheet` is a React, TypeScript, and Canvas spreadsheet component built around one versioned `SpreadsheetDocument` model.
 
 ![Tego Sheet interactive workbench](docs/assets/tego-sheet-demo.png)
 
@@ -13,33 +13,28 @@ npm install tego-sheet react react-dom
 Import the component and its explicitly exported stylesheet:
 
 ```tsx
-import { TegoSheet } from 'tego-sheet';
+import { createSpreadsheetDocument, TegoSheet } from 'tego-sheet';
 import 'tego-sheet/styles.css';
 
 export function Workbook() {
-  return <TegoSheet defaultValue={[]} />;
+  return <TegoSheet defaultDocument={createSpreadsheetDocument()} />;
 }
 ```
 
 ## Uncontrolled and controlled workbooks
 
-`defaultValue` initializes an uncontrolled workbook. The component then owns edits; `onChange` still receives an isolated workbook and typed change metadata.
+`defaultDocument` initializes an uncontrolled document. The component then owns edits; `onDocumentChange` receives an isolated schema 2 snapshot and typed change metadata.
 
 ```tsx
-import { TegoSheet, type WorkbookData } from 'tego-sheet';
+import { createSpreadsheetDocument, TegoSheet } from 'tego-sheet';
 
-const initial: WorkbookData = [
-  {
-    name: 'Budget',
-    rows: { 0: { cells: { 0: { text: 'Item' }, 1: { text: 'Amount' } } } },
-  },
-];
+const initial = createSpreadsheetDocument({ sheetName: 'Budget' });
 
 export function Uncontrolled() {
   return (
     <TegoSheet
-      defaultValue={initial}
-      onChange={(next, change) => {
+      defaultDocument={initial}
+      onDocumentChange={(next, change) => {
         console.log(change.kind, next);
       }}
     />
@@ -47,36 +42,40 @@ export function Uncontrolled() {
 }
 ```
 
-Use `value` when the parent owns the accepted workbook. Keep the same `value` reference for unrelated renders; supply a new value to accept, reject, or replace optimistic edits.
+Use `document` when the parent owns the accepted snapshot. Keep the same reference for unrelated renders; supply a new document to accept, reject, or replace optimistic edits.
 
 ```tsx
 import { useState } from 'react';
-import { TegoSheet, type WorkbookData } from 'tego-sheet';
+import { createSpreadsheetDocument, TegoSheet } from 'tego-sheet';
 
 export function Controlled() {
-  const [value, setValue] = useState<WorkbookData>([]);
-  return <TegoSheet value={value} onChange={setValue} />;
+  const [document, setDocument] = useState(() => createSpreadsheetDocument());
+  return <TegoSheet document={document} onDocumentChange={setDocument} />;
 }
 ```
 
-Do not pass both `value` and `defaultValue`, and do not switch modes after mount.
+Do not pass both `document` and `defaultDocument`, and do not switch modes after mount.
 
 ## Callbacks and ref commands
 
-The public callbacks are `onChange`, `onActiveSheetChange`, `onSelectionChange`, `onCellEdit`, `onPaste`, and `onError`. They observe committed state; failed commands do not produce success callbacks.
+The public callbacks are `onDocumentChange`, `onActiveSheetChange`, `onSelectionChange`, `onCellEdit`, `onPaste`, and `onError`.
 
-`TegoSheetHandle` exposes `focus`, `getValue`, `getCell`, `getCellStyle`, `setCellText`, sheet add/delete/rename/activate commands, `undo`, `redo`, `validate`, `print`, and `recalculateLayout`. It never exposes the controller, Canvas engine, or mutable internal objects. Synchronous programmer-contract failures are instances of the public `TegoSheetException` class; recoverable browser failures use `onError`.
+`TegoSheetHandle` exposes `focus`, `getDocument`, `getCell`, `getCellStyle`, `setCellText`, sheet add/delete/rename/activate commands, `undo`, `redo`, `validate`, `print`, and `recalculateLayout`.
 
 ```tsx
 import { useRef } from 'react';
-import { TegoSheet, type TegoSheetHandle } from 'tego-sheet';
+import { createSpreadsheetDocument, TegoSheet, type TegoSheetHandle } from 'tego-sheet';
 
 export function WithRef() {
   const sheet = useRef<TegoSheetHandle>(null);
   return (
     <>
       <button onClick={() => sheet.current?.undo()}>Undo</button>
-      <TegoSheet ref={sheet} defaultValue={[]} onCellEdit={(event) => console.log(event.text)} />
+      <TegoSheet
+        ref={sheet}
+        defaultDocument={createSpreadsheetDocument()}
+        onCellEdit={(event) => console.log(event.text)}
+      />
     </>
   );
 }
@@ -87,7 +86,7 @@ export function WithRef() {
 Set `toolbar` or `sheetTabs` to `false` to hide that region, use the default by omitting the prop, or pass a typed renderer. Slot renderers receive a read-only view model and typed actions, never implementation objects.
 
 ```tsx
-import { TegoSheet, type ToolbarRenderer } from 'tego-sheet';
+import { createSpreadsheetDocument, TegoSheet, type ToolbarRenderer } from 'tego-sheet';
 
 const toolbar: ToolbarRenderer = (state) => (
   <button disabled={!state.canUndo} onClick={() => state.execute({ type: 'undo' })}>
@@ -96,7 +95,9 @@ const toolbar: ToolbarRenderer = (state) => (
 );
 
 export function CustomChrome() {
-  return <TegoSheet defaultValue={[]} toolbar={toolbar} sheetTabs={false} />;
+  return (
+    <TegoSheet defaultDocument={createSpreadsheetDocument()} toolbar={toolbar} sheetTabs={false} />
+  );
 }
 ```
 
@@ -105,11 +106,11 @@ export function CustomChrome() {
 Locales are isolated per component. Import only the dictionary you use; English remains the recursive fallback for partial custom messages.
 
 ```tsx
-import { TegoSheet } from 'tego-sheet';
+import { createSpreadsheetDocument, TegoSheet } from 'tego-sheet';
 import { zhCN } from 'tego-sheet/locales/zh-cn';
 
 export function ChineseWorkbook() {
-  return <TegoSheet defaultValue={[]} locale={zhCN} />;
+  return <TegoSheet defaultDocument={createSpreadsheetDocument()} locale={zhCN} />;
 }
 ```
 
@@ -117,7 +118,7 @@ The public locale subpaths are `tego-sheet/locales/en`, `/de`, `/nl`, and `/zh-c
 
 ## Legacy workbook JSON
 
-Existing sparse sheet, row, column, cell, style, merge, validation, filter, and extension-key data can be passed directly through `value` or `defaultValue`. `getValue()` and `onChange` return the compatible serialized shape. Runtime `SheetId` values are opaque UI identities and are never added to the JSON.
+Existing sparse workbook JSON must enter explicitly through `migrateLegacyWorkbook`. Pass the successful schema 2 result through `document` or `defaultDocument`; all runtime snapshots remain `SpreadsheetDocument`.
 
 See [Migration from x-data-spreadsheet](docs/migration-from-x-data-spreadsheet.md) for option mappings, the five intentional correctness fixes, and removal of the old imperative API.
 

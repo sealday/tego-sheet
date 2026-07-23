@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, expectTypeOf, it } from 'vitest';
-import type { WorkbookData } from 'tego-sheet';
+import type { SpreadsheetDocument } from 'tego-sheet';
+import type { WorkbookData } from '../../../src/core';
 import {
   PLAYGROUND_MODES,
   appendPlaygroundEvent,
@@ -53,7 +54,7 @@ describe('playground event history', () => {
 
     const result = appendPlaygroundEvent(existing, {
       sequence: 60,
-      callback: 'onChange',
+      callback: 'onDocumentChange',
       payload: { sequence: 60 },
     });
 
@@ -100,7 +101,7 @@ describe('playground event history', () => {
     };
     const [event] = appendPlaygroundEvent([], {
       sequence: 1,
-      callback: 'onChange',
+      callback: 'onDocumentChange',
       payload,
     });
     if (!event || typeof event.payload !== 'object' || event.payload === null) {
@@ -132,16 +133,16 @@ describe('playground preset registry', () => {
       {
         mode: 'uncontrolled',
         label: 'Uncontrolled',
-        description: 'Let TegoSheet own edits after reading defaultValue once at mount.',
+        description: 'Let TegoSheet own edits after reading defaultDocument once at mount.',
         docsLink: '/docs/concepts/controlled-and-uncontrolled',
-        publicApis: ['TegoSheet', 'defaultValue', 'onChange'],
+        publicApis: ['TegoSheet', 'defaultDocument', 'onDocumentChange'],
       },
       {
         mode: 'controlled',
         label: 'Controlled',
-        description: 'Accept each onChange snapshot into a parent-owned value.',
+        description: 'Accept each document snapshot into parent-owned state.',
         docsLink: '/docs/concepts/controlled-and-uncontrolled',
-        publicApis: ['TegoSheet', 'value', 'onChange'],
+        publicApis: ['TegoSheet', 'document', 'onDocumentChange'],
       },
       {
         mode: 'custom-chrome',
@@ -162,7 +163,7 @@ describe('playground preset registry', () => {
         label: 'Legacy JSON',
         description: 'Load compatible sparse workbook JSON and inspect its public snapshot.',
         docsLink: '/docs/migration/from-x-data-spreadsheet',
-        publicApis: ['TegoSheet', 'WorkbookInput', 'TegoSheetHandle.getValue'],
+        publicApis: ['migrateLegacyWorkbook', 'TegoSheet', 'TegoSheetHandle.getDocument'],
       },
     ]);
 
@@ -195,38 +196,19 @@ describe('playground preset registry', () => {
       const first = factories[index]!();
       const second = createFixture(mode);
 
-      expect(first).not.toBe(second);
-      expect(first[0]).not.toBe(second[0]);
-      expect(first[0]?.rows).not.toBe(second[0]?.rows);
-      expect(first[0]?.rows?.[0]).not.toBe(second[0]?.rows?.[0]);
-      expectTypeOf(second).toMatchTypeOf<WorkbookData>();
+      expect(first).toBeDefined();
+      expect(second.schemaVersion).toBe(2);
+      expect(Object.isFrozen(second)).toBe(true);
+      expectTypeOf(second).toMatchTypeOf<SpreadsheetDocument>();
     }
   });
 
   it('does not leak nested fixture mutations across calls', () => {
     const first = createFixture('legacy-json');
     const second = createFixture('legacy-json');
-    const firstCell = (first[0]?.rows?.[0] as { cells: { 0: { text: string } } } | undefined)
-      ?.cells[0];
-
-    expect(firstCell).toBeDefined();
-    firstCell!.text = 'changed';
-
-    expect(second[0]?.rows?.[0]).toEqual({
-      height: 0,
-      hide: false,
-      style: 0,
-      cells: {
-        0: {
-          text: '',
-          style: 0,
-          editable: false,
-          printable: false,
-          value: 0,
-        },
-        12: { text: 'edge' },
-      },
-    });
+    expect(first).not.toBe(second);
+    expect(first.workbook.sheets[0]?.cells).not.toBe(second.workbook.sheets[0]?.cells);
+    expect(Object.isFrozen(first.workbook.sheets[0]?.cells)).toBe(true);
   });
 
   it('uses the established compatible sparse legacy JSON shape', () => {

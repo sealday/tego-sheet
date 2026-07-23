@@ -1,4 +1,4 @@
-import type { WorkbookData } from 'tego-sheet';
+import { migrateLegacyWorkbook, type SpreadsheetDocument } from 'tego-sheet';
 import type { PlaygroundMode } from './playground-model';
 
 export interface PlaygroundPreset {
@@ -7,7 +7,7 @@ export interface PlaygroundPreset {
   readonly description: string;
   readonly docsLink: string;
   readonly publicApis: readonly string[];
-  readonly createFixture: () => WorkbookData;
+  readonly createFixture: () => unknown;
 }
 
 export const PLAYGROUND_LOCALES = Object.freeze([
@@ -17,7 +17,7 @@ export const PLAYGROUND_LOCALES = Object.freeze([
   Object.freeze({ label: 'Nederlands', subpath: 'tego-sheet/locales/nl' }),
 ] as const);
 
-export function createUncontrolledFixture(): WorkbookData {
+export function createUncontrolledFixture(): unknown {
   return [
     {
       name: 'Budget',
@@ -34,7 +34,7 @@ export function createUncontrolledFixture(): WorkbookData {
   ];
 }
 
-export function createControlledFixture(): WorkbookData {
+export function createControlledFixture(): unknown {
   return [
     {
       name: 'Inventory',
@@ -49,7 +49,7 @@ export function createControlledFixture(): WorkbookData {
   ];
 }
 
-export function createCustomChromeFixture(): WorkbookData {
+export function createCustomChromeFixture(): unknown {
   return [
     {
       name: 'Roadmap',
@@ -64,7 +64,7 @@ export function createCustomChromeFixture(): WorkbookData {
   ];
 }
 
-export function createLocalesFixture(): WorkbookData {
+export function createLocalesFixture(): unknown {
   return [
     {
       name: 'Locale demo',
@@ -81,7 +81,7 @@ export function createLocalesFixture(): WorkbookData {
   ];
 }
 
-export function createLegacyJsonFixture(): WorkbookData {
+export function createLegacyJsonFixture(): unknown {
   return [
     {
       name: '',
@@ -124,17 +124,17 @@ export const PLAYGROUND_PRESETS = {
   uncontrolled: freezePreset({
     mode: 'uncontrolled',
     label: 'Uncontrolled',
-    description: 'Let TegoSheet own edits after reading defaultValue once at mount.',
+    description: 'Let TegoSheet own edits after reading defaultDocument once at mount.',
     docsLink: '/docs/concepts/controlled-and-uncontrolled',
-    publicApis: ['TegoSheet', 'defaultValue', 'onChange'],
+    publicApis: ['TegoSheet', 'defaultDocument', 'onDocumentChange'],
     createFixture: createUncontrolledFixture,
   }),
   controlled: freezePreset({
     mode: 'controlled',
     label: 'Controlled',
-    description: 'Accept each onChange snapshot into a parent-owned value.',
+    description: 'Accept each document snapshot into parent-owned state.',
     docsLink: '/docs/concepts/controlled-and-uncontrolled',
-    publicApis: ['TegoSheet', 'value', 'onChange'],
+    publicApis: ['TegoSheet', 'document', 'onDocumentChange'],
     createFixture: createControlledFixture,
   }),
   'custom-chrome': freezePreset({
@@ -158,13 +158,15 @@ export const PLAYGROUND_PRESETS = {
     label: 'Legacy JSON',
     description: 'Load compatible sparse workbook JSON and inspect its public snapshot.',
     docsLink: '/docs/migration/from-x-data-spreadsheet',
-    publicApis: ['TegoSheet', 'WorkbookInput', 'TegoSheetHandle.getValue'],
+    publicApis: ['migrateLegacyWorkbook', 'TegoSheet', 'TegoSheetHandle.getDocument'],
     createFixture: createLegacyJsonFixture,
   }),
 } as const satisfies { readonly [Mode in PlaygroundMode]: PlaygroundPreset };
 
 Object.freeze(PLAYGROUND_PRESETS);
 
-export function createFixture(mode: PlaygroundMode): WorkbookData {
-  return PLAYGROUND_PRESETS[mode].createFixture();
+export function createFixture(mode: PlaygroundMode): SpreadsheetDocument {
+  const result = migrateLegacyWorkbook(PLAYGROUND_PRESETS[mode].createFixture());
+  if (!result.ok) throw new TypeError('Playground fixture migration failed');
+  return result.document;
 }

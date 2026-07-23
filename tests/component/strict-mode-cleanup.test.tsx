@@ -1,11 +1,12 @@
 import { cleanup, render, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { WorkbookController } from '../../src/core/controller/workbook-controller';
+import { SpreadsheetDocumentController } from '../../src/core/controller/spreadsheet-document-controller';
 import { CanvasEngine, InteractionManager } from '../../src/engine';
 import { TegoSheet } from '../../src';
 import { createCanvasHarness } from '../helpers/canvas-harness';
 import { ResourceLedger } from '../helpers/resource-ledger';
+import { testDocument } from '../helpers/workbook-builders';
 
 const zeroResources = Object.freeze({
   listener: 0,
@@ -97,9 +98,9 @@ it('balances Strict Mode resources and makes retained browser callbacks inert', 
     frame.release();
   });
 
-  const actualSubscribe = WorkbookController.prototype.subscribe;
-  vi.spyOn(WorkbookController.prototype, 'subscribe').mockImplementation(
-    function (this: WorkbookController, subscriber) {
+  const actualSubscribe = SpreadsheetDocumentController.prototype.subscribe;
+  vi.spyOn(SpreadsheetDocumentController.prototype, 'subscribe').mockImplementation(
+    function (this: SpreadsheetDocumentController, subscriber) {
       const release = ledger.acquire('subscription');
       const unsubscribe = actualSubscribe.call(this, subscriber);
       let active = true;
@@ -117,7 +118,7 @@ it('balances Strict Mode resources and makes retained browser callbacks inert', 
 
   const rendered = render(
     <StrictMode>
-      <TegoSheet defaultValue={[{ name: 'A' }]} />
+      <TegoSheet defaultDocument={testDocument([{ name: 'A' }])} />
     </StrictMode>,
   );
   await waitFor(() => expect(rendered.container.querySelector('canvas')).not.toBeNull());
@@ -147,9 +148,9 @@ it('cleans runtime resources in the specified ownership order', async () => {
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
   const order: string[] = [];
   let subscriptionSequence = 0;
-  const actualSubscribe = WorkbookController.prototype.subscribe;
-  vi.spyOn(WorkbookController.prototype, 'subscribe').mockImplementation(
-    function (this: WorkbookController, subscriber) {
+  const actualSubscribe = SpreadsheetDocumentController.prototype.subscribe;
+  vi.spyOn(SpreadsheetDocumentController.prototype, 'subscribe').mockImplementation(
+    function (this: SpreadsheetDocumentController, subscriber) {
       subscriptionSequence += 1;
       const label = `subscription-${subscriptionSequence}`;
       const unsubscribe = actualSubscribe.call(this, subscriber);
@@ -171,15 +172,15 @@ it('cleans runtime resources in the specified ownership order', async () => {
     order.push('engine');
     actualEngineDispose.call(this);
   });
-  const actualControllerDispose = WorkbookController.prototype.dispose;
-  vi.spyOn(WorkbookController.prototype, 'dispose').mockImplementation(
-    function (this: WorkbookController) {
+  const actualControllerDispose = SpreadsheetDocumentController.prototype.dispose;
+  vi.spyOn(SpreadsheetDocumentController.prototype, 'dispose').mockImplementation(
+    function (this: SpreadsheetDocumentController) {
       order.push('controller');
       actualControllerDispose.call(this);
     },
   );
 
-  const rendered = render(<TegoSheet defaultValue={[{}]} />);
+  const rendered = render(<TegoSheet defaultDocument={testDocument([{}])} />);
   await waitFor(() => expect(rendered.container.querySelector('canvas')).not.toBeNull());
   rendered.unmount();
 
@@ -231,7 +232,7 @@ it('disconnects a partially registered ResizeObserver and drains manager listene
     },
   );
 
-  expect(() => render(<TegoSheet defaultValue={[{}]} />)).toThrow(observeError);
+  expect(() => render(<TegoSheet defaultDocument={testDocument([{}])} />)).toThrow(observeError);
   expect(disconnect).toHaveBeenCalledOnce();
   expect(activeObservers).toBe(0);
   expect(managedAdds).toBeGreaterThan(0);
@@ -262,7 +263,7 @@ it('preserves observer setup and rollback failures in one aggregate', () => {
 
   let thrown: unknown;
   try {
-    render(<TegoSheet defaultValue={[{}]} />);
+    render(<TegoSheet defaultDocument={testDocument([{}])} />);
   } catch (error) {
     thrown = error;
   }

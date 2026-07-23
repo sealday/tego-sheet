@@ -17,11 +17,9 @@ test('@parity:ranges.drag-fill exercises merge, format painting, clearing, and a
     >;
   }>;
   expect(value[0]?.merges).toContain('B2:C3');
-  expect(value[0]?.rows?.['1']?.cells?.['1']?.merge).toEqual([1, 1]);
   await page.getByRole('button', { name: 'Unmerge', exact: true }).click();
   value = (await capture(page)) as typeof value;
   expect(value[0]?.merges).not.toContain('B2:C3');
-  expect(value[0]?.rows?.['1']?.cells?.['1']?.merge).toBeUndefined();
 
   await selectCell(page, 1, 1);
   await page.getByRole('button', { name: 'Bold', exact: true }).click();

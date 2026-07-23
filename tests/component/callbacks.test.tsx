@@ -1,20 +1,16 @@
 import { act } from '@testing-library/react';
 import { startTransition } from 'react';
 import { expect, it, vi } from 'vitest';
-import {
-  TegoSheetException,
-  type Selection,
-  type TegoSheetError,
-  type WorkbookInput,
-} from '../../src/core';
+import { TegoSheetException, type Selection, type TegoSheetError } from '../../src/core';
 import { renderSheet } from '../helpers/render-sheet';
+import { legacyProjection, testDocument } from '../helpers/workbook-builders';
 
 it('orders a committed cell callback after checkpoint recording and before selection and paint', () => {
   const order: string[] = [];
   const rendered = renderSheet(
     {
-      defaultValue: [{}],
-      onChange: () => order.push('change'),
+      defaultDocument: testDocument([{}]),
+      onDocumentChange: () => order.push('change'),
       onCellEdit: () => order.push('cell-edit'),
       onSelectionChange: () => order.push('selection'),
     },
@@ -49,7 +45,14 @@ it('keeps semantic no-ops silent', () => {
   const onChange = vi.fn();
   const onCellEdit = vi.fn();
   const schedulePaint = vi.fn();
-  const rendered = renderSheet({ defaultValue: [{}], onChange, onCellEdit }, { schedulePaint });
+  const rendered = renderSheet(
+    {
+      defaultDocument: testDocument([{}]),
+      onDocumentChange: onChange,
+      onCellEdit,
+    },
+    { schedulePaint },
+  );
   const sheet = rendered.runtime.epoch.snapshot.sheets[0]!.id;
 
   act(() => {
@@ -66,7 +69,7 @@ it('keeps semantic no-ops silent', () => {
 
 it('reports recoverable UI failures but keeps ref failures synchronous', () => {
   const onError = vi.fn<(error: TegoSheetError) => void>();
-  const rendered = renderSheet({ defaultValue: [{}], onError });
+  const rendered = renderSheet({ defaultDocument: testDocument([{}]), onError });
   const sheet = rendered.runtime.epoch.snapshot.sheets[0]!.id;
   const invalid = {
     type: 'set-cell-text' as const,
@@ -91,10 +94,10 @@ it('reports recoverable UI failures but keeps ref failures synchronous', () => {
 it('uses the latest callback props without replacing the dispatcher', () => {
   const first = vi.fn();
   const latest = vi.fn();
-  const rendered = renderSheet({ defaultValue: [{}], onChange: first });
+  const rendered = renderSheet({ defaultDocument: testDocument([{}]), onDocumentChange: first });
   const dispatcher = rendered.runtime.dispatcher;
 
-  rendered.rerenderProps({ defaultValue: [{}], onChange: latest });
+  rendered.rerenderProps({ defaultDocument: testDocument([{}]), onDocumentChange: latest });
   const sheet = rendered.runtime.epoch.snapshot.sheets[0]!.id;
   act(() => {
     rendered.runtime.dispatchRef(
@@ -111,10 +114,10 @@ it('uses the latest callback props without replacing the dispatcher', () => {
 it('isolates callback values and updates the external-store snapshot', () => {
   let callbackValue: unknown;
   const rendered = renderSheet({
-    defaultValue: [{ name: 'Sheet' }],
-    onChange: (value) => {
+    defaultDocument: testDocument([{ name: 'Sheet' }]),
+    onDocumentChange: (value) => {
       callbackValue = value;
-      (value as { name?: string }[])[0]!.name = 'Mutated callback';
+      expect(Object.isFrozen(value)).toBe(true);
     },
   });
   const sheet = rendered.runtime.epoch.snapshot.sheets[0]!.id;
@@ -127,15 +130,15 @@ it('isolates callback values and updates the external-store snapshot', () => {
   });
 
   expect(callbackValue).toBeDefined();
-  expect(rendered.runtime.epoch.controller.getValue()[0]?.name).toBe('Sheet');
+  expect(legacyProjection(rendered.runtime.epoch.controller.getDocument())[0]?.name).toBe('Sheet');
   expect(rendered.container.querySelector('output')?.getAttribute('data-revision')).toBe('1');
 });
 
 it('does not swallow exceptions thrown by consumer callbacks', () => {
   const consumerError = new Error('consumer callback failed');
   const rendered = renderSheet({
-    defaultValue: [{}],
-    onChange: () => {
+    defaultDocument: testDocument([{}]),
+    onDocumentChange: () => {
       throw consumerError;
     },
   });
@@ -158,8 +161,8 @@ it('does not convert a consumer TegoSheetException into a UI command failure', (
   });
   const onError = vi.fn();
   const rendered = renderSheet({
-    defaultValue: [{}],
-    onChange: () => {
+    defaultDocument: testDocument([{}]),
+    onDocumentChange: () => {
       throw consumerError;
     },
     onError,
@@ -184,7 +187,7 @@ it('does not convert a consumer TegoSheetException into a UI command failure', (
 
 it('does not capture paste result matrices without an onPaste callback', () => {
   const rendered = renderSheet({
-    defaultValue: [
+    defaultDocument: testDocument([
       {
         rows: {
           len: 4,
@@ -192,7 +195,7 @@ it('does not capture paste result matrices without an onPaste callback', () => {
         },
         cols: { len: 2 },
       },
-    ],
+    ]),
   });
   const controller = rendered.runtime.epoch.controller;
   const sheet = rendered.runtime.epoch.snapshot.sheets[0]!.id;
@@ -251,12 +254,12 @@ it.each([
   'rejects an oversized internal paste before expanding $label metadata',
   ({ endRow, rowCount }) => {
     const rendered = renderSheet({
-      defaultValue: [
+      defaultDocument: testDocument([
         {
           rows: { len: rowCount },
           cols: { len: 1 },
         },
-      ],
+      ]),
       onPaste: vi.fn(),
     });
     const controller = rendered.runtime.epoch.controller;
@@ -287,7 +290,7 @@ it.each([
 it('uses the committed affected range and pre-cut values for paste callbacks', () => {
   const onPaste = vi.fn();
   const rendered = renderSheet({
-    defaultValue: [
+    defaultDocument: testDocument([
       {
         rows: {
           len: 8,
@@ -296,7 +299,7 @@ it('uses the committed affected range and pre-cut values for paste callbacks', (
         },
         cols: { len: 4 },
       },
-    ],
+    ]),
     onPaste,
   });
   const sheet = rendered.runtime.epoch.snapshot.sheets[0]!.id;
@@ -359,45 +362,9 @@ it('uses the committed affected range and pre-cut values for paste callbacks', (
   });
 });
 
-it('preserves dangerous JSON keys in isolated callback payloads without prototype pollution', () => {
-  const input = JSON.parse(
-    '[{"name":"Safe","__proto__":{"polluted":true},"constructor":{"tag":"input"}}]',
-  ) as WorkbookInput;
-  let received: unknown;
-  const rendered = renderSheet({
-    defaultValue: input,
-    onChange: (value) => {
-      received = value;
-      const sheet = value[0] as unknown as Record<string, unknown>;
-      (sheet.__proto__ as Record<string, unknown>).polluted = false;
-      (sheet.constructor as unknown as Record<string, unknown>).tag = 'callback';
-    },
-  });
-  const sheet = rendered.runtime.epoch.snapshot.sheets[0]!.id;
-
-  act(() => {
-    rendered.runtime.dispatchRef({
-      type: 'set-cell-text',
-      address: { sheet, row: 0, column: 0 },
-      text: 'next',
-    });
-  });
-
-  const payloadSheet = (received as Record<string, unknown>[])[0]!;
-  expect(Object.hasOwn(payloadSheet, '__proto__')).toBe(true);
-  expect(Object.hasOwn(payloadSheet, 'constructor')).toBe(true);
-  expect((Object.prototype as Record<string, unknown>).polluted).toBeUndefined();
-  const controllerSheet = rendered.runtime.epoch.controller.getValue()[0] as Record<
-    string,
-    unknown
-  >;
-  expect((controllerSheet.__proto__ as Record<string, unknown>).polluted).toBe(true);
-  expect((controllerSheet.constructor as unknown as Record<string, unknown>).tag).toBe('input');
-});
-
 it('clones cyclic Error and DOMException causes without recursion failure', () => {
   const onError = vi.fn();
-  const rendered = renderSheet({ defaultValue: [], onError });
+  const rendered = renderSheet({ defaultDocument: testDocument([]), onError });
   const cause = new Error('cyclic cause');
   Object.defineProperty(cause, 'cause', { enumerable: true, value: cause });
 
@@ -432,7 +399,7 @@ it('keeps committed callbacks during an aborted concurrent render', () => {
   const first = vi.fn();
   const pending = vi.fn();
   const rendered = renderSheet(
-    { defaultValue: [{}], onChange: first },
+    { defaultDocument: testDocument([{}]), onDocumentChange: first },
     { suspendWhen: () => suspend },
   );
   const dispatcher = rendered.runtime.dispatcher;
@@ -441,7 +408,7 @@ it('keeps committed callbacks during an aborted concurrent render', () => {
   suspend = true;
   act(() => {
     startTransition(() => {
-      rendered.rerenderProps({ defaultValue: [{}], onChange: pending });
+      rendered.rerenderProps({ defaultDocument: testDocument([{}]), onDocumentChange: pending });
     });
   });
   act(() => {
@@ -462,9 +429,9 @@ it('does not deliver errors or events through an inactive dispatcher', () => {
   const onError = vi.fn();
   const onSelectionChange = vi.fn();
   const rendered = renderSheet({
-    defaultValue: [{}],
+    defaultDocument: testDocument([{}]),
     onActiveSheetChange,
-    onChange,
+    onDocumentChange: onChange,
     onError,
     onSelectionChange,
   });

@@ -2,8 +2,10 @@ import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react
 import { createRef, startTransition, Suspense, useLayoutEffect, useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { TegoSheet } from '../../src';
-import type { TegoSheetHandle, WorkbookInput } from '../../src';
+import type { TegoSheetHandle } from '../../src';
+import type { WorkbookInput } from '../../src/core';
 import { createCanvasHarness } from '../helpers/canvas-harness';
+import { legacyProjection, testDocument } from '../helpers/workbook-builders';
 
 let nextFrame = 1;
 let frames = new Map<number, FrameRequestCallback>();
@@ -35,11 +37,17 @@ it('keeps optimistic state across same-reference renders without mutating value'
     },
   ];
   const before = structuredClone(value);
+  const document = testDocument(value);
   const onChange = vi.fn();
   const onSelectionChange = vi.fn();
   const ref = createRef<TegoSheetHandle>();
   const rendered = render(
-    <TegoSheet ref={ref} value={value} onChange={onChange} onSelectionChange={onSelectionChange} />,
+    <TegoSheet
+      ref={ref}
+      document={document}
+      onDocumentChange={onChange}
+      onSelectionChange={onSelectionChange}
+    />,
   );
   await waitFor(() => expect(ref.current).not.toBeNull());
   const captured = ref.current!;
@@ -49,16 +57,21 @@ it('keeps optimistic state across same-reference renders without mutating value'
   const sheet = onSelectionChange.mock.lastCall![0].sheet;
 
   act(() => captured.setCellText({ sheet, row: 0, column: 0 }, 'optimistic'));
-  expect(captured.getValue()[0]?.rows?.[0]).toMatchObject({
+  expect(legacyProjection(captured.getDocument())[0]?.rows?.[0]).toMatchObject({
     cells: { 0: { text: 'optimistic' } },
   });
 
   rendered.rerender(
-    <TegoSheet ref={ref} value={value} onChange={onChange} onSelectionChange={onSelectionChange} />,
+    <TegoSheet
+      ref={ref}
+      document={document}
+      onDocumentChange={onChange}
+      onSelectionChange={onSelectionChange}
+    />,
   );
 
   expect(ref.current).toBe(captured);
-  expect(captured.getValue()[0]?.rows?.[0]).toMatchObject({
+  expect(legacyProjection(captured.getDocument())[0]?.rows?.[0]).toMatchObject({
     cells: { 0: { text: 'optimistic' } },
   });
   expect(onChange).toHaveBeenCalledOnce();
@@ -70,15 +83,15 @@ it('retains the last valid controlled document and reports each invalid referenc
   const invalid = { rows: { len: -1 } } as unknown as WorkbookInput;
   const onError = vi.fn();
   const ref = createRef<TegoSheetHandle>();
-  const rendered = render(<TegoSheet ref={ref} value={valid} onError={onError} />);
+  const rendered = render(<TegoSheet ref={ref} document={testDocument(valid)} onError={onError} />);
   await waitFor(() => expect(ref.current).not.toBeNull());
 
-  rendered.rerender(<TegoSheet ref={ref} value={invalid} onError={onError} />);
-  rendered.rerender(<TegoSheet ref={ref} value={invalid} onError={onError} />);
-  rendered.rerender(<TegoSheet ref={ref} value={valid} onError={onError} />);
-  rendered.rerender(<TegoSheet ref={ref} value={invalid} onError={onError} />);
+  rendered.rerender(<TegoSheet ref={ref} document={testDocument(invalid)} onError={onError} />);
+  rendered.rerender(<TegoSheet ref={ref} document={testDocument(invalid)} onError={onError} />);
+  rendered.rerender(<TegoSheet ref={ref} document={testDocument(valid)} onError={onError} />);
+  rendered.rerender(<TegoSheet ref={ref} document={testDocument(invalid)} onError={onError} />);
 
-  expect(ref.current!.getValue()[0]?.name).toBe('Valid');
+  expect(legacyProjection(ref.current!.getDocument())[0]?.name).toBe('Valid');
   expect(onError).toHaveBeenCalledOnce();
   expect(onError).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -88,19 +101,21 @@ it('retains the last valid controlled document and reports each invalid referenc
   );
 
   const anotherInvalid = { rows: { len: -1 } } as unknown as WorkbookInput;
-  rendered.rerender(<TegoSheet ref={ref} value={anotherInvalid} onError={onError} />);
+  rendered.rerender(
+    <TegoSheet ref={ref} document={testDocument(anotherInvalid)} onError={onError} />,
+  );
   expect(onError).toHaveBeenCalledTimes(2);
 });
 
 it('rejects switching a mounted controlled component to uncontrolled mode', async () => {
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
   const ref = createRef<TegoSheetHandle>();
-  const rendered = render(<TegoSheet ref={ref} value={[{}]} />);
+  const rendered = render(<TegoSheet ref={ref} document={testDocument([{}])} />);
   await waitFor(() => expect(ref.current).not.toBeNull());
 
-  expect(() => rendered.rerender(<TegoSheet ref={ref} defaultValue={[{}]} />)).toThrowError(
-    expect.objectContaining({ code: 'INVALID_COMMAND', recoverable: false }),
-  );
+  expect(() =>
+    rendered.rerender(<TegoSheet ref={ref} defaultDocument={testDocument([{}])} />),
+  ).toThrowError(expect.objectContaining({ code: 'INVALID_COMMAND', recoverable: false }));
 });
 
 it('reconciles a value replacement committed before the controller epoch activates', async () => {
@@ -114,12 +129,12 @@ it('reconciles a value replacement committed before the controller epoch activat
     // before the controller epoch's activation layout effect.
     // oxlint-disable-next-line react/react-compiler
     useLayoutEffect(() => setValue(replacement), []);
-    return <TegoSheet ref={ref} value={value} />;
+    return <TegoSheet ref={ref} document={testDocument(value)} />;
   }
 
   render(<Host />);
   await waitFor(() => expect(ref.current).not.toBeNull());
-  expect(ref.current!.getValue()[0]?.name).toBe('Replacement');
+  expect(legacyProjection(ref.current!.getDocument())[0]?.name).toBe('Replacement');
 });
 
 it('reports an invalid value committed before the controller epoch activates once', async () => {
@@ -134,12 +149,12 @@ it('reports an invalid value committed before the controller epoch activates onc
     // phase, before the controller epoch's activation layout effect.
     // oxlint-disable-next-line react/react-compiler
     useLayoutEffect(() => setValue(invalid), []);
-    return <TegoSheet ref={ref} value={value} onError={onError} />;
+    return <TegoSheet ref={ref} document={testDocument(value)} onError={onError} />;
   }
 
   render(<Host />);
   await waitFor(() => expect(ref.current).not.toBeNull());
-  expect(ref.current!.getValue()[0]?.name).toBe('Initial');
+  expect(legacyProjection(ref.current!.getDocument())[0]?.name).toBe('Initial');
   expect(onError).toHaveBeenCalledOnce();
   expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: 'INVALID_DATA' }));
 });
@@ -158,7 +173,7 @@ it('does not reconcile a controlled value from an aborted render', async () => {
   function Mounted({ value }: { readonly value: WorkbookInput }) {
     return (
       <Suspense fallback={<output data-suspended="" />}>
-        <TegoSheet ref={ref} value={value} />
+        <TegoSheet ref={ref} document={testDocument(value)} />
         <PendingBoundary />
       </Suspense>
     );
@@ -179,8 +194,8 @@ it('does not reconcile a controlled value from an aborted render', async () => {
   });
 
   expect(ref.current).toBe(captured);
-  expect(captured.getValue()).toHaveLength(2);
-  expect(captured.getValue()[1]).toMatchObject({
+  expect(legacyProjection(captured.getDocument())).toHaveLength(2);
+  expect(legacyProjection(captured.getDocument())[1]).toMatchObject({
     name: 'Optimistic sheet',
     rows: { 0: { cells: { 0: { text: 'optimistic' } } } },
   });

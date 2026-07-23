@@ -13,34 +13,23 @@ npm install tego-sheet
 ```
 
 Import the stylesheet once in your application entry point, then render the component inside a
-container with an explicit height. This example uses uncontrolled ownership: `defaultValue` is read
-only when the component mounts, and `onChange` receives a complete `WorkbookData` snapshot after
+container with an explicit height. This example uses uncontrolled ownership: `defaultDocument` is read
+only when the component mounts, and `onDocumentChange` receives a complete schema 2 snapshot after
 each committed mutation.
 
 ```tsx
-import { TegoSheet, type WorkbookData } from 'tego-sheet';
+import { createSpreadsheetDocument, TegoSheet } from 'tego-sheet';
 import 'tego-sheet/styles.css';
 
-const initialWorkbook: WorkbookData = [
-  {
-    name: 'Budget',
-    rows: {
-      len: 20,
-      0: { cells: { 0: { text: 'Item' }, 1: { text: 'Amount' } } },
-      1: { cells: { 0: { text: 'Hosting' }, 1: { text: '29' } } },
-      2: { cells: { 0: { text: 'Total' }, 1: { text: '=SUM(B2:B2)' } } },
-    },
-    cols: { len: 6 },
-  },
-];
+const initialDocument = createSpreadsheetDocument({ sheetName: 'Budget' });
 
 export function BudgetSheet() {
   return (
     <div style={{ height: 520, minWidth: 0 }}>
       <TegoSheet
-        defaultValue={initialWorkbook}
-        onChange={(value, change) => {
-          console.log(change.kind, JSON.stringify(value));
+        defaultDocument={initialDocument}
+        onDocumentChange={(document, change) => {
+          console.log(change.kind, JSON.stringify(document));
         }}
       />
     </div>

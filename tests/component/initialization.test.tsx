@@ -1,11 +1,9 @@
 import { act, render } from '@testing-library/react';
 import { StrictMode, useLayoutEffect } from 'react';
 import { expect, it, vi } from 'vitest';
-import {
-  WorkbookController,
-  type WorkbookControllerOptions,
-} from '../../src/core/controller/workbook-controller';
-import type { WorkbookInput } from '../../src/core';
+import { SpreadsheetDocumentController } from '../../src/core/controller/spreadsheet-document-controller';
+import type { WorkbookControllerOptions } from '../../src/core/controller/workbook-controller';
+import type { SpreadsheetDocument } from '../../src/document';
 import {
   createControllerExternalStore,
   type ControllerExternalStore,
@@ -15,6 +13,7 @@ import {
   useControllerEpoch,
 } from '../../src/react/hooks/use-controller-epoch';
 import { renderSheet } from '../helpers/render-sheet';
+import { legacyProjection, testDocument } from '../helpers/workbook-builders';
 
 type ActiveEpochLike = Pick<
   NonNullable<ReturnType<typeof useControllerEpoch>>,
@@ -55,7 +54,7 @@ function createTestEpochSlot(): TestEpochSlot {
 }
 
 it('commits slot transitions and drains listeners before rethrowing the first error', () => {
-  const controller = new WorkbookController([{}]);
+  const controller = new SpreadsheetDocumentController(testDocument([{}]));
   const store = createControllerExternalStore(controller);
   const slot = createControllerEpochSlot();
   const epoch: ActiveEpochLike = {
@@ -88,32 +87,34 @@ it('commits slot transitions and drains listeners before rethrowing the first er
 });
 
 it('initializes a single blank sheet from an empty object', () => {
-  const rendered = renderSheet({ defaultValue: {} });
+  const rendered = renderSheet({ defaultDocument: testDocument({}) });
 
   expect(rendered.container.querySelector('output')?.getAttribute('data-mode')).toBe(
     'uncontrolled',
   );
   expect(rendered.container.querySelector('output')?.getAttribute('data-sheets')).toBe('1');
-  expect(rendered.runtime.epoch.controller.getValue()).toHaveLength(1);
+  expect(legacyProjection(rendered.runtime.epoch.controller.getDocument())).toHaveLength(1);
 });
 
 it('preserves an empty array as an empty workbook', () => {
-  const rendered = renderSheet({ defaultValue: [] });
+  const rendered = renderSheet({ defaultDocument: testDocument([]) });
 
   expect(rendered.container.querySelector('output')?.getAttribute('data-sheets')).toBe('0');
-  expect(rendered.runtime.epoch.controller.getValue()).toEqual([]);
+  expect(legacyProjection(rendered.runtime.epoch.controller.getDocument())).toEqual([]);
 });
 
 it('reads defaultValue only for the controller epoch initialization', () => {
-  const rendered = renderSheet({ defaultValue: [{ name: 'Initial' }] });
+  const rendered = renderSheet({ defaultDocument: testDocument([{ name: 'Initial' }]) });
 
-  rendered.rerenderProps({ defaultValue: [{ name: 'Ignored' }] });
+  rendered.rerenderProps({ defaultDocument: testDocument([{ name: 'Ignored' }]) });
 
-  expect(rendered.runtime.epoch.controller.getValue()[0]?.name).toBe('Initial');
+  expect(legacyProjection(rendered.runtime.epoch.controller.getDocument())[0]?.name).toBe(
+    'Initial',
+  );
 });
 
 it('keeps the controller epoch usable through Strict Mode effect replay', () => {
-  const rendered = renderSheet({ defaultValue: [{}] }, { strict: true });
+  const rendered = renderSheet({ defaultDocument: testDocument([{}]) }, { strict: true });
   const sheet = rendered.runtime.epoch.snapshot.sheets[0]!.id;
 
   expect(() =>
@@ -131,9 +132,9 @@ it('creates no controller for an aborted render and disposes every Strict Mode e
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
   let created = 0;
   let disposed = 0;
-  const createController = (input: WorkbookInput, options: WorkbookControllerOptions) => {
+  const createController = (input: SpreadsheetDocument, options: WorkbookControllerOptions) => {
     created += 1;
-    const controller = new WorkbookController(input, options);
+    const controller = new SpreadsheetDocumentController(input, options);
     const dispose = controller.dispose.bind(controller);
     controller.dispose = () => {
       disposed += 1;
@@ -143,14 +144,14 @@ it('creates no controller for an aborted render and disposes every Strict Mode e
   };
 
   function Aborted(): never {
-    useControllerEpoch({ defaultValue: [{}] }, { createController });
+    useControllerEpoch({ defaultDocument: testDocument([{}]) }, { createController });
     throw new Error('abort render');
   }
   expect(() => render(<Aborted />)).toThrow('abort render');
   expect(created).toBe(0);
 
   function Mounted() {
-    const epoch = useControllerEpoch({ defaultValue: [{}] }, { createController });
+    const epoch = useControllerEpoch({ defaultDocument: testDocument([{}]) }, { createController });
     return <output>{epoch?.snapshot.revision ?? 'pending'}</output>;
   }
   const mounted = render(
@@ -175,7 +176,7 @@ it('rolls back an activated epoch when a slot listener throws during setup', () 
       throw activateError;
     }
   });
-  let controller: WorkbookController | undefined;
+  let controller: SpreadsheetDocumentController | undefined;
   let activatedEpoch: ActiveEpochLike | undefined;
   const dispose = vi.fn();
   const activate = slot.activate.bind(slot);
@@ -183,8 +184,8 @@ it('rolls back an activated epoch when a slot listener throws during setup', () 
     activatedEpoch = epoch;
     activate(epoch);
   };
-  const createController = (input: WorkbookInput, options: WorkbookControllerOptions) => {
-    controller = new WorkbookController(input, options);
+  const createController = (input: SpreadsheetDocument, options: WorkbookControllerOptions) => {
+    controller = new SpreadsheetDocumentController(input, options);
     const actualDispose = controller.dispose.bind(controller);
     controller.dispose = () => {
       dispose();
@@ -198,7 +199,7 @@ it('rolls back an activated epoch when a slot listener throws during setup', () 
   };
 
   function Mounted() {
-    useControllerEpoch({ defaultValue: [{}] }, runtime);
+    useControllerEpoch({ defaultDocument: testDocument([{}]) }, runtime);
     return null;
   }
 
@@ -221,10 +222,10 @@ it('rolls back an activated epoch when a slot listener throws during setup', () 
 it('disposes a created controller when initial store snapshot construction fails', () => {
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
   const snapshotError = new Error('initial snapshot failed');
-  let controller: WorkbookController | undefined;
+  let controller: SpreadsheetDocumentController | undefined;
   const dispose = vi.fn();
-  const createController = (input: WorkbookInput, options: WorkbookControllerOptions) => {
-    controller = new WorkbookController(input, options);
+  const createController = (input: SpreadsheetDocument, options: WorkbookControllerOptions) => {
+    controller = new SpreadsheetDocumentController(input, options);
     controller.getSnapshot = () => {
       throw snapshotError;
     };
@@ -237,7 +238,7 @@ it('disposes a created controller when initial store snapshot construction fails
   };
 
   function Mounted() {
-    useControllerEpoch({ defaultValue: [{}] }, { createController });
+    useControllerEpoch({ defaultDocument: testDocument([{}]) }, { createController });
     return null;
   }
 
@@ -259,7 +260,7 @@ it('preserves setup and both resource cleanup errors in order', () => {
       throw activateError;
     }
   });
-  let controller: WorkbookController | undefined;
+  let controller: SpreadsheetDocumentController | undefined;
   let activatedEpoch: ActiveEpochLike | undefined;
   const activate = slot.activate.bind(slot);
   slot.activate = (epoch) => {
@@ -272,8 +273,8 @@ it('preserves setup and both resource cleanup errors in order', () => {
     activate(epoch);
   };
   const dispose = vi.fn();
-  const createController = (input: WorkbookInput, options: WorkbookControllerOptions) => {
-    controller = new WorkbookController(input, options);
+  const createController = (input: SpreadsheetDocument, options: WorkbookControllerOptions) => {
+    controller = new SpreadsheetDocumentController(input, options);
     const actualDispose = controller.dispose.bind(controller);
     controller.dispose = () => {
       dispose();
@@ -288,7 +289,7 @@ it('preserves setup and both resource cleanup errors in order', () => {
   };
 
   function Mounted() {
-    useControllerEpoch({ defaultValue: [{}] }, runtime);
+    useControllerEpoch({ defaultDocument: testDocument([{}]) }, runtime);
     return null;
   }
 
@@ -334,8 +335,8 @@ it('attempts slot and both resource cleanups after making the epoch inactive', (
     }
   });
   const dispose = vi.fn();
-  const createController = (input: WorkbookInput, options: WorkbookControllerOptions) => {
-    const controller = new WorkbookController(input, options);
+  const createController = (input: SpreadsheetDocument, options: WorkbookControllerOptions) => {
+    const controller = new SpreadsheetDocumentController(input, options);
     const actualDispose = controller.dispose.bind(controller);
     controller.dispose = () => {
       dispose();
@@ -350,7 +351,7 @@ it('attempts slot and both resource cleanups after making the epoch inactive', (
   };
 
   function Mounted() {
-    const active = useControllerEpoch({ defaultValue: [{}] }, runtime);
+    const active = useControllerEpoch({ defaultDocument: testDocument([{}]) }, runtime);
     useLayoutEffect(() => {
       if (active !== null) epoch = active;
     }, [active]);
@@ -384,7 +385,7 @@ it('attempts slot and both resource cleanups after making the epoch inactive', (
 });
 
 it('makes an unmounted epoch synchronously inactive', () => {
-  const rendered = renderSheet({ defaultValue: [{}] });
+  const rendered = renderSheet({ defaultDocument: testDocument([{}]) });
   const staleDispatcher = rendered.runtime.dispatcher;
   const sheet = rendered.runtime.epoch.snapshot.sheets[0]!.id;
 
@@ -402,11 +403,11 @@ it('makes an unmounted epoch synchronously inactive', () => {
 it('disposes the controller once when store cleanup throws during epoch teardown', () => {
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
   const unsubscribeError = new Error('unsubscribe failed');
-  let controller: WorkbookController | undefined;
+  let controller: SpreadsheetDocumentController | undefined;
   let store: ControllerExternalStore | undefined;
   const dispose = vi.fn();
-  const createController = (input: WorkbookInput, options: WorkbookControllerOptions) => {
-    controller = new WorkbookController(input, options);
+  const createController = (input: SpreadsheetDocument, options: WorkbookControllerOptions) => {
+    controller = new SpreadsheetDocumentController(input, options);
     const actualSubscribe = controller.subscribe.bind(controller);
     controller.subscribe = (listener) => {
       const unsubscribe = actualSubscribe(listener);
@@ -424,7 +425,7 @@ it('disposes the controller once when store cleanup throws during epoch teardown
   };
 
   function Mounted() {
-    const epoch = useControllerEpoch({ defaultValue: [{}] }, { createController });
+    const epoch = useControllerEpoch({ defaultDocument: testDocument([{}]) }, { createController });
     useLayoutEffect(() => {
       if (epoch !== null) store = epoch.store;
     }, [epoch]);
@@ -451,11 +452,11 @@ it('aggregates store and controller errors after attempting both epoch cleanups'
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
   const unsubscribeError = new Error('unsubscribe failed');
   const controllerDisposeError = new Error('controller dispose failed');
-  let controller: WorkbookController | undefined;
+  let controller: SpreadsheetDocumentController | undefined;
   let store: ControllerExternalStore | undefined;
   const dispose = vi.fn();
-  const createController = (input: WorkbookInput, options: WorkbookControllerOptions) => {
-    controller = new WorkbookController(input, options);
+  const createController = (input: SpreadsheetDocument, options: WorkbookControllerOptions) => {
+    controller = new SpreadsheetDocumentController(input, options);
     const actualSubscribe = controller.subscribe.bind(controller);
     controller.subscribe = (listener) => {
       const unsubscribe = actualSubscribe(listener);
@@ -474,7 +475,7 @@ it('aggregates store and controller errors after attempting both epoch cleanups'
   };
 
   function Mounted() {
-    const epoch = useControllerEpoch({ defaultValue: [{}] }, { createController });
+    const epoch = useControllerEpoch({ defaultDocument: testDocument([{}]) }, { createController });
     useLayoutEffect(() => {
       if (epoch !== null) store = epoch.store;
     }, [epoch]);
@@ -499,7 +500,7 @@ it('aggregates store and controller errors after attempting both epoch cleanups'
 });
 
 it('catches up the external snapshot on delayed first subscribe and reconnect', () => {
-  const controller = new WorkbookController([{}]);
+  const controller = new SpreadsheetDocumentController(testDocument([{}]));
   const store = createControllerExternalStore(controller);
   const sheet = controller.getSheetIds()[0]!;
 
@@ -535,7 +536,7 @@ it('catches up the external snapshot on delayed first subscribe and reconnect', 
 });
 
 it('adopts a same-revision branch after a disconnected checkpoint restore', () => {
-  const controller = new WorkbookController([{}]);
+  const controller = new SpreadsheetDocumentController(testDocument([{}]));
   const base = controller.checkpoint();
   const store = createControllerExternalStore(controller);
   const sheet = controller.getSheetIds()[0]!;
@@ -564,7 +565,7 @@ it('adopts a same-revision branch after a disconnected checkpoint restore', () =
   store.subscribe(listener);
 
   expect(store.getSnapshot().revision).toBe(1);
-  expect(store.getSnapshot().value[0]?.rows?.[0]).toMatchObject({
+  expect(store.getSnapshot().projection[0]?.rows?.[0]).toMatchObject({
     cells: { 0: { text: 'branch B' } },
   });
   expect(listener).not.toHaveBeenCalled();
@@ -574,7 +575,7 @@ it('adopts a same-revision branch after a disconnected checkpoint restore', () =
 });
 
 it('makes a failed connection inert when rollback cleanup also throws', () => {
-  const controller = new WorkbookController([{}]);
+  const controller = new SpreadsheetDocumentController(testDocument([{}]));
   const store = createControllerExternalStore(controller);
   const sheet = controller.getSheetIds()[0]!;
   const connectError = new Error('snapshot refresh failed');
@@ -628,7 +629,7 @@ it('makes a failed connection inert when rollback cleanup also throws', () => {
 });
 
 it('notifies every current listener before rethrowing the first listener error', () => {
-  const controller = new WorkbookController([{}]);
+  const controller = new SpreadsheetDocumentController(testDocument([{}]));
   const store = createControllerExternalStore(controller);
   const sheet = controller.getSheetIds()[0]!;
   const firstError = new Error('first listener failed');
@@ -667,7 +668,7 @@ it('notifies every current listener before rethrowing the first listener error',
 });
 
 it('makes a disconnected connection inert before a failing cleanup', () => {
-  const controller = new WorkbookController([{}]);
+  const controller = new SpreadsheetDocumentController(testDocument([{}]));
   const actualSubscribe = controller.subscribe.bind(controller);
   const cleanupError = new Error('disconnect failed');
   const subscribe = vi.spyOn(controller, 'subscribe').mockImplementation((listener) => {
@@ -710,7 +711,7 @@ it('makes a disconnected connection inert before a failing cleanup', () => {
 });
 
 it('clears listeners even when controller cleanup throws during dispose', () => {
-  const controller = new WorkbookController([{}]);
+  const controller = new SpreadsheetDocumentController(testDocument([{}]));
   const actualSubscribe = controller.subscribe.bind(controller);
   const cleanupError = new Error('dispose disconnect failed');
   vi.spyOn(controller, 'subscribe').mockImplementation((listener) => {

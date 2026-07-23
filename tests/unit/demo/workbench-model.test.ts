@@ -10,10 +10,6 @@ import {
   type PreviewEvent,
 } from '../../../demo/src/workbench-model';
 
-interface MutableTestRow {
-  cells?: Record<number, { text?: string }>;
-}
-
 describe('fullscreen demo workbench model', () => {
   it('depends only on the public tego-sheet surface', () => {
     const modelSource = readFileSync(
@@ -29,35 +25,27 @@ describe('fullscreen demo workbench model', () => {
     const formatted = formatWorkbookJson(workbook);
 
     expect(formatted).toBe(formatWorkbookJson(workbook));
-    expect(formatted).toContain('\n  {\n    "name": "Budget"');
+    expect(formatted).toContain('"schemaVersion": 2');
+    expect(formatted).toContain('"name": "Budget"');
     expect(parseWorkbookJson(formatted)).toEqual(workbook);
   });
 
-  it('accepts and formats a single-sheet object without changing its JSON shape', () => {
+  it('explicitly migrates a single-sheet object to schema 2 JSON', () => {
     const source = '{"name":"Solo","rows":{"len":1}}';
     const parsed = parseWorkbookJson(source);
 
-    expect(parsed).toEqual({ name: 'Solo', rows: { len: 1 } });
-    expect(formatWorkbookJson(parsed)).toBe(
-      '{\n  "name": "Solo",\n  "rows": {\n    "len": 1\n  }\n}',
-    );
+    expect(parsed.schemaVersion).toBe(2);
+    expect(parsed.workbook.sheets[0]?.name).toBe('Solo');
+    expect(JSON.parse(formatWorkbookJson(parsed))).toEqual(parsed);
   });
 
   it('returns deeply independent example workbooks', () => {
     const first = cloneExampleWorkbook();
     const second = cloneExampleWorkbook();
-    const firstSheet = first[0];
-    const firstRow = firstSheet?.rows?.[1] as MutableTestRow | undefined;
-    const firstCell = firstRow?.cells?.[0];
-    const secondRow = second[0]?.rows?.[1] as MutableTestRow | undefined;
-
-    expect(firstSheet).toBeDefined();
-    expect(firstCell).toBeDefined();
-    Reflect.set(firstSheet!, 'name', 'Changed');
-    Reflect.set(firstCell!, 'text', 'Changed item');
-
-    expect(second[0]?.name).toBe('Budget');
-    expect(secondRow?.cells?.[0]?.text).toBe('Hosting');
+    expect(first).not.toBe(second);
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(first.workbook.sheets[0]?.name).toBe('Budget');
+    expect(second.workbook.sheets[0]?.name).toBe('Budget');
   });
 
   it('rejects invalid JSON without changing an existing workbook', () => {

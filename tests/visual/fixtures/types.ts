@@ -1,4 +1,5 @@
-import type { LocaleDefinition, WorkbookData } from 'tego-sheet';
+import type { LocaleDefinition } from 'tego-sheet';
+import type { WorkbookData } from '../../../src/core';
 import type { VisualFixtureName } from '../parity';
 
 export type VisualLocale = 'de' | 'en';

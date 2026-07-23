@@ -3,6 +3,7 @@ import { createRef } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { TegoSheet, type SheetId, type TegoSheetHandle } from '../../src';
 import { createCanvasHarness } from '../helpers/canvas-harness';
+import { legacyProjection, testDocument } from '../helpers/workbook-builders';
 
 beforeEach(() => {
   const context = createCanvasHarness().canvas.getContext('2d');
@@ -31,7 +32,7 @@ it('@parity:output.print-dialog runs validation, filter, sort, print, and tab op
   const rendered = render(
     <TegoSheet
       ref={ref}
-      defaultValue={[
+      defaultDocument={testDocument([
         {
           name: 'Data',
           rows: {
@@ -41,7 +42,7 @@ it('@parity:output.print-dialog runs validation, filter, sort, print, and tab op
           },
           cols: { len: 2 },
         },
-      ]}
+      ])}
     />,
   );
   await waitFor(() => expect(ref.current).not.toBeNull());
@@ -61,10 +62,10 @@ it('@parity:output.print-dialog runs validation, filter, sort, print, and tab op
     target: { value: 'number' },
   });
   fireEvent.click(rendered.getByRole('button', { name: /^save$/i }));
-  expect(ref.current!.getValue()[0]!.validations).toHaveLength(1);
+  expect(legacyProjection(ref.current!.getDocument())[0]!.validations).toHaveLength(1);
   fireEvent.click(rendered.getByRole('button', { name: /data validation/i }));
   fireEvent.click(rendered.getByRole('button', { name: /remove validation/i }));
-  expect(ref.current!.getValue()[0]!.validations ?? []).toHaveLength(0);
+  expect(legacyProjection(ref.current!.getDocument())[0]!.validations ?? []).toHaveLength(0);
 
   fireEvent.focusIn(root);
   fireEvent.keyDown(window, { key: 'a', ctrlKey: true });
@@ -77,7 +78,7 @@ it('@parity:output.print-dialog runs validation, filter, sort, print, and tab op
   expect(within(filter).getByLabelText('Empty')).toBeTruthy();
   expect(within(filter).queryByLabelText('Name')).toBeNull();
   fireEvent.click(rendered.getByRole('button', { name: /apply filter/i }));
-  expect(ref.current!.getValue()[0]!.autofilter?.ref).toBeDefined();
+  expect(legacyProjection(ref.current!.getDocument())[0]!.autofilter?.ref).toBeDefined();
 
   fireEvent.click(rendered.getByRole('button', { name: /print/i }));
   const printDialog = rendered.getByRole('dialog', { name: /print/i });
@@ -96,7 +97,7 @@ it('@parity:output.print-dialog runs validation, filter, sort, print, and tab op
 
 it('clears transient chrome when authority changes', async () => {
   const first = [{ name: 'A' }, { name: 'B' }];
-  const rendered = render(<TegoSheet value={first} />);
+  const rendered = render(<TegoSheet document={testDocument(first)} />);
   const paint = rendered.getByRole('button', { name: /paint format/i });
 
   fireEvent.click(paint);
@@ -104,13 +105,13 @@ it('clears transient chrome when authority changes', async () => {
   expect(rendered.getByRole('dialog', { name: /data validation/i })).toBeTruthy();
   expect(paint.getAttribute('aria-pressed')).toBe('true');
 
-  rendered.rerender(<TegoSheet value={first} readOnly />);
+  rendered.rerender(<TegoSheet document={testDocument(first)} readOnly />);
   await waitFor(() =>
     expect(rendered.queryByRole('dialog', { name: /data validation/i })).toBeNull(),
   );
   expect(paint.getAttribute('aria-pressed')).toBe('false');
 
-  rendered.rerender(<TegoSheet value={first} />);
+  rendered.rerender(<TegoSheet document={testDocument(first)} />);
   fireEvent.click(rendered.getByRole('button', { name: /^filter$/i }));
   expect(rendered.getByRole('dialog', { name: /^filter$/i })).toBeTruthy();
   fireEvent.click(rendered.getAllByRole('tab')[1]!);
@@ -118,12 +119,12 @@ it('clears transient chrome when authority changes', async () => {
 
   fireEvent.click(rendered.getByRole('button', { name: /print/i }));
   expect(rendered.getByRole('dialog', { name: /print/i })).toBeTruthy();
-  rendered.rerender(<TegoSheet value={[{ name: 'Replacement' }]} />);
+  rendered.rerender(<TegoSheet document={testDocument([{ name: 'Replacement' }])} />);
   await waitFor(() => expect(rendered.queryByRole('dialog', { name: /print/i })).toBeNull());
 });
 
 it('disables every mutating default control in read-only mode', async () => {
-  const rendered = render(<TegoSheet defaultValue={[{}]} readOnly />);
+  const rendered = render(<TegoSheet defaultDocument={testDocument([{}])} readOnly />);
   await waitFor(() =>
     expect(rendered.getByRole('button', { name: /bold/i }).hasAttribute('disabled')).toBe(true),
   );
@@ -138,13 +139,13 @@ it('rejects an oversized filter dialog once without opening it', async () => {
   const onError = vi.fn();
   const rendered = render(
     <TegoSheet
-      defaultValue={[
+      defaultDocument={testDocument([
         {
           rows: { len: 250_002 },
           cols: { len: 1 },
           autofilter: { ref: 'A1:A250002', filters: [] },
         },
-      ]}
+      ])}
       onError={onError}
     />,
   );
@@ -180,14 +181,14 @@ it('exposes legacy context actions and attributes context-menu mutations to thei
   const rendered = render(
     <TegoSheet
       ref={ref}
-      defaultValue={[
+      defaultDocument={testDocument([
         {
           rows: { len: 2, 0: { cells: { 0: { text: 'A', style: 0 }, 1: { text: 'B' } } } },
           cols: { len: 2 },
           styles: [{ color: '#f00' }],
         },
-      ]}
-      onChange={(_value, change) => changes.push(change)}
+      ])}
+      onDocumentChange={(_value, change) => changes.push(change)}
     />,
   );
   await waitFor(() => expect(ref.current).not.toBeNull());
@@ -214,7 +215,7 @@ it('exposes legacy context actions and attributes context-menu mutations to thei
   ])
     expect(within(menu).getByRole('menuitem', { name })).toBeTruthy();
   fireEvent.click(within(menu).getByRole('menuitem', { name: /disable export/i }));
-  expect(ref.current!.getValue()[0]).toMatchObject({
+  expect(legacyProjection(ref.current!.getDocument())[0]).toMatchObject({
     rows: { 0: { cells: { 0: { text: 'A', printable: false } } } },
   });
   expect(changes.at(-1)).toMatchObject({ kind: 'cell', source: 'context-menu' });
@@ -228,7 +229,9 @@ it('exposes legacy context actions and attributes context-menu mutations to thei
   fireEvent.contextMenu(root, { clientX: 70, clientY: 40 });
   menu = rendered.getByRole('menu', { name: /cell actions/i });
   fireEvent.click(within(menu).getByRole('menuitem', { name: /clear contents/i }));
-  expect(ref.current!.getValue()[0]).toMatchObject({ rows: { 0: { cells: { 0: {} } } } });
+  expect(legacyProjection(ref.current!.getDocument())[0]).toMatchObject({
+    rows: { 0: { cells: { 0: {} } } },
+  });
   expect(changes.at(-1)).toMatchObject({ kind: 'cell', source: 'context-menu' });
 
   fireEvent.contextMenu(root, { clientX: 70, clientY: 40 });
@@ -290,7 +293,7 @@ it('@parity:clipboard.menu-actions routes context clipboard modes through the in
   const rendered = render(
     <TegoSheet
       ref={ref}
-      defaultValue={[
+      defaultDocument={testDocument([
         {
           rows: {
             len: 1,
@@ -304,8 +307,8 @@ it('@parity:clipboard.menu-actions routes context clipboard modes through the in
           cols: { len: 2 },
           styles: [{ color: '#f00' }, { color: '#00f' }],
         },
-      ]}
-      onChange={(_value, change) => changes.push(change)}
+      ])}
+      onDocumentChange={(_value, change) => changes.push(change)}
     />,
   );
   await waitFor(() => expect(ref.current).not.toBeNull());
@@ -325,7 +328,7 @@ it('@parity:clipboard.menu-actions routes context clipboard modes through the in
     within(rendered.getByRole('menu')).getByRole('menuitem', { name: /paste values only/i }),
   );
   await waitFor(() =>
-    expect(ref.current!.getValue()[0]).toMatchObject({
+    expect(legacyProjection(ref.current!.getDocument())[0]).toMatchObject({
       rows: { 0: { cells: { 1: { text: 'source', style: 1 } } } },
     }),
   );
@@ -336,7 +339,7 @@ it('@parity:clipboard.menu-actions routes context clipboard modes through the in
     within(rendered.getByRole('menu')).getByRole('menuitem', { name: /paste format only/i }),
   );
   await waitFor(() =>
-    expect(ref.current!.getValue()[0]).toMatchObject({
+    expect(legacyProjection(ref.current!.getDocument())[0]).toMatchObject({
       rows: { 0: { cells: { 1: { text: 'source', style: 0 } } } },
     }),
   );
@@ -351,12 +354,16 @@ it('@parity:clipboard.menu-actions routes context clipboard modes through the in
     within(rendered.getByRole('menu')).getByRole('menuitem', { name: /paste values only/i }),
   );
   await waitFor(() =>
-    expect(ref.current!.getValue()[0]).toMatchObject({
+    expect(legacyProjection(ref.current!.getDocument())[0]).toMatchObject({
       rows: { 0: { cells: { 0: { text: 'source', style: 0 } } } },
     }),
   );
   expect(
-    (ref.current!.getValue()[0]!.rows!['0'] as { cells?: Record<string, unknown> }).cells?.['1'],
+    (
+      legacyProjection(ref.current!.getDocument())[0]!.rows!['0'] as {
+        cells?: Record<string, unknown>;
+      }
+    ).cells?.['1'],
   ).toBeUndefined();
   expect(changes.at(-1)).toMatchObject({ kind: 'clipboard', source: 'context-menu' });
 
@@ -368,18 +375,22 @@ it('@parity:clipboard.menu-actions routes context clipboard modes through the in
     within(rendered.getByRole('menu')).getByRole('menuitem', { name: /paste format only/i }),
   );
   await waitFor(() =>
-    expect(ref.current!.getValue()[0]).toMatchObject({
+    expect(legacyProjection(ref.current!.getDocument())[0]).toMatchObject({
       rows: { 0: { cells: { 1: { text: 'source', style: 0 } } } },
     }),
   );
   expect(
-    (ref.current!.getValue()[0]!.rows!['0'] as { cells?: Record<string, unknown> }).cells?.['0'],
+    (
+      legacyProjection(ref.current!.getDocument())[0]!.rows!['0'] as {
+        cells?: Record<string, unknown>;
+      }
+    ).cells?.['0'],
   ).toBeUndefined();
   expect(changes.at(-1)).toMatchObject({ kind: 'clipboard', source: 'context-menu' });
 
   rendered.rerender(
     <TegoSheet
-      defaultValue={[{ rows: { 0: { cells: { 0: { text: 'read only' } } } } }]}
+      defaultDocument={testDocument([{ rows: { 0: { cells: { 0: { text: 'read only' } } } } }])}
       readOnly
     />,
   );
@@ -406,7 +417,10 @@ it('reports context clipboard denial to the latest onError callback', async () =
   const first = vi.fn();
   const latest = vi.fn();
   const rendered = render(
-    <TegoSheet defaultValue={[{ rows: { 0: { cells: { 0: { text: 'A' } } } } }]} onError={first} />,
+    <TegoSheet
+      defaultDocument={testDocument([{ rows: { 0: { cells: { 0: { text: 'A' } } } } }])}
+      onError={first}
+    />,
   );
   const root = rendered.container.querySelector<HTMLElement>('[data-tego-sheet]')!;
   Object.defineProperties(root, {
@@ -416,7 +430,7 @@ it('reports context clipboard denial to the latest onError callback', async () =
   fireEvent(window, new Event('resize'));
   rendered.rerender(
     <TegoSheet
-      defaultValue={[{ rows: { 0: { cells: { 0: { text: 'A' } } } } }]}
+      defaultDocument={testDocument([{ rows: { 0: { cells: { 0: { text: 'A' } } } } }])}
       onError={latest}
     />,
   );
@@ -442,7 +456,7 @@ it('arms paint format and applies it to the next engine selection', async () => 
   const rendered = render(
     <TegoSheet
       ref={ref}
-      defaultValue={[
+      defaultDocument={testDocument([
         {
           rows: {
             len: 1,
@@ -451,8 +465,8 @@ it('arms paint format and applies it to the next engine selection', async () => 
           cols: { len: 2 },
           styles: [{ color: '#ff0000' }],
         },
-      ]}
-      onChange={onChange}
+      ])}
+      onDocumentChange={onChange}
       onSelectionChange={(selection) => {
         sheet = selection.sheet;
       }}

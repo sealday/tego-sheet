@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { TegoSheet } from '../../src';
 import type { TegoSheetHandle } from '../../src';
 import { createCanvasHarness } from '../helpers/canvas-harness';
+import { legacyProjection, testDocument } from '../helpers/workbook-builders';
 
 beforeEach(() => {
   const context = createCanvasHarness().canvas.getContext('2d');
@@ -23,10 +24,10 @@ afterEach(() => {
 
 it('treats an empty object as one blank sheet', async () => {
   const ref = createRef<TegoSheetHandle>();
-  const rendered = render(<TegoSheet ref={ref} defaultValue={{}} />);
+  const rendered = render(<TegoSheet ref={ref} defaultDocument={testDocument({})} />);
   await waitFor(() => expect(ref.current).not.toBeNull());
 
-  expect(ref.current!.getValue()).toHaveLength(1);
+  expect(legacyProjection(ref.current!.getDocument())).toHaveLength(1);
   expect(rendered.container.querySelector('canvas')).not.toBeNull();
   expect(rendered.getByRole('button', { name: /add sheet/i })).not.toBeNull();
 });
@@ -35,15 +36,20 @@ it('@parity:correction.empty-workbook-component preserves an empty array and let
   const onChange = vi.fn();
   const ref = createRef<TegoSheetHandle>();
   const rendered = render(
-    <TegoSheet ref={ref} defaultValue={[]} initialActiveSheetIndex={99} onChange={onChange} />,
+    <TegoSheet
+      ref={ref}
+      defaultDocument={testDocument([])}
+      initialActiveSheetIndex={99}
+      onDocumentChange={onChange}
+    />,
   );
   await waitFor(() => expect(ref.current).not.toBeNull());
 
-  expect(ref.current!.getValue()).toEqual([]);
+  expect(legacyProjection(ref.current!.getDocument())).toEqual([]);
   expect(rendered.container.querySelector('canvas')).toBeNull();
   fireEvent.click(rendered.getByRole('button', { name: /add sheet/i }));
 
-  expect(ref.current!.getValue()).toHaveLength(1);
+  expect(legacyProjection(ref.current!.getDocument())).toHaveLength(1);
   expect(onChange).toHaveBeenCalledOnce();
   await waitFor(() => expect(rendered.container.querySelector('canvas')).not.toBeNull());
   expect(requestAnimationFrame).toHaveBeenCalled();
@@ -51,13 +57,13 @@ it('@parity:correction.empty-workbook-component preserves an empty array and let
 
 it('disables print in the default and custom toolbar while no active sheet exists', async () => {
   let disabledActions: ReadonlySet<string> | undefined;
-  const rendered = render(<TegoSheet defaultValue={[]} />);
+  const rendered = render(<TegoSheet defaultDocument={testDocument([])} />);
   await waitFor(() => expect(rendered.getByRole('button', { name: /print/i })).toBeTruthy());
   expect(rendered.getByRole('button', { name: /print/i }).hasAttribute('disabled')).toBe(true);
 
   rendered.rerender(
     <TegoSheet
-      defaultValue={[]}
+      defaultDocument={testDocument([])}
       toolbar={(props) => {
         disabledActions = props.disabledActions;
         return null;
@@ -69,7 +75,7 @@ it('disables print in the default and custom toolbar while no active sheet exist
 
 it('disposes the canvas runtime when deleting the final sheet', async () => {
   const ref = createRef<TegoSheetHandle>();
-  const rendered = render(<TegoSheet ref={ref} defaultValue={[]} />);
+  const rendered = render(<TegoSheet ref={ref} defaultDocument={testDocument([])} />);
   await waitFor(() => expect(ref.current).not.toBeNull());
 
   const sheet = ref.current!.addSheet('Temporary');
@@ -78,16 +84,16 @@ it('disposes the canvas runtime when deleting the final sheet', async () => {
 
   await waitFor(() => expect(rendered.container.querySelector('canvas')).toBeNull());
   expect(cancelAnimationFrame).toHaveBeenCalled();
-  expect(ref.current!.getValue()).toEqual([]);
+  expect(legacyProjection(ref.current!.getDocument())).toEqual([]);
 });
 
 it('renders no mutation affordance for a read-only empty workbook', async () => {
   const ref = createRef<TegoSheetHandle>();
-  const rendered = render(<TegoSheet ref={ref} defaultValue={[]} readOnly />);
+  const rendered = render(<TegoSheet ref={ref} defaultDocument={testDocument([])} readOnly />);
   await waitFor(() => expect(ref.current).not.toBeNull());
 
   expect(rendered.getByText(/empty workbook/i)).not.toBeNull();
   expect(rendered.queryByRole('button', { name: /add sheet/i })).toBeNull();
   expect(() => ref.current!.addSheet()).toThrow(/read-only/i);
-  expect(ref.current!.getValue()).toEqual([]);
+  expect(legacyProjection(ref.current!.getDocument())).toEqual([]);
 });

@@ -110,8 +110,6 @@ const expectedPublicExports = [
   'Workbook',
   'WorkbookChange',
   'WorkbookChangeKind',
-  'WorkbookData',
-  'WorkbookInput',
   'WorkbookSettings',
   'createSpreadsheetDocument',
   'migrateLegacyWorkbook',
@@ -149,12 +147,13 @@ const structuredAliases = {
 
 const tegoSheetPropNames = [
   'className',
-  'defaultValue',
+  'defaultDocument',
+  'document',
   'initialActiveSheetIndex',
   'locale',
   'onActiveSheetChange',
   'onCellEdit',
-  'onChange',
+  'onDocumentChange',
   'onError',
   'onPaste',
   'onSelectionChange',
@@ -163,13 +162,12 @@ const tegoSheetPropNames = [
   'sheetTabs',
   'style',
   'toolbar',
-  'value',
 ] as const;
 
 const callbackNames = [
   'onActiveSheetChange',
   'onCellEdit',
-  'onChange',
+  'onDocumentChange',
   'onError',
   'onPaste',
   'onSelectionChange',

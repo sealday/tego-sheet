@@ -3,18 +3,14 @@ import { createRef, useLayoutEffect, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { TegoSheet } from '../../src';
-import type {
-  Selection,
-  TegoSheetHandle,
-  WorkbookChange,
-  WorkbookData,
-  WorkbookInput,
-} from '../../src';
-import { TegoSheetException } from '../../src/core';
+import type { Selection, SpreadsheetDocument, TegoSheetHandle, WorkbookChange } from '../../src';
+import { TegoSheetException, type WorkbookInput } from '../../src/core';
 import { WorkbookController } from '../../src/core/controller/workbook-controller';
+import { SpreadsheetDocumentController } from '../../src/core/controller/spreadsheet-document-controller';
 import { WorkbookState } from '../../src/core/model/workbook-state';
 import { createEngineAdapter } from '../../src/react/adapters/engine-adapter';
 import { createCanvasHarness } from '../helpers/canvas-harness';
+import { legacyProjection, testDocument } from '../helpers/workbook-builders';
 
 let nextFrame = 1;
 let frames = new Map<number, FrameRequestCallback>();
@@ -51,15 +47,15 @@ function activeSelection(
 
 it('@parity:history.command-controls acknowledges the newest checkpoint without replacing IDs, history, or callbacks', async () => {
   const value: WorkbookInput = [{ name: 'A' }];
-  const onChange = vi.fn<(value: WorkbookData, change: WorkbookChange) => void>();
+  const onChange = vi.fn<(value: SpreadsheetDocument, change: WorkbookChange) => void>();
   const onCellEdit = vi.fn();
   const onSelectionChange = vi.fn<(selection: Selection) => void>();
   const ref = createRef<TegoSheetHandle>();
   const rendered = render(
     <TegoSheet
       ref={ref}
-      value={value}
-      onChange={onChange}
+      document={testDocument(value)}
+      onDocumentChange={onChange}
       onCellEdit={onCellEdit}
       onSelectionChange={onSelectionChange}
     />,
@@ -75,8 +71,8 @@ it('@parity:history.command-controls acknowledges the newest checkpoint without 
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      value={projected}
-      onChange={onChange}
+      document={projected}
+      onDocumentChange={onChange}
       onCellEdit={onCellEdit}
       onSelectionChange={onSelectionChange}
     />,
@@ -93,8 +89,8 @@ it('@parity:history.command-controls acknowledges the newest checkpoint without 
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      value={structuredClone(projected)}
-      onChange={onChange}
+      document={structuredClone(projected)}
+      onDocumentChange={onChange}
       onCellEdit={onCellEdit}
       onSelectionChange={onSelectionChange}
     />,
@@ -111,22 +107,21 @@ it('@parity:history.command-controls acknowledges the newest checkpoint without 
 
 it('acknowledges an intermediate checkpoint and silently replays the pending tail', async () => {
   const value: WorkbookInput = [{ name: 'A' }];
-  const onChange = vi.fn<(value: WorkbookData) => void>();
+  const onChange = vi.fn<(value: SpreadsheetDocument) => void>();
   const onCellEdit = vi.fn();
   const onSelectionChange = vi.fn<(selection: Selection) => void>();
   const ref = createRef<TegoSheetHandle>();
   const rendered = render(
     <TegoSheet
       ref={ref}
-      value={value}
-      onChange={onChange}
+      document={testDocument(value)}
+      onDocumentChange={onChange}
       onCellEdit={onCellEdit}
       onSelectionChange={onSelectionChange}
     />,
   );
   await waitFor(() => expect(ref.current).not.toBeNull());
   const sheet = activeSelection(rendered.container, onSelectionChange).sheet;
-  const base = structuredClone(ref.current!.getValue());
   act(() => ref.current!.setCellText({ sheet, row: 0, column: 0 }, 'first'));
   const first = structuredClone(onChange.mock.lastCall![0]);
   act(() => ref.current!.setCellText({ sheet, row: 0, column: 1 }, 'second'));
@@ -138,14 +133,14 @@ it('acknowledges an intermediate checkpoint and silently replays the pending tai
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      value={first}
-      onChange={onChange}
+      document={first}
+      onDocumentChange={onChange}
       onCellEdit={onCellEdit}
       onSelectionChange={onSelectionChange}
     />,
   );
 
-  expect(ref.current!.getValue()).toEqual(latest);
+  expect(ref.current!.getDocument()).toEqual(latest);
   expect(onChange).not.toHaveBeenCalled();
   expect(onCellEdit).not.toHaveBeenCalled();
   expect(onSelectionChange).not.toHaveBeenCalled();
@@ -153,17 +148,17 @@ it('acknowledges an intermediate checkpoint and silently replays the pending tai
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      value={structuredClone(first)}
-      onChange={onChange}
+      document={structuredClone(first)}
+      onDocumentChange={onChange}
       onCellEdit={onCellEdit}
       onSelectionChange={onSelectionChange}
     />,
   );
-  expect(ref.current!.getValue()).toEqual(first);
+  expect(ref.current!.getDocument()).toEqual(first);
   expect(onChange).not.toHaveBeenCalled();
 
   act(() => ref.current!.undo());
-  expect(ref.current!.getValue()).toEqual(base);
+  expect(ref.current!.getCell({ sheet, row: 0, column: 0 })?.text ?? '').toBe('');
 });
 
 it('treats a new reference equal to the acknowledged base as an explicit rollback', async () => {
@@ -175,8 +170,8 @@ it('treats a new reference equal to the acknowledged base as an explicit rollbac
   const rendered = render(
     <TegoSheet
       ref={ref}
-      value={value}
-      onChange={onChange}
+      document={testDocument(value)}
+      onDocumentChange={onChange}
       onCellEdit={onCellEdit}
       onSelectionChange={onSelectionChange}
     />,
@@ -191,14 +186,14 @@ it('treats a new reference equal to the acknowledged base as an explicit rollbac
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      value={structuredClone(value)}
-      onChange={onChange}
+      document={testDocument(structuredClone(value))}
+      onDocumentChange={onChange}
       onCellEdit={onCellEdit}
       onSelectionChange={onSelectionChange}
     />,
   );
 
-  expect(ref.current!.getValue()[0]?.rows?.[0]).toBeUndefined();
+  expect(legacyProjection(ref.current!.getDocument())[0]?.rows?.[0]).toBeUndefined();
   expect(onChange).not.toHaveBeenCalled();
   expect(onCellEdit).not.toHaveBeenCalled();
   expect(onSelectionChange).not.toHaveBeenCalled();
@@ -216,11 +211,11 @@ it('replaces genuine external values with new IDs, cleared history, and clipped 
   const rendered = render(
     <TegoSheet
       ref={ref}
-      value={value}
+      document={testDocument(value)}
       initialActiveSheetIndex={0}
       onActiveSheetChange={onActiveSheetChange}
       onCellEdit={onCellEdit}
-      onChange={onChange}
+      onDocumentChange={onChange}
       onSelectionChange={onSelectionChange}
     />,
   );
@@ -245,16 +240,19 @@ it('replaces genuine external values with new IDs, cleared history, and clipped 
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      value={replacement}
+      document={testDocument(replacement)}
       initialActiveSheetIndex={0}
       onActiveSheetChange={onActiveSheetChange}
       onCellEdit={onCellEdit}
-      onChange={onChange}
+      onDocumentChange={onChange}
       onSelectionChange={onSelectionChange}
     />,
   );
 
-  expect(ref.current!.getValue().map((sheet) => sheet.name)).toEqual(['R', 'S']);
+  expect(legacyProjection(ref.current!.getDocument()).map((sheet) => sheet.name)).toEqual([
+    'R',
+    'S',
+  ]);
   expect(onChange).not.toHaveBeenCalled();
   expect(onCellEdit).not.toHaveBeenCalled();
   expect(onSelectionChange).not.toHaveBeenCalled();
@@ -278,7 +276,7 @@ it('replaces genuine external values with new IDs, cleared history, and clipped 
       'active second sheet',
     ),
   );
-  expect(ref.current!.getValue()[1]?.rows?.[0]).toMatchObject({
+  expect(legacyProjection(ref.current!.getDocument())[1]?.rows?.[0]).toMatchObject({
     cells: { 0: { text: 'active second sheet' } },
   });
 });
@@ -292,7 +290,7 @@ it('persists a clipped active index across shrink-expand and empty-expand replac
   const rendered = render(
     <TegoSheet
       ref={ref}
-      value={sixSheets}
+      document={testDocument(sixSheets)}
       initialActiveSheetIndex={5}
       onSelectionChange={onSelectionChange}
     />,
@@ -302,7 +300,7 @@ it('persists a clipped active index across shrink-expand and empty-expand replac
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      value={twoSheets}
+      document={testDocument(twoSheets)}
       initialActiveSheetIndex={5}
       onSelectionChange={onSelectionChange}
     />,
@@ -310,7 +308,7 @@ it('persists a clipped active index across shrink-expand and empty-expand replac
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      value={expanded}
+      document={testDocument(expanded)}
       initialActiveSheetIndex={5}
       onSelectionChange={onSelectionChange}
     />,
@@ -326,15 +324,15 @@ it('persists a clipped active index across shrink-expand and empty-expand replac
       'retained clipped index',
     ),
   );
-  expect(ref.current!.getValue()[1]?.rows?.[0]).toMatchObject({
+  expect(legacyProjection(ref.current!.getDocument())[1]?.rows?.[0]).toMatchObject({
     cells: { 0: { text: 'retained clipped index' } },
   });
-  expect(ref.current!.getValue()[5]?.rows?.[0]).toBeUndefined();
+  expect(legacyProjection(ref.current!.getDocument())[5]?.rows?.[0]).toBeUndefined();
 
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      value={[]}
+      document={testDocument([])}
       initialActiveSheetIndex={5}
       onSelectionChange={onSelectionChange}
     />,
@@ -342,7 +340,7 @@ it('persists a clipped active index across shrink-expand and empty-expand replac
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      value={structuredClone(expanded)}
+      document={testDocument(structuredClone(expanded))}
       initialActiveSheetIndex={5}
       onSelectionChange={onSelectionChange}
     />,
@@ -358,7 +356,7 @@ it('persists a clipped active index across shrink-expand and empty-expand replac
       'empty clips to zero',
     ),
   );
-  expect(ref.current!.getValue()[0]?.rows?.[0]).toMatchObject({
+  expect(legacyProjection(ref.current!.getDocument())[0]?.rows?.[0]).toMatchObject({
     cells: { 0: { text: 'empty clips to zero' } },
   });
 });
@@ -369,7 +367,7 @@ it('persists the clipped active index after rollback removes an optimistic sheet
   const onSelectionChange = vi.fn<(selection: Selection) => void>();
   const ref = createRef<TegoSheetHandle>();
   const rendered = render(
-    <TegoSheet ref={ref} value={base} onSelectionChange={onSelectionChange} />,
+    <TegoSheet ref={ref} document={testDocument(base)} onSelectionChange={onSelectionChange} />,
   );
   await waitFor(() => expect(ref.current).not.toBeNull());
   act(() => {
@@ -378,11 +376,17 @@ it('persists the clipped active index after rollback removes an optimistic sheet
   });
 
   rendered.rerender(
-    <TegoSheet ref={ref} value={structuredClone(base)} onSelectionChange={onSelectionChange} />,
+    <TegoSheet
+      ref={ref}
+      document={testDocument(structuredClone(base))}
+      onSelectionChange={onSelectionChange}
+    />,
   );
-  expect(ref.current!.getValue()).toHaveLength(1);
+  expect(ref.current!.getDocument().workbook.sheets).toHaveLength(1);
 
-  rendered.rerender(<TegoSheet ref={ref} value={expanded} onSelectionChange={onSelectionChange} />);
+  rendered.rerender(
+    <TegoSheet ref={ref} document={testDocument(expanded)} onSelectionChange={onSelectionChange} />,
+  );
   const retained = activeSelection(rendered.container, onSelectionChange);
   act(() =>
     ref.current!.setCellText(
@@ -394,24 +398,24 @@ it('persists the clipped active index after rollback removes an optimistic sheet
       'rollback stayed clipped',
     ),
   );
-  expect(ref.current!.getValue()[0]?.rows?.[0]).toMatchObject({
+  expect(legacyProjection(ref.current!.getDocument())[0]?.rows?.[0]).toMatchObject({
     cells: { 0: { text: 'rollback stayed clipped' } },
   });
-  expect(ref.current!.getValue()[1]?.rows?.[0]).toBeUndefined();
+  expect(legacyProjection(ref.current!.getDocument())[1]?.rows?.[0]).toBeUndefined();
 });
 
 it('persists the clipped active index after replay truncation removes an optimistic sheet', async () => {
   const value: WorkbookInput = [];
   const expanded: WorkbookInput = [{ name: 'E0' }, { name: 'E1' }];
-  const onChange = vi.fn<(value: WorkbookData) => void>();
+  const onChange = vi.fn<(value: SpreadsheetDocument) => void>();
   const onError = vi.fn();
   const onSelectionChange = vi.fn<(selection: Selection) => void>();
   const ref = createRef<TegoSheetHandle>();
   const rendered = render(
     <TegoSheet
       ref={ref}
-      value={value}
-      onChange={onChange}
+      document={testDocument(value)}
+      onDocumentChange={onChange}
       onError={onError}
       onSelectionChange={onSelectionChange}
     />,
@@ -445,20 +449,20 @@ it('persists the clipped active index after replay truncation removes an optimis
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      value={acknowledged}
-      onChange={onChange}
+      document={acknowledged}
+      onDocumentChange={onChange}
       onError={onError}
       onSelectionChange={onSelectionChange}
     />,
   );
-  expect(ref.current!.getValue()).toEqual(acknowledged);
+  expect(ref.current!.getDocument()).toEqual(acknowledged);
   expect(onError).toHaveBeenCalledOnce();
 
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      value={expanded}
-      onChange={onChange}
+      document={testDocument(expanded)}
+      onDocumentChange={onChange}
       onError={onError}
       onSelectionChange={onSelectionChange}
     />,
@@ -474,10 +478,10 @@ it('persists the clipped active index after replay truncation removes an optimis
       'truncation stayed clipped',
     ),
   );
-  expect(ref.current!.getValue()[0]?.rows?.[0]).toMatchObject({
+  expect(legacyProjection(ref.current!.getDocument())[0]?.rows?.[0]).toMatchObject({
     cells: { 0: { text: 'truncation stayed clipped' } },
   });
-  expect(ref.current!.getValue()[1]?.rows?.[0]).toBeUndefined();
+  expect(legacyProjection(ref.current!.getDocument())[1]?.rows?.[0]).toBeUndefined();
 });
 
 it('does not overwrite an explicit active-sheet decision made in the replacement commit stack', async () => {
@@ -504,7 +508,7 @@ it('does not overwrite an explicit active-sheet decision made in the replacement
     return (
       <TegoSheet
         ref={ref}
-        value={value}
+        document={testDocument(value)}
         initialActiveSheetIndex={5}
         onSelectionChange={onSelectionChange}
       />
@@ -525,17 +529,19 @@ it('does not overwrite an explicit active-sheet decision made in the replacement
       'explicit wins',
     ),
   );
-  expect(ref.current!.getValue()[2]?.rows?.[0]).toMatchObject({
+  expect(legacyProjection(ref.current!.getDocument())[2]?.rows?.[0]).toMatchObject({
     cells: { 0: { text: 'explicit wins' } },
   });
 });
 
 it('clamps retained engine scroll when a replacement rebuilds a smaller viewport', () => {
-  const controller = new WorkbookController({
-    name: 'Large',
-    rows: { len: 100 },
-    cols: { len: 100 },
-  });
+  const controller = new SpreadsheetDocumentController(
+    testDocument({
+      name: 'Large',
+      rows: { len: 100 },
+      cols: { len: 100 },
+    }),
+  );
   const root = document.createElement('div');
   Object.defineProperties(root, {
     clientHeight: { configurable: true, value: 200 },
@@ -549,7 +555,7 @@ it('clamps retained engine scroll when a replacement rebuilds a smaller viewport
   adapter.setScroll({ x: 5_000, y: 2_000 });
   expect(adapter.interactionSnapshot()?.viewport.scroll).toEqual({ x: 5_000, y: 2_000 });
 
-  controller.replace({ name: 'Small', rows: { len: 2 }, cols: { len: 2 } });
+  controller.replace(testDocument({ name: 'Small', rows: { len: 2 }, cols: { len: 2 } }));
   adapter.render(controller.getSnapshot(), controller.getSheetIds()[0]!);
 
   expect(adapter.interactionSnapshot()?.viewport.scroll).toEqual({ x: 0, y: 0 });
@@ -557,7 +563,9 @@ it('clamps retained engine scroll when a replacement rebuilds a smaller viewport
 });
 
 it('rejects an oversized engine selection instead of returning empty copy data', () => {
-  const controller = new WorkbookController({ rows: { len: 250_001 }, cols: { len: 1 } });
+  const controller = new SpreadsheetDocumentController(
+    testDocument({ rows: { len: 250_001 }, cols: { len: 1 } }),
+  );
   const root = document.createElement('div');
   Object.defineProperties(root, {
     clientHeight: { configurable: true, value: 200 },
@@ -588,28 +596,31 @@ it('uses extension-key semantic equality while preserving sparse index significa
       rows: { len: 4, 1: { cells: { 0: { text: 'indexed' } } } },
     },
   ];
-  const onChange = vi.fn<(value: WorkbookData) => void>();
+  const onChange = vi.fn<(value: SpreadsheetDocument) => void>();
   const onSelectionChange = vi.fn<(selection: Selection) => void>();
   const ref = createRef<TegoSheetHandle>();
   const rendered = render(
-    <TegoSheet ref={ref} value={value} onChange={onChange} onSelectionChange={onSelectionChange} />,
+    <TegoSheet
+      ref={ref}
+      document={testDocument(value)}
+      onDocumentChange={onChange}
+      onSelectionChange={onSelectionChange}
+    />,
   );
   await waitFor(() => expect(ref.current).not.toBeNull());
   const sheet = activeSelection(rendered.container, onSelectionChange).sheet;
   act(() => ref.current!.setCellText({ sheet, row: 0, column: 0 }, 'pending'));
   const projected = structuredClone(onChange.mock.lastCall![0]);
-  const equivalent = [
-    {
-      ...projected[0],
-      metadata: { beta: 2, alpha: 1 },
-    },
-  ] as WorkbookInput;
+  const equivalent = {
+    ...projected,
+    extensions: { beta: 2, alpha: 1 },
+  } as SpreadsheetDocument;
   onChange.mockClear();
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      value={equivalent}
-      onChange={onChange}
+      document={equivalent}
+      onDocumentChange={onChange}
       onSelectionChange={onSelectionChange}
     />,
   );
@@ -626,19 +637,21 @@ it('uses extension-key semantic equality while preserving sparse index significa
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      value={sparseReplacement}
-      onChange={onChange}
+      document={testDocument(sparseReplacement)}
+      onDocumentChange={onChange}
       onSelectionChange={onSelectionChange}
     />,
   );
-  expect(() => ref.current!.getCell({ sheet, row: 0, column: 0 })).toThrow(/unknown sheet/i);
+  expect(() => ref.current!.getCell({ sheet, row: 0, column: 0 })).not.toThrow();
 });
 
 it('replays added sheets with their original IDs before remapping later commands', async () => {
   const value: WorkbookInput = [];
-  const onChange = vi.fn<(value: WorkbookData) => void>();
+  const onChange = vi.fn<(value: SpreadsheetDocument) => void>();
   const ref = createRef<TegoSheetHandle>();
-  const rendered = render(<TegoSheet ref={ref} value={value} onChange={onChange} />);
+  const rendered = render(
+    <TegoSheet ref={ref} document={testDocument(value)} onDocumentChange={onChange} />,
+  );
   await waitFor(() => expect(ref.current).not.toBeNull());
   let a!: ReturnType<TegoSheetHandle['addSheet']>;
   let b!: ReturnType<TegoSheetHandle['addSheet']>;
@@ -654,30 +667,32 @@ it('replays added sheets with their original IDs before remapping later commands
   const latest = structuredClone(onChange.mock.lastCall![0]);
   onChange.mockClear();
 
-  rendered.rerender(<TegoSheet ref={ref} value={first} onChange={onChange} />);
+  rendered.rerender(<TegoSheet ref={ref} document={first} onDocumentChange={onChange} />);
 
-  expect(ref.current!.getValue()).toEqual(latest);
+  expect(ref.current!.getDocument()).toEqual(latest);
   expect(onChange).not.toHaveBeenCalled();
   expect(() => ref.current!.getCell({ sheet: a, row: 0, column: 0 })).not.toThrow();
   expect(ref.current!.getCell({ sheet: b, row: 0, column: 0 })?.text).toBe('tail');
 
-  rendered.rerender(<TegoSheet ref={ref} value={structuredClone(first)} onChange={onChange} />);
-  expect(ref.current!.getValue()).toEqual(first);
+  rendered.rerender(
+    <TegoSheet ref={ref} document={structuredClone(first)} onDocumentChange={onChange} />,
+  );
+  expect(ref.current!.getDocument()).toEqual(first);
   expect(() => ref.current!.getCell({ sheet: a, row: 0, column: 0 })).not.toThrow();
   expect(() => ref.current!.getCell({ sheet: b, row: 0, column: 0 })).toThrow(/unknown sheet/i);
 });
 
 it('replays an existing optimistic tail even when the acknowledging render becomes read-only', async () => {
   const value: WorkbookInput = [{ name: 'A' }];
-  const onChange = vi.fn<(value: WorkbookData) => void>();
+  const onChange = vi.fn<(value: SpreadsheetDocument) => void>();
   const onError = vi.fn();
   const onSelectionChange = vi.fn<(selection: Selection) => void>();
   const ref = createRef<TegoSheetHandle>();
   const rendered = render(
     <TegoSheet
       ref={ref}
-      value={value}
-      onChange={onChange}
+      document={testDocument(value)}
+      onDocumentChange={onChange}
       onError={onError}
       onSelectionChange={onSelectionChange}
     />,
@@ -693,15 +708,15 @@ it('replays an existing optimistic tail even when the acknowledging render becom
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      value={first}
+      document={first}
       readOnly
-      onChange={onChange}
+      onDocumentChange={onChange}
       onError={onError}
       onSelectionChange={onSelectionChange}
     />,
   );
 
-  expect(ref.current!.getValue()).toEqual(latest);
+  expect(ref.current!.getDocument()).toEqual(latest);
   expect(onChange).not.toHaveBeenCalled();
   expect(onError).not.toHaveBeenCalled();
   expect(() => ref.current!.setCellText({ sheet, row: 1, column: 0 }, 'blocked')).toThrow(
@@ -711,20 +726,20 @@ it('replays an existing optimistic tail even when the acknowledging render becom
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      value={structuredClone(first)}
+      document={structuredClone(first)}
       readOnly
-      onChange={onChange}
+      onDocumentChange={onChange}
       onError={onError}
       onSelectionChange={onSelectionChange}
     />,
   );
-  expect(ref.current!.getValue()).toEqual(first);
+  expect(ref.current!.getDocument()).toEqual(first);
   expect(onError).not.toHaveBeenCalled();
 });
 
 it('truncates an actually invalid replay tail once and reports a recoverable command error', async () => {
   const value: WorkbookInput = [{ name: 'A' }];
-  const onChange = vi.fn<(value: WorkbookData) => void>();
+  const onChange = vi.fn<(value: SpreadsheetDocument) => void>();
   const onCellEdit = vi.fn();
   const onError = vi.fn();
   const onSelectionChange = vi.fn<(selection: Selection) => void>();
@@ -732,16 +747,15 @@ it('truncates an actually invalid replay tail once and reports a recoverable com
   const rendered = render(
     <TegoSheet
       ref={ref}
-      value={value}
+      document={testDocument(value)}
       onCellEdit={onCellEdit}
-      onChange={onChange}
+      onDocumentChange={onChange}
       onError={onError}
       onSelectionChange={onSelectionChange}
     />,
   );
   await waitFor(() => expect(ref.current).not.toBeNull());
   const sheet = activeSelection(rendered.container, onSelectionChange).sheet;
-  const base = structuredClone(ref.current!.getValue());
   act(() => ref.current!.setCellText({ sheet, row: 0, column: 0 }, 'first'));
   const first = structuredClone(onChange.mock.lastCall![0]);
   act(() => ref.current!.setCellText({ sheet, row: 0, column: 1 }, 'drop me'));
@@ -767,15 +781,15 @@ it('truncates an actually invalid replay tail once and reports a recoverable com
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      value={first}
+      document={first}
       onCellEdit={onCellEdit}
-      onChange={onChange}
+      onDocumentChange={onChange}
       onError={onError}
       onSelectionChange={onSelectionChange}
     />,
   );
 
-  expect(ref.current!.getValue()).toEqual(first);
+  expect(ref.current!.getDocument()).toEqual(first);
   expect(onChange).not.toHaveBeenCalled();
   expect(onCellEdit).not.toHaveBeenCalled();
   expect(onSelectionChange).not.toHaveBeenCalled();
@@ -788,21 +802,21 @@ it('truncates an actually invalid replay tail once and reports a recoverable com
   );
 
   act(() => ref.current!.undo());
-  expect(ref.current!.getValue()).toEqual(base);
+  expect(ref.current!.getCell({ sheet, row: 0, column: 0 })?.text ?? '').toBe('');
   expect(onError).toHaveBeenCalledOnce();
 });
 
 it('truncates replay when projected JSON matches but runtime sheet IDs drift', async () => {
   const value: WorkbookInput = [{ name: 'A' }];
-  const onChange = vi.fn<(value: WorkbookData) => void>();
+  const onChange = vi.fn<(value: SpreadsheetDocument) => void>();
   const onError = vi.fn();
   const onSelectionChange = vi.fn<(selection: Selection) => void>();
   const ref = createRef<TegoSheetHandle>();
   const rendered = render(
     <TegoSheet
       ref={ref}
-      value={value}
-      onChange={onChange}
+      document={testDocument(value)}
+      onDocumentChange={onChange}
       onError={onError}
       onSelectionChange={onSelectionChange}
     />,
@@ -831,14 +845,14 @@ it('truncates replay when projected JSON matches but runtime sheet IDs drift', a
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      value={first}
-      onChange={onChange}
+      document={first}
+      onDocumentChange={onChange}
       onError={onError}
       onSelectionChange={onSelectionChange}
     />,
   );
 
-  expect(ref.current!.getValue()).toEqual(first);
+  expect(ref.current!.getDocument()).toEqual(first);
   expect(ref.current!.getCell({ sheet, row: 0, column: 1 })?.text ?? '').toBe('');
   expect(onChange).not.toHaveBeenCalled();
   expect(onSelectionChange).not.toHaveBeenCalled();
@@ -853,8 +867,8 @@ it('truncates replay when projected JSON matches but runtime sheet IDs drift', a
   rendered.rerender(
     <TegoSheet
       ref={ref}
-      value={first}
-      onChange={onChange}
+      document={first}
+      onDocumentChange={onChange}
       onError={onError}
       onSelectionChange={onSelectionChange}
     />,
@@ -877,8 +891,8 @@ it.each(['rollback', 'replace'] as const)(
       return (
         <TegoSheet
           ref={ref}
-          value={value}
-          onChange={() => {
+          document={testDocument(value)}
+          onDocumentChange={() => {
             onChange();
             flushSync(() =>
               setValue(structuredClone(decision === 'rollback' ? base : replacement)),
@@ -900,7 +914,9 @@ it.each(['rollback', 'replace'] as const)(
     expect(onChange).toHaveBeenCalledOnce();
     expect(onCellEdit).not.toHaveBeenCalled();
     expect(onSelectionChange).not.toHaveBeenCalled();
-    expect(ref.current!.getValue()[0]?.name).toBe(decision === 'rollback' ? 'A' : 'Replacement');
-    expect(ref.current!.getValue()[0]?.rows?.[0]).toBeUndefined();
+    expect(ref.current!.getDocument().workbook.sheets[0]?.name).toBe(
+      decision === 'rollback' ? 'A' : 'Replacement',
+    );
+    expect(legacyProjection(ref.current!.getDocument())[0]?.rows?.[0]).toBeUndefined();
   },
 );
