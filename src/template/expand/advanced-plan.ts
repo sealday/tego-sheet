@@ -1,5 +1,6 @@
 import { evaluateTemplateExpression, type TemplateFormatterRegistry } from '../expression';
 import type { CompiledTemplate, TemplateIRBinding, TemplateRegionNode } from '../model';
+import { structuralAxis } from './advanced-axis';
 import type { ExpansionScope } from './advanced-internals';
 
 export type AdvancedBinding = Extract<
@@ -33,16 +34,7 @@ export interface AllocationEstimate {
 
 export function createExpansionPlan(compiled: CompiledTemplate): ExpansionPlan {
   const bindingById = new Map(compiled.ir.bindings.map((binding) => [binding.id, binding]));
-  const axis = (
-    node: TemplateRegionNode,
-  ): 'vertical' | 'horizontal' | 'conditional' | undefined => {
-    const binding = bindingById.get(node.bindingId);
-    if (binding?.type === 'repeat-rows') return 'vertical';
-    if (binding?.type === 'repeat-columns') return 'horizontal';
-    if (binding?.type === 'conditional-range') return 'conditional';
-    if (binding?.type === 'repeat-range' && binding.axis !== 'both') return binding.axis;
-    return undefined;
-  };
+  const axis = (node: TemplateRegionNode) => structuralAxis(bindingById.get(node.bindingId));
   const horizontalNestedIds = new Set<string>();
   const mixedTreeIds = new Set<string>();
   const collectMixedTree = (node: TemplateRegionNode): void => {

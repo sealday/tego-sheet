@@ -1237,6 +1237,87 @@ describe('TP2 advanced template structures', () => {
     expect(tick).not.toHaveBeenCalled();
   });
 
+  it('expands a pure horizontal tree made from repeat-range bindings', () => {
+    const { document, template } = source([
+      {
+        id: 'outer-range',
+        type: 'repeat-range',
+        range: range(0, 1, 0, 2),
+        source: 'groups',
+        axis: 'horizontal',
+        empty: 'remove',
+      },
+      {
+        id: 'inner-range',
+        type: 'repeat-range',
+        range: range(0, 1, 1, 1),
+        source: 'item.values',
+        axis: 'horizontal',
+        empty: 'remove',
+      },
+      {
+        id: 'inner-value',
+        type: 'value',
+        target: { sheetId: 'sheet-1', row: 0, column: 1 },
+        expression: 'item',
+      },
+    ] as never);
+    const compiled = compileSpreadsheetTemplate(document, template.id, options).template!;
+    const expanded = expandAdvancedTemplate(
+      compiled,
+      { groups: [{ values: ['A', 'B'] }, { values: ['C'] }] },
+      options.limits,
+    );
+
+    expect(expanded.diagnostics).toEqual([]);
+    expect(
+      expanded.document?.workbook.sheets[0]?.cells
+        .filter(({ cell }) => cell.input.type === 'string')
+        .map(({ column, cell }) => [column, cell.input.type === 'string' ? cell.input.value : '']),
+    ).toEqual(
+      expect.arrayContaining([
+        [1, 'A'],
+        [2, 'B'],
+        [5, 'C'],
+      ]),
+    );
+    expect(
+      expanded.structuralMappings.filter(({ bindingId }) => bindingId === 'inner-range'),
+    ).toHaveLength(3);
+  });
+
+  it('preflights the column limit of a mixed horizontal root', () => {
+    const { document, template } = source([
+      {
+        id: 'outer-columns',
+        type: 'repeat-columns',
+        range: range(0, 1, 0, 1),
+        source: 'groups',
+        empty: 'remove',
+      },
+      {
+        id: 'inner-rows',
+        type: 'repeat-rows',
+        range: range(1, 1, 0, 1),
+        source: 'item.values',
+        empty: 'remove',
+        pageBreak: 'auto',
+      },
+    ] as never);
+    const compiled = compileSpreadsheetTemplate(document, template.id, options).template!;
+    const expanded = expandAdvancedTemplate(
+      compiled,
+      { groups: Array.from({ length: 10 }, () => ({ values: [] })) },
+      { ...options.limits, maxExpandedColumns: 2 },
+    );
+
+    expect(expanded.document).toBeUndefined();
+    expect(expanded.structuralMappings).toEqual([]);
+    expect(expanded.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'EXPANSION_LIMIT_EXCEEDED' }),
+    );
+  });
+
   it('counts value-created cells before cloning an empty advanced range', () => {
     const base = createSpreadsheetDocument({
       id: 'blank-allocation',
