@@ -15,7 +15,6 @@
 | 0     | Atomic Command / Transaction                                 | planned | [Foundation](foundation.md)                             |
 | 0     | Formula dependency and number-format core                    | planned | [Foundation](foundation.md)                             |
 | 0     | Shared render semantics and Canvas accessibility             | planned | [Foundation](foundation.md)                             |
-| 0     | Minimal cell-type and adapter registry kernel                | planned | [Foundation](foundation.md)                             |
 | 1     | Sheet, selection and range print targets                     | planned | [Template printing](template-printing.md)               |
 | 1     | Safe scalar bindings, repeat rows and conditional ranges     | planned | [Template printing](template-printing.md)               |
 | 1     | Deterministic pagination and print profiles                  | planned | [Template printing](template-printing.md)               |

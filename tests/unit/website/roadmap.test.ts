@@ -35,10 +35,10 @@ const miniRfcs = {
 describe('product roadmap data', () => {
   it('contains the approved capabilities in dependency order', () => {
     expect(roadmapPhases.map((phase) => phase.id)).toEqual([0, 1, 2, 3, 4]);
-    expect(roadmapItems).toHaveLength(32);
+    expect(roadmapItems).toHaveLength(31);
     expect(allRoadmapItems).toHaveLength(roadmapItems.length + shippedRoadmapItems.length);
-    expect(shippedRoadmapItems.map((item) => item.id)).toEqual(['workbook-2']);
-    expect(new Set(roadmapItems.map((item) => item.id))).toHaveProperty('size', 32);
+    expect(shippedRoadmapItems.map((item) => item.id)).toEqual(['workbook-2', 'extension-kernel']);
+    expect(new Set(roadmapItems.map((item) => item.id))).toHaveProperty('size', 31);
     expect(roadmapItems.every((item) => item.status === 'planned')).toBe(true);
     expect(roadmapItems[0]?.title).toBe('Atomic Command / Transaction');
     expect(
@@ -148,7 +148,7 @@ describe('product roadmap data', () => {
           expect(miniRfc, `${file} ${id} must include ${section}`).toMatch(section);
         }
 
-        expect(miniRfc).toContain(id === 'F1' ? 'shipped' : 'planned');
+        expect(miniRfc).toContain(id === 'F1' || id === 'F5' ? 'shipped' : 'planned');
       }
     }
   });

@@ -113,6 +113,7 @@ export const allRoadmapItems = [
     'Minimal cell-type and adapter registry kernel',
     'Typed internal composition without exposing an unsafe plugin surface.',
     '/docs/roadmap/foundation',
+    'shipped',
   ),
   item(
     'print-targets',
