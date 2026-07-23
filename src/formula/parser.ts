@@ -146,12 +146,24 @@ function columnIndex(label: string): number {
 function referenceFrom(token: Token, sheetToken?: string): FormulaReference {
   const match = /^(\$?)([A-Z]+)(\$?)([1-9]\d*)$/u.exec(token.value);
   if (match === null) throw new FormulaSyntaxError('Invalid A1 reference', token.span);
+  const column = columnIndex(match[2] as string);
+  const row = Number(match[4]) - 1;
+  if (
+    !Number.isSafeInteger(column) ||
+    !Number.isSafeInteger(row) ||
+    column < 0 ||
+    column >= 16_384 ||
+    row < 0 ||
+    row >= 1_048_576
+  ) {
+    throw new FormulaSyntaxError('Reference exceeds Excel worksheet coordinates', token.span);
+  }
   return {
     ...(sheetToken === undefined ? {} : { sheetToken }),
     columnAbsolute: match[1] === '$',
-    column: columnIndex(match[2] as string),
+    column,
     rowAbsolute: match[3] === '$',
-    row: Number(match[4]) - 1,
+    row,
   };
 }
 

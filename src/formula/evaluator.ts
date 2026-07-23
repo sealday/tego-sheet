@@ -117,6 +117,20 @@ function snapshotGraph(graph: FormulaDependencyGraph): FormulaDependencyGraph {
   };
 }
 
+function snapshotDiagnostics(
+  diagnostics: ReadonlyMap<string, readonly FormulaDiagnostic[]>,
+): ReadonlyMap<string, readonly FormulaDiagnostic[]> {
+  return new Map(
+    [...diagnostics].map(([address, values]) => [
+      address,
+      values.map((diagnostic) => ({
+        ...diagnostic,
+        ...(diagnostic.span === undefined ? {} : { span: { ...diagnostic.span } }),
+      })),
+    ]),
+  );
+}
+
 function scalar(value: FormulaValue): ScalarFormulaValue {
   return value.type === 'array' ? { type: 'error', value: '#VALUE!' } : value;
 }
@@ -297,7 +311,7 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
           return new Map(state.values);
         },
         get diagnostics() {
-          return new Map(state.diagnostics);
+          return snapshotDiagnostics(state.diagnostics);
         },
       });
       formulaProgramStates.set(program, state);
@@ -365,6 +379,11 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
           }
         }
       }
+      for (const [address, diagnostics] of program.diagnostics) {
+        const retained = diagnostics.filter(({ code }) => code !== 'FORMULA_CIRCULAR_REFERENCE');
+        if (retained.length === 0) program.diagnostics.delete(address);
+        else if (retained.length !== diagnostics.length) program.diagnostics.set(address, retained);
+      }
       const cycles = findCycles(program.graph, program.formulas);
       const cycleAddresses = new Set(cycles.flat());
       for (const cycle of cycles) {
@@ -392,7 +411,12 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
           return snapshot;
         }
         const ast = program.formulas.get(address);
-        if (ast === undefined) return inputValue(program.inputs.get(address) ?? { type: 'blank' });
+        if (ast === undefined) {
+          const input = program.inputs.get(address);
+          if (input?.type === 'formula' && values.has(address))
+            return values.get(address) as FormulaValue;
+          return inputValue(input ?? { type: 'blank' });
+        }
         if (evaluating.has(address)) return { type: 'error', value: '#REF!' };
         evaluationCount += 1;
         if (evaluationCount > maximumEvaluations) {
@@ -478,6 +502,13 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
           }
           return { type: 'error', value: '#NAME?' };
         }
+        if (
+          ast.arguments.length < definition.parameters.minimum ||
+          (definition.parameters.maximum !== undefined &&
+            ast.arguments.length > definition.parameters.maximum)
+        ) {
+          return { type: 'error', value: '#VALUE!' };
+        }
         if (definition.mode === 'async') {
           const address = [...evaluating].at(-1);
           if (address !== undefined) {
@@ -522,13 +553,6 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
             arguments_.push(value);
           }
         }
-        if (
-          arguments_.length < definition.parameters.minimum ||
-          (definition.parameters.maximum !== undefined &&
-            arguments_.length > definition.parameters.maximum)
-        ) {
-          return { type: 'error', value: '#VALUE!' };
-        }
         const context: FormulaFunctionContext = Object.freeze({
           locale: environment.locale,
           timeZone: environment.timeZone,
@@ -549,7 +573,7 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
         values: new Map(values),
         evaluatedAddresses: Object.freeze([...new Set(evaluated)]),
         cycles,
-        diagnostics: new Map(program.diagnostics),
+        diagnostics: snapshotDiagnostics(program.diagnostics),
       };
     },
   };

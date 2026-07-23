@@ -135,6 +135,70 @@ describe('formula dependency graph', () => {
       },
     ]);
     expect(() => createFormulaEngine().compile(document)).toThrow(/dependency limit/u);
+
+    const cumulative = formulaDocument([
+      {
+        id: 'sheet-1',
+        name: 'Sheet1',
+        cells: [
+          {
+            row: 0,
+            column: 0,
+            input: { type: 'formula', source: '=SUM(A1:A60000,A60001:A120000)' },
+          },
+        ],
+      },
+    ]);
+    expect(() => createFormulaEngine().compile(cumulative)).toThrow(/dependency limit/u);
+  });
+
+  it('propagates an incrementally introduced parse error and clears stale cycle diagnostics', () => {
+    const document = formulaDocument([
+      {
+        id: 'sheet-1',
+        name: 'Sheet1',
+        cells: [
+          { row: 0, column: 0, input: { type: 'formula', source: '=1' } },
+          { row: 0, column: 1, input: { type: 'formula', source: '=A1+1' } },
+        ],
+      },
+    ]);
+    const engine = createFormulaEngine();
+    const program = engine.compile(document);
+    engine.recalculate(program, [], environment);
+    const invalid = engine.recalculate(
+      program,
+      [
+        {
+          sheetId: 'sheet-1',
+          row: 0,
+          column: 0,
+          input: { type: 'formula', source: '=SUM(' },
+        },
+      ],
+      environment,
+    );
+    expect(invalid.values.get('sheet-1!B1')).toEqual({ type: 'error', value: '#VALUE!' });
+    const diagnostics = invalid.diagnostics.get('sheet-1!A1') as unknown[];
+    diagnostics.push({ code: 'poison' });
+    expect(program.diagnostics.get('sheet-1!A1')).toHaveLength(1);
+  });
+
+  it('validates IF arity before selecting a branch', () => {
+    const document = formulaDocument([
+      {
+        id: 'sheet-1',
+        name: 'Sheet1',
+        cells: [
+          { row: 0, column: 0, input: { type: 'formula', source: '=IF()' } },
+          { row: 0, column: 1, input: { type: 'formula', source: '=IF(TRUE)' } },
+        ],
+      },
+    ]);
+    const engine = createFormulaEngine();
+    const result = engine.recalculate(engine.compile(document), [], environment);
+    expect(result.values.get('sheet-1!A1')).toEqual({ type: 'error', value: '#VALUE!' });
+    expect(result.values.get('sheet-1!B1')).toEqual({ type: 'error', value: '#VALUE!' });
   });
 
   it('uses the explicit clock and invalidates volatile functions only on tick changes', () => {

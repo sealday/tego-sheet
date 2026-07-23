@@ -47,10 +47,17 @@ function keyOfReference(reference: FormulaReference): string | undefined {
 /** Collects every direct cell dependency from a resolved AST. */
 export function collectFormulaDependencies(ast: FormulaAst): ReadonlySet<string> {
   const result = new Set<string>();
+  const add = (address: string): void => {
+    if (result.has(address)) return;
+    if (result.size >= 100_000) {
+      throw new RangeError('Formula dependency limit exceeds 100000 cells');
+    }
+    result.add(address);
+  };
   const visit = (node: FormulaAst): void => {
     if (node.kind === 'reference') {
       const key = keyOfReference(node.reference);
-      if (key !== undefined) result.add(key);
+      if (key !== undefined) add(key);
       return;
     }
     if (node.kind === 'range') {
@@ -65,7 +72,7 @@ export function collectFormulaDependencies(ast: FormulaAst): ReadonlySet<string>
       }
       for (let row = startRow; row <= endRow; row += 1) {
         for (let column = startColumn; column <= endColumn; column += 1) {
-          result.add(formulaAddressKey({ sheetId: node.start.sheetId, row, column }));
+          add(formulaAddressKey({ sheetId: node.start.sheetId, row, column }));
         }
       }
       return;
@@ -88,8 +95,13 @@ export function createDependencyGraph(
 ): FormulaDependencyGraph {
   const dependencies = new Map<string, ReadonlySet<string>>();
   const mutableDependents = new Map<string, Set<string>>();
+  let edgeCount = 0;
   for (const [address, ast] of formulas) {
     const formulaDependencies = collectFormulaDependencies(ast);
+    edgeCount += formulaDependencies.size;
+    if (!Number.isSafeInteger(edgeCount) || edgeCount > 1_000_000) {
+      throw new RangeError('Formula program dependency limit exceeds 1000000 edges');
+    }
     dependencies.set(address, formulaDependencies);
     for (const dependency of formulaDependencies) {
       const dependents = mutableDependents.get(dependency) ?? new Set<string>();

@@ -44,6 +44,7 @@ describe('Excel-oriented number formats', () => {
       'Tuesday, January 2, 2024',
     );
     expect(formatter.format({ type: 'number', value: 1.5 }, '[h]:mm', context)).toBe('36:00');
+    expect(formatter.format({ type: 'number', value: 0.5 }, 'mm:ss', context)).toBe('00:00');
   });
 
   it('honors date systems and explicit locale/time zone without consulting host defaults', () => {
@@ -66,6 +67,9 @@ describe('Excel-oriented number formats', () => {
 
   it('rejects unsupported tokens instead of guessing and declares compatibility', () => {
     expect(() => parseNumberFormat('[DBNum1]0')).toThrow(
+      expect.objectContaining({ code: 'NUMBER_FORMAT_INVALID' }),
+    );
+    expect(() => parseNumberFormat('[mm]:ss')).toThrow(
       expect.objectContaining({ code: 'NUMBER_FORMAT_INVALID' }),
     );
     expect(BUILTIN_NUMBER_FORMAT_COMPATIBILITY).toContainEqual({

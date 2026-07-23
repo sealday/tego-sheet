@@ -103,7 +103,7 @@ function parseSection(source: string): NumberFormatSection {
         operator: conditionMatch[1] as NumberFormatConditionOperator,
         value: Number(conditionMatch[2]),
       };
-    } else if (/^[hms]+$/iu.test(content)) {
+    } else if (/^h+$/iu.test(content)) {
       break;
     } else {
       throw new NumberFormatSyntaxError(`Unsupported bracket token [${content}]`);

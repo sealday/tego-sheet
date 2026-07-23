@@ -129,7 +129,7 @@ function pad(value: number, length = 2): string {
 function formatDateToken(
   token: string,
   parts: ReturnType<typeof serialParts>,
-  previous: string,
+  isMinute: boolean,
   serial: number,
   locale: string,
 ): string {
@@ -146,7 +146,6 @@ function formatDateToken(
   if (lower.startsWith('d')) return lower === 'dd' ? pad(parts.day) : String(parts.day);
   if (lower.startsWith('h')) return lower === 'hh' ? pad(parts.hour) : String(parts.hour);
   if (lower.startsWith('s')) return lower === 'ss' ? pad(parts.second) : String(parts.second);
-  const isMinute = previous.endsWith(':');
   if (!isMinute && (lower === 'mmm' || lower === 'mmmm')) {
     return new Intl.DateTimeFormat(locale, {
       month: lower === 'mmm' ? 'short' : 'long',
@@ -199,7 +198,7 @@ function formatValue(value: FormulaValue, ast: NumberFormatAst, context: FormatC
   const parts = dateMode ? serialParts(sourceNumber, context.dateSystem) : undefined;
   let output = '';
   let renderedNumber = false;
-  for (const token of section.tokens) {
+  for (const [tokenIndex, token] of section.tokens.entries()) {
     if (token.kind === 'literal') {
       output += token.value;
       continue;
@@ -209,10 +208,21 @@ function formatValue(value: FormulaValue, ast: NumberFormatAst, context: FormatC
       continue;
     }
     if (token.kind === 'date-pattern') {
+      const previousDate = section.tokens
+        .slice(0, tokenIndex)
+        .reverse()
+        .find(({ kind }) => kind === 'date-pattern');
+      const nextDate = section.tokens
+        .slice(tokenIndex + 1)
+        .find(({ kind }) => kind === 'date-pattern');
+      const minuteContext =
+        /^m{1,2}$/iu.test(token.value) &&
+        ((previousDate?.kind === 'date-pattern' && /^\[?h/iu.test(previousDate.value)) ||
+          (nextDate?.kind === 'date-pattern' && /^s/iu.test(nextDate.value)));
       output += formatDateToken(
         token.value,
         parts as ReturnType<typeof serialParts>,
-        output,
+        minuteContext,
         sourceNumber,
         context.locale,
       );

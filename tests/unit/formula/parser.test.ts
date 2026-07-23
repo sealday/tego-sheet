@@ -59,6 +59,18 @@ describe('typed formula parser', () => {
     );
   });
 
+  it('rejects references outside finite Excel worksheet coordinates', () => {
+    expect(() => parseFormula(`=${'A'.repeat(300)}1`)).toThrow(
+      expect.objectContaining({ code: 'FORMULA_PARSE_ERROR' }),
+    );
+    expect(() => parseFormula('=XFE1')).toThrow(
+      expect.objectContaining({ code: 'FORMULA_PARSE_ERROR' }),
+    );
+    expect(() => parseFormula('=A1048577')).toThrow(
+      expect.objectContaining({ code: 'FORMULA_PARSE_ERROR' }),
+    );
+  });
+
   it('translates only relative axes during copy and normalizes source from the typed AST', () => {
     const translated = translateFormula(parseFormula('=$A1+B$1+$C$1'), {
       rowDelta: 2,
