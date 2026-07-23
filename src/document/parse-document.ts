@@ -134,7 +134,7 @@ function resolveLimits(
 
 class InputCaptureError extends Error {
   constructor(
-    readonly code: 'DOCUMENT_SCHEMA_INVALID' | 'DOCUMENT_LIMIT_EXCEEDED',
+    readonly code: 'DOCUMENT_SCHEMA_INVALID' | 'DOCUMENT_LIMIT_EXCEEDED' | 'INVALID_EXTENSION_DATA',
     readonly path: string,
     message: string,
   ) {
@@ -171,19 +171,26 @@ function captureInput(input: unknown, limits: ResolvedDocumentLimits): unknown {
       );
     }
   };
-  const capture = (value: unknown, path: string, inArray: boolean): unknown => {
-    if (
-      value === null ||
-      typeof value === 'string' ||
-      typeof value === 'boolean' ||
-      typeof value === 'number'
-    ) {
+  const invalidJsonCode = (path: string): InputCaptureError['code'] =>
+    path.startsWith('$.extensions.') ? 'INVALID_EXTENSION_DATA' : 'DOCUMENT_SCHEMA_INVALID';
+  const capture = (value: unknown, path: string): unknown => {
+    if (value === null || typeof value === 'string' || typeof value === 'boolean') {
       consume(JSON.stringify(value) ?? 'null');
       return value;
     }
-    if (typeof value !== 'object') {
-      if (inArray) consume('null');
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value)) {
+        throw new InputCaptureError(
+          invalidJsonCode(path),
+          path,
+          `${path} must contain a finite JSON number`,
+        );
+      }
+      consume(JSON.stringify(value));
       return value;
+    }
+    if (typeof value !== 'object') {
+      throw new InputCaptureError(invalidJsonCode(path), path, `${path} must contain a JSON value`);
     }
     if (context.active.has(value)) {
       throw new InputCaptureError(
@@ -250,7 +257,7 @@ function captureInput(input: unknown, limits: ResolvedDocumentLimits): unknown {
               `${path}[${index}] must be a data property`,
             );
           }
-          output[index] = capture(descriptor.value, `${path}[${index}]`, true);
+          output[index] = capture(descriptor.value, `${path}[${index}]`);
         }
         consume(']');
         for (const [key, descriptor] of Object.entries(descriptors)) {
@@ -290,7 +297,7 @@ function captureInput(input: unknown, limits: ResolvedDocumentLimits): unknown {
           configurable: true,
           enumerable: true,
           writable: true,
-          value: capture(item, `${path}.${key}`, false),
+          value: capture(item, `${path}.${key}`),
         });
         if (item === undefined || typeof item === 'function' || typeof item === 'symbol') continue;
         if (emitted > 0) consume(',');
@@ -305,7 +312,7 @@ function captureInput(input: unknown, limits: ResolvedDocumentLimits): unknown {
     }
   };
 
-  return capture(input, '$', false);
+  return capture(input, '$');
 }
 
 function exceedsCollectionLimits(

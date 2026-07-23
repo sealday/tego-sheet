@@ -429,4 +429,19 @@ describe('Workbook 2.0 validation', () => {
       codesOf(documentWithWorkbookGetter(decodedWorkbook), { limits: { maxBytes: 1_000 } }),
     ).toContain('DOCUMENT_SCHEMA_INVALID');
   });
+
+  it.each([
+    ['bigint', 1n],
+    ['undefined', undefined],
+    ['function', () => undefined],
+    ['symbol', Symbol('not-json')],
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+  ])('rejects non-JSON %s values even in unknown fields', (_label, value) => {
+    const fixture = validDocument() as unknown as Record<string, unknown>;
+    fixture.unknown = value;
+
+    expect(() => parseSpreadsheetDocument(fixture)).not.toThrow();
+    expect(codesOf(fixture)).toContain('DOCUMENT_SCHEMA_INVALID');
+  });
 });
