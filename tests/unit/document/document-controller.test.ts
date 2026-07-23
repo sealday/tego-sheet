@@ -2,9 +2,27 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createDocumentController,
   createSpreadsheetDocument,
+  parseSpreadsheetDocument,
+  serializeSpreadsheetDocument,
   type DocumentCommandEnvelope,
   type SheetId,
 } from '../../../src';
+
+function createMultiSheetDocument() {
+  const input = JSON.parse(
+    serializeSpreadsheetDocument(
+      createSpreadsheetDocument({ id: 'document-1', sheetId: 'sheet-1' }),
+    ),
+  ) as {
+    workbook: {
+      sheets: Array<{ id: string; name: string; cells: unknown[]; merges: unknown[] }>;
+    };
+  };
+  input.workbook.sheets.push({ id: 'sheet-2', name: 'Second', cells: [], merges: [] });
+  const parsed = parseSpreadsheetDocument(input as never);
+  if (!parsed.ok) throw new TypeError('Expected test document to parse');
+  return parsed.document;
+}
 
 function setText(id: string, sheet: string, row: number, text: string): DocumentCommandEnvelope {
   return {
@@ -120,5 +138,45 @@ describe('public document controller', () => {
       status: 'committed',
       notificationError: 'public observer failed',
     });
+  });
+
+  it('preserves multi-sheet aggregate changes across public undo and redo events', () => {
+    const controller = createDocumentController(createMultiSheetDocument());
+    const listener = vi.fn();
+    controller.subscribe(listener);
+    controller.transact({
+      schemaVersion: 1,
+      id: 'transaction-1',
+      baseRevision: 0,
+      commands: [
+        setText('command-1', 'sheet-1', 0, 'first'),
+        setText('command-2', 'sheet-2', 0, 'second'),
+      ],
+    });
+    listener.mockClear();
+
+    expect(controller.undo()).toMatchObject({
+      status: 'committed',
+      change: {
+        kind: 'history',
+        sheets: [{ sheetId: 'sheet-1' }, { sheetId: 'sheet-2' }],
+      },
+    });
+    expect(listener.mock.calls[0]?.[0].change.sheets).toMatchObject([
+      { sheetId: 'sheet-1' },
+      { sheetId: 'sheet-2' },
+    ]);
+    listener.mockClear();
+    expect(controller.redo()).toMatchObject({
+      status: 'committed',
+      change: {
+        kind: 'history',
+        sheets: [{ sheetId: 'sheet-1' }, { sheetId: 'sheet-2' }],
+      },
+    });
+    expect(listener.mock.calls[0]?.[0].change.sheets).toMatchObject([
+      { sheetId: 'sheet-1' },
+      { sheetId: 'sheet-2' },
+    ]);
   });
 });

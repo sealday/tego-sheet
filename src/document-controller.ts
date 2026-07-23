@@ -442,6 +442,9 @@ class PublicDocumentController implements DocumentController {
       revision: this.getSnapshot().revision,
       document: result.commit.document,
       change: toChange(result.commit.change),
+      ...(result.commit.notificationError === undefined
+        ? {}
+        : { notificationError: result.commit.notificationError }),
     });
   }
 
@@ -454,6 +457,9 @@ class PublicDocumentController implements DocumentController {
       revision: this.getSnapshot().revision,
       document: result.commit.document,
       change: toChange(result.commit.change),
+      ...(result.commit.notificationError === undefined
+        ? {}
+        : { notificationError: result.commit.notificationError }),
     });
   }
 

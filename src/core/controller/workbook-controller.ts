@@ -87,6 +87,7 @@ export interface TransactionChangeSummary {
   readonly kind: WorkbookChangeKind;
   readonly sheet: SheetId;
   readonly range?: WorkbookChange['range'];
+  readonly aggregate?: WorkbookChange['aggregate'];
 }
 
 let nextControllerId = 1;
@@ -392,7 +393,13 @@ export class WorkbookController {
     }
     this.state = after;
     const commandSnapshot = this.isolateCommand(command);
-    const change = this.createChange(summary.kind, source, summary.sheet, summary.range);
+    const change = this.createChange(
+      summary.kind,
+      source,
+      summary.sheet,
+      summary.range,
+      summary.aggregate,
+    );
     this.revision += 1;
     this.history.record(
       this.createHistoryEntry(
@@ -448,6 +455,7 @@ export class WorkbookController {
       source,
       entry.metadata.change.sheet,
       entry.metadata.change.range,
+      entry.metadata.change.aggregate,
     );
     const commit = this.createCommit(command, change, undefined);
     this.runBeforeNotify(commit as CommandCommit<unknown, WorkbookCommand>, options, transaction);
@@ -460,6 +468,7 @@ export class WorkbookController {
     source: ChangeSource,
     sheet: SheetId,
     range?: WorkbookChange['range'],
+    aggregate?: WorkbookChange['aggregate'],
   ): WorkbookChange {
     this.changeSequence += 1;
     return isolated({
@@ -468,6 +477,7 @@ export class WorkbookController {
       source,
       sheet,
       ...(range === undefined ? {} : { range }),
+      ...(aggregate === undefined ? {} : { aggregate }),
     });
   }
 

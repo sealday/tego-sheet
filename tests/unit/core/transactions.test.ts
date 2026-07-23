@@ -110,6 +110,8 @@ describe('SpreadsheetDocumentController transactions', () => {
 
   it('aggregates every affected sheet and range in one transaction change', () => {
     const controller = new SpreadsheetDocumentController(createMultiSheetDocument());
+    const listener = vi.fn();
+    controller.subscribe(listener);
     const second = {
       ...command('command-2', 3, 'beta'),
       command: {
@@ -148,6 +150,18 @@ describe('SpreadsheetDocumentController transactions', () => {
           ],
         },
       ],
+    });
+    listener.mockClear();
+    expect(controller.undo().status).toBe('committed');
+    expect(listener.mock.calls[0]?.[0].commit.change).toMatchObject({
+      kind: 'history',
+      aggregate: outcome.change.aggregate,
+    });
+    listener.mockClear();
+    expect(controller.redo().status).toBe('committed');
+    expect(listener.mock.calls[0]?.[0].commit.change).toMatchObject({
+      kind: 'history',
+      aggregate: outcome.change.aggregate,
     });
   });
 
@@ -431,5 +445,28 @@ describe('SpreadsheetDocumentController transactions', () => {
     expect(controller.getCellText({ sheet: sheetId('sheet-1'), row: 0, column: 0 })).toBe(
       'committed',
     );
+  });
+
+  it('reports observer failures after direct dispatch, undo, and redo without throwing', () => {
+    const controller = new SpreadsheetDocumentController(
+      createSpreadsheetDocument({ id: 'document-1', sheetId: 'sheet-1' }),
+    );
+    controller.execute(command('initial', 0, 'initial'));
+    controller.subscribe(() => {
+      throw new Error('direct observer failed');
+    });
+
+    expect(controller.dispatch(command('direct', 1, 'direct').command, 'ref')).toMatchObject({
+      status: 'committed',
+      commit: { notificationError: 'direct observer failed' },
+    });
+    expect(controller.undo()).toMatchObject({
+      status: 'committed',
+      commit: { notificationError: 'direct observer failed' },
+    });
+    expect(controller.redo()).toMatchObject({
+      status: 'committed',
+      commit: { notificationError: 'direct observer failed' },
+    });
   });
 });

@@ -39,6 +39,7 @@ export interface SpreadsheetControllerCommit<
   readonly result: Result;
   readonly ['document']: SpreadsheetDocument;
   readonly transaction?: CommittedTransactionRecord;
+  readonly notificationError?: string;
 }
 
 export interface SpreadsheetControllerSnapshot extends Omit<ControllerSnapshot, 'value'> {
@@ -468,6 +469,7 @@ export class SpreadsheetDocumentController {
       const candidate = this.currentDocument;
       this.documentHistory.restore(checkpoint.documentHistory);
       this.documentHistory.record(this.createDocumentHistoryEntry(checkpoint.document, candidate));
+      const aggregate = aggregateTransactionChanges(commits);
       const finalized = this.legacy.finalizeTransaction(
         checkpoint.legacy,
         lastCommit.command,
@@ -475,6 +477,7 @@ export class SpreadsheetDocumentController {
         {
           kind: 'transaction',
           sheet: lastCommit.change.sheet,
+          aggregate,
         },
       );
       if (finalized.status === 'noop') {
@@ -485,11 +488,7 @@ export class SpreadsheetDocumentController {
           revision: checkpoint.legacy.revision,
         };
       }
-      const aggregate = aggregateTransactionChanges(commits);
-      const change = cloneFrozenDocumentValue({
-        ...finalized.commit.change,
-        aggregate,
-      }) as WorkbookChange;
+      const change = finalized.commit.change;
       const transactionRecord = cloneFrozenDocumentValue({
         ...transaction,
         committedRevision: this.getSnapshot().revision,
@@ -678,7 +677,18 @@ export class SpreadsheetDocumentController {
         snapshot: this.getSnapshot(),
         commit,
       }) as SpreadsheetControllerEvent;
-      this.subscriptions.publish(event);
+      try {
+        this.subscriptions.publish(event);
+      } catch (error) {
+        return {
+          status: 'committed',
+          commit: cloneFrozenDocumentValue({
+            ...commit,
+            notificationError:
+              error instanceof Error ? error.message : 'Spreadsheet observer failed',
+          }),
+        };
+      }
     }
     return { status: 'committed', commit };
   }
