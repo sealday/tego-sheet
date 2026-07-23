@@ -113,8 +113,8 @@ const expectedCatalog: readonly CatalogRow[] = [
   },
   {
     id: 'output',
-    unit: ['output.print-layout'],
-    component: ['output.print-dialog'],
+    unit: ['output.template-layout'],
+    component: ['output.template-designer'],
     browser: ['output.browser-print', 'output.export-download'],
     visual: ['output.print-preview'],
   },

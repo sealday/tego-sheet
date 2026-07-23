@@ -1284,6 +1284,21 @@ function TemplateSurface(props: {
   );
 }
 
+function TemplateDesignerSurface(props: {
+  readonly document: import('../document').SpreadsheetDocument;
+  readonly template: NonNullable<TegoSheetProps['template']>;
+  readonly onChange: NonNullable<TegoSheetProps['onTemplateChange']>;
+  readonly onDiagnostics: TegoSheetProps['onDiagnostics'];
+}) {
+  const { document, onChange, onDiagnostics, template } = props;
+  const diagnostics = useMemo(
+    () => compileSpreadsheetTemplate(document, template).diagnostics,
+    [document, template],
+  );
+  useEffect(() => onDiagnostics?.(diagnostics), [diagnostics, onDiagnostics]);
+  return <TemplateDesigner template={template} diagnostics={diagnostics} onChange={onChange} />;
+}
+
 /**
  * Renders an interactive spreadsheet with controlled or uncontrolled document ownership.
  * Use a {@link TegoSheetHandle} ref for cell, sheet, validation, and layout operations.
@@ -1353,10 +1368,11 @@ export const TegoSheet = forwardRef<TegoSheetHandle, TegoSheetProps>(
       return (
         <div data-tego-template-mode="">
           {runtime}
-          <TemplateDesigner
+          <TemplateDesignerSurface
+            document={epoch.snapshot.document}
             template={props.template}
-            diagnostics={[]}
             onChange={props.onTemplateChange ?? (() => undefined)}
+            onDiagnostics={props.onDiagnostics}
           />
         </div>
       );

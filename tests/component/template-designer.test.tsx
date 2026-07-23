@@ -38,7 +38,7 @@ const template: SpreadsheetTemplate = {
 };
 
 describe('TemplateDesigner', () => {
-  it('edits the SDK template model and locates binding diagnostics', () => {
+  it('@parity:output.template-designer edits the SDK template model and locates binding diagnostics', () => {
     const onChange = vi.fn();
     const onLocate = vi.fn();
     const diagnostics: readonly Diagnostic[] = [
@@ -57,6 +57,11 @@ describe('TemplateDesigner', () => {
         diagnostics={diagnostics}
         onChange={onChange}
         onLocateBinding={onLocate}
+        selection={{
+          sheetId: 'sheet-1' as never,
+          start: { row: 2, column: 1 },
+          end: { row: 4, column: 2 },
+        }}
       />,
     );
 
@@ -70,6 +75,59 @@ describe('TemplateDesigner', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: /Customer is missing/u }));
     expect(onLocate).toHaveBeenCalledWith('binding-1');
+
+    fireEvent.change(screen.getByLabelText('Formatter for binding-1'), {
+      target: { value: 'currency' },
+    });
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindings: [expect.objectContaining({ formatter: 'currency' })],
+      }),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add repeat rows' }));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindings: expect.arrayContaining([
+          expect.objectContaining({
+            type: 'repeat-rows',
+            range: expect.objectContaining({
+              start: { row: 2, column: 1 },
+              end: { row: 4, column: 2 },
+            }),
+          }),
+        ]),
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText('Paper'), { target: { value: 'Letter' } });
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        printProfiles: [
+          expect.objectContaining({ page: expect.objectContaining({ paper: { type: 'Letter' } }) }),
+        ],
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Use selection as print range' }));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        printProfiles: [
+          expect.objectContaining({
+            targets: [
+              expect.objectContaining({
+                type: 'range',
+                range: expect.objectContaining({
+                  start: { row: 2, column: 1 },
+                  end: { row: 4, column: 2 },
+                }),
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Delete binding-1' }));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ bindings: [] }));
   });
 });
 

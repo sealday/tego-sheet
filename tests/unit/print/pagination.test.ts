@@ -44,7 +44,7 @@ describe('deterministic template pagination', () => {
     expect(result.diagnostics).toEqual([expect.objectContaining({ code: 'PAGE_LIMIT_EXCEEDED' })]);
   });
 
-  it('paginates columns deterministically and honors requested fit-width page counts', () => {
+  it('@parity:output.template-layout paginates columns deterministically and honors requested fit-width page counts', () => {
     const fixed = paginateTemplateTargets({
       targets: [{ id: 'wide', rows: [20], columns: [60, 60, 60] }],
       paper: { width: 140, height: 100 },
