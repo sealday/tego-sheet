@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { DocumentSheetId } from '../../../src/document';
 import {
   bindAdvancedFormula,
   createFormulaNameRegistry,
@@ -6,6 +7,8 @@ import {
 } from '../../../src/formula/advanced';
 
 describe('FRM-01 advanced formula foundation', () => {
+  const sheetId = 'sheet-1' as DocumentSheetId;
+
   it('binds workbook names and structured references to stable identifiers', () => {
     const names = createFormulaNameRegistry();
     names.register({
@@ -13,13 +16,13 @@ describe('FRM-01 advanced formula foundation', () => {
       name: 'TaxRate',
       scope: 'workbook',
       refersTo: {
-        sheetId: 'sheet-1',
+        sheetId,
         start: { row: 0, column: 1 },
         end: { row: 0, column: 1 },
       },
     });
     const result = bindAdvancedFormula('=TaxRate+Sales[Amount]', {
-      currentSheetId: 'sheet-1',
+      currentSheetId: sheetId,
       names,
       tables: [
         {
@@ -39,7 +42,7 @@ describe('FRM-01 advanced formula foundation', () => {
   it('plans dynamic spill atomically and reports blockers', () => {
     expect(
       planFormulaSpill({
-        anchor: { sheetId: 'sheet-1', row: 1, column: 1 },
+        anchor: { sheetId, row: 1, column: 1 },
         value: {
           type: 'array',
           rows: [
@@ -63,7 +66,7 @@ describe('FRM-01 advanced formula foundation', () => {
     });
     expect(
       planFormulaSpill({
-        anchor: { sheetId: 'sheet-1', row: 1, column: 1 },
+        anchor: { sheetId, row: 1, column: 1 },
         value: {
           type: 'array',
           rows: [[{ type: 'number', value: 1 }], [{ type: 'number', value: 2 }]],
