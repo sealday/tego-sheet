@@ -50,6 +50,7 @@ export default defineConfig({
         'locales/zh-cn': resolve(import.meta.dirname, 'src/locales/zh-cn.ts'),
         'output/pdf': resolve(import.meta.dirname, 'src/output/pdf/index.ts'),
         'output/xlsx': resolve(import.meta.dirname, 'src/output/xlsx/index.ts'),
+        'output/image': resolve(import.meta.dirname, 'src/output/image/index.ts'),
       },
       fileName: (format, entryName) => {
         const extension = format === 'es' ? 'js' : 'cjs';

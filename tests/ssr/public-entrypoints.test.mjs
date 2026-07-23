@@ -12,6 +12,7 @@ const publicEntries = [
   'tego-sheet/locales/zh-cn',
   'tego-sheet/output/pdf',
   'tego-sheet/output/xlsx',
+  'tego-sheet/output/image',
 ];
 const browserGlobals = [
   'window',

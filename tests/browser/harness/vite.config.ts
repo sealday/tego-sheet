@@ -18,6 +18,10 @@ export default defineConfig({
         replacement: resolve(projectRoot, 'src/output/xlsx/index.ts'),
       },
       {
+        find: 'tego-sheet/output/image',
+        replacement: resolve(projectRoot, 'src/output/image/index.ts'),
+      },
+      {
         find: 'tego-sheet/styles.css',
         replacement: resolve(projectRoot, 'src/ui/styles/index.less'),
       },

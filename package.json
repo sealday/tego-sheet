@@ -65,6 +65,11 @@
       "import": "./dist/output/xlsx.js",
       "require": "./dist/output/xlsx.cjs"
     },
+    "./output/image": {
+      "types": "./dist/output/image/index.d.ts",
+      "import": "./dist/output/image.js",
+      "require": "./dist/output/image.cjs"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {

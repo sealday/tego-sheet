@@ -15,6 +15,7 @@ const expectedExports = [
   './locales/zh-cn',
   './output/pdf',
   './output/xlsx',
+  './output/image',
   './package.json',
 ];
 
@@ -159,6 +160,24 @@ test('the optional XLSX subpath exposes only its adapter contract', () => {
       const expected = ['OutputAdapterError', 'XlsxAdapter'];
       if (JSON.stringify(Object.keys(xlsx)) !== JSON.stringify(expected)) {
         throw new Error('Unexpected XLSX exports: ' + Object.keys(xlsx).join(','));
+      }
+    `,
+    ],
+    { cwd: consumer, stdio: 'pipe' },
+  );
+});
+
+test('the optional image subpath exposes only its adapter contract', () => {
+  execFileSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '--eval',
+      `
+      const image = await import('tego-sheet/output/image');
+      const expected = ['ImageAdapter', 'OutputAdapterError'];
+      if (JSON.stringify(Object.keys(image)) !== JSON.stringify(expected)) {
+        throw new Error('Unexpected image exports: ' + Object.keys(image).join(','));
       }
     `,
     ],
