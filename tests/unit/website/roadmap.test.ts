@@ -1,7 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { groupRoadmapItems, roadmapItems, roadmapPhases } from '../../../website/src/data/roadmap';
+import {
+  allRoadmapItems,
+  groupRoadmapItems,
+  roadmapItems,
+  roadmapPhases,
+  roadmapStatusLabels,
+  shippedRoadmapItems,
+} from '../../../website/src/data/roadmap';
 
 const root = process.cwd();
 const roadmapDocument = (name: string): string =>
@@ -29,6 +36,8 @@ describe('product roadmap data', () => {
   it('contains the approved capabilities in dependency order', () => {
     expect(roadmapPhases.map((phase) => phase.id)).toEqual([0, 1, 2, 3, 4]);
     expect(roadmapItems).toHaveLength(33);
+    expect(allRoadmapItems).toHaveLength(roadmapItems.length);
+    expect(shippedRoadmapItems).toEqual([]);
     expect(new Set(roadmapItems.map((item) => item.id))).toHaveProperty('size', 33);
     expect(roadmapItems.every((item) => item.status === 'planned')).toBe(true);
     expect(roadmapItems[0]?.title).toBe('Workbook 2.0 typed document model');
@@ -37,6 +46,14 @@ describe('product roadmap data', () => {
         (item) => item.title === 'Safe scalar bindings, repeat rows and conditional ranges',
       ),
     ).toBe(true);
+  });
+
+  it('renders status copy from the canonical status-label mapping', () => {
+    const page = readFileSync(join(root, 'website/src/pages/roadmap.tsx'), 'utf8');
+
+    expect(roadmapStatusLabels.planned).toBe('Planned');
+    expect(page).toContain('{roadmapStatusLabels[item.status]}');
+    expect(page).not.toMatch(/>\s*Planned\s*</);
   });
 
   it('groups every item under one declared phase and a Docusaurus design route', () => {

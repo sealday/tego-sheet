@@ -1,7 +1,7 @@
 import Link from '@docusaurus/Link';
 import Layout from '@theme/Layout';
 import type { ReactElement } from 'react';
-import { groupRoadmapItems, roadmapPhases } from '../data/roadmap';
+import { groupRoadmapItems, roadmapPhases, roadmapStatusLabels } from '../data/roadmap';
 import styles from './roadmap.module.css';
 
 export default function Roadmap(): ReactElement {
@@ -52,7 +52,7 @@ export default function Roadmap(): ReactElement {
                   <li data-roadmap-item={item.id} key={item.id}>
                     <div className={styles.status}>
                       <i aria-hidden="true" />
-                      Planned
+                      {roadmapStatusLabels[item.status]}
                     </div>
                     <Link to={item.designTo}>{item.title}</Link>
                     <p>{item.summary}</p>

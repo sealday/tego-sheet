@@ -1,5 +1,11 @@
 export type RoadmapPhaseId = 0 | 1 | 2 | 3 | 4;
-export type RoadmapStatus = 'planned';
+export type RoadmapStatus = 'planned' | 'in-progress' | 'shipped';
+
+export const roadmapStatusLabels = {
+  planned: 'Planned',
+  'in-progress': 'In progress',
+  shipped: 'Shipped',
+} as const satisfies Readonly<Record<RoadmapStatus, string>>;
 
 export interface RoadmapPhase {
   readonly id: RoadmapPhaseId;
@@ -55,22 +61,23 @@ export const roadmapPhases = [
   },
 ] as const satisfies readonly RoadmapPhase[];
 
-const item = <const Id extends string>(
+const item = <const Id extends string, const Status extends RoadmapStatus = 'planned'>(
   id: Id,
   phase: RoadmapPhaseId,
   title: string,
   summary: string,
   designTo: RoadmapItem['designTo'],
-): RoadmapItem & { readonly id: Id } => ({
+  status: Status = 'planned' as Status,
+): RoadmapItem & { readonly id: Id; readonly status: Status } => ({
   id,
   phase,
   title,
   summary,
-  status: 'planned',
+  status,
   designTo,
 });
 
-export const roadmapItems = [
+export const allRoadmapItems = [
   item(
     'workbook-2',
     0,
@@ -304,7 +311,23 @@ export const roadmapItems = [
   ),
 ] as const satisfies readonly RoadmapItem[];
 
-export type RoadmapItemId = (typeof roadmapItems)[number]['id'];
+export type RoadmapItemId = (typeof allRoadmapItems)[number]['id'];
+
+export function selectRoadmapItemsByStatus<
+  const Items extends readonly RoadmapItem[],
+  const Status extends RoadmapStatus,
+>(items: Items, status: Status): readonly (Items[number] & { readonly status: Status })[] {
+  return items.filter(
+    (
+      roadmapItem,
+    ): roadmapItem is Items[number] & {
+      readonly status: Status;
+    } => roadmapItem.status === status,
+  );
+}
+
+export const roadmapItems = selectRoadmapItemsByStatus(allRoadmapItems, 'planned');
+export const shippedRoadmapItems = selectRoadmapItemsByStatus(allRoadmapItems, 'shipped');
 
 export function groupRoadmapItems(): ReadonlyMap<RoadmapPhaseId, readonly RoadmapItem[]> {
   return new Map(
