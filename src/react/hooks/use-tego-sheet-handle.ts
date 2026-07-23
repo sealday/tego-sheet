@@ -40,6 +40,7 @@ export interface TegoSheetHandleRuntime {
   readonly isActive: () => boolean;
   readonly root: HTMLDivElement | null;
   readonly setActiveSheet: (sheet: SheetId | null) => void;
+  readonly refreshFilterView?: () => void;
 }
 
 export interface RuntimeCapture<Runtime extends TegoSheetHandleRuntime> {
@@ -193,6 +194,16 @@ function createStableHandle<Runtime extends TegoSheetHandleRuntime>(
       if (index < 0) throw invalid(`Unknown sheet ID: ${sheet}`);
       authority.activate(sheet);
       runtime.dispatcher.emitActiveSheetChange({ sheet, index, source: 'ref' });
+    },
+    activateFilterView(sheet, viewId) {
+      const runtime = authority.require();
+      runtime.controller.activateFilterView(sheet, viewId);
+      runtime.refreshFilterView?.();
+    },
+    deactivateFilterView(sheet) {
+      const runtime = authority.require();
+      runtime.controller.deactivateFilterView(sheet);
+      runtime.refreshFilterView?.();
     },
     undo() {
       authority.require().dispatcher.dispatchRef({ type: 'undo' }, 'ref');

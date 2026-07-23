@@ -43,6 +43,7 @@ import type {
   TemplateResourceBinding,
 } from './model';
 import { objectToDisplayCommands, resolveObjectAnchor } from '../objects';
+import { applyDocumentFilterView } from '../views';
 
 const DEFAULT_LIMITS: RenderLimits = Object.freeze({
   maxExpandedCells: 250_000,
@@ -387,6 +388,10 @@ function displayPages(
   structuralMappings: readonly StructuralMapping[],
   resourceBindings: readonly TemplateResourceBinding[],
   resources: ResolvedResourceStore,
+  viewProjections: ReadonlyMap<
+    string,
+    { readonly hiddenRows: ReadonlySet<number>; readonly rowOrder: readonly number[] }
+  >,
   data: unknown,
   date: Date,
 ): readonly PrintDisplayPageInput[] {
@@ -396,7 +401,16 @@ function displayPages(
     const endRow = target.range.start.row + page.rowEnd;
     const startColumn = target.range.start.column + page.columnStart;
     const endColumn = target.range.start.column + page.columnEnd;
-    const bodyRows = Array.from({ length: endRow - startRow + 1 }, (_, index) => startRow + index);
+    const viewProjection = viewProjections.get(target.sheet.id);
+    const rowPosition = new Map(viewProjection?.rowOrder.map((row, index) => [row, index]) ?? []);
+    const bodyRows = Array.from({ length: endRow - startRow + 1 }, (_, index) => startRow + index)
+      .filter((row) => !viewProjection?.hiddenRows.has(row))
+      .sort((left, right) => {
+        const leftPosition = rowPosition.get(left);
+        const rightPosition = rowPosition.get(right);
+        if (leftPosition === undefined || rightPosition === undefined) return left - right;
+        return leftPosition - rightPosition;
+      });
     const bodyColumns = Array.from(
       { length: endColumn - startColumn + 1 },
       (_, index) => startColumn + index,
@@ -868,6 +882,24 @@ export async function renderSpreadsheetTemplate(
       tick: 0,
       functionRegistryVersion: 'builtin-1',
     });
+    const activeFilterViews = (request.activeFilterViews ?? []).flatMap(({ sheetId, viewId }) => {
+      const view = expansion.document?.workbook.sheets
+        .find(({ id }) => id === sheetId)
+        ?.filterViews.find(({ id }) => id === viewId);
+      return view === undefined ? [] : [view];
+    });
+    const viewProjections = new Map(
+      activeFilterViews.map((view) => [
+        view.range.sheetId,
+        applyDocumentFilterView({
+          document: expansion.document!,
+          formulaValues: calculation.values,
+          view,
+          locale: environment.locale,
+          limits: { maxRows: limits.maxExpandedRows },
+        }),
+      ]),
+    );
     const resolvedTargets = targets(
       expansion.document,
       profile,
@@ -960,6 +992,7 @@ export async function renderSpreadsheetTemplate(
         condition: 1,
         style: 1,
         environment: 1,
+        view: activeFilterViews.length,
       },
       environment: {
         locale: environment.locale,
@@ -967,6 +1000,7 @@ export async function renderSpreadsheetTemplate(
         dateSystem: environment.dateSystem,
         target: 'print',
       },
+      activeFilterViews,
     });
     const pageInputs = displayPages(
       pagination.pages,
@@ -977,6 +1011,7 @@ export async function renderSpreadsheetTemplate(
       expansion.structuralMappings,
       resourceBindings,
       resources,
+      viewProjections,
       request.data,
       environment.clock,
     );

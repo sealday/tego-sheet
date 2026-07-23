@@ -24,7 +24,7 @@ import type {
   ResolvedStyle,
 } from './cell-presentation';
 import type { PresentationCache } from './presentation-cache';
-import { applyFilterView } from '../views';
+import { applyDocumentFilterView } from '../views';
 
 const DEFAULT_STYLE: ResolvedStyle = Object.freeze({
   color: '#0a0a0a',
@@ -82,6 +82,8 @@ export interface PresentationResolverOptions {
   readonly cache: PresentationCache;
   /** Optional document or session view composed as derived row visibility. */
   readonly activeFilterView?: FilterView;
+  /** Optional per-sheet document or session views for multi-sheet output. */
+  readonly activeFilterViews?: readonly FilterView[];
   /** Optional validation-state resolver. */
   readonly validation?: (address: DocumentCellAddress) => PresentationValidation;
   /** Optional derived conditional-style resolver shared by every presentation target. */
@@ -381,42 +383,25 @@ export function createPresentationResolver(
   const conditionalFormatter = createConditionalFormatEvaluator(
     options.conditionalFormattingLimits ?? { maxRules: 10_000, maxCells: 10_000_000 },
   );
-  const filterViewHiddenRows = (() => {
-    const view = options.activeFilterView;
-    if (view === undefined) return new Set<number>();
-    const rows: FormulaValue[][] = [];
-    for (let row = view.range.start.row; row <= view.range.end.row; row += 1) {
-      const values: FormulaValue[] = [];
-      for (let column = view.range.start.column; column <= view.range.end.column; column += 1) {
-        const cell = cellAt(options.document, view.range.sheetId, row, column);
-        const formulaValue =
-          options.formulaValues?.get(
-            formulaAddressKey({ sheetId: view.range.sheetId, row, column }),
-          ) ??
-          options.formulaProgram?.values.get(
-            formulaAddressKey({ sheetId: view.range.sheetId, row, column }),
-          );
-        values.push(
-          cell?.input.type === 'formula' ? (formulaValue ?? inputValue(cell)) : inputValue(cell),
-        );
-      }
-      rows.push(values);
-    }
-    return applyFilterView({
-      view,
-      rows,
-      locale: options.environment.locale,
-      limits: { maxRows: Math.max(1, view.range.end.row - view.range.start.row + 1) },
-    }).hiddenRows;
-  })();
+  const activeViews =
+    options.activeFilterViews ??
+    [options.activeFilterView].filter((view): view is FilterView => view !== undefined);
+  const filterViewHiddenRows = new Map(
+    activeViews.map((view) => [
+      view.range.sheetId,
+      applyDocumentFilterView({
+        document: options.document,
+        formulaValues: options.formulaValues ?? options.formulaProgram?.values,
+        view,
+        locale: options.environment.locale,
+        limits: { maxRows: Math.max(1, view.range.end.row - view.range.start.row + 1) },
+      }).hiddenRows,
+    ]),
+  );
+  const activeViewKey = activeViews.map(({ id }) => id).join(',');
   const resolver: PresentationResolver = {
     resolve(address: DocumentCellAddress) {
-      const key = addressKey(
-        address,
-        options.revisions,
-        options.environment,
-        options.activeFilterView?.id,
-      );
+      const key = addressKey(address, options.revisions, options.environment, activeViewKey);
       const cached = options.cache.get(key);
       if (cached !== undefined) return cached;
       const sheet = options.document.workbook.sheets.find(({ id }) => id === address.sheetId);
@@ -476,8 +461,7 @@ export function createPresentationResolver(
       const hidden =
         sheet.rows.some((row) => row.index === address.row && row.hidden === true) ||
         sheet.columns.some((column) => column.index === address.column && column.hidden === true) ||
-        (options.activeFilterView?.range.sheetId === address.sheetId &&
-          filterViewHiddenRows.has(address.row));
+        (filterViewHiddenRows.get(address.sheetId)?.has(address.row) ?? false);
       const description = validation.status === 'valid' ? undefined : validation.message;
       const presentation = freezePresentation({
         address,

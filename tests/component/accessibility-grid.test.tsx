@@ -122,6 +122,29 @@ it('activates and edits semantic cells, then restores focus when the editor clos
   expect(document.activeElement).toBe(rendered.getByRole('gridcell', { name: 'R2C2' }));
 });
 
+it('exposes projected visual row indexes while preserving logical cell coordinates', () => {
+  const onActivate = vi.fn();
+  const rendered = render(
+    <AccessibilityGrid
+      rowCount={2}
+      rowOrder={[2, 0]}
+      columnCount={1}
+      viewport={{ rowStart: 0, rowEnd: 1, columnStart: 0, columnEnd: 0 }}
+      activeCell={{ row: 2, column: 0 }}
+      selection={{ start: { row: 2, column: 0 }, end: { row: 2, column: 0 } }}
+      resolvePresentation={presentation}
+      onActivate={onActivate}
+    />,
+  );
+
+  const first = rendered.getByRole('gridcell', { name: 'R3C1' });
+  expect(rendered.getByRole('grid').getAttribute('aria-rowcount')).toBe('2');
+  expect(first.getAttribute('aria-rowindex')).toBe('1');
+  expect(first.getAttribute('tabindex')).toBe('0');
+  fireEvent.click(first);
+  expect(onActivate).toHaveBeenCalledWith({ row: 2, column: 0 });
+});
+
 it('mounts the bounded semantic grid beside the Canvas surface', async () => {
   const context = createCanvasHarness().canvas.getContext('2d');
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => context);

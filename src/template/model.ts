@@ -433,6 +433,11 @@ export interface RenderRequest {
   readonly limits?: Partial<RenderLimits>;
   /** Explicit logical resources discovered for this render session. */
   readonly resourceRefs?: readonly ResourceRef[];
+  /** Explicit session-only saved-view selections consumed by this render. */
+  readonly activeFilterViews?: readonly {
+    readonly sheetId: DocumentSheetId;
+    readonly viewId: string;
+  }[];
 }
 
 /** Deterministic host capabilities required by rendering. */

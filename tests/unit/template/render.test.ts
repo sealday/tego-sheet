@@ -123,6 +123,59 @@ const environment = {
 };
 
 describe('template render pipeline', () => {
+  it('consumes an explicit session view snapshot in print without persisting selection', async () => {
+    const viewSource = {
+      ...source,
+      workbook: {
+        ...source.workbook,
+        sheets: [
+          {
+            ...source.workbook.sheets[0]!,
+            cells: [
+              { row: 0, column: 0, cell: { input: { type: 'string', value: 'status' } } },
+              { row: 1, column: 0, cell: { input: { type: 'string', value: 'keep' } } },
+              { row: 2, column: 0, cell: { input: { type: 'string', value: 'drop' } } },
+            ],
+            filterViews: [
+              {
+                id: 'kept',
+                name: 'Kept',
+                range: {
+                  sheetId: 'sheet-1',
+                  start: { row: 0, column: 0 },
+                  end: { row: 2, column: 0 },
+                },
+                sorts: [],
+                filters: [{ column: 0, operator: 'equal', value: 'keep' }],
+                visibility: 'document',
+              },
+            ],
+          },
+        ],
+      },
+    } as unknown as SpreadsheetDocument;
+    const viewTemplate = { ...template, bindings: [] };
+    const compiled = compileSpreadsheetTemplate(viewSource, viewTemplate).template!;
+    const result = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: {},
+        profileId: 'profile-1',
+        missingValue: 'error',
+        activeFilterViews: [{ sheetId: 'sheet-1' as never, viewId: 'kept' }],
+      },
+      environment,
+    );
+    const texts =
+      result.document?.print.displayList.pages.flatMap((page) =>
+        page.commands.flatMap((command) => (command.kind === 'text' ? [command.text] : [])),
+      ) ?? [];
+    expect(texts).toContain('keep');
+    expect(texts).not.toContain('drop');
+    expect(result.document?.workbook.sheets[0]).not.toHaveProperty('activeViewId');
+  });
+
   it('renders persistent floating text objects through the shared display list', async () => {
     const objectSource = {
       ...source,

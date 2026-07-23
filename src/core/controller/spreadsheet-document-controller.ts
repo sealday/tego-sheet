@@ -1,6 +1,6 @@
 import { parseSpreadsheetDocument } from '../../document/parse-document';
 import { projectDocumentToLegacy, projectLegacyToDocument } from './runtime-projection';
-import type { CellInput, SpreadsheetDocument } from '../../document/model/document';
+import type { CellInput, FilterView, SpreadsheetDocument } from '../../document/model/document';
 import {
   createFormulaEngine,
   createFormulaFunctionRegistry,
@@ -412,6 +412,8 @@ export class SpreadsheetDocumentController {
   private readonly calculationOptions: SpreadsheetCalculationOptions;
   private formulaProgram: FormulaProgram;
   private formulaValues: ReadonlyMap<string, FormulaValue>;
+  private readonly activeFilterViews = new Map<SheetId, string>();
+  private filterViewRevision = 0;
   private readonly legacy: WorkbookController;
   private readonly subscriptions = new SubscriptionStore<SpreadsheetControllerEvent>();
   private permissionGateActive = false;
@@ -482,6 +484,40 @@ export class SpreadsheetDocumentController {
 
   getCellText(address: CellAddress): string {
     return this.legacy.getCellText(address);
+  }
+
+  /** Selects one saved view as session-only state without changing document history. */
+  activateFilterView(sheet: SheetId, viewId: string): void {
+    const index = this.getSheetIds().findIndex((candidate) => candidate === sheet);
+    const documentSheet = this.currentDocument.workbook.sheets[index];
+    if (documentSheet === undefined) throw new RangeError(`Unknown sheet ID: ${sheet}`);
+    if (!documentSheet.filterViews.some((view) => view.id === viewId)) {
+      throw new RangeError(`Unknown filter view ID: ${viewId}`);
+    }
+    if (this.activeFilterViews.get(sheet) === viewId) return;
+    this.activeFilterViews.set(sheet, viewId);
+    this.filterViewRevision += 1;
+  }
+
+  /** Clears the selected session view for one worksheet. */
+  deactivateFilterView(sheet: SheetId): void {
+    if (!this.activeFilterViews.delete(sheet)) return;
+    this.filterViewRevision += 1;
+  }
+
+  /** Returns the selected immutable view definition for one worksheet. */
+  getActiveFilterView(sheet: SheetId): FilterView | undefined {
+    const index = this.getSheetIds().findIndex((candidate) => candidate === sheet);
+    const viewId = this.activeFilterViews.get(sheet);
+    if (index < 0 || viewId === undefined) return undefined;
+    return this.currentDocument.workbook.sheets[index]?.filterViews.find(
+      (view) => view.id === viewId,
+    );
+  }
+
+  /** Monotonic session revision used to invalidate derived presentation caches. */
+  getFilterViewRevision(): number {
+    return this.filterViewRevision;
   }
 
   getSnapshot(): SpreadsheetControllerSnapshot {

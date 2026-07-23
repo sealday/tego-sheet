@@ -65,6 +65,7 @@ import { createPresentationValidationResolver } from './adapters/presentation-ad
 import { compileSpreadsheetTemplate, renderSpreadsheetTemplate } from '../template';
 import { TemplateDesigner } from './template-designer';
 import { TemplatePreview } from './preview';
+import { applyDocumentFilterView } from '../views';
 
 function callbacksFromProps(props: TegoSheetProps): TegoSheetCallbacks {
   return {
@@ -525,6 +526,7 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
     (value: number) => value + 1,
     0,
   );
+  const [filterViewRevision, refreshFilterView] = useReducer((value: number) => value + 1, 0);
   const controller = props.epoch.controller;
   const isActive = props.epoch.isActive;
   const requestSurfaceFocus = useCallback(() => {
@@ -644,6 +646,7 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
       ? {}
       : { confirmValidationWarning: props.confirmValidationWarning }),
     root: null,
+    refreshFilterView,
     selection,
     setActiveSheet,
   };
@@ -784,6 +787,7 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
     activeSheet,
     canvasRef,
     enabled: sheets.length > 0,
+    filterViewRevision,
     engineSlot,
     epoch: props.epoch,
     locale: props.locale,
@@ -966,6 +970,47 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
       : props.epoch.snapshot.document.workbook.sheets.find(
           ({ id }) => id === (activeSheet as string),
         );
+  void filterViewRevision;
+  const activeFilterView =
+    activeSheet === null ? undefined : props.epoch.controller.getActiveFilterView(activeSheet);
+  const accessibilityRows = useMemo(() => {
+    const rowCount =
+      activeData === null
+        ? 0
+        : Math.max(
+            selection?.active.row ?? 0,
+            typeof activeData.rows?.len === 'number' ? activeData.rows.len - 1 : 0,
+          ) + 1;
+    if (activeFilterView === undefined) {
+      return Array.from({ length: rowCount }, (_, row) => row);
+    }
+    const projection = applyDocumentFilterView({
+      document: props.epoch.snapshot.document,
+      formulaValues: new Map(
+        props.epoch.snapshot.calculation.values.map(({ address, value }) => [address, value]),
+      ),
+      view: activeFilterView,
+      locale:
+        props.locale?.id ?? props.epoch.snapshot.document.workbook.settings.localeHint ?? 'en-US',
+      limits: {
+        maxRows: Math.max(1, activeFilterView.range.end.row - activeFilterView.range.start.row + 1),
+      },
+    });
+    const bodyStart = activeFilterView.range.start.row + 1;
+    const bodyEnd = Math.min(rowCount - 1, activeFilterView.range.end.row);
+    return [
+      ...Array.from({ length: Math.min(rowCount, bodyStart) }, (_, row) => row),
+      ...projection.rowOrder.filter((row) => row <= bodyEnd && !projection.hiddenRows.has(row)),
+      ...Array.from(
+        { length: Math.max(0, rowCount - bodyEnd - 1) },
+        (_, index) => bodyEnd + index + 1,
+      ),
+    ];
+  }, [activeData, activeFilterView, props.epoch.snapshot, props.locale?.id, selection?.active.row]);
+  const accessibilityVisualRow = useMemo(
+    () => new Map(accessibilityRows.map((logicalRow, visualRow) => [logicalRow, visualRow])),
+    [accessibilityRows],
+  );
   const accessibilityPresentations = useMemo(
     () =>
       activeDocumentSheet === undefined
@@ -983,6 +1028,7 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
               condition: props.epoch.snapshot.revision,
               style: props.epoch.snapshot.revision,
               environment: props.epoch.snapshot.revision,
+              view: filterViewRevision,
             },
             environment: {
               locale:
@@ -993,8 +1039,19 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
               dateSystem: props.epoch.snapshot.document.workbook.settings.dateSystem,
               target: 'accessibility',
             },
+            ...(activeSheet === null
+              ? {}
+              : { activeFilterView: props.epoch.controller.getActiveFilterView(activeSheet) }),
           }),
-    [accessibilityCache, activeDocumentSheet, props.epoch.snapshot, props.locale?.id],
+    [
+      accessibilityCache,
+      activeDocumentSheet,
+      activeSheet,
+      filterViewRevision,
+      props.epoch.controller,
+      props.epoch.snapshot,
+      props.locale?.id,
+    ],
   );
   const accessibilityViewport = (() => {
     void accessibilityViewportRevision;
@@ -1013,6 +1070,15 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
       },
     };
   })();
+  const accessibilityVisualViewport =
+    accessibilityViewport === null
+      ? null
+      : (() => {
+          const fallback = accessibilityVisualRow.get(selection?.active.row ?? 0) ?? 0;
+          const start = accessibilityVisualRow.get(accessibilityViewport.start.row) ?? fallback;
+          const end = accessibilityVisualRow.get(accessibilityViewport.end.row) ?? fallback;
+          return { start: Math.min(start, end), end: Math.max(start, end) };
+        })();
   const activeStyle =
     selection === null || activeData === null
       ? (initialOptions.defaultStyle ?? {})
@@ -1177,14 +1243,7 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
       data-grid-visible={props.options?.showGrid === false ? 'false' : 'true'}
       data-context-menu-enabled={props.options?.showContextMenu === false ? 'false' : 'true'}
       role="grid"
-      aria-rowcount={
-        activeData === null
-          ? undefined
-          : Math.max(
-              selection?.active.row ?? 0,
-              typeof activeData.rows?.len === 'number' ? activeData.rows.len - 1 : 0,
-            ) + 1
-      }
+      aria-rowcount={activeData === null ? undefined : accessibilityRows.length}
       aria-colcount={
         activeData === null
           ? undefined
@@ -1284,20 +1343,19 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
             activeData === null ||
             activeDocumentSheet === undefined ||
             accessibilityViewport === null ||
+            accessibilityVisualViewport === null ||
             accessibilityPresentations === null ? null : (
               <div className="tego-sheet__accessibility-grid">
                 <AccessibilityGrid
-                  rowCount={Math.max(
-                    selection.active.row + 1,
-                    typeof activeData.rows?.len === 'number' ? activeData.rows.len : 0,
-                  )}
+                  rowCount={accessibilityRows.length}
+                  rowOrder={accessibilityRows}
                   columnCount={Math.max(
                     selection.active.column + 1,
                     typeof activeData.cols?.len === 'number' ? activeData.cols.len : 0,
                   )}
                   viewport={{
-                    rowStart: accessibilityViewport.start.row,
-                    rowEnd: accessibilityViewport.end.row,
+                    rowStart: accessibilityVisualViewport.start,
+                    rowEnd: accessibilityVisualViewport.end,
                     columnStart: accessibilityViewport.start.column,
                     columnEnd: accessibilityViewport.end.column,
                   }}

@@ -157,6 +157,10 @@ export interface TegoSheetHandle {
   renameSheet(sheet: SheetId, name: string): void;
   /** Activates an identified worksheet and emits an active-sheet event with source `ref`. */
   activateSheet(sheet: SheetId): void;
+  /** Activates a saved filter view as session-only presentation state. */
+  activateFilterView(sheet: SheetId, viewId: string): void;
+  /** Clears the active session-only filter view for a worksheet. */
+  deactivateFilterView(sheet: SheetId): void;
   /** Commits the previous history state when undo is available. */
   undo(): void;
   /** Reapplies the next history state when redo is available. */

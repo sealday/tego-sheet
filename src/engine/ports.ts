@@ -61,6 +61,13 @@ export interface SheetGridSizing {
   readonly defaultRowHeight?: number;
   readonly defaultColumnWidth?: number;
   readonly locale?: LocaleDefinition;
+  /** Session-derived row ordering and visibility without persistent row mutation. */
+  readonly derivedRows?: {
+    readonly start: number;
+    readonly end: number;
+    readonly rowOrder: readonly number[];
+    readonly hiddenRows: ReadonlySet<number>;
+  };
 }
 
 const DEFAULT_ROW_COUNT = 100;
@@ -221,7 +228,70 @@ function createRowOrder(
   sheet: Readonly<SheetData>,
   count: number,
   locale: LocaleDefinition,
+  derived?: SheetGridSizing['derivedRows'],
 ): RowOrder {
+  if (derived !== undefined) {
+    const start = Math.max(0, derived.start);
+    const end = Math.min(count - 1, derived.end);
+    const expected = end - start + 1;
+    const order = [...derived.rowOrder];
+    const members = new Set(order);
+    if (
+      expected < 0 ||
+      order.length !== expected ||
+      members.size !== expected ||
+      order.some((row) => !Number.isSafeInteger(row) || row < start || row > end)
+    ) {
+      throw new RangeError('derived row order must be a permutation of its range');
+    }
+    const visualByLogical = new Map(order.map((row, index) => [row, start + index]));
+    return {
+      logicalAtVisual(visualRow) {
+        assertIndex(visualRow, count, 'visual row');
+        return visualRow < start || visualRow > end
+          ? visualRow
+          : (order[visualRow - start] as number);
+      },
+      visualOfLogical(logicalRow) {
+        assertIndex(logicalRow, count, 'logical row');
+        return visualByLogical.get(logicalRow) ?? logicalRow;
+      },
+      visualRange(logicalStart, logicalEnd) {
+        return mappedRangeBounds(
+          logicalStart,
+          logicalEnd,
+          count,
+          start,
+          end,
+          (logicalRow) => visualByLogical.get(logicalRow) ?? logicalRow,
+          'logical row',
+        );
+      },
+      visualRuns(logicalStart, logicalEnd) {
+        return mappedRangeRuns(
+          logicalStart,
+          logicalEnd,
+          count,
+          start,
+          end,
+          (logicalRow) => visualByLogical.get(logicalRow) ?? logicalRow,
+          'logical row',
+        );
+      },
+      logicalRange(visualStart, visualEnd) {
+        return mappedRangeBounds(
+          visualStart,
+          visualEnd,
+          count,
+          start,
+          end,
+          (visualRow) => order[visualRow - start] ?? visualRow,
+          'visual row',
+        );
+      },
+      reordered: order.some((row, index) => row !== start + index),
+    };
+  }
   const sort = sheet.autofilter?.sort;
   const reference = sheet.autofilter?.ref;
   if (sort?.ci === undefined || sort.order === undefined || reference === undefined) {
@@ -449,7 +519,12 @@ export function createSheetGridModel(
   const merges = Object.freeze(
     (sheet.merges ?? []).map((value) => frozenRange(parseA1Range(value))),
   );
-  const order = createRowOrder(sheet, rowCount, sizing.locale ?? { id: 'en', messages: {} });
+  const order = createRowOrder(
+    sheet,
+    rowCount,
+    sizing.locale ?? { id: 'en', messages: {} },
+    sizing.derivedRows,
+  );
   let filtered: readonly number[] = [];
   try {
     filtered = filteredRows(sheet);
@@ -463,7 +538,7 @@ export function createSheetGridModel(
     (data) => data.height,
     'row',
     defaultRowHeight > 0 ? 'last' : 'none',
-    filtered.map(order.visualOfLogical),
+    [...filtered, ...(sizing.derivedRows?.hiddenRows ?? [])].map(order.visualOfLogical),
   );
   const columns = createSparseAxis<ColumnData>(
     sheet.cols,

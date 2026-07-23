@@ -9,8 +9,9 @@ import {
   type TransactionResult,
 } from './core/controller/spreadsheet-document-controller';
 import type { ChangeSource, WorkbookChange } from './core/types/changes';
+import type { SheetId } from './core/types/coordinates';
 import type { JsonValue } from './core/types/json';
-import type { SpreadsheetDocument } from './document/model/document';
+import type { FilterView, SpreadsheetDocument } from './document/model/document';
 import type { CalculationEnvironment, FormulaFunctionRegistry } from './formula';
 
 /**
@@ -257,6 +258,12 @@ export interface DocumentControllerOptions {
 export interface DocumentController {
   /** Returns the current immutable public state. */
   getSnapshot(): DocumentControllerSnapshot;
+  /** Selects a saved worksheet view as session-only state. */
+  activateFilterView(sheet: SheetId, viewId: string): void;
+  /** Clears the selected session view for a worksheet. */
+  deactivateFilterView(sheet: SheetId): void;
+  /** Returns the selected saved view without changing document state. */
+  getActiveFilterView(sheet: SheetId): FilterView | undefined;
   /** Executes one JSON-safe command through the atomic transaction boundary. */
   execute(
     command: DocumentCommandEnvelope,
@@ -401,6 +408,18 @@ class PublicDocumentController implements DocumentController {
 
   getSnapshot(): DocumentControllerSnapshot {
     return toSnapshot(this.#controller);
+  }
+
+  activateFilterView(sheet: SheetId, viewId: string): void {
+    this.#controller.activateFilterView(sheet, viewId);
+  }
+
+  deactivateFilterView(sheet: SheetId): void {
+    this.#controller.deactivateFilterView(sheet);
+  }
+
+  getActiveFilterView(sheet: SheetId): FilterView | undefined {
+    return this.#controller.getActiveFilterView(sheet);
   }
 
   execute(

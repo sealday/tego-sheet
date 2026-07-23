@@ -7,7 +7,7 @@ import {
   type SheetOptions,
 } from '../../core';
 import type { SpreadsheetControllerSnapshot } from '../../core/controller/spreadsheet-document-controller';
-import type { DocumentSheetId } from '../../document';
+import type { DocumentSheetId, FilterView } from '../../document';
 import {
   CanvasEngine,
   clampScroll,
@@ -28,6 +28,7 @@ import {
 } from '../../engine';
 import { createPresentationCache, createPresentationResolver } from '../../presentation';
 import { createPresentationValidationResolver } from './presentation-adapter';
+import { applyDocumentFilterView } from '../../views';
 
 export interface EngineAdapterOptions {
   readonly root: HTMLElement;
@@ -36,6 +37,8 @@ export interface EngineAdapterOptions {
   readonly sheetOptions?: SheetOptions;
   readonly showGrid?: boolean;
   readonly locale?: LocaleDefinition;
+  readonly getActiveFilterView?: (sheet: SheetId) => FilterView | undefined;
+  readonly getFilterViewRevision?: () => number;
 }
 
 export interface EngineAdapter {
@@ -149,6 +152,7 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
         condition: latestSnapshot.revision,
         style: latestSnapshot.revision,
         environment: latestSnapshot.revision,
+        view: options.getFilterViewRevision?.() ?? 0,
       },
       environment: {
         locale:
@@ -157,6 +161,9 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
         dateSystem: latestSnapshot.document.workbook.settings.dateSystem,
         target: 'screen',
       },
+      ...(activeSheet === null || options.getActiveFilterView === undefined
+        ? {}
+        : { activeFilterView: options.getActiveFilterView(activeSheet) }),
     });
     const renderSnapshot: CanvasRenderSnapshot = {
       sheet,
@@ -180,15 +187,42 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
     if (disposed || latestSnapshot === null) return;
     const index = activeIndex();
     const sheet = index < 0 ? undefined : latestSnapshot.projection[index];
-    if (sheet === undefined) {
+    const documentSheet = index < 0 ? undefined : latestSnapshot.document.workbook.sheets[index];
+    if (sheet === undefined || documentSheet === undefined) {
       viewport = null;
       selection = null;
       return;
     }
+    const activeView =
+      activeSheet === null ? undefined : options.getActiveFilterView?.(activeSheet);
+    const derivedRows =
+      activeView === undefined
+        ? undefined
+        : applyDocumentFilterView({
+            document: latestSnapshot.document,
+            formulaValues: new Map(
+              latestSnapshot.calculation.values.map(({ address, value }) => [address, value]),
+            ),
+            view: activeView,
+            locale:
+              options.locale?.id ?? latestSnapshot.document.workbook.settings.localeHint ?? 'en-US',
+            limits: {
+              maxRows: Math.max(1, activeView.range.end.row - activeView.range.start.row + 1),
+            },
+          });
     const model = createSheetGridModel(sheet, {
       defaultRowHeight: options.sheetOptions?.rows?.defaultHeight,
       defaultColumnWidth: options.sheetOptions?.columns?.defaultWidth,
       locale: options.locale,
+      ...(derivedRows === undefined
+        ? {}
+        : {
+            derivedRows: {
+              start: activeView!.range.start.row + 1,
+              end: activeView!.range.end.row,
+              ...derivedRows,
+            },
+          }),
     });
     const previousScroll = viewport?.scroll ?? { x: 0, y: 0 };
     viewport = createViewportMetrics(model, {

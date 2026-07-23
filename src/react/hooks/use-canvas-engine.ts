@@ -7,6 +7,7 @@ export interface UseCanvasEngineOptions {
   readonly activeSheet: SheetId | null;
   readonly canvasRef: RefObject<HTMLCanvasElement | null>;
   readonly enabled: boolean;
+  readonly filterViewRevision?: number;
   readonly engineSlot: EngineAdapterSlot;
   readonly epoch: ControllerEpoch;
   readonly onReady: () => void;
@@ -55,6 +56,7 @@ export function useCanvasEngine(options: UseCanvasEngineOptions): void {
     activeSheet,
     canvasRef,
     enabled,
+    filterViewRevision,
     engineSlot,
     epoch,
     onReady,
@@ -85,6 +87,8 @@ export function useCanvasEngine(options: UseCanvasEngineOptions): void {
         canvas,
         sheetOptions,
         locale,
+        getActiveFilterView: (sheet) => controller.getActiveFilterView(sheet),
+        getFilterViewRevision: () => controller.getFilterViewRevision(),
         onRenderError: (cause) => {
           const handler = onRenderErrorRef.current;
           if (handler === undefined) throw cause;
@@ -133,7 +137,7 @@ export function useCanvasEngine(options: UseCanvasEngineOptions): void {
     const engine = engineSlot.get();
     engine?.render(epoch.snapshot, activeSheet);
     onSelectionChange?.(engine?.publicSelection() ?? null);
-  }, [activeSheet, engineSlot, epoch.snapshot, isActive, onSelectionChange]);
+  }, [activeSheet, engineSlot, epoch.snapshot, filterViewRevision, isActive, onSelectionChange]);
 
   useLayoutEffect(() => {
     if (!isActive()) return;
