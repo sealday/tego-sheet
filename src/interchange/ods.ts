@@ -153,6 +153,12 @@ export function createOdsReader(configuredLimits: InterchangeLimits = {}): Workb
       const unsupported: string[] = [];
       if (/<table:shapes\b|<draw:/i.test(content)) unsupported.push('ods:drawing-objects');
       if (/<table:database-ranges\b/i.test(content)) unsupported.push('ods:database-ranges');
+      if (/<table:named-expressions\b/i.test(content)) unsupported.push('ods:named-expressions');
+      if (/<table:content-validations\b/i.test(content)) unsupported.push('ods:data-validation');
+      if (/<table:data-pilot-tables\b/i.test(content)) unsupported.push('ods:pivot-tables');
+      if (/<office:forms\b/i.test(content)) unsupported.push('ods:forms');
+      if (/<office:annotation\b/i.test(content)) unsupported.push('ods:comments');
+      if (/<table:filter\b/i.test(content)) unsupported.push('ods:filters');
       const sheets: ImportedSheet[] = [];
       const state = { cells: 0 };
       for (const match of content.matchAll(/<table:table\b([^>]*?)>([\s\S]*?)<\/table:table>/gi)) {

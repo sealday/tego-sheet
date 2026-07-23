@@ -159,6 +159,74 @@ describe('IO-01 bounded atomic workbook readers and writers', () => {
     expect(imported.security.unsupportedFeatures).toContain('ods:merged-cells');
   });
 
+  it('reports every recognized XLSX degradation as a structured diagnostic', async () => {
+    const imported = await createXlsxReader().read(
+      xlsxFixture(`<?xml version="1.0"?>
+        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+          <sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData>
+          <autoFilter ref="A1:A2"/>
+          <hyperlinks><hyperlink ref="A1" location="Data!A1"/></hyperlinks>
+          <sheetProtection sheet="1"/>
+          <drawing r:id="rId2"/>
+          <tableParts count="1"><tablePart r:id="rId3"/></tableParts>
+        </worksheet>`),
+    );
+
+    expect(imported.security.unsupportedFeatures).toEqual([
+      'xlsx:auto-filter',
+      'xlsx:hyperlinks',
+      'xlsx:sheet-protection',
+      'xlsx:drawing-objects',
+      'xlsx:tables',
+    ]);
+    expect(imported.diagnostics).toEqual(
+      imported.security.unsupportedFeatures.map((feature) =>
+        expect.objectContaining({
+          code: 'UNSUPPORTED_INTERCHANGE_FEATURE',
+          severity: 'warning',
+          domain: 'interchange',
+          stage: 'decode',
+          details: { feature },
+        }),
+      ),
+    );
+  });
+
+  it('reports every recognized ODS degradation as a structured diagnostic', async () => {
+    const imported = await createOdsReader().read(
+      odsFixture(`<?xml version="1.0"?>
+        <office:document-content
+          xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+          xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+          xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+          xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
+          office:version="1.3">
+          <office:body><office:spreadsheet>
+            <table:named-expressions/>
+            <table:content-validations/>
+            <table:database-ranges/>
+            <table:data-pilot-tables/>
+            <table:table table:name="Data">
+              <table:shapes><draw:frame/></table:shapes>
+              <table:table-row>
+                <table:table-cell office:value-type="string"><text:p>Hello</text:p></table:table-cell>
+              </table:table-row>
+            </table:table>
+          </office:spreadsheet></office:body>
+        </office:document-content>`),
+    );
+
+    expect(imported.security.unsupportedFeatures).toEqual([
+      'ods:drawing-objects',
+      'ods:database-ranges',
+      'ods:named-expressions',
+      'ods:data-validation',
+      'ods:pivot-tables',
+    ]);
+    expect(imported.diagnostics).toHaveLength(imported.security.unsupportedFeatures.length);
+    expect(imported.diagnostics.every((entry) => entry.severity === 'warning')).toBe(true);
+  });
+
   it('rejects archive and cell limits without exposing partial documents', async () => {
     const oversized = new Uint8Array(32);
     for (const reader of [

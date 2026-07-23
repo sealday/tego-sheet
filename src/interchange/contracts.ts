@@ -200,10 +200,22 @@ export function importResult(
   warnings: readonly string[] = [],
   unsupportedFeatures: readonly string[] = [],
 ): WorkbookImportResult {
+  const security = securityReport(warnings, unsupportedFeatures);
   return Object.freeze({
     format,
     document,
-    diagnostics: Object.freeze([]),
-    security: securityReport(warnings, unsupportedFeatures),
+    diagnostics: Object.freeze(
+      security.unsupportedFeatures.map((feature) =>
+        Object.freeze({
+          code: 'UNSUPPORTED_INTERCHANGE_FEATURE',
+          severity: 'warning' as const,
+          domain: 'interchange' as const,
+          stage: 'decode' as const,
+          message: `The imported workbook uses an unsupported feature: ${feature}`,
+          details: Object.freeze({ feature }),
+        }),
+      ),
+    ),
+    security,
   });
 }

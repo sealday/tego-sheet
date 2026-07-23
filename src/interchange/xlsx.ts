@@ -160,6 +160,18 @@ function parseWorksheet(
   if (/<mergeCells\b/i.test(xml)) unsupported.push('xlsx:merged-cells');
   if (/<conditionalFormatting\b/i.test(xml)) unsupported.push('xlsx:conditional-formatting');
   if (/<dataValidations\b/i.test(xml)) unsupported.push('xlsx:data-validation');
+  if (/<autoFilter\b/i.test(xml)) unsupported.push('xlsx:auto-filter');
+  if (/<hyperlinks\b/i.test(xml)) unsupported.push('xlsx:hyperlinks');
+  if (/<sheetProtection\b/i.test(xml)) unsupported.push('xlsx:sheet-protection');
+  if (/<drawing\b/i.test(xml)) unsupported.push('xlsx:drawing-objects');
+  if (/<tableParts\b/i.test(xml)) unsupported.push('xlsx:tables');
+  if (/<pivotTableDefinition\b/i.test(xml)) unsupported.push('xlsx:pivot-tables');
+  if (/<(?:legacyDrawing|oleObjects|controls)\b/i.test(xml)) {
+    unsupported.push('xlsx:embedded-objects');
+  }
+  if (/<(?:pageMargins|pageSetup|headerFooter|printOptions)\b/i.test(xml)) {
+    unsupported.push('xlsx:print-settings');
+  }
   return { name, cells };
 }
 
@@ -201,6 +213,13 @@ export function createXlsxReader(configuredLimits: InterchangeLimits = {}): Work
           : archiveXml(entries, 'xl/sharedStrings.xml', limits);
       const strings = sharedStrings(shared);
       const unsupported: string[] = [];
+      if (/<definedNames\b/i.test(workbook)) unsupported.push('xlsx:defined-names');
+      if (/<workbookProtection\b/i.test(workbook)) unsupported.push('xlsx:workbook-protection');
+      if (entries['xl/styles.xml'] !== undefined) unsupported.push('xlsx:styles');
+      if (entries['xl/calcChain.xml'] !== undefined) unsupported.push('xlsx:calculation-chain');
+      if (entryNames.some((name) => /^xl\/comments\d*\.xml$/i.test(name))) {
+        unsupported.push('xlsx:comments');
+      }
       const sheets: ImportedSheet[] = [];
       let totalCells = 0;
       for (const match of workbook.matchAll(/<sheet\b([^>]*?)(?:\/>|>[\s\S]*?<\/sheet>)/gi)) {
