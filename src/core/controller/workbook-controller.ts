@@ -81,6 +81,12 @@ export interface ProjectionCommit<Result> {
   readonly range?: WorkbookChange['range'];
 }
 
+export interface TransactionChangeSummary {
+  readonly kind: WorkbookChangeKind;
+  readonly sheet: SheetId;
+  readonly range?: WorkbookChange['range'];
+}
+
 let nextControllerId = 1;
 
 function cloneValue<T>(value: T): T {
@@ -355,6 +361,45 @@ export class WorkbookController {
     this.changeSequence = checkpoint.changeSequence;
   }
 
+  /**
+   * @internal Collapses silently prepared commands into one revision and one history entry.
+   * The checkpoint must belong to this controller and describe the state before preparation.
+   */
+  finalizeTransaction(
+    checkpoint: ControllerCheckpoint,
+    command: WorkbookCommand,
+    source: ChangeSource,
+    summary: TransactionChangeSummary,
+  ): CommandOutcome<void, WorkbookCommand> {
+    this.ensureMutable();
+    if (!this.isOwnedCheckpoint(checkpoint)) {
+      throw invalidCommand('Checkpoint does not belong to this workbook controller');
+    }
+    const after = this.state;
+    const changed =
+      JSON.stringify(after.serialize()) !== JSON.stringify(checkpoint.state.serialize());
+    this.history.restore(checkpoint.history);
+    this.revision = checkpoint.revision;
+    this.changeSequence = checkpoint.changeSequence;
+    if (!changed) {
+      this.state = checkpoint.state;
+      return { status: 'noop' };
+    }
+    this.state = after;
+    const commandSnapshot = this.isolateCommand(command);
+    const change = this.createChange(summary.kind, source, summary.sheet, summary.range);
+    this.revision += 1;
+    this.history.record({
+      before: checkpoint.state,
+      after,
+      metadata: Object.freeze({ command: commandSnapshot, change }),
+    });
+    return {
+      status: 'committed',
+      commit: this.createCommit(commandSnapshot, change, undefined),
+    };
+  }
+
   replace(input: WorkbookInput, sheetIds?: readonly SheetId[]): void {
     this.ensureActive();
     const replacement = this.state.replace(input, sheetIds);
@@ -489,6 +534,15 @@ export class WorkbookController {
 
   private ensureActive(): void {
     if (this.disposed) throw invalidCommand('Workbook controller is disposed');
+  }
+
+  private isOwnedCheckpoint(checkpoint: ControllerCheckpoint): boolean {
+    return (
+      typeof checkpoint === 'object' &&
+      checkpoint !== null &&
+      this.checkpoints.has(checkpoint) &&
+      hasCheckpointOwner(checkpoint, this.checkpointOwner)
+    );
   }
 }
 

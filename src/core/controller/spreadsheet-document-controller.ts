@@ -3,6 +3,8 @@ import { projectDocumentToLegacy, projectLegacyToDocument } from './runtime-proj
 import type { SpreadsheetDocument } from '../../document/model/document';
 import type { CommandResult, WorkbookCommand } from '../commands/workbook-command';
 import type { ChangeSource } from '../types/changes';
+import type { WorkbookChange } from '../types/changes';
+import type { JsonObject } from '../types/json';
 import { sheetId, type CellAddress, type SheetId } from '../types/coordinates';
 import type { ValidationResult } from '../types/validation';
 import { TegoSheetException } from '../errors/tego-sheet-exception';
@@ -31,6 +33,7 @@ export interface SpreadsheetControllerCommit<
   readonly change: import('../types/changes').WorkbookChange;
   readonly result: Result;
   readonly ['document']: SpreadsheetDocument;
+  readonly transaction?: SerializableTransactionEnvelope;
 }
 
 export interface SpreadsheetControllerSnapshot extends Omit<ControllerSnapshot, 'value'> {
@@ -52,6 +55,196 @@ export interface SpreadsheetControllerCheckpoint {
   readonly legacy: ReturnType<WorkbookController['checkpoint']>;
   readonly documentHistory: HistoryCheckpoint<SpreadsheetDocument, null>;
   readonly ['document']: SpreadsheetDocument;
+}
+
+/** A JSON-serializable, versioned document command submitted to the transaction boundary. */
+export interface SerializableCommandEnvelope {
+  readonly schemaVersion: 1;
+  readonly id: string;
+  readonly command: WorkbookCommand;
+}
+
+/** A JSON-serializable atomic group of document commands. */
+export interface SerializableTransactionEnvelope {
+  readonly schemaVersion: 1;
+  readonly id: string;
+  readonly baseRevision: number;
+  readonly commands: readonly SerializableCommandEnvelope[];
+  readonly metadata?: JsonObject;
+}
+
+/** Context supplied to a transaction permission gate before candidate execution starts. */
+export interface TransactionPermissionContext {
+  readonly transaction: SerializableTransactionEnvelope;
+  readonly snapshot: SpreadsheetControllerSnapshot;
+}
+
+/** Synchronous authorization hook for document transactions. */
+export type TransactionPermissionGate = (context: TransactionPermissionContext) => boolean;
+
+export interface TransactionOptions {
+  readonly source?: ChangeSource;
+  readonly permissionGate?: TransactionPermissionGate;
+}
+
+export interface ExecuteOptions extends TransactionOptions {
+  readonly baseRevision?: number;
+}
+
+export type TransactionRejectionCode =
+  | 'COMMAND_SCHEMA_INVALID'
+  | 'COMMAND_NOT_ALLOWED'
+  | 'REVISION_CONFLICT'
+  | 'TRANSACTION_INVARIANT_FAILED'
+  | 'TRANSACTION_LIMIT_EXCEEDED';
+
+export interface TransactionRejection {
+  readonly status: 'rejected';
+  readonly code: TransactionRejectionCode;
+  readonly message: string;
+}
+
+export interface TransactionCommit {
+  readonly status: 'committed';
+  readonly transaction: SerializableTransactionEnvelope;
+  readonly revision: number;
+  readonly change: WorkbookChange;
+  readonly ['document']: SpreadsheetDocument;
+}
+
+export interface TransactionNoop {
+  readonly status: 'noop';
+  readonly transaction: SerializableTransactionEnvelope;
+  readonly revision: number;
+}
+
+export type TransactionResult = TransactionCommit | TransactionNoop | TransactionRejection;
+
+export type TransactionPreview =
+  | TransactionRejection
+  | {
+      readonly status: 'ready' | 'noop';
+      readonly transaction: SerializableTransactionEnvelope;
+      readonly baseRevision: number;
+      readonly ['document']: SpreadsheetDocument;
+    };
+
+const MAX_TRANSACTION_COMMANDS = 1_000;
+
+function captureJsonValue(value: unknown, seen = new Set<object>()): unknown {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'object' || seen.has(value)) {
+    throw new TypeError('Value is not finite acyclic JSON');
+  }
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) {
+      const descriptors = Object.getOwnPropertyDescriptors(value);
+      const output: unknown[] = [];
+      for (let index = 0; index < value.length; index += 1) {
+        const descriptor = descriptors[String(index)];
+        if (
+          descriptor === undefined ||
+          !descriptor.enumerable ||
+          !Object.hasOwn(descriptor, 'value')
+        ) {
+          throw new TypeError('JSON arrays must contain data properties');
+        }
+        output.push(captureJsonValue(descriptor.value, seen));
+      }
+      return Object.freeze(output);
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new TypeError('JSON objects must use a plain prototype');
+    }
+    if (Object.getOwnPropertySymbols(value).length > 0) {
+      throw new TypeError('JSON objects cannot contain symbol keys');
+    }
+    const output = Object.create(null) as Record<string, unknown>;
+    for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
+      if (!descriptor.enumerable) continue;
+      if (!Object.hasOwn(descriptor, 'value')) {
+        throw new TypeError('JSON objects cannot contain accessors');
+      }
+      Object.defineProperty(output, key, {
+        configurable: false,
+        enumerable: true,
+        value: captureJsonValue(descriptor.value, seen),
+        writable: false,
+      });
+    }
+    return Object.freeze(output);
+  } finally {
+    seen.delete(value);
+  }
+}
+
+function snapshotTransaction(
+  value: SerializableTransactionEnvelope,
+): SerializableTransactionEnvelope | TransactionRejection {
+  let transaction: SerializableTransactionEnvelope;
+  try {
+    const captured = captureJsonValue(value);
+    if (captured === null || typeof captured !== 'object' || Array.isArray(captured)) {
+      throw new TypeError('Transaction must be an object');
+    }
+    transaction = captured as SerializableTransactionEnvelope;
+  } catch {
+    return {
+      status: 'rejected',
+      code: 'COMMAND_SCHEMA_INVALID',
+      message: 'Transaction could not be isolated',
+    };
+  }
+  if (
+    transaction.schemaVersion !== 1 ||
+    typeof transaction.id !== 'string' ||
+    transaction.id.length === 0 ||
+    !Number.isSafeInteger(transaction.baseRevision) ||
+    transaction.baseRevision < 0 ||
+    !Array.isArray(transaction.commands)
+  ) {
+    return {
+      status: 'rejected',
+      code: 'COMMAND_SCHEMA_INVALID',
+      message: 'Transaction envelope is invalid',
+    };
+  }
+  if (transaction.commands.length > MAX_TRANSACTION_COMMANDS) {
+    return {
+      status: 'rejected',
+      code: 'TRANSACTION_LIMIT_EXCEEDED',
+      message: `Transaction exceeds ${MAX_TRANSACTION_COMMANDS} commands`,
+    };
+  }
+  if (
+    transaction.commands.some(
+      (entry) =>
+        entry.schemaVersion !== 1 ||
+        typeof entry.id !== 'string' ||
+        entry.id.length === 0 ||
+        entry.command === null ||
+        typeof entry.command !== 'object' ||
+        entry.command.type === 'undo' ||
+        entry.command.type === 'redo',
+    )
+  ) {
+    return {
+      status: 'rejected',
+      code: 'COMMAND_SCHEMA_INVALID',
+      message: 'Transaction command envelope is invalid',
+    };
+  }
+  if (new Set(transaction.commands.map((entry) => entry.id)).size !== transaction.commands.length) {
+    return {
+      status: 'rejected',
+      code: 'COMMAND_SCHEMA_INVALID',
+      message: 'Transaction command IDs must be unique',
+    };
+  }
+  return transaction;
 }
 
 /** @internal */
@@ -141,6 +334,122 @@ export class SpreadsheetDocumentController {
 
   subscribe(subscriber: (event: SpreadsheetControllerEvent) => void): () => void {
     return this.subscriptions.subscribe(subscriber);
+  }
+
+  execute(command: SerializableCommandEnvelope, options: ExecuteOptions = {}): TransactionResult {
+    return this.transact(
+      {
+        schemaVersion: 1,
+        id: `transaction:${command.id}`,
+        baseRevision: options.baseRevision ?? this.getSnapshot().revision,
+        commands: [command],
+      },
+      options,
+    );
+  }
+
+  transact(
+    input: SerializableTransactionEnvelope,
+    options: TransactionOptions = {},
+  ): TransactionResult {
+    const checked = this.checkTransaction(input, options);
+    if ('status' in checked) return checked;
+    const transaction = checked;
+    const checkpoint = this.checkpoint();
+    const source = options.source ?? 'ref';
+    let lastCommit: SpreadsheetControllerCommit<unknown, WorkbookCommand> | undefined;
+    let event: SpreadsheetControllerEvent;
+    let result: TransactionCommit;
+    try {
+      for (const envelope of transaction.commands) {
+        const outcome = this.dispatch(envelope.command, source, { notify: false });
+        if (outcome.status === 'committed') lastCommit = outcome.commit;
+      }
+      if (lastCommit === undefined) {
+        this.restore(checkpoint);
+        return {
+          status: 'noop',
+          transaction,
+          revision: checkpoint.legacy.revision,
+        };
+      }
+      const candidate = this.currentDocument;
+      this.documentHistory.restore(checkpoint.documentHistory);
+      this.documentHistory.record({
+        before: checkpoint.document,
+        after: candidate,
+        metadata: null,
+      });
+      const finalized = this.legacy.finalizeTransaction(
+        checkpoint.legacy,
+        lastCommit.command,
+        source,
+        {
+          kind: 'transaction',
+          sheet: lastCommit.change.sheet,
+        },
+      );
+      if (finalized.status === 'noop') {
+        this.restore(checkpoint);
+        return {
+          status: 'noop',
+          transaction,
+          revision: checkpoint.legacy.revision,
+        };
+      }
+      const commit = cloneFrozenDocumentValue({
+        ...lastCommit,
+        change: finalized.commit.change,
+        ['document']: candidate,
+        transaction,
+      }) as SpreadsheetControllerCommit<unknown, WorkbookCommand>;
+      this.currentDocument = candidate;
+      event = cloneFrozenDocumentValue({
+        snapshot: this.getSnapshot(),
+        commit,
+      }) as SpreadsheetControllerEvent;
+      result = cloneFrozenDocumentValue({
+        status: 'committed',
+        transaction,
+        revision: this.getSnapshot().revision,
+        change: finalized.commit.change,
+        ['document']: candidate,
+      }) as TransactionCommit;
+    } catch (error) {
+      this.restore(checkpoint);
+      return this.rejectTransaction(error);
+    }
+    this.subscriptions.publish(event);
+    return result;
+  }
+
+  dryRun(
+    input: SerializableTransactionEnvelope,
+    options: TransactionOptions = {},
+  ): TransactionPreview {
+    const checked = this.checkTransaction(input, options);
+    if ('status' in checked) return checked;
+    const transaction = checked;
+    const checkpoint = this.checkpoint();
+    const source = options.source ?? 'ref';
+    try {
+      let changed = false;
+      for (const envelope of transaction.commands) {
+        const outcome = this.dispatch(envelope.command, source, { notify: false });
+        if (outcome.status === 'committed') changed = true;
+      }
+      const candidate = this.getDocument();
+      return cloneFrozenDocumentValue({
+        status: changed ? 'ready' : 'noop',
+        transaction,
+        baseRevision: transaction.baseRevision,
+        ['document']: candidate,
+      }) as TransactionPreview;
+    } catch (error) {
+      return this.rejectTransaction(error);
+    } finally {
+      this.restore(checkpoint);
+    }
   }
 
   dispatch<Command extends WorkbookCommand>(
@@ -306,5 +615,71 @@ export class SpreadsheetDocumentController {
   dispose(): void {
     this.subscriptions.dispose();
     this.legacy.dispose();
+  }
+
+  private checkTransaction(
+    input: SerializableTransactionEnvelope,
+    options: TransactionOptions,
+  ): SerializableTransactionEnvelope | TransactionRejection {
+    const transaction = snapshotTransaction(input);
+    if ('status' in transaction) return transaction;
+    if (
+      options.source !== undefined &&
+      ![
+        'keyboard',
+        'pointer',
+        'touch',
+        'toolbar',
+        'sheet-tabs',
+        'context-menu',
+        'clipboard',
+        'ref',
+      ].includes(options.source)
+    ) {
+      return {
+        status: 'rejected',
+        code: 'COMMAND_SCHEMA_INVALID',
+        message: 'Transaction source is invalid',
+      };
+    }
+    if (transaction.baseRevision !== this.getSnapshot().revision) {
+      return {
+        status: 'rejected',
+        code: 'REVISION_CONFLICT',
+        message: `Expected revision ${transaction.baseRevision}, current revision is ${this.getSnapshot().revision}`,
+      };
+    }
+    try {
+      if (
+        options.permissionGate?.({
+          transaction,
+          snapshot: this.getSnapshot(),
+        }) === false
+      ) {
+        return {
+          status: 'rejected',
+          code: 'COMMAND_NOT_ALLOWED',
+          message: 'Transaction was denied by the permission gate',
+        };
+      }
+    } catch (error) {
+      return {
+        status: 'rejected',
+        code: 'COMMAND_NOT_ALLOWED',
+        message: error instanceof Error ? error.message : 'Transaction permission gate failed',
+      };
+    }
+    return transaction;
+  }
+
+  private rejectTransaction(error: unknown): TransactionRejection {
+    return {
+      status: 'rejected',
+      code:
+        error instanceof TegoSheetException && error.code === 'INVALID_COMMAND'
+          ? 'COMMAND_SCHEMA_INVALID'
+          : 'TRANSACTION_INVARIANT_FAILED',
+      message: error instanceof Error ? error.message : 'Transaction failed',
+    };
   }
 }

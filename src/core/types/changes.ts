@@ -11,6 +11,7 @@ export type WorkbookChangeKind =
   | 'filter'
   | 'validation'
   | 'sheet'
+  | 'transaction'
   | 'history';
 
 /** User interaction or imperative API that initiated a change. */
