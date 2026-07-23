@@ -228,4 +228,138 @@ describe('Workbook 2.0 validation', () => {
       diagnostics: [{ code: 'DOCUMENT_LIMIT_EXCEEDED', details: { path: '$' } }],
     });
   });
+
+  it.each([
+    ['maxSheets', Number.NaN],
+    ['maxCells', Number.POSITIVE_INFINITY],
+    ['maxMerges', -1],
+    ['maxBytes', 1.5],
+  ] as const)('rejects invalid %s limit values before decoding', (name, value) => {
+    const input = Object.defineProperty(validDocument(), 'workbook', {
+      get: () => {
+        throw new Error('document decoding must not begin');
+      },
+    });
+
+    const result = parseSpreadsheetDocument(input, {
+      limits: { [name]: value },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      diagnostics: [
+        {
+          code: 'DOCUMENT_LIMIT_EXCEEDED',
+          details: { path: `$.limits.${name}` },
+        },
+      ],
+    });
+  });
+
+  it('treats undefined limits as absent instead of disabling defaults', () => {
+    const sheets = Array.from({ length: 1_001 }, () => ({
+      id: 'unused',
+      name: 'Unused',
+      cells: [],
+      merges: [],
+    }));
+    Object.defineProperty(sheets, 0, {
+      get: () => {
+        throw new Error('over-limit sheet entries must not be decoded');
+      },
+    });
+    const fixture = validDocument();
+    fixture.workbook.sheets = sheets;
+
+    expect(
+      codesOf(fixture, {
+        limits: { maxSheets: undefined },
+      }),
+    ).toContain('DOCUMENT_LIMIT_EXCEEDED');
+  });
+
+  it('short-circuits sheet limits before decoding sheet entries', () => {
+    const sheets = Array.from({ length: 2 }, () => ({
+      id: 'unused',
+      name: 'Unused',
+      cells: [],
+      merges: [],
+    }));
+    Object.defineProperty(sheets, 0, {
+      get: () => {
+        throw new Error('over-limit sheet entries must not be decoded');
+      },
+    });
+    const fixture = validDocument();
+    fixture.workbook.sheets = sheets;
+
+    expect(codesOf(fixture, { limits: { maxSheets: 1 } })).toContain('DOCUMENT_LIMIT_EXCEEDED');
+  });
+
+  it('short-circuits cell limits before decoding cells or checking references', () => {
+    const cells = Array.from({ length: 2 }, () => ({
+      row: 0,
+      column: 0,
+      cell: { input: { type: 'blank' as const } },
+    }));
+    Object.defineProperty(cells, 0, {
+      get: () => {
+        throw new Error('over-limit cells must not be decoded');
+      },
+    });
+    const fixture = validDocument();
+    fixture.workbook.sheets[0]!.cells = cells;
+
+    expect(codesOf(fixture, { limits: { maxCells: 1 } })).toContain('DOCUMENT_LIMIT_EXCEEDED');
+  });
+
+  it('short-circuits merge limits before decoding merges or checking overlap', () => {
+    const merges = Array.from({ length: 2 }, () => ({
+      start: { row: 0, column: 0 },
+      end: { row: 0, column: 0 },
+    }));
+    Object.defineProperty(merges, 0, {
+      get: () => {
+        throw new Error('over-limit merges must not be decoded');
+      },
+    });
+    const fixture = validDocument();
+    fixture.workbook.sheets[0]!.merges = merges;
+
+    expect(codesOf(fixture, { limits: { maxMerges: 1 } })).toContain('DOCUMENT_LIMIT_EXCEEDED');
+  });
+
+  it('short-circuits object byte limits without stringifying the complete input', () => {
+    const fixture = {
+      schemaVersion: 2,
+      id: 'document-byte-limit',
+      workbook: {
+        sheets: [],
+        styles: [],
+        validations: [],
+        settings: { dateSystem: 'excel-1900' },
+      },
+      padding: 'x'.repeat(100),
+    } as Record<string, unknown>;
+    Object.defineProperty(fixture, 'extensions', {
+      enumerable: true,
+      get: () => {
+        throw new Error('byte preflight must stop before later properties');
+      },
+    });
+
+    expect(codesOf(fixture, { limits: { maxBytes: 16 } })).toContain('DOCUMENT_LIMIT_EXCEEDED');
+  });
+
+  it('reports hostile object accessors atomically during shallow preflight', () => {
+    const fixture = Object.defineProperty({ schemaVersion: 2 }, 'workbook', {
+      enumerable: true,
+      get: () => {
+        throw new Error('hostile accessor');
+      },
+    });
+
+    expect(() => parseSpreadsheetDocument(fixture)).not.toThrow();
+    expect(codesOf(fixture)).toContain('DOCUMENT_SCHEMA_INVALID');
+  });
 });

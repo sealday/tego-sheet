@@ -29,30 +29,45 @@ import type {
 import { compareSparseCells } from './model/sparse-cells';
 import type { SparseCell } from './model/sparse-cells';
 
+/** Configurable safety limits enforced before deep document decoding. */
 export interface DocumentLimits {
+  /** Maximum number of sheets. */
   readonly maxSheets?: number;
+  /** Maximum total number of sparse cells. */
   readonly maxCells?: number;
+  /** Maximum total number of merge ranges. */
+  readonly maxMerges?: number;
+  /** Maximum UTF-8 byte size of the input document. */
   readonly maxBytes?: number;
 }
 
+/** Options controlling Workbook 2.0 parsing. */
 export interface DocumentParseOptions {
+  /** Optional safety-limit overrides. */
   readonly limits?: DocumentLimits;
 }
 
+/** Atomic result of parsing and validating a Workbook 2.0 document. */
 export type DocumentParseResult =
   | {
+      /** Indicates that parsing succeeded. */
       readonly ok: true;
+      /** Deeply frozen parsed document snapshot. */
       readonly document: SpreadsheetDocument;
+      /** Successful parses contain no diagnostics. */
       readonly diagnostics: readonly [];
     }
   | {
+      /** Indicates that parsing failed atomically. */
       readonly ok: false;
+      /** Aggregated structured diagnostics; no partial document is exposed. */
       readonly diagnostics: readonly DocumentDiagnostic[];
     };
 
 const DEFAULT_LIMITS = {
   maxSheets: 1_000,
   maxCells: 1_000_000,
+  maxMerges: 2_000,
   maxBytes: 64 * 1024 * 1024,
 } as const;
 const NAMESPACE_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)+$/i;
@@ -84,6 +99,112 @@ function compareCodeUnits(left: string, right: string): number {
 interface ParseContext {
   readonly diagnostics: DocumentDiagnostic[];
   readonly activeJson: WeakSet<object>;
+}
+
+interface ResolvedDocumentLimits {
+  readonly maxSheets: number;
+  readonly maxCells: number;
+  readonly maxMerges: number;
+  readonly maxBytes: number;
+}
+
+const LIMIT_NAMES = ['maxSheets', 'maxCells', 'maxMerges', 'maxBytes'] as const;
+
+function resolveLimits(
+  options: DocumentParseOptions,
+  context: ParseContext,
+): ResolvedDocumentLimits | undefined {
+  const limits = { ...DEFAULT_LIMITS };
+  for (const name of LIMIT_NAMES) {
+    const value = options.limits?.[name];
+    if (value === undefined) continue;
+    if (!Number.isSafeInteger(value) || value < 0) {
+      addDiagnostic(
+        context,
+        'DOCUMENT_LIMIT_EXCEEDED',
+        `$.limits.${name}`,
+        `${name} must be a non-negative safe integer`,
+      );
+      return undefined;
+    }
+    Object.assign(limits, { [name]: value });
+  }
+  return limits;
+}
+
+function exceedsObjectByteLimit(input: unknown, maximum: number): boolean {
+  const encoder = new TextEncoder();
+  const active = new WeakSet<object>();
+  let bytes = 0;
+  const consume = (text: string): boolean => {
+    bytes += encoder.encode(text).byteLength;
+    return bytes > maximum;
+  };
+  const visit = (value: unknown, inArray: boolean): boolean => {
+    if (
+      value === null ||
+      typeof value === 'string' ||
+      typeof value === 'boolean' ||
+      typeof value === 'number'
+    ) {
+      return consume(JSON.stringify(value) ?? 'null');
+    }
+    if (typeof value !== 'object') {
+      return inArray ? consume('null') : false;
+    }
+    if (active.has(value)) return false;
+    active.add(value);
+    try {
+      if (Array.isArray(value)) {
+        if (consume('[')) return true;
+        for (let index = 0; index < value.length; index += 1) {
+          if (index > 0 && consume(',')) return true;
+          if (visit(value[index], true)) return true;
+        }
+        return consume(']');
+      }
+      if (consume('{')) return true;
+      let emitted = 0;
+      for (const key of Object.keys(value)) {
+        const item = (value as Record<string, unknown>)[key];
+        if (item === undefined || typeof item === 'function' || typeof item === 'symbol') {
+          continue;
+        }
+        if (emitted > 0 && consume(',')) return true;
+        emitted += 1;
+        if (consume(JSON.stringify(key)) || consume(':') || visit(item, false)) return true;
+      }
+      return consume('}');
+    } finally {
+      active.delete(value);
+    }
+  };
+  return visit(input, false);
+}
+
+function exceedsCollectionLimits(
+  input: unknown,
+  limits: ResolvedDocumentLimits,
+): string | undefined {
+  if (!isRecord(input) || !isRecord(input.workbook) || !Array.isArray(input.workbook.sheets)) {
+    return undefined;
+  }
+  const sheets = input.workbook.sheets;
+  if (sheets.length > limits.maxSheets) return '$.workbook.sheets';
+  let cells = 0;
+  let merges = 0;
+  for (const sheet of sheets) {
+    if (!isRecord(sheet)) continue;
+    if (Array.isArray(sheet.cells)) {
+      cells += sheet.cells.length;
+      if (cells > limits.maxCells) return '$.workbook.sheets';
+    }
+    if (Array.isArray(sheet.merges)) {
+      merges += sheet.merges.length;
+      if (merges > limits.maxMerges) return '$.workbook.sheets';
+    }
+  }
+  return undefined;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
@@ -721,18 +842,26 @@ function canonicalizeDocument(document: SpreadsheetDocument): SpreadsheetDocumen
   };
 }
 
+/**
+ * Parses and validates an unknown Workbook 2.0 input atomically.
+ *
+ * @param input - JSON text or an object-like document input.
+ * @param options - Optional bounded-decoding limits.
+ * @returns A frozen document on success or aggregated diagnostics on failure.
+ */
 export function parseSpreadsheetDocument(
   input: unknown,
   options: DocumentParseOptions = {},
 ): DocumentParseResult {
   const context: ParseContext = { diagnostics: [], activeJson: new WeakSet() };
-  const limits = { ...DEFAULT_LIMITS, ...options.limits };
+  const limits = resolveLimits(options, context);
+  if (limits === undefined) {
+    return { ok: false, diagnostics: deepFreeze(context.diagnostics) };
+  }
   let decodedInput = input;
-  let encodedBytes: number | undefined;
 
   if (typeof input === 'string') {
-    encodedBytes = new TextEncoder().encode(input).byteLength;
-    if (encodedBytes > limits.maxBytes) {
+    if (new TextEncoder().encode(input).byteLength > limits.maxBytes) {
       addDiagnostic(
         context,
         'DOCUMENT_LIMIT_EXCEEDED',
@@ -756,6 +885,54 @@ export function parseSpreadsheetDocument(
     }
   }
 
+  let collectionLimitPath: string | undefined;
+  try {
+    collectionLimitPath = exceedsCollectionLimits(decodedInput, limits);
+  } catch {
+    addDiagnostic(
+      context,
+      'DOCUMENT_SCHEMA_INVALID',
+      '$',
+      'Input could not be inspected safely',
+      'document',
+      'decode',
+    );
+    return { ok: false, diagnostics: deepFreeze(context.diagnostics) };
+  }
+  if (collectionLimitPath !== undefined) {
+    addDiagnostic(
+      context,
+      'DOCUMENT_LIMIT_EXCEEDED',
+      collectionLimitPath,
+      `${collectionLimitPath} exceeds its configured document limit`,
+    );
+    return { ok: false, diagnostics: deepFreeze(context.diagnostics) };
+  }
+
+  if (typeof input !== 'string') {
+    try {
+      if (exceedsObjectByteLimit(input, limits.maxBytes)) {
+        addDiagnostic(
+          context,
+          'DOCUMENT_LIMIT_EXCEEDED',
+          '$',
+          '$ exceeds its configured document limit',
+        );
+        return { ok: false, diagnostics: deepFreeze(context.diagnostics) };
+      }
+    } catch {
+      addDiagnostic(
+        context,
+        'DOCUMENT_SCHEMA_INVALID',
+        '$',
+        'Input could not be measured safely',
+        'document',
+        'decode',
+      );
+      return { ok: false, diagnostics: deepFreeze(context.diagnostics) };
+    }
+  }
+
   let document: SpreadsheetDocument;
   try {
     document = decodeDocument(decodedInput, context);
@@ -770,28 +947,6 @@ export function parseSpreadsheetDocument(
     );
     return { ok: false, diagnostics: deepFreeze(context.diagnostics) };
   }
-  const cellCount = document.workbook.sheets.reduce(
-    (total, sheet) => total + sheet.cells.length,
-    0,
-  );
-  const measuredBytes =
-    encodedBytes ?? new TextEncoder().encode(JSON.stringify(document)).byteLength;
-  const limitChecks: readonly [number, number, string][] = [
-    [document.workbook.sheets.length, limits.maxSheets, '$.workbook.sheets'],
-    [cellCount, limits.maxCells, '$.workbook.sheets'],
-    [measuredBytes, limits.maxBytes, '$'],
-  ];
-  for (const [actual, maximum, path] of limitChecks) {
-    if (actual > maximum) {
-      addDiagnostic(
-        context,
-        'DOCUMENT_LIMIT_EXCEEDED',
-        path,
-        `${path} exceeds its configured document limit`,
-      );
-    }
-  }
-
   if (context.diagnostics.length > 0) {
     return { ok: false, diagnostics: deepFreeze(context.diagnostics) };
   }

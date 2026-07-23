@@ -7,11 +7,43 @@ declare const resourceIdBrand: unique symbol;
 declare const bindingIdBrand: unique symbol;
 declare const objectIdBrand: unique symbol;
 
-export type DocumentId = string & { readonly [documentIdBrand]: true };
-export type DocumentSheetId = string & { readonly [documentSheetIdBrand]: true };
-export type StyleId = string & { readonly [styleIdBrand]: true };
-export type ValidationId = string & { readonly [validationIdBrand]: true };
-export type TemplateId = string & { readonly [templateIdBrand]: true };
-export type ResourceId = string & { readonly [resourceIdBrand]: true };
-export type BindingId = string & { readonly [bindingIdBrand]: true };
-export type ObjectId = string & { readonly [objectIdBrand]: true };
+/** Stable opaque identifier for a spreadsheet document. */
+export type DocumentId = string & {
+  /** Type-only brand that distinguishes document identifiers. */
+  readonly [documentIdBrand]: true;
+};
+/** Stable opaque identifier for a sheet within a document. */
+export type DocumentSheetId = string & {
+  /** Type-only brand that distinguishes document sheet identifiers. */
+  readonly [documentSheetIdBrand]: true;
+};
+/** Stable opaque identifier for a style registry entry. */
+export type StyleId = string & {
+  /** Type-only brand that distinguishes style identifiers. */
+  readonly [styleIdBrand]: true;
+};
+/** Stable opaque identifier for a validation registry entry. */
+export type ValidationId = string & {
+  /** Type-only brand that distinguishes validation identifiers. */
+  readonly [validationIdBrand]: true;
+};
+/** Stable opaque identifier for a spreadsheet template. */
+export type TemplateId = string & {
+  /** Type-only brand that distinguishes template identifiers. */
+  readonly [templateIdBrand]: true;
+};
+/** Stable opaque identifier for a document resource. */
+export type ResourceId = string & {
+  /** Type-only brand that distinguishes resource identifiers. */
+  readonly [resourceIdBrand]: true;
+};
+/** Stable opaque identifier for a data binding. */
+export type BindingId = string & {
+  /** Type-only brand that distinguishes binding identifiers. */
+  readonly [bindingIdBrand]: true;
+};
+/** Stable opaque identifier for a document object. */
+export type ObjectId = string & {
+  /** Type-only brand that distinguishes object identifiers. */
+  readonly [objectIdBrand]: true;
+};

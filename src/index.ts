@@ -89,12 +89,9 @@ export type {
   ResourceMetadata,
   ResourceStore,
   Sheet,
-  SheetInput,
   SheetRange,
   SparseCell,
-  SparseCellInput,
   SpreadsheetDocument,
-  SpreadsheetDocumentInput,
   SpreadsheetTemplate,
   StyleId,
   StyleRegistry,
@@ -104,6 +101,7 @@ export type {
   Workbook,
   WorkbookSettings,
 } from './document';
+/** A zero-based Workbook 2.0 cell coordinate. */
 export type { CellPoint as DocumentCellPoint } from './document';
 export { TegoSheet } from './react/tego-sheet';
 export type {

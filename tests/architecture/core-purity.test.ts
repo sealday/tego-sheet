@@ -22,16 +22,32 @@ const forbiddenGlobals = new Set([
   'localStorage',
   'sessionStorage',
 ]);
+const configPath = ts.findConfigFile(root, ts.sys.fileExists, 'tsconfig.json');
+if (configPath === undefined) throw new Error('tsconfig.json must exist');
+const config = ts.readConfigFile(configPath, ts.sys.readFile);
+if (config.error !== undefined) {
+  throw new Error(ts.flattenDiagnosticMessageText(config.error.messageText, '\n'));
+}
+const parsedConfig = ts.parseJsonConfigFileContent(config.config, ts.sys, root);
+const purityProgram = ts.createProgram({
+  rootNames: parsedConfig.fileNames,
+  options: parsedConfig.options,
+});
+const purityChecker = purityProgram.getTypeChecker();
 
-function coreFiles(): readonly string[] {
-  return execFileSync('git', ['ls-files', '-z', 'src/core'], { cwd: root, encoding: 'utf8' })
+function pureModuleFiles(): readonly string[] {
+  return execFileSync('git', ['ls-files', '-z', 'src/core', 'src/document'], {
+    cwd: root,
+    encoding: 'utf8',
+  })
     .split('\0')
     .filter((file) => file.endsWith('.ts'));
 }
 
-it('[ARCH-3] keeps every core and controller module independent of React and the browser', () => {
-  expect(coreFiles().length).toBeGreaterThan(20);
-  for (const file of coreFiles()) {
+it('[ARCH-3] keeps every core, controller, and document module independent of React and the browser', () => {
+  expect(pureModuleFiles()).toEqual(expect.arrayContaining(['src/document/parse-document.ts']));
+  expect(pureModuleFiles().length).toBeGreaterThan(20);
+  for (const file of pureModuleFiles()) {
     const source = readFileSync(resolve(root, file), 'utf8');
     const imports = ts.preProcessFile(source).importedFiles.map((entry) => entry.fileName);
     expect(imports, file).not.toEqual(
@@ -43,10 +59,17 @@ it('[ARCH-3] keeps every core and controller module independent of React and the
       ]),
     );
 
-    const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+    const sourceFile = purityProgram.getSourceFile(resolve(root, file));
+    if (sourceFile === undefined) throw new Error(`${file} must be part of the TypeScript program`);
     const found = new Set<string>();
     const visit = (node: ts.Node): void => {
-      if (ts.isIdentifier(node) && forbiddenGlobals.has(node.text)) found.add(node.text);
+      if (ts.isIdentifier(node) && forbiddenGlobals.has(node.text)) {
+        const symbol = purityChecker.getSymbolAtLocation(node);
+        const isWorkspaceDeclaration = symbol?.declarations?.some((declaration) =>
+          declaration.getSourceFile().fileName.startsWith(resolve(root, 'src')),
+        );
+        if (!isWorkspaceDeclaration) found.add(node.text);
+      }
       ts.forEachChild(node, visit);
     };
     visit(sourceFile);

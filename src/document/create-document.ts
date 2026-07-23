@@ -5,6 +5,12 @@ import type {
 } from './model/document';
 import { parseSpreadsheetDocument } from './parse-document';
 
+/**
+ * Creates a valid, deeply frozen empty Workbook 2.0 document.
+ *
+ * @param options - Optional stable IDs and initial workbook settings.
+ * @returns A new immutable document snapshot.
+ */
 export function createSpreadsheetDocument(
   options: CreateDocumentOptions = {},
 ): SpreadsheetDocument {

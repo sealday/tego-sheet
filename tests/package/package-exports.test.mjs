@@ -16,7 +16,7 @@ const expectedExports = [
   './package.json',
 ];
 
-test('the package exposes only the approved React surface', () => {
+test('the package exposes only the approved root and locale entry points', () => {
   const packageJson = JSON.parse(
     readFileSync(join(consumer, 'node_modules/tego-sheet/package.json'), 'utf8'),
   );
@@ -32,7 +32,14 @@ test('the built root has only the approved runtime exports and internal subpaths
       '--eval',
       `
       const root = await import('tego-sheet');
-      if (JSON.stringify(Object.keys(root)) !== JSON.stringify(['TegoSheet', 'TegoSheetException'])) {
+      const expected = [
+        'TegoSheet',
+        'TegoSheetException',
+        'createSpreadsheetDocument',
+        'parseSpreadsheetDocument',
+        'serializeSpreadsheetDocument',
+      ];
+      if (JSON.stringify(Object.keys(root)) !== JSON.stringify(expected)) {
         throw new Error('Unexpected root exports: ' + Object.keys(root).join(','));
       }
       const exception = new root.TegoSheetException({

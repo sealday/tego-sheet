@@ -169,6 +169,70 @@ describe('Workbook 2.0 parsing and serialization', () => {
     expect(document.workbook.styles.map(({ id }) => id)).toEqual(['z', 'ä', 'é']);
   });
 
+  it('produces identical bytes for semantically equal unordered registries and resources', () => {
+    const first = documentWithInputs([]);
+    first.workbook.styles = [
+      { id: 'style-z', value: { z: 1, a: 2 } },
+      { id: 'style-a', value: null },
+    ];
+    first.workbook.validations = [
+      { id: 'validation-z', value: { z: true, a: false } },
+      { id: 'validation-a', value: null },
+    ];
+    first.resources.items = [
+      { id: 'resource-z', kind: 'image', metadata: { z: 1, a: 2 } },
+      { id: 'resource-a', kind: 'font' },
+    ];
+    const second = structuredClone(first);
+    second.workbook.styles.reverse();
+    second.workbook.validations.reverse();
+    second.resources.items.reverse();
+
+    expect(serializeSpreadsheetDocument(parseOk(first))).toBe(
+      serializeSpreadsheetDocument(parseOk(second)),
+    );
+  });
+
+  it('preserves user-defined sheet and template order while canonicalizing bytes', () => {
+    const fixture = documentWithInputs([]);
+    fixture.workbook.sheets.push({
+      id: 'sheet-first-lexically',
+      name: 'Second user sheet',
+      cells: [],
+      merges: [],
+    });
+    fixture.templates = [
+      {
+        id: 'template-z',
+        name: 'First template',
+        sheetId: 'sheet-stable',
+        printProfile: {
+          paperSize: 'A4',
+          orientation: 'portrait',
+          margins: { top: 0, right: 0, bottom: 0, left: 0 },
+        },
+      },
+      {
+        id: 'template-a',
+        name: 'Second template',
+        sheetId: 'sheet-stable',
+        printProfile: {
+          paperSize: 'A4',
+          orientation: 'portrait',
+          margins: { top: 0, right: 0, bottom: 0, left: 0 },
+        },
+      },
+    ];
+
+    const document = parseOk(fixture);
+
+    expect(document.workbook.sheets.map(({ id }) => id)).toEqual([
+      'sheet-stable',
+      'sheet-first-lexically',
+    ]);
+    expect(document.templates.map(({ id }) => id)).toEqual(['template-z', 'template-a']);
+  });
+
   it('preserves JSON meta-property keys without prototype mutation', () => {
     const fixture = documentWithInputs([]);
     fixture.extensions['vendor.meta'] = JSON.parse(

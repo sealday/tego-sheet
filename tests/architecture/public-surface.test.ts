@@ -88,8 +88,14 @@ function trackedFiles(): readonly string[] {
     .filter(Boolean);
 }
 
-it('[ARCH-1] exposes only the React component and public exception at runtime', () => {
-  expect(Object.keys(publicApi).sort()).toEqual(['TegoSheet', 'TegoSheetException']);
+it('[ARCH-1] exposes only the approved React and Workbook 2.0 runtime API', () => {
+  expect(Object.keys(publicApi).sort()).toEqual([
+    'TegoSheet',
+    'TegoSheetException',
+    'createSpreadsheetDocument',
+    'parseSpreadsheetDocument',
+    'serializeSpreadsheetDocument',
+  ]);
 
   const source = readFileSync(resolve(root, 'src/index.ts'), 'utf8');
   expect(source).not.toMatch(
