@@ -2,6 +2,7 @@ import type { JsonValue } from '../../core/types/json';
 import type {
   DocumentId,
   DocumentSheetId,
+  ObjectId,
   ResourceId,
   StyleId,
   TemplateId,
@@ -153,6 +154,156 @@ export interface SheetFilter {
   } | null;
 }
 
+/** One saved-view comparison over an absolute worksheet column. */
+export interface FilterViewPredicate {
+  /** Absolute zero-based worksheet column. */
+  readonly column: number;
+  /** Scalar comparison operator. */
+  readonly operator:
+    | 'equal'
+    | 'notEqual'
+    | 'greaterThan'
+    | 'greaterThanOrEqual'
+    | 'lessThan'
+    | 'lessThanOrEqual'
+    | 'contains';
+  /** Fixed comparison value. */
+  readonly value: string | number | boolean;
+}
+
+/** Persistent saved filter and sort definition; active selection remains session-owned. */
+export interface FilterView {
+  /** Stable view identifier. */
+  readonly id: string;
+  /** User-visible view name. */
+  readonly name: string;
+  /** Header-inclusive source range. */
+  readonly range: DocumentCellRange;
+  /** Ordered sort definitions. */
+  readonly sorts: readonly {
+    /** Absolute zero-based worksheet column. */
+    readonly column: number;
+    /** Sort direction. */
+    readonly direction: 'ascending' | 'descending';
+  }[];
+  /** Predicates combined with logical AND. */
+  readonly filters: readonly FilterViewPredicate[];
+  /** Persistent document definition or ephemeral session definition. */
+  readonly visibility: 'document' | 'session';
+}
+
+/** Device-independent object rectangle or cell offset. */
+export interface ObjectRect {
+  /** Horizontal position. */
+  readonly x: number;
+  /** Vertical position. */
+  readonly y: number;
+  /** Non-negative width. */
+  readonly width: number;
+  /** Non-negative height. */
+  readonly height: number;
+}
+
+/** Logical positioning modes shared by worksheet objects. */
+export type ObjectAnchor =
+  | {
+      /** Uses absolute worksheet geometry. */
+      readonly type: 'absolute';
+      /** Fixed object rectangle. */
+      readonly rect: ObjectRect;
+    }
+  | {
+      /** Positions a fixed-size object relative to one cell. */
+      readonly type: 'one-cell';
+      /** Anchor cell. */
+      readonly cell: DocumentCellAddress;
+      /** Offset from the cell origin. */
+      readonly offset: {
+        /** Horizontal cell offset. */
+        readonly x: number;
+        /** Vertical cell offset. */
+        readonly y: number;
+      };
+      /** Fixed object size. */
+      readonly size: Pick<ObjectRect, 'width' | 'height'>;
+    }
+  | {
+      /** Sizes an object between two cell markers. */
+      readonly type: 'two-cell';
+      /** Top-left marker. */
+      readonly from: DocumentCellAddress & {
+        /** Offset from the top-left cell origin. */
+        readonly offset: Pick<ObjectRect, 'x' | 'y'>;
+      };
+      /** Bottom-right marker. */
+      readonly to: DocumentCellAddress & {
+        /** Offset from the bottom-right cell origin. */
+        readonly offset: Pick<ObjectRect, 'x' | 'y'>;
+      };
+    };
+
+/** Persistent image or plain-text floating worksheet object. */
+export type SheetObject =
+  | {
+      /** Stable object identifier. */
+      readonly id: ObjectId;
+      /** Raster image object. */
+      readonly kind: 'image';
+      /** Logical object position. */
+      readonly anchor: ObjectAnchor;
+      /** Stable paint order. */
+      readonly zIndex: number;
+      /** Whether interactive editing is locked. */
+      readonly locked: boolean;
+      /** Template repetition policy. */
+      readonly templateRepeat: 'shared' | 'per-item' | 'forbidden';
+      /** Document-owned image resource. */
+      readonly resourceId: ResourceId;
+      /** Image fitting policy. */
+      readonly fit?: 'contain' | 'cover' | 'fill';
+      /** Accessible object label. */
+      readonly accessibility: {
+        /** Accessible object name. */
+        readonly name: string;
+        /** Optional accessible object description. */
+        readonly description?: string;
+      };
+    }
+  | {
+      /** Stable object identifier. */
+      readonly id: ObjectId;
+      /** Plain-text box object. */
+      readonly kind: 'text-box';
+      /** Logical object position. */
+      readonly anchor: ObjectAnchor;
+      /** Stable paint order. */
+      readonly zIndex: number;
+      /** Whether interactive editing is locked. */
+      readonly locked: boolean;
+      /** Template repetition policy. */
+      readonly templateRepeat: 'shared' | 'per-item' | 'forbidden';
+      /** Plain text that is never interpreted as markup. */
+      readonly text: string;
+      /** Deterministic text presentation. */
+      readonly style: {
+        /** CSS-compatible text color. */
+        readonly color: string;
+        /** Resolved font family. */
+        readonly fontFamily: string;
+        /** Font size in device-independent units. */
+        readonly fontSize: number;
+        /** Optional horizontal alignment. */
+        readonly horizontalAlign?: 'left' | 'center' | 'right';
+      };
+      /** Accessible object label. */
+      readonly accessibility: {
+        /** Accessible object name. */
+        readonly name: string;
+        /** Optional accessible object description. */
+        readonly description?: string;
+      };
+    };
+
 /** Workbook-tab visibility persisted independently of any output adapter. */
 export type WorksheetVisibility = 'visible' | 'hidden' | 'very-hidden';
 
@@ -233,6 +384,10 @@ export interface Sheet {
   readonly visibility: WorksheetVisibility;
   /** Ordered typed conditional-format rules owned by this worksheet. */
   readonly conditionalFormatting: readonly ConditionalFormat[];
+  /** Persistent saved-view definitions; active selection is never stored here. */
+  readonly filterViews: readonly FilterView[];
+  /** Canonically ordered floating worksheet objects. */
+  readonly objects: readonly SheetObject[];
 }
 
 /** One stable-ID entry in a JSON-valued registry. */
@@ -369,6 +524,8 @@ export interface SheetInput {
   };
   visibility?: WorksheetVisibility;
   conditionalFormatting?: ConditionalFormat[];
+  filterViews?: FilterView[];
+  objects?: SheetObject[];
 }
 
 export interface SpreadsheetDocumentInput {

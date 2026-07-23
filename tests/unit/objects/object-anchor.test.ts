@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { DocumentSheetId, ResourceId } from '../../../src/document';
+import type { DocumentSheetId, ObjectId, ResourceId } from '../../../src/document';
 import {
   objectToDisplayCommands,
   resolveObjectAnchor,
@@ -44,7 +44,7 @@ describe('OBJ-01 shared object anchors', () => {
     expect(() =>
       objectToDisplayCommands(
         {
-          id: 'logo',
+          id: 'logo' as ObjectId,
           kind: 'image',
           anchor: { type: 'absolute', rect: { x: 0, y: 0, width: 40, height: 20 } },
           zIndex: 2,
@@ -59,7 +59,7 @@ describe('OBJ-01 shared object anchors', () => {
     expect(
       objectToDisplayCommands(
         {
-          id: 'notice',
+          id: 'notice' as ObjectId,
           kind: 'text-box',
           anchor: { type: 'absolute', rect: { x: 10, y: 10, width: 80, height: 20 } },
           zIndex: 1,

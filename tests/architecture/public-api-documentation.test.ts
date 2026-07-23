@@ -192,6 +192,7 @@ const expectedPublicExports = [
   'ObjectGeometry',
   'ObjectId',
   'ObjectOffset',
+  'ObjectRect',
   'ObjectRepeatPolicy',
   'PageBand',
   'PageBreak',

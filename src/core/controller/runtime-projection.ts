@@ -363,6 +363,8 @@ function mergeSheet(
     name: sameJson(beforeLegacy?.name, afterLegacy?.name) ? previous.name : operational.name,
     visibility: previous.visibility,
     conditionalFormatting: previous.conditionalFormatting.map((format) => structuredClone(format)),
+    filterViews: previous.filterViews.map((view) => structuredClone(view)),
+    objects: previous.objects.map((object) => structuredClone(object)),
     cells,
     merges: sameJson(beforeLegacy?.merges, afterLegacy?.merges)
       ? previous.merges.map((range) => ({

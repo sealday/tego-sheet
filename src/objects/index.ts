@@ -7,5 +7,6 @@ export type {
   ObjectCoordinateTransform,
   ObjectGeometry,
   ObjectOffset,
+  ObjectRect,
   SheetObject,
 } from './model';

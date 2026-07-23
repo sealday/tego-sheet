@@ -304,6 +304,7 @@ export type {
   ObjectDisplayContext,
   ObjectGeometry,
   ObjectOffset,
+  ObjectRect,
   SheetObject,
 } from './objects';
 export {

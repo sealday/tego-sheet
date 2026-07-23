@@ -12,6 +12,9 @@ import type {
   ConditionalFormat,
   ConditionalStyle,
   ExtensionStore,
+  FilterView,
+  FilterViewPredicate,
+  ObjectAnchor,
   ResourceMetadata,
   Sheet,
   SheetColumn,
@@ -19,6 +22,7 @@ import type {
   SheetFilterItem,
   SheetRange,
   SheetRow,
+  SheetObject,
   SpreadsheetDocument,
   StoredSpreadsheetTemplate,
 } from './model/document';
@@ -27,6 +31,7 @@ import { BUILTIN_FORMULA_COMPATIBILITY, parseFormula, type FormulaAst } from '..
 import type {
   DocumentId,
   DocumentSheetId,
+  ObjectId,
   ResourceId,
   StyleId,
   TemplateId,
@@ -47,6 +52,10 @@ export interface DocumentLimits {
   readonly maxRows?: number;
   /** Maximum total number of sparse column layout entries. */
   readonly maxColumns?: number;
+  /** Maximum total number of saved view definitions. */
+  readonly maxViews?: number;
+  /** Maximum total number of floating objects. */
+  readonly maxObjects?: number;
   /** Maximum UTF-8 byte size of the input document. */
   readonly maxBytes?: number;
 }
@@ -80,6 +89,8 @@ const DEFAULT_LIMITS = {
   maxMerges: 2_000,
   maxRows: 1_000_000,
   maxColumns: 1_000_000,
+  maxViews: 10_000,
+  maxObjects: 100_000,
   maxBytes: 64 * 1024 * 1024,
 } as const;
 const NAMESPACE_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)+$/i;
@@ -119,6 +130,8 @@ interface ResolvedDocumentLimits {
   readonly maxMerges: number;
   readonly maxRows: number;
   readonly maxColumns: number;
+  readonly maxViews: number;
+  readonly maxObjects: number;
   readonly maxBytes: number;
 }
 
@@ -128,6 +141,8 @@ const LIMIT_NAMES = [
   'maxMerges',
   'maxRows',
   'maxColumns',
+  'maxViews',
+  'maxObjects',
   'maxBytes',
 ] as const;
 
@@ -172,6 +187,8 @@ interface InputCaptureContext {
   merges: number;
   rows: number;
   columns: number;
+  views: number;
+  objects: number;
 }
 
 function captureInput(input: unknown, limits: ResolvedDocumentLimits): unknown {
@@ -184,6 +201,8 @@ function captureInput(input: unknown, limits: ResolvedDocumentLimits): unknown {
     merges: 0,
     rows: 0,
     columns: 0,
+    views: 0,
+    objects: 0,
   };
 
   const consume = (text: string): void => {
@@ -285,6 +304,26 @@ function captureInput(input: unknown, limits: ResolvedDocumentLimits): unknown {
             );
           }
         }
+        if (/^\$\.workbook\.sheets\[\d+\]\.filterViews$/.test(path)) {
+          context.views += length;
+          if (context.views > context.limits.maxViews) {
+            throw new InputCaptureError(
+              'DOCUMENT_LIMIT_EXCEEDED',
+              '$.workbook.sheets',
+              '$.workbook.sheets exceeds its configured saved-view limit',
+            );
+          }
+        }
+        if (/^\$\.workbook\.sheets\[\d+\]\.objects$/.test(path)) {
+          context.objects += length;
+          if (context.objects > context.limits.maxObjects) {
+            throw new InputCaptureError(
+              'DOCUMENT_LIMIT_EXCEEDED',
+              '$.workbook.sheets',
+              '$.workbook.sheets exceeds its configured object limit',
+            );
+          }
+        }
 
         consume('[');
         const output = Array.from<unknown>({ length });
@@ -373,6 +412,8 @@ function exceedsCollectionLimits(
   let merges = 0;
   let rows = 0;
   let columns = 0;
+  let views = 0;
+  let objects = 0;
   for (const sheet of sheets) {
     if (!isRecord(sheet)) continue;
     if (Array.isArray(sheet.cells)) {
@@ -390,6 +431,14 @@ function exceedsCollectionLimits(
     if (Array.isArray(sheet.columns)) {
       columns += sheet.columns.length;
       if (columns > limits.maxColumns) return '$.workbook.sheets';
+    }
+    if (Array.isArray(sheet.filterViews)) {
+      views += sheet.filterViews.length;
+      if (views > limits.maxViews) return '$.workbook.sheets';
+    }
+    if (Array.isArray(sheet.objects)) {
+      objects += sheet.objects.length;
+      if (objects > limits.maxObjects) return '$.workbook.sheets';
     }
   }
   return undefined;
@@ -1025,6 +1074,274 @@ function conditionalFormattingAt(
   });
 }
 
+const FILTER_VIEW_OPERATORS = new Set([
+  'equal',
+  'notEqual',
+  'greaterThan',
+  'greaterThanOrEqual',
+  'lessThan',
+  'lessThanOrEqual',
+  'contains',
+]);
+
+function filterViewsAt(value: unknown, path: string, context: ParseContext): FilterView[] {
+  if (value === undefined) return [];
+  return arrayAt(value, path, context).map((entry, index): FilterView => {
+    const entryPath = `${path}[${index}]`;
+    const source = recordAt(entry, entryPath, context);
+    const rangeRecord = recordAt(source?.range, `${entryPath}.range`, context);
+    const range = rangeAt(source?.range, `${entryPath}.range`, context);
+    const sorts = arrayAt(source?.sorts, `${entryPath}.sorts`, context).map((sort, sortIndex) => {
+      const sortPath = `${entryPath}.sorts[${sortIndex}]`;
+      const item = recordAt(sort, sortPath, context);
+      const direction =
+        item?.direction === 'descending' || item?.direction === 'ascending'
+          ? item.direction
+          : 'ascending';
+      if (item?.direction !== direction) {
+        addDiagnostic(
+          context,
+          'DOCUMENT_SCHEMA_INVALID',
+          `${sortPath}.direction`,
+          `${sortPath}.direction must be ascending or descending`,
+        );
+      }
+      return {
+        column: indexAt(item?.column, `${sortPath}.column`, context),
+        direction: direction as 'ascending' | 'descending',
+      };
+    });
+    const filters = arrayAt(source?.filters, `${entryPath}.filters`, context).map(
+      (filter, filterIndex): FilterViewPredicate => {
+        const filterPath = `${entryPath}.filters[${filterIndex}]`;
+        const item = recordAt(filter, filterPath, context);
+        const operator =
+          typeof item?.operator === 'string' && FILTER_VIEW_OPERATORS.has(item.operator)
+            ? item.operator
+            : 'equal';
+        if (item?.operator !== operator) {
+          addDiagnostic(
+            context,
+            'DOCUMENT_SCHEMA_INVALID',
+            `${filterPath}.operator`,
+            `${filterPath}.operator is unsupported`,
+          );
+        }
+        const scalar = item?.value;
+        if (
+          typeof scalar !== 'string' &&
+          typeof scalar !== 'boolean' &&
+          (typeof scalar !== 'number' || !Number.isFinite(scalar))
+        ) {
+          addDiagnostic(
+            context,
+            'DOCUMENT_SCHEMA_INVALID',
+            `${filterPath}.value`,
+            `${filterPath}.value must be a finite scalar`,
+          );
+        }
+        return {
+          column: indexAt(item?.column, `${filterPath}.column`, context),
+          operator: operator as FilterViewPredicate['operator'],
+          value:
+            typeof scalar === 'string' || typeof scalar === 'boolean'
+              ? scalar
+              : finiteAt(scalar, `${filterPath}.value`, context),
+        };
+      },
+    );
+    if (source?.visibility !== 'document') {
+      addDiagnostic(
+        context,
+        'DOCUMENT_SCHEMA_INVALID',
+        `${entryPath}.visibility`,
+        `${entryPath}.visibility must be document`,
+      );
+    }
+    return {
+      id: stringAt(source?.id, `${entryPath}.id`, context),
+      name: displayStringAt(source?.name, `${entryPath}.name`, context),
+      range: {
+        sheetId: stringAt(
+          rangeRecord?.sheetId,
+          `${entryPath}.range.sheetId`,
+          context,
+        ) as DocumentSheetId,
+        ...range,
+      },
+      sorts,
+      filters,
+      visibility: 'document',
+    };
+  });
+}
+
+function objectOffsetAt(
+  value: unknown,
+  path: string,
+  context: ParseContext,
+): { x: number; y: number } {
+  const source = recordAt(value, path, context);
+  return {
+    x: finiteAt(source?.x, `${path}.x`, context),
+    y: finiteAt(source?.y, `${path}.y`, context),
+  };
+}
+
+function objectAddressAt(
+  value: unknown,
+  path: string,
+  context: ParseContext,
+): { sheetId: DocumentSheetId; row: number; column: number } {
+  const source = recordAt(value, path, context);
+  return {
+    sheetId: stringAt(source?.sheetId, `${path}.sheetId`, context) as DocumentSheetId,
+    row: indexAt(source?.row, `${path}.row`, context),
+    column: indexAt(source?.column, `${path}.column`, context),
+  };
+}
+
+function objectAnchorAt(value: unknown, path: string, context: ParseContext): ObjectAnchor {
+  const source = recordAt(value, path, context);
+  if (source?.type === 'absolute') {
+    const rect = recordAt(source.rect, `${path}.rect`, context);
+    return {
+      type: 'absolute',
+      rect: {
+        x: finiteAt(rect?.x, `${path}.rect.x`, context),
+        y: finiteAt(rect?.y, `${path}.rect.y`, context),
+        width: nonNegativeFiniteAt(rect?.width, `${path}.rect.width`, context),
+        height: nonNegativeFiniteAt(rect?.height, `${path}.rect.height`, context),
+      },
+    };
+  }
+  if (source?.type === 'one-cell') {
+    const size = recordAt(source.size, `${path}.size`, context);
+    return {
+      type: 'one-cell',
+      cell: objectAddressAt(source.cell, `${path}.cell`, context),
+      offset: objectOffsetAt(source.offset, `${path}.offset`, context),
+      size: {
+        width: nonNegativeFiniteAt(size?.width, `${path}.size.width`, context),
+        height: nonNegativeFiniteAt(size?.height, `${path}.size.height`, context),
+      },
+    };
+  }
+  if (source?.type !== 'two-cell') {
+    addDiagnostic(
+      context,
+      'DOCUMENT_SCHEMA_INVALID',
+      `${path}.type`,
+      `${path}.type must be absolute, one-cell, or two-cell`,
+    );
+  }
+  const from = recordAt(source?.from, `${path}.from`, context);
+  const to = recordAt(source?.to, `${path}.to`, context);
+  return {
+    type: 'two-cell',
+    from: {
+      ...objectAddressAt(from, `${path}.from`, context),
+      offset: objectOffsetAt(from?.offset, `${path}.from.offset`, context),
+    },
+    to: {
+      ...objectAddressAt(to, `${path}.to`, context),
+      offset: objectOffsetAt(to?.offset, `${path}.to.offset`, context),
+    },
+  };
+}
+
+function sheetObjectsAt(value: unknown, path: string, context: ParseContext): SheetObject[] {
+  if (value === undefined) return [];
+  return arrayAt(value, path, context).map((entry, index): SheetObject => {
+    const entryPath = `${path}[${index}]`;
+    const source = recordAt(entry, entryPath, context);
+    const repeat =
+      source?.templateRepeat === 'per-item' ||
+      source?.templateRepeat === 'shared' ||
+      source?.templateRepeat === 'forbidden'
+        ? source.templateRepeat
+        : 'forbidden';
+    if (source?.templateRepeat !== repeat) {
+      addDiagnostic(
+        context,
+        'DOCUMENT_SCHEMA_INVALID',
+        `${entryPath}.templateRepeat`,
+        `${entryPath}.templateRepeat is invalid`,
+      );
+    }
+    const accessibility = recordAt(source?.accessibility, `${entryPath}.accessibility`, context);
+    const common = {
+      id: stringAt(source?.id, `${entryPath}.id`, context) as ObjectId,
+      anchor: objectAnchorAt(source?.anchor, `${entryPath}.anchor`, context),
+      zIndex: indexAt(source?.zIndex, `${entryPath}.zIndex`, context),
+      locked: booleanAt(source?.locked, `${entryPath}.locked`, context),
+      templateRepeat: repeat,
+      accessibility: {
+        name: displayStringAt(accessibility?.name, `${entryPath}.accessibility.name`, context),
+        ...(accessibility?.description === undefined
+          ? {}
+          : {
+              description: displayStringAt(
+                accessibility.description,
+                `${entryPath}.accessibility.description`,
+                context,
+              ),
+            }),
+      },
+    } as const;
+    if (source?.kind === 'image') {
+      const fit =
+        source.fit === undefined ||
+        source.fit === 'contain' ||
+        source.fit === 'cover' ||
+        source.fit === 'fill'
+          ? source.fit
+          : undefined;
+      if (source.fit !== fit) {
+        addDiagnostic(
+          context,
+          'DOCUMENT_SCHEMA_INVALID',
+          `${entryPath}.fit`,
+          `${entryPath}.fit is invalid`,
+        );
+      }
+      return {
+        ...common,
+        kind: 'image',
+        resourceId: stringAt(source.resourceId, `${entryPath}.resourceId`, context) as ResourceId,
+        ...(fit === undefined ? {} : { fit }),
+      };
+    }
+    if (source?.kind !== 'text-box') {
+      addDiagnostic(
+        context,
+        'DOCUMENT_SCHEMA_INVALID',
+        `${entryPath}.kind`,
+        `${entryPath}.kind must be image or text-box`,
+      );
+    }
+    const style = recordAt(source?.style, `${entryPath}.style`, context);
+    const align =
+      style?.horizontalAlign === undefined ||
+      style.horizontalAlign === 'left' ||
+      style.horizontalAlign === 'center' ||
+      style.horizontalAlign === 'right'
+        ? style?.horizontalAlign
+        : undefined;
+    return {
+      ...common,
+      kind: 'text-box',
+      text: displayStringAt(source?.text, `${entryPath}.text`, context),
+      style: {
+        color: stringAt(style?.color, `${entryPath}.style.color`, context),
+        fontFamily: stringAt(style?.fontFamily, `${entryPath}.style.fontFamily`, context),
+        fontSize: nonNegativeFiniteAt(style?.fontSize, `${entryPath}.style.fontSize`, context),
+        ...(align === undefined ? {} : { horizontalAlign: align }),
+      },
+    };
+  });
+}
+
 function sheetAt(value: unknown, path: string, context: ParseContext): Sheet {
   const record = recordAt(value, path, context);
   const merges = arrayAt(record?.merges, `${path}.merges`, context).map((merge, index) =>
@@ -1064,6 +1381,8 @@ function sheetAt(value: unknown, path: string, context: ParseContext): Sheet {
     `${path}.conditionalFormatting`,
     context,
   );
+  const filterViews = filterViewsAt(record?.filterViews, `${path}.filterViews`, context);
+  const objects = sheetObjectsAt(record?.objects, `${path}.objects`, context);
 
   for (const [index, merge] of merges.entries()) {
     if (!isNormalized(merge)) {
@@ -1106,6 +1425,8 @@ function sheetAt(value: unknown, path: string, context: ParseContext): Sheet {
     ...(filter === undefined ? {} : { filter }),
     visibility,
     conditionalFormatting,
+    filterViews,
+    objects,
   };
 }
 
@@ -1201,6 +1522,56 @@ function validateReferences(document: SpreadsheetDocument, context: ParseContext
   const templateIds = new Set(document.templates.map(({ id }) => id));
 
   document.workbook.sheets.forEach((sheet, sheetIndex) => {
+    duplicateDiagnostics(
+      context,
+      sheet.filterViews,
+      `$.workbook.sheets[${sheetIndex}].filterViews`,
+    );
+    duplicateDiagnostics(context, sheet.objects, `$.workbook.sheets[${sheetIndex}].objects`);
+    sheet.filterViews.forEach((view, viewIndex) => {
+      const base = `$.workbook.sheets[${sheetIndex}].filterViews[${viewIndex}]`;
+      if (view.range.sheetId !== sheet.id || !sheetIds.has(view.range.sheetId)) {
+        addDiagnostic(
+          context,
+          'DOCUMENT_SCHEMA_INVALID',
+          `${base}.range.sheetId`,
+          'Saved-view range must reference its owning sheet',
+        );
+      }
+      if (!isNormalized(view.range)) {
+        addDiagnostic(
+          context,
+          'INVALID_RANGE',
+          `${base}.range`,
+          'Saved-view range must be normalized',
+        );
+      }
+    });
+    sheet.objects.forEach((object, objectIndex) => {
+      const base = `$.workbook.sheets[${sheetIndex}].objects[${objectIndex}]`;
+      const anchors =
+        object.anchor.type === 'absolute'
+          ? []
+          : object.anchor.type === 'one-cell'
+            ? [object.anchor.cell]
+            : [object.anchor.from, object.anchor.to];
+      if (anchors.some(({ sheetId }) => sheetId !== sheet.id || !sheetIds.has(sheetId))) {
+        addDiagnostic(
+          context,
+          'DOCUMENT_SCHEMA_INVALID',
+          `${base}.anchor`,
+          'Object anchors must reference their owning sheet',
+        );
+      }
+      if (object.kind === 'image' && !resourceIds.has(object.resourceId)) {
+        addDiagnostic(
+          context,
+          'DANGLING_REFERENCE',
+          `${base}.resourceId`,
+          'Referenced object resourceId does not exist',
+        );
+      }
+    });
     sheet.conditionalFormatting.forEach((format, formatIndex) => {
       const base = `$.workbook.sheets[${sheetIndex}].conditionalFormatting[${formatIndex}]`;
       if (format.range.sheetId !== sheet.id || !sheetIds.has(format.range.sheetId)) {
@@ -1463,6 +1834,12 @@ function canonicalizeDocument(document: SpreadsheetDocument): SpreadsheetDocumen
         cells: [...sheet.cells].sort(compareSparseCells),
         rows: [...sheet.rows].sort((left, right) => left.index - right.index),
         columns: [...sheet.columns].sort((left, right) => left.index - right.index),
+        filterViews: [...sheet.filterViews].sort((left, right) =>
+          compareCodeUnits(left.id, right.id),
+        ),
+        objects: [...sheet.objects].sort(
+          (left, right) => left.zIndex - right.zIndex || compareCodeUnits(left.id, right.id),
+        ),
       })),
       styles: [...document.workbook.styles].sort((left, right) =>
         compareCodeUnits(left.id, right.id),

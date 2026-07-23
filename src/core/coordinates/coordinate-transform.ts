@@ -1,6 +1,7 @@
 import type {
   CellPoint,
   ConditionalFormat,
+  ObjectAnchor,
   SheetInput,
   SheetRange,
   SpreadsheetDocumentInput,
@@ -263,6 +264,25 @@ function transformCellFormula(
   };
 }
 
+function transformObjectAnchor(anchor: ObjectAnchor, transform: CoordinateTransform): ObjectAnchor {
+  if (anchor.type === 'absolute') return anchor;
+  const point = (value: CellPoint): CellPoint => {
+    const transformed = transform.point(value);
+    if (transformed !== null) return transformed;
+    return transform.axis === 'row'
+      ? { ...value, row: transform.boundary(value.row) }
+      : { ...value, column: transform.boundary(value.column) };
+  };
+  if (anchor.type === 'one-cell') {
+    return { ...anchor, cell: { ...anchor.cell, ...point(anchor.cell) } };
+  }
+  return {
+    ...anchor,
+    from: { ...anchor.from, ...point(anchor.from) },
+    to: { ...anchor.to, ...point(anchor.to) },
+  };
+}
+
 /** Applies a coordinate mapping to every coordinate-bearing field currently in a schema 2 sheet. */
 export function transformSheetCoordinates(
   sheet: SheetInput,
@@ -362,6 +382,29 @@ export function transformSheetCoordinates(
       ];
     },
   );
+  const filterViews = (sheet.filterViews ?? []).flatMap((view) => {
+    const range = transform.range(view.range);
+    if (range === null) return [];
+    const columns = <T extends { readonly column: number }>(items: readonly T[]): T[] =>
+      transform.axis === 'row'
+        ? [...items]
+        : items.flatMap((item) => {
+            const column = transform.scalar(item.column);
+            return column === null ? [] : [{ ...item, column }];
+          });
+    return [
+      {
+        ...view,
+        range: { ...view.range, ...range },
+        sorts: columns(view.sorts),
+        filters: columns(view.filters),
+      },
+    ];
+  });
+  const objects = (sheet.objects ?? []).map((object) => ({
+    ...object,
+    anchor: transformObjectAnchor(object.anchor, transform),
+  }));
   return {
     ...sheet,
     ...(transform.axis === 'row' && sheet.rowCount !== undefined
@@ -398,6 +441,8 @@ export function transformSheetCoordinates(
     ...(freeze === undefined ? {} : { freeze }),
     ...(filter === undefined ? {} : { filter }),
     conditionalFormatting,
+    filterViews,
+    objects,
   };
 }
 
