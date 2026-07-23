@@ -10,6 +10,7 @@ import type {
   TemplatePrintProfile,
 } from '../model';
 
+/** Version of the serialized template IR contract. */
 export const TEMPLATE_COMPILER_VERSION = '1.0.0';
 
 function immutable<T>(value: T): T {

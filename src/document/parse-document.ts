@@ -20,7 +20,7 @@ import type {
   SheetRange,
   SheetRow,
   SpreadsheetDocument,
-  SpreadsheetTemplate,
+  StoredSpreadsheetTemplate,
 } from './model/document';
 import type {
   DocumentId,
@@ -926,7 +926,11 @@ function printProfileAt(value: unknown, path: string, context: ParseContext): Pr
   };
 }
 
-function templateAt(value: unknown, path: string, context: ParseContext): SpreadsheetTemplate {
+function templateAt(
+  value: unknown,
+  path: string,
+  context: ParseContext,
+): StoredSpreadsheetTemplate {
   const record = recordAt(value, path, context);
   let range: DocumentCellRange | undefined;
   if (record?.range !== undefined) {

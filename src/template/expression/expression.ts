@@ -1,7 +1,9 @@
 /** Stable failure raised by the restricted template expression language. */
 export class TemplateExpressionError extends SyntaxError {
+  /** Stable expression failure code. */
   readonly code: 'INVALID_EXPRESSION' | 'TEMPLATE_EXPRESSION_UNSAFE' | 'UNKNOWN_FORMATTER';
 
+  /** Creates a restricted-expression failure. */
   constructor(
     code: 'INVALID_EXPRESSION' | 'TEMPLATE_EXPRESSION_UNSAFE' | 'UNKNOWN_FORMATTER',
     message: string,
@@ -12,21 +14,40 @@ export class TemplateExpressionError extends SyntaxError {
   }
 }
 
+/** Validated expression nodes interpreted without JavaScript evaluation. */
 export type TemplateExpressionNode =
-  | { readonly kind: 'literal'; readonly value: null | string | number | boolean }
-  | { readonly kind: 'identifier'; readonly name: string }
   | {
+      /** Literal node discriminator. */
+      readonly kind: 'literal';
+      /** Literal scalar value. */
+      readonly value: null | string | number | boolean;
+    }
+  | {
+      /** Identifier node discriminator. */
+      readonly kind: 'identifier';
+      /** Scope variable name. */
+      readonly name: string;
+    }
+  | {
+      /** Property-read node discriminator. */
       readonly kind: 'member';
+      /** Object expression. */
       readonly object: TemplateExpressionNode;
+      /** Validated own-property name. */
       readonly property: string;
     }
   | {
+      /** Unary-operation discriminator. */
       readonly kind: 'unary';
+      /** Supported unary operator. */
       readonly operator: '!' | '-';
+      /** Unary operand. */
       readonly operand: TemplateExpressionNode;
     }
   | {
+      /** Binary-operation discriminator. */
       readonly kind: 'binary';
+      /** Supported deterministic binary operator. */
       readonly operator:
         | '??'
         | '||'
@@ -41,35 +62,55 @@ export type TemplateExpressionNode =
         | '-'
         | '*'
         | '/';
+      /** Left operand. */
       readonly left: TemplateExpressionNode;
+      /** Right operand. */
       readonly right: TemplateExpressionNode;
     }
   | {
+      /** Conditional-operation discriminator. */
       readonly kind: 'conditional';
+      /** Branch predicate. */
       readonly test: TemplateExpressionNode;
+      /** Value selected when truthy. */
       readonly consequent: TemplateExpressionNode;
+      /** Value selected when falsy. */
       readonly alternate: TemplateExpressionNode;
     }
   | {
+      /** Registered-formatter call discriminator. */
       readonly kind: 'call';
+      /** Formatter registry key. */
       readonly formatter: string;
+      /** Ordered formatter arguments. */
       readonly arguments: readonly TemplateExpressionNode[];
     };
 
+/** Immutable parsed expression artifact. */
 export interface CompiledTemplateExpression {
+  /** Original source text. */
   readonly source: string;
+  /** Validated expression tree. */
   readonly ast: TemplateExpressionNode;
 }
 
+/** Read-only data visible to the expression interpreter. */
 export interface TemplateExpressionScope {
+  /** Root template data. */
   readonly root: unknown;
+  /** Current repeat item. */
   readonly item?: unknown;
+  /** Zero-based repeat index. */
   readonly index?: number;
+  /** Whether the item is first. */
   readonly first?: boolean;
+  /** Whether the item is last. */
   readonly last?: boolean;
 }
 
+/** Pure formatter callable with frozen arguments. */
 export type TemplateFormatter = (...values: readonly unknown[]) => unknown;
+/** Formatter functions keyed by explicit public identifier. */
 export type TemplateFormatterRegistry = Readonly<Record<string, TemplateFormatter>>;
 
 interface Token {

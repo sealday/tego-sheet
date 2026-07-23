@@ -154,7 +154,7 @@ export type {
   SheetRow,
   SparseCell,
   SpreadsheetDocument,
-  SpreadsheetTemplate,
+  StoredSpreadsheetTemplate,
   StyleId,
   StyleRegistry,
   TemplateId,
@@ -258,6 +258,63 @@ export type {
   PrintStrokeRectCommand,
   PrintTextCommand,
 } from './print';
+export {
+  BrowserPrintError,
+  IsolatedBrowserPrintAdapter,
+  serializeGeneratedDocumentSvgPages,
+} from './output/browser-print-adapter';
+export type {
+  BrowserPrintCleanupReason,
+  BrowserPrintErrorCode,
+  BrowserPrintOptions,
+  BrowserPrintResult,
+  BrowserPrintSvgPage,
+  GeneratedDocumentForBrowserPrint,
+  IsolatedBrowserPrintAdapterOptions,
+} from './output/browser-print-adapter';
+export {
+  TEMPLATE_COMPILER_VERSION,
+  TemplateExpressionError,
+  compileSpreadsheetTemplate,
+  compileTemplateExpression,
+  evaluateTemplateExpression,
+  hashSpreadsheetDocument,
+  renderSpreadsheetTemplate,
+} from './template';
+export type {
+  CompilationResult,
+  CompiledTemplate,
+  CompiledTemplateExpression,
+  ConditionalRangeBinding,
+  GeneratedDocument,
+  GeneratedPrintPage,
+  PageBand,
+  PageBreak,
+  PageSetup,
+  PaperDefinition,
+  PrintDocument,
+  PrintScale,
+  PrintTarget,
+  RenderEnvironment,
+  RenderLimits,
+  RenderRequest,
+  RenderResult,
+  RepeatRowsBinding,
+  SpreadsheetTemplate,
+  TemplateBinding,
+  TemplateExpressionNode,
+  TemplateExpressionScope,
+  TemplateFormatter,
+  TemplateFormatterRegistry,
+  TemplateIR,
+  TemplateIRBinding,
+  TemplatePrintProfile,
+  ValueBinding,
+} from './template';
+export { TemplatePreview } from './react/preview';
+export type { TemplatePreviewProps } from './react/preview';
+export { TemplateDesigner } from './react/template-designer';
+export type { TemplateDesignerProps } from './react/template-designer';
 export { TegoSheet } from './react/tego-sheet';
 export type {
   SheetTabsRenderer,

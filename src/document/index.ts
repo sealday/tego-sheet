@@ -33,7 +33,7 @@ export type {
   SheetRow,
   SpreadsheetDocument,
   SpreadsheetDocumentInput,
-  SpreadsheetTemplate,
+  StoredSpreadsheetTemplate,
   StyleRegistry,
   ValidationRegistry,
   Workbook,

@@ -2,10 +2,15 @@ import type { ChangeEvent, ReactElement } from 'react';
 import type { BindingId, Diagnostic } from '../../document';
 import type { SpreadsheetTemplate, TemplateBinding } from '../../template';
 
+/** Inputs for the SDK-model template property panel. */
 export interface TemplateDesignerProps {
+  /** Immutable template being edited. */
   readonly template: SpreadsheetTemplate;
+  /** Current compiler or render diagnostics. */
   readonly diagnostics: readonly Diagnostic[];
+  /** Receives the next immutable template snapshot. */
   readonly onChange: (template: SpreadsheetTemplate) => void;
+  /** Requests that the host reveal a binding's sheet location. */
   readonly onLocateBinding?: (bindingId: BindingId) => void;
 }
 

@@ -55,6 +55,7 @@ export class BrowserPrintError extends Error {
   /** Stable machine-readable failure code. */
   readonly code: BrowserPrintErrorCode;
 
+  /** Creates a stable browser-print failure. */
   constructor(code: BrowserPrintErrorCode, message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = 'BrowserPrintError';
@@ -200,12 +201,18 @@ function abortedError(message = 'Browser print was cancelled'): BrowserPrintErro
  * The adapter never clones the editor DOM and owns every iframe it creates.
  */
 export class IsolatedBrowserPrintAdapter {
+  /** Owner document used only to mount isolated frames. */
   readonly #document: Document;
+  /** Bounded cleanup fallback. */
   readonly #timeoutMs: number;
+  /** Optional host print invocation. */
   readonly #print?: (target: Window) => void;
+  /** Active sessions owned by this adapter. */
   readonly #sessions = new Set<PrintSession>();
+  /** Whether disposal has permanently closed this adapter. */
   #disposed = false;
 
+  /** Creates an iframe-owning browser print adapter. */
   constructor(options: IsolatedBrowserPrintAdapterOptions = {}) {
     const ownerDocument = options.document ?? globalThis.document;
     if (ownerDocument === undefined) {
@@ -327,6 +334,7 @@ export class IsolatedBrowserPrintAdapter {
     }
   }
 
+  /** Removes listeners, timers, and the iframe for one owned session. */
   #cleanup(session: PrintSession): void {
     if (!this.#sessions.delete(session)) return;
     clearTimeout(session.timer);

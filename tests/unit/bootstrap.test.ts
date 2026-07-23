@@ -28,6 +28,18 @@ it('imports the library entry without browser globals', async () => {
     'createPresentationResolver',
     'createPrintDisplayList',
     'validatePrintDisplayCommands',
+    'BrowserPrintError',
+    'IsolatedBrowserPrintAdapter',
+    'serializeGeneratedDocumentSvgPages',
+    'TEMPLATE_COMPILER_VERSION',
+    'TemplateExpressionError',
+    'compileSpreadsheetTemplate',
+    'compileTemplateExpression',
+    'evaluateTemplateExpression',
+    'hashSpreadsheetDocument',
+    'renderSpreadsheetTemplate',
+    'TemplatePreview',
+    'TemplateDesigner',
     'TegoSheet',
   ]);
 });

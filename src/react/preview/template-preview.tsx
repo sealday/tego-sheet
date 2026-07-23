@@ -4,7 +4,9 @@ import {
   type GeneratedDocumentForBrowserPrint,
 } from '../../output/browser-print-adapter';
 
+/** Inputs for the immutable SVG page preview. */
 export interface TemplatePreviewProps {
+  /** Generated artifact whose display list is rendered without re-layout. */
   readonly document: GeneratedDocumentForBrowserPrint;
 }
 

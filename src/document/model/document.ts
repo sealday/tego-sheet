@@ -235,7 +235,7 @@ export interface PrintProfile {
 }
 
 /** Reusable document template targeting a sheet and optional range. */
-export interface SpreadsheetTemplate {
+export interface StoredSpreadsheetTemplate {
   /** Stable opaque template identifier. */
   readonly id: TemplateId;
   /** User-visible template name. */
@@ -284,7 +284,7 @@ export interface SpreadsheetDocument {
   /** Workbook content and settings. */
   readonly workbook: Workbook;
   /** User-ordered reusable templates. */
-  readonly templates: readonly SpreadsheetTemplate[];
+  readonly templates: readonly StoredSpreadsheetTemplate[];
   /** Resource metadata store. */
   readonly resources: ResourceStore;
   /** Namespaced extension data. */

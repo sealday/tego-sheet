@@ -7,6 +7,13 @@ export {
 export { hashSpreadsheetDocument } from './hash';
 export { renderSpreadsheetTemplate } from './render';
 export type {
+  CompiledTemplateExpression,
+  TemplateExpressionNode,
+  TemplateExpressionScope,
+  TemplateFormatter,
+  TemplateFormatterRegistry,
+} from './expression';
+export type {
   CompilationResult,
   CompiledTemplate,
   ConditionalRangeBinding,
