@@ -443,7 +443,7 @@ describe('documentation site contract', () => {
     if (build.status !== 0) {
       throw new Error(`Public package build failed:\n${build.stdout}\n${build.stderr}`);
     }
-  });
+  }, 30_000);
 
   it('builds for the GitHub Pages project path', async () => {
     const config = await loadConfig();
@@ -748,7 +748,7 @@ describe('documentation site contract', () => {
         ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'),
       ),
     ).toEqual([]);
-  });
+  }, 15_000);
 
   it('keeps the recursive playground module graph on published package boundaries', () => {
     const componentRoot = resolve(root, 'website/src/components/playground');

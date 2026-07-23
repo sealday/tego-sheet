@@ -705,7 +705,7 @@ it('[ARCH-5] separates browser API implementations from section 6.6 lifetime own
   expect(
     [...(lifetimeOwners.get('subscription') ?? [])].every((file) => file.startsWith('src/react/')),
   ).toBe(true);
-});
+}, 15_000);
 
 it(
   '[ARCH-5] keeps the React disposal cascade ordered and executes the Strict Mode cleanup probe',

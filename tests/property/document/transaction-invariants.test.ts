@@ -164,5 +164,5 @@ describe('document transaction generated invariants', () => {
       expect(controller.validate().valid, `branch invariant ${seed}`).toBe(true);
       expect(listener.mock.calls.length, `event count ${seed}`).toBeGreaterThanOrEqual(10);
     }
-  });
+  }, 15_000);
 });

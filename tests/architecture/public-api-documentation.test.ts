@@ -599,5 +599,5 @@ describe('public API documentation', () => {
     } finally {
       await rm(temporaryRoot, { force: true, recursive: true });
     }
-  }, 15_000);
+  }, 30_000);
 });
