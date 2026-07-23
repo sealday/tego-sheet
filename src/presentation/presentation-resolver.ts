@@ -7,7 +7,11 @@ import type {
   SpreadsheetDocument,
 } from '../document';
 import { formulaAddressKey, type FormulaProgram, type FormulaValue } from '../formula';
-import { createNumberFormatter } from '../format';
+import {
+  createConditionalFormatEvaluator,
+  createNumberFormatter,
+  type ConditionalRule,
+} from '../format';
 import { checkboxCellType } from '../extensions/cell-types/checkbox';
 import { dropdownCellType } from '../extensions/cell-types/dropdown';
 import type { BuiltInCellTypeDefinition, CellTypeScalar } from '../extensions/kernel/capabilities';
@@ -74,6 +78,19 @@ export interface PresentationResolverOptions {
   readonly cache: PresentationCache;
   /** Optional validation-state resolver. */
   readonly validation?: (address: DocumentCellAddress) => PresentationValidation;
+  /** Optional derived conditional-style resolver shared by every presentation target. */
+  readonly conditionalStyle?: (
+    address: DocumentCellAddress,
+    value: FormulaValue,
+    formattedText: string,
+  ) => Readonly<Partial<ResolvedStyle>>;
+  /** Optional resource limits for persistent worksheet conditional rules. */
+  readonly conditionalFormattingLimits?: {
+    /** Maximum rules evaluated for one cell. */
+    readonly maxRules: number;
+    /** Maximum aggregate target cells across those rules. */
+    readonly maxCells: number;
+  };
   /** Optional ordered annotation resolver. */
   readonly annotations?: (address: DocumentCellAddress) => readonly PresentationAnnotation[];
 }
@@ -288,11 +305,73 @@ function cellAt(
     ?.cells.find((entry) => entry.row === row && entry.column === column)?.cell;
 }
 
+function conditionalScalar(source: string): string | number | undefined {
+  const trimmed = source.trim();
+  const numberValue = Number(trimmed);
+  if (trimmed.length > 0 && Number.isFinite(numberValue)) return numberValue;
+  const quoted = /^(["'])(.*)\1$/u.exec(trimmed);
+  return quoted?.[2];
+}
+
+function documentConditionalRules(
+  document: SpreadsheetDocument,
+  address: DocumentCellAddress,
+): readonly ConditionalRule[] {
+  const sheet = document.workbook.sheets.find(({ id }) => id === address.sheetId);
+  if (sheet === undefined) return [];
+  return sheet.conditionalFormatting.flatMap((rule, index): readonly ConditionalRule[] => {
+    if (rule.type === 'color-scale') {
+      return [
+        {
+          id: `sheet-rule-${index}`,
+          priority: index,
+          stopIfTrue: false,
+          ranges: [rule.range],
+          condition: { type: 'not-blank' },
+          effect: {
+            type: 'color-scale',
+            minimumColor: rule.minimumColor,
+            ...(rule.midpointColor === undefined ? {} : { midpointColor: rule.midpointColor }),
+            maximumColor: rule.maximumColor,
+          },
+        },
+      ];
+    }
+    const value = conditionalScalar(rule.formula);
+    const value2 = rule.formula2 === undefined ? undefined : conditionalScalar(rule.formula2);
+    if (value === undefined) return [];
+    const patch: Record<string, JsonValue> = {};
+    if (rule.style.color !== undefined) patch.color = rule.style.color;
+    if (rule.style.backgroundColor !== undefined) {
+      patch.backgroundColor = rule.style.backgroundColor;
+    }
+    if (rule.style.bold !== undefined) patch.bold = rule.style.bold;
+    return [
+      {
+        id: `sheet-rule-${index}`,
+        priority: index,
+        stopIfTrue: false,
+        ranges: [rule.range],
+        condition: {
+          type: 'cell-is',
+          operator: rule.operator,
+          value,
+          ...(value2 === undefined ? {} : { value2 }),
+        },
+        effect: { type: 'style', patch },
+      },
+    ];
+  });
+}
+
 /** Creates the one shared resolver used by visual, semantic and print surfaces. */
 export function createPresentationResolver(
   options: PresentationResolverOptions,
 ): PresentationResolver {
   const formatter = createNumberFormatter();
+  const conditionalFormatter = createConditionalFormatEvaluator(
+    options.conditionalFormattingLimits ?? { maxRules: 10_000, maxCells: 10_000_000 },
+  );
   const resolver: PresentationResolver = {
     resolve(address: DocumentCellAddress) {
       const key = addressKey(address, options.revisions, options.environment);
@@ -301,7 +380,7 @@ export function createPresentationResolver(
       const sheet = options.document.workbook.sheets.find(({ id }) => id === address.sheetId);
       if (sheet === undefined) throw new RangeError(`Unknown sheet: ${address.sheetId}`);
       const cell = cellAt(options.document, address.sheetId, address.row, address.column);
-      const resolvedStyle = style(options, address, cell);
+      const baseStyle = style(options, address, cell);
       const formulaKey = formulaAddressKey(address);
       const formulaValue =
         options.formulaValues?.get(formulaKey) ?? options.formulaProgram?.values.get(formulaKey);
@@ -311,9 +390,9 @@ export function createPresentationResolver(
         (cell?.input.type === 'formula' ? (formulaValue ?? inputValue(cell)) : inputValue(cell));
       let formattedText = custom?.formattedText ?? plain(value);
       const diagnostics: Diagnostic[] = [];
-      if (custom === undefined && resolvedStyle.numberFormat !== undefined) {
+      if (custom === undefined && baseStyle.numberFormat !== undefined) {
         try {
-          formattedText = formatter.format(value, resolvedStyle.numberFormat, options.environment);
+          formattedText = formatter.format(value, baseStyle.numberFormat, options.environment);
         } catch (cause) {
           diagnostics.push({
             code: 'PRESENTATION_FORMAT_INVALID',
@@ -326,6 +405,30 @@ export function createPresentationResolver(
           });
         }
       }
+      const conditional = conditionalFormatter.evaluate({
+        address,
+        value,
+        text: formattedText,
+        baseStyle,
+        rules: documentConditionalRules(options.document, address),
+      });
+      diagnostics.push(
+        ...conditional.diagnostics.map(
+          (diagnostic): Diagnostic => ({
+            code: diagnostic.code,
+            severity: 'warning',
+            domain: 'format',
+            stage: 'resolve',
+            message: `Conditional format ${diagnostic.ruleId} is not supported by presentation`,
+            location: { cell: address },
+          }),
+        ),
+      );
+      const resolvedStyle = Object.freeze({
+        ...baseStyle,
+        ...conditional.stylePatch,
+        ...options.conditionalStyle?.(address, value, formattedText),
+      });
       const validation = options.validation?.(address) ?? { status: 'valid' };
       const annotations = options.annotations?.(address) ?? [];
       const hidden =

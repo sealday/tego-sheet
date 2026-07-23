@@ -14,12 +14,16 @@ export type ConditionalExpression =
       readonly operator:
         | 'equal'
         | 'notEqual'
+        | 'between'
+        | 'notBetween'
         | 'greaterThan'
         | 'greaterThanOrEqual'
         | 'lessThan'
         | 'lessThanOrEqual';
       /** Fixed comparison value. */
       readonly value: number | string;
+      /** Inclusive upper bound for between comparisons. */
+      readonly value2?: number | string;
     }
   | {
       /** Matches blank values. */
@@ -89,7 +93,7 @@ export interface ConditionalEvaluationInput {
   /** Already formatted cell text. */
   readonly text: string;
   /** Immutable base style. */
-  readonly baseStyle: Readonly<Record<string, JsonValue>>;
+  readonly baseStyle: Readonly<object>;
   /** Candidate rules. */
   readonly rules: readonly ConditionalRule[];
   /** Optional side-effect-free referenced-cell lookup. */

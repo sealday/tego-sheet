@@ -68,6 +68,11 @@ function documentFixture() {
                 },
               },
             },
+            {
+              row: 3,
+              column: 0,
+              cell: { input: { type: 'number', value: 12 } },
+            },
           ],
           merges: [],
           rows: [
@@ -75,6 +80,19 @@ function documentFixture() {
             { index: 2, styleId: 'row-style' },
           ],
           columns: [{ index: 0, styleId: 'column-style' }],
+          conditionalFormatting: [
+            {
+              type: 'cell-is',
+              range: {
+                sheetId: 'sheet-1',
+                start: { row: 3, column: 0 },
+                end: { row: 3, column: 0 },
+              },
+              operator: 'greaterThan',
+              formula: '10',
+              style: { color: '#cc0000', bold: true },
+            },
+          ],
         },
       ],
       styles: [
@@ -197,6 +215,55 @@ describe('shared cell presentation', () => {
     expect(second).toBe(first);
     expect(Object.isFrozen(first)).toBe(true);
     expect(Object.isFrozen(first.style)).toBe(true);
+  });
+
+  it('applies conditional style as derived CellPresentation state', () => {
+    const { document, cache } = resolverFixture();
+    const resolver = createPresentationResolver({
+      document,
+      cache,
+      revisions: {
+        document: 1,
+        calculation: 0,
+        condition: 1,
+        style: 1,
+        environment: 1,
+      },
+      environment: {
+        locale: 'en-US',
+        timeZone: 'UTC',
+        dateSystem: 'excel-1900',
+        target: 'print',
+      },
+      conditionalStyle: (_address, value) =>
+        value.type === 'number' && value.value > 1000 ? { color: '#ff0000', bold: true } : {},
+    });
+
+    const presentation = resolver.resolve({
+      sheetId: 'sheet-1' as never,
+      row: 0,
+      column: 0,
+    });
+    expect(presentation.style).toMatchObject({
+      color: '#ff0000',
+      backgroundColor: '#ffeecc',
+      bold: true,
+    });
+    expect(document.workbook.styles.find(({ id }) => id === 'currency')?.value).toMatchObject({
+      color: '#123456',
+    });
+  });
+
+  it('derives persistent worksheet conditional rules into the shared presentation', () => {
+    const { document, resolver } = resolverFixture();
+
+    expect(
+      resolver.resolve({ sheetId: 'sheet-1' as never, row: 3, column: 0 }).style,
+    ).toMatchObject({
+      color: '#cc0000',
+      bold: true,
+    });
+    expect(document.workbook.sheets[0]?.cells[5]?.cell.styleId).toBeUndefined();
   });
 
   it('composes built-in checkbox and dropdown semantics from the F5 definitions', () => {

@@ -52,6 +52,7 @@ function compare(
   left: number | string | boolean | undefined,
   operator: Extract<ConditionalExpression, { type: 'cell-is' }>['operator'],
   right: number | string,
+  right2?: number | string,
 ): boolean {
   if (left === undefined) return false;
   const comparison =
@@ -60,6 +61,15 @@ function compare(
       : String(left).localeCompare(String(right), 'en-US');
   if (operator === 'equal') return comparison === 0;
   if (operator === 'notEqual') return comparison !== 0;
+  if (operator === 'between' || operator === 'notBetween') {
+    if (right2 === undefined) return false;
+    const upperComparison =
+      typeof left === 'number' && typeof right2 === 'number'
+        ? left - right2
+        : String(left).localeCompare(String(right2), 'en-US');
+    const between = comparison >= 0 && upperComparison <= 0;
+    return operator === 'between' ? between : !between;
+  }
   if (operator === 'greaterThan') return comparison > 0;
   if (operator === 'greaterThanOrEqual') return comparison >= 0;
   if (operator === 'lessThan') return comparison < 0;
@@ -90,7 +100,7 @@ function matches(condition: ConditionalExpression, input: ConditionalEvaluationI
   if (condition.type === 'not-blank') return input.value.type !== 'blank';
   if (condition.type === 'text-contains') return input.text.includes(condition.text);
   if (condition.type === 'cell-is') {
-    return compare(scalar(input.value), condition.operator, condition.value);
+    return compare(scalar(input.value), condition.operator, condition.value, condition.value2);
   }
   try {
     const ast = parseFormula(condition.source);
