@@ -331,8 +331,23 @@ function hasPageShape(value: unknown): boolean {
   );
 }
 
+function hasBandShape(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    ['left', 'center', 'right'].every(
+      (slot) => value[slot] === undefined || typeof value[slot] === 'string',
+    )
+  );
+}
+
 function hasRuntimeTemplateShape(value: unknown): value is SpreadsheetTemplate {
-  if (!isRecord(value) || !Array.isArray(value.bindings) || !Array.isArray(value.printProfiles)) {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    typeof value.name !== 'string' ||
+    !Array.isArray(value.bindings) ||
+    !Array.isArray(value.printProfiles)
+  ) {
     return false;
   }
   const bindingsAreValid = value.bindings.every((binding) => {
@@ -344,7 +359,8 @@ function hasRuntimeTemplateShape(value: unknown): value is SpreadsheetTemplate {
         isRecord(binding.target) &&
         typeof binding.target.sheetId === 'string' &&
         hasPointShape(binding.target) &&
-        typeof binding.expression === 'string'
+        typeof binding.expression === 'string' &&
+        (binding.formatter === undefined || typeof binding.formatter === 'string')
       );
     }
     if (binding.type === 'repeat-rows') {
@@ -388,16 +404,111 @@ function hasRuntimeTemplateShape(value: unknown): value is SpreadsheetTemplate {
         ) &&
         (profile.repeatRows === undefined || hasRangeShape(profile.repeatRows)) &&
         (profile.repeatColumns === undefined || hasRangeShape(profile.repeatColumns)) &&
+        (profile.header === undefined || hasBandShape(profile.header)) &&
+        (profile.footer === undefined || hasBandShape(profile.footer)) &&
         typeof profile.showGridlines === 'boolean' &&
         typeof profile.showHeadings === 'boolean',
     )
   );
 }
 
+function hasUnsafeCompilationGraph(roots: readonly unknown[]): boolean {
+  interface Frame {
+    readonly object: object;
+    readonly values: readonly unknown[];
+    readonly depth: number;
+    index: number;
+  }
+
+  const active = new WeakSet<object>();
+  const stack: Frame[] = [];
+  let entries = 0;
+  let stringUnits = 0;
+  const enter = (value: unknown, depth: number): boolean => {
+    if (typeof value === 'string') {
+      stringUnits += value.length;
+      return stringUnits <= 32_000_000;
+    }
+    if (value === null || typeof value !== 'object') return true;
+    if (active.has(value) || depth > 512) return false;
+    let descriptors: readonly PropertyDescriptor[];
+    try {
+      descriptors = Object.values(Object.getOwnPropertyDescriptors(value));
+    } catch {
+      return false;
+    }
+    if (descriptors.some((descriptor) => !('value' in descriptor))) return false;
+    entries += descriptors.length;
+    if (entries > 1_000_000) return false;
+    active.add(value);
+    stack.push({
+      object: value,
+      values: descriptors.map((descriptor) =>
+        'value' in descriptor ? descriptor.value : undefined,
+      ),
+      depth,
+      index: 0,
+    });
+    return true;
+  };
+  for (const root of roots) {
+    if (!enter(root, 0)) return true;
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1]!;
+      if (frame.index >= frame.values.length) {
+        active.delete(frame.object);
+        stack.pop();
+        continue;
+      }
+      if (!enter(frame.values[frame.index++], frame.depth + 1)) return true;
+    }
+  }
+  return false;
+}
+
 function exceedsCompilationBudget(document: SpreadsheetDocument, template: SpreadsheetTemplate) {
-  const sourceCells = document.workbook.sheets.reduce((sum, sheet) => sum + sheet.cells.length, 0);
+  const sourceCollections =
+    document.workbook.sheets.reduce(
+      (sum, sheet) =>
+        sum + sheet.cells.length + sheet.rows.length + sheet.columns.length + sheet.merges.length,
+      0,
+    ) +
+    document.workbook.styles.length +
+    document.workbook.validations.length +
+    document.resources.items.length;
+  const templateBindings = document.templates.reduce(
+    (sum, sourceTemplate) => sum + sourceTemplate.bindings.length,
+    0,
+  );
+  const templateProfiles = document.templates.reduce(
+    (sum, sourceTemplate) => sum + sourceTemplate.printProfiles.length,
+    0,
+  );
+  const pending: unknown[] = [document];
+  const seen = new WeakSet<object>();
+  let graphEntries = 0;
+  let stringUnits = 0;
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (typeof value === 'string') {
+      stringUnits += value.length;
+      if (stringUnits > 32_000_000) return true;
+      continue;
+    }
+    if (value === null || typeof value !== 'object' || seen.has(value)) continue;
+    seen.add(value);
+    const descriptors = Object.values(Object.getOwnPropertyDescriptors(value));
+    graphEntries += descriptors.length;
+    if (graphEntries > 1_000_000) return true;
+    for (const descriptor of descriptors) {
+      if (!('value' in descriptor)) return true;
+      pending.push(descriptor.value);
+    }
+  }
   return (
-    sourceCells > 1_000_000 ||
+    sourceCollections > 1_000_000 ||
+    templateBindings > 10_000 ||
+    templateProfiles > 1_000 ||
     template.bindings.length > 10_000 ||
     template.printProfiles.length > 1_000
   );
@@ -409,6 +520,12 @@ export function compileSpreadsheetTemplate(
   templateOrId: SpreadsheetTemplate | SpreadsheetTemplate['id'],
 ): CompilationResult {
   const diagnostics: Diagnostic[] = [];
+  if (hasUnsafeCompilationGraph([document, templateOrId])) {
+    const frozenDiagnostics = immutableClone([
+      diagnostic('COMPILATION_RESOURCE_LIMIT', 'Template source exceeds compilation limits'),
+    ]);
+    return immutableClone({ diagnostics: frozenDiagnostics, hasErrors: true });
+  }
   const resolved = resolveTemplate(document, templateOrId, diagnostics);
   const template = resolved.template;
   if (template === undefined) {

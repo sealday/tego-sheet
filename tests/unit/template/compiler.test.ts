@@ -189,6 +189,26 @@ describe('template compiler', () => {
         diagnostics: [expect.objectContaining({ code: 'INVALID_TEMPLATE_STRUCTURE' })],
       }),
     );
+
+    const malformedBand = template({
+      printProfiles: [
+        {
+          ...template().printProfiles[0]!,
+          header: { left: 42 as unknown as string },
+        },
+      ],
+    });
+    const bandDocument = {
+      ...document,
+      templates: [malformedBand],
+    } as SpreadsheetDocument;
+    expect(() => compileSpreadsheetTemplate(bandDocument, malformedBand.id)).not.toThrow();
+    expect(compileSpreadsheetTemplate(bandDocument, malformedBand.id)).toEqual(
+      expect.objectContaining({
+        hasErrors: true,
+        diagnostics: [expect.objectContaining({ code: 'INVALID_TEMPLATE_STRUCTURE' })],
+      }),
+    );
   });
 
   it('rejects oversized compiler input before cloning the source document', () => {
@@ -204,6 +224,102 @@ describe('template compiler', () => {
     };
     const persisted = { ...document, templates: [oversized] } as SpreadsheetDocument;
     expect(compileSpreadsheetTemplate(persisted, oversized.id)).toEqual(
+      expect.objectContaining({
+        hasErrors: true,
+        diagnostics: [expect.objectContaining({ code: 'COMPILATION_RESOURCE_LIMIT' })],
+      }),
+    );
+  });
+
+  it('budgets the complete source graph without executing accessors', () => {
+    const selected = template();
+    const binding = {
+      id: 'oversized' as never,
+      type: 'value' as const,
+      target: { sheetId: 'sheet-1' as never, row: 0, column: 0 },
+      expression: 'value',
+    };
+    const unrelated = template({
+      id: 'unrelated' as never,
+      bindings: Array.from({ length: 10_001 }, () => binding),
+    });
+    const oversized = {
+      ...document,
+      templates: [selected, unrelated],
+    } as SpreadsheetDocument;
+    expect(compileSpreadsheetTemplate(oversized, selected.id)).toEqual(
+      expect.objectContaining({
+        hasErrors: true,
+        diagnostics: [expect.objectContaining({ code: 'COMPILATION_RESOURCE_LIMIT' })],
+      }),
+    );
+
+    let accessorCalls = 0;
+    const accessorBacked = Object.defineProperty(
+      { ...document, templates: [selected] },
+      'extensions',
+      {
+        enumerable: true,
+        get() {
+          accessorCalls += 1;
+          throw new Error('must not execute');
+        },
+      },
+    ) as SpreadsheetDocument;
+    expect(compileSpreadsheetTemplate(accessorBacked, selected.id)).toEqual(
+      expect.objectContaining({
+        hasErrors: true,
+        diagnostics: [expect.objectContaining({ code: 'COMPILATION_RESOURCE_LIMIT' })],
+      }),
+    );
+    expect(accessorCalls).toBe(0);
+
+    let stylesAccessorCalls = 0;
+    const accessorWorkbook = Object.defineProperty({ ...document.workbook }, 'styles', {
+      enumerable: true,
+      get() {
+        stylesAccessorCalls += 1;
+        throw new Error('styles getter executed');
+      },
+    });
+    const nestedAccessor = {
+      ...document,
+      workbook: accessorWorkbook,
+      templates: [selected],
+    } as SpreadsheetDocument;
+    expect(() => compileSpreadsheetTemplate(nestedAccessor, selected.id)).not.toThrow();
+    expect(compileSpreadsheetTemplate(nestedAccessor, selected.id)).toEqual(
+      expect.objectContaining({
+        hasErrors: true,
+        diagnostics: [expect.objectContaining({ code: 'COMPILATION_RESOURCE_LIMIT' })],
+      }),
+    );
+    expect(stylesAccessorCalls).toBe(0);
+
+    const cyclicExtensions: Record<string, unknown> = {};
+    cyclicExtensions.self = cyclicExtensions;
+    const cyclic = {
+      ...document,
+      extensions: cyclicExtensions,
+      templates: [selected],
+    } as SpreadsheetDocument;
+    expect(() => compileSpreadsheetTemplate(cyclic, selected.id)).not.toThrow();
+    expect(compileSpreadsheetTemplate(cyclic, selected.id)).toEqual(
+      expect.objectContaining({
+        hasErrors: true,
+        diagnostics: [expect.objectContaining({ code: 'COMPILATION_RESOURCE_LIMIT' })],
+      }),
+    );
+
+    const shared = Object.fromEntries(
+      Array.from({ length: 1_050 }, (_, index) => [`field-${index}`, index]),
+    );
+    const fanOut = {
+      ...document,
+      extensions: { refs: Array.from({ length: 1_050 }, () => shared) },
+      templates: [selected],
+    } as SpreadsheetDocument;
+    expect(compileSpreadsheetTemplate(fanOut, selected.id)).toEqual(
       expect.objectContaining({
         hasErrors: true,
         diagnostics: [expect.objectContaining({ code: 'COMPILATION_RESOURCE_LIMIT' })],
