@@ -1,6 +1,11 @@
 import { strToU8, zipSync } from 'fflate';
 import type { Cell, JsonValue, Sheet, SheetRange, SpreadsheetDocument } from '../../document';
-import type { FormulaValue } from '../../formula';
+import {
+  BUILTIN_FORMULA_COMPATIBILITY,
+  parseFormula,
+  type FormulaAst,
+  type FormulaValue,
+} from '../../formula';
 import type {
   GeneratedConditionalCellRule,
   GeneratedDocument,
@@ -11,6 +16,18 @@ import { outputError, throwIfAborted } from '../output-error';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const FIXED_ZIP_DATE = new Date(1980, 0, 1, 0, 0, 0, 0);
+const CONDITIONAL_CELL_OPERATORS = new Set([
+  'between',
+  'notBetween',
+  'equal',
+  'notEqual',
+  'greaterThan',
+  'lessThan',
+  'greaterThanOrEqual',
+  'lessThanOrEqual',
+]);
+const CONDITIONAL_STYLE_KEYS = new Set(['color', 'backgroundColor', 'bold']);
+const SUPPORTED_FORMULA_FUNCTIONS = new Set(BUILTIN_FORMULA_COMPATIBILITY.map(({ name }) => name));
 const DEFAULT_LIMITS: XlsxOutputLimits = Object.freeze({
   maxSheets: 1_000,
   maxCells: 1_000_000,
@@ -159,6 +176,83 @@ function xlsxColor(value: string): string {
   return normalized.length === 6 ? `FF${normalized.toUpperCase()}` : normalized.toUpperCase();
 }
 
+function validateFormulaReference(
+  sheetToken: string | undefined,
+  workbook: Workbook,
+  currentSheetId: Sheet['id'],
+): void {
+  if (sheetToken === undefined) {
+    if (!workbook.sheets.some(({ id }) => id === currentSheetId)) {
+      throw new Error(`Unknown current sheet ${currentSheetId}`);
+    }
+    return;
+  }
+  const matches = workbook.sheets.filter(
+    ({ name }) => name.toLocaleLowerCase('en-US') === sheetToken.toLocaleLowerCase('en-US'),
+  );
+  if (matches.length !== 1) throw new Error(`Unknown or ambiguous sheet ${sheetToken}`);
+}
+
+function validateFormulaAst(
+  ast: FormulaAst,
+  workbook: Workbook,
+  currentSheetId: Sheet['id'],
+): void {
+  if (ast.kind === 'reference') {
+    validateFormulaReference(ast.reference.sheetToken, workbook, currentSheetId);
+  } else if (ast.kind === 'range') {
+    validateFormulaReference(ast.start.sheetToken, workbook, currentSheetId);
+    validateFormulaReference(ast.end.sheetToken, workbook, currentSheetId);
+  } else if (ast.kind === 'unary') {
+    validateFormulaAst(ast.operand, workbook, currentSheetId);
+  } else if (ast.kind === 'binary') {
+    validateFormulaAst(ast.left, workbook, currentSheetId);
+    validateFormulaAst(ast.right, workbook, currentSheetId);
+  } else if (ast.kind === 'call') {
+    if (!SUPPORTED_FORMULA_FUNCTIONS.has(ast.name)) {
+      throw new Error(`Unsupported formula function ${ast.name}`);
+    }
+    for (const argument of ast.arguments) validateFormulaAst(argument, workbook, currentSheetId);
+  }
+}
+
+function safeFormula(
+  source: string,
+  workbook: Workbook,
+  currentSheetId: Sheet['id'],
+  leadingEquals: 'required' | 'forbidden',
+): string {
+  if (
+    source.length === 0 ||
+    (leadingEquals === 'required' && !source.startsWith('=')) ||
+    (leadingEquals === 'forbidden' && source.startsWith('='))
+  ) {
+    throw outputError(
+      'XLSX_UNSUPPORTED_FEATURE',
+      `Formula must ${leadingEquals === 'required' ? '' : 'not '}start with =`,
+      { location: { sheetId: currentSheetId } },
+    );
+  }
+  try {
+    const ast = parseFormula(leadingEquals === 'required' ? source : `=${source}`);
+    validateFormulaAst(ast, workbook, currentSheetId);
+  } catch (error) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 'XLSX_UNSUPPORTED_FEATURE'
+    ) {
+      throw error;
+    }
+    throw outputError('XLSX_UNSUPPORTED_FEATURE', 'Formula is outside the supported safe subset', {
+      location: { sheetId: currentSheetId },
+      details: { reason: error instanceof Error ? error.message : String(error) },
+    });
+  }
+  return leadingEquals === 'required' ? source.slice(1) : source;
+}
+
 function conditionalRules(document: GeneratedDocument): readonly GeneratedConditionalCellRule[] {
   const worksheetById = new Map(
     document.worksheets.map((worksheet) => [worksheet.sheetId, worksheet]),
@@ -180,6 +274,17 @@ function differentialStyles(document: GeneratedDocument): {
   const rules = conditionalRules(document);
   const indices = new Map(rules.map((rule, index) => [rule, index]));
   const styles = rules.map(({ style }) => {
+    if (
+      Object.keys(style).some((key) => !CONDITIONAL_STYLE_KEYS.has(key)) ||
+      (style.color !== undefined && typeof style.color !== 'string') ||
+      (style.backgroundColor !== undefined && typeof style.backgroundColor !== 'string') ||
+      (style.bold !== undefined && typeof style.bold !== 'boolean')
+    ) {
+      throw outputError(
+        'XLSX_UNSUPPORTED_FEATURE',
+        'Conditional differential style contains unsupported fields',
+      );
+    }
     const font =
       style.color === undefined && style.bold !== true
         ? ''
@@ -198,6 +303,7 @@ function differentialStyles(document: GeneratedDocument): {
 
 function conditionalFormattingXml(
   sheet: Sheet,
+  workbook: Workbook,
   worksheet: GeneratedWorksheet,
   dxfIndices: ReadonlyMap<GeneratedConditionalCellRule, number>,
 ): string {
@@ -215,6 +321,13 @@ function conditionalFormattingXml(
         });
       }
       if (format.type === 'cell-is') {
+        if (!CONDITIONAL_CELL_OPERATORS.has(format.operator)) {
+          throw outputError(
+            'XLSX_UNSUPPORTED_FEATURE',
+            'Conditional cell rule operator is unsupported',
+            { location: { sheetId: sheet.id } },
+          );
+        }
         const needsSecond = format.operator === 'between' || format.operator === 'notBetween';
         if (
           format.formula.length === 0 ||
@@ -227,6 +340,11 @@ function conditionalFormattingXml(
             { location: { sheetId: sheet.id } },
           );
         }
+        const formula = safeFormula(format.formula, workbook, sheet.id, 'forbidden');
+        const formula2 =
+          format.formula2 === undefined
+            ? undefined
+            : safeFormula(format.formula2, workbook, sheet.id, 'forbidden');
         const dxfId = dxfIndices.get(format);
         if (dxfId === undefined) {
           throw outputError(
@@ -237,8 +355,8 @@ function conditionalFormattingXml(
         return (
           `<conditionalFormatting sqref="${absoluteRange({ start: format.range.start, end: format.range.end }).replaceAll('$', '')}">` +
           `<cfRule type="cellIs" dxfId="${dxfId}" priority="${index + 1}" operator="${format.operator}">` +
-          `<formula>${xml(format.formula)}</formula>` +
-          (format.formula2 === undefined ? '' : `<formula>${xml(format.formula2)}</formula>`) +
+          `<formula>${xml(formula)}</formula>` +
+          (formula2 === undefined ? '' : `<formula>${xml(formula2)}</formula>`) +
           '</cfRule></conditionalFormatting>'
         );
       }
@@ -390,6 +508,7 @@ function cellXml(
   styleIndices: ReadonlyMap<string, number>,
   calculated: ReadonlyMap<string, FormulaValue>,
   formulaMode: XlsxOutputOptions['formulaMode'],
+  workbook: Workbook,
 ): string {
   const reference = cellReference(row, column);
   const style = cell.styleId === undefined ? undefined : styleIndices.get(cell.styleId);
@@ -438,7 +557,7 @@ function cellXml(
     }
     return `<c r="${reference}"${styleAttribute}><v>${cached.value}</v></c>`;
   }
-  const formula = input.source.startsWith('=') ? input.source.slice(1) : input.source;
+  const formula = safeFormula(input.source, workbook, sheet.id, 'required');
   const cachedType =
     cached?.type === 'string'
       ? ' t="str"'
@@ -795,6 +914,7 @@ function worksheetXml(
               styleIndices,
               calculated,
               options.formulaMode,
+              workbook,
             ),
           )
           .join('')}</row>`,
@@ -815,7 +935,7 @@ function worksheetXml(
     `<dimension ref="${absoluteRange(sheetRange(sheet)).replaceAll('$', '')}"/>` +
     `<sheetViews><sheetView workbookViewId="0"${profile?.showGridlines === false ? ' showGridLines="0"' : ''}${profile?.showHeadings === false ? ' showRowColHeaders="0"' : ''}/></sheetViews>` +
     `<sheetFormatPr defaultRowHeight="15"/>${columns}<sheetData>${rowXml}</sheetData>${merges}` +
-    `${validationXml(sheet, workbook)}${conditionalFormattingXml(sheet, worksheet, dxfIndices)}${pageXml(profile, sheet)}${hasDrawing ? '<drawing r:id="rId1"/>' : ''}</worksheet>`
+    `${validationXml(sheet, workbook)}${conditionalFormattingXml(sheet, workbook, worksheet, dxfIndices)}${pageXml(profile, sheet)}${hasDrawing ? '<drawing r:id="rId1"/>' : ''}</worksheet>`
   );
 }
 

@@ -196,7 +196,7 @@ describe('XlsxAdapter', () => {
                     end: { row: 2, column: 1 },
                   },
                   operator: 'lessThan',
-                  formula: 'A2<5&N("x")',
+                  formula: 'IF(A2<5,"x&y","z")',
                   style: {
                     color: '#ffffff',
                     backgroundColor: '#ff0000',
@@ -235,7 +235,7 @@ describe('XlsxAdapter', () => {
       '<color rgb="FFFF0000"/><color rgb="FFFFFF00"/><color rgb="FF00FF00"/>',
     );
     expect(xml['xl/worksheets/sheet1.xml']).toContain(
-      '<cfRule type="cellIs" dxfId="0" priority="2" operator="lessThan"><formula>A2&lt;5&amp;N(&quot;x&quot;)</formula></cfRule>',
+      '<cfRule type="cellIs" dxfId="0" priority="2" operator="lessThan"><formula>IF(A2&lt;5,&quot;x&amp;y&quot;,&quot;z&quot;)</formula></cfRule>',
     );
     expect(xml['xl/styles.xml']).toContain(
       '<dxfs count="1"><dxf><font><b/><color rgb="FFFFFFFF"/></font><fill><patternFill patternType="solid"><fgColor rgb="FFFF0000"/>',
@@ -283,6 +283,85 @@ describe('XlsxAdapter', () => {
           ],
         } as never,
         options,
+      ),
+    ).rejects.toMatchObject({ code: 'XLSX_UNSUPPORTED_FEATURE' });
+  });
+
+  it('rejects runtime-injected conditional operators, styles, and unsafe formulas', async () => {
+    const fixture = outputGeneratedDocument();
+    const options = {
+      formulaMode: 'values-only' as const,
+      compatibility: 'excel' as const,
+    };
+    const rule = {
+      type: 'cell-is',
+      range: {
+        sheetId: 'sheet-1',
+        start: { row: 0, column: 0 },
+        end: { row: 0, column: 0 },
+      },
+      operator: 'equal',
+      formula: '1',
+      style: {},
+    };
+    const render = (override: object) =>
+      new XlsxAdapter().render(
+        {
+          ...fixture,
+          worksheets: [
+            {
+              ...fixture.worksheets[0]!,
+              conditionalFormatting: [{ ...rule, ...override }],
+            },
+          ],
+        } as never,
+        options,
+      );
+
+    await expect(render({ operator: 'containsText' })).rejects.toMatchObject({
+      code: 'XLSX_UNSUPPORTED_FEATURE',
+    });
+    await expect(render({ style: { italic: true } })).rejects.toMatchObject({
+      code: 'XLSX_UNSUPPORTED_FEATURE',
+    });
+    await expect(render({ formula: '=1' })).rejects.toMatchObject({
+      code: 'XLSX_UNSUPPORTED_FEATURE',
+    });
+    await expect(render({ formula: '[external.xlsx]Sheet1!A1' })).rejects.toMatchObject({
+      code: 'XLSX_UNSUPPORTED_FEATURE',
+    });
+    await expect(render({ formula: 'HYPERLINK("https://example.com")' })).rejects.toMatchObject({
+      code: 'XLSX_UNSUPPORTED_FEATURE',
+    });
+    await expect(render({ formula: "'Missing'!A1" })).rejects.toMatchObject({
+      code: 'XLSX_UNSUPPORTED_FEATURE',
+    });
+    await expect(
+      new XlsxAdapter().render(
+        {
+          ...fixture,
+          workbook: {
+            ...fixture.workbook,
+            sheets: [
+              {
+                ...fixture.workbook.sheets[0]!,
+                cells: [
+                  {
+                    row: 0,
+                    column: 0,
+                    cell: {
+                      input: {
+                        type: 'formula',
+                        source: '=HYPERLINK("https://example.com")',
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        { ...options, formulaMode: 'formula-and-cached-value' },
       ),
     ).rejects.toMatchObject({ code: 'XLSX_UNSUPPORTED_FEATURE' });
   });
