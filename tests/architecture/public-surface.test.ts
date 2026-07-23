@@ -156,6 +156,7 @@ it('[ARCH-1] publishes only the approved package entry points', () => {
     './locales/nl',
     './locales/zh-cn',
     './output/pdf',
+    './output/xlsx',
     './package.json',
     './styles.css',
   ]);

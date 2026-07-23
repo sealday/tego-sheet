@@ -78,9 +78,10 @@ part can enter the package.
 
 - Worksheets, cells, merges, styles, validations, strings, resources,
   relationships, and ZIP paths use stable source or canonical key order.
-- ZIP uses fixed `1980-01-01T00:00:00.000Z` mtimes, one compression level, and
-  canonical path insertion. Equal document plus equal options must produce
-  equal bytes, not merely equivalent XML.
+- ZIP uses a local `Date(1980, 0, 1, 0, 0, 0, 0)` solely to encode the
+  timezone-independent DOS epoch fields, plus one compression level and
+  canonical path insertion. Equal document plus equal options must produce equal
+  bytes, not merely equivalent XML.
 - `fflate` has browser and Node conditional exports and no DOM dependency. The
   serializer itself uses `Uint8Array`, `TextEncoder`, and `Blob`, all available
   in the supported Node/browser/Worker environments.

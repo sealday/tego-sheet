@@ -60,6 +60,11 @@
       "import": "./dist/output/pdf.js",
       "require": "./dist/output/pdf.cjs"
     },
+    "./output/xlsx": {
+      "types": "./dist/output/xlsx/index.d.ts",
+      "import": "./dist/output/xlsx.js",
+      "require": "./dist/output/xlsx.cjs"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {

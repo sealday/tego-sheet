@@ -885,8 +885,15 @@ export async function renderSpreadsheetTemplate(
     if (diagnostics.some(({ severity }) => severity === 'error')) {
       return failAfterResources(freeze({ diagnostics }));
     }
+    const calculatedCells = expansion.document.workbook.sheets.flatMap((sheet) =>
+      sheet.cells.map(({ row, column }) => {
+        const address = { sheetId: sheet.id, row, column };
+        return freeze({ address, value: presentation.resolve(address).value });
+      }),
+    );
     const document: GeneratedDocument = freeze({
       workbook: expansion.document.workbook,
+      calculatedCells,
       print: {
         pages: pagination.pages.map((page) => ({
           id: page.id,
@@ -900,6 +907,7 @@ export async function renderSpreadsheetTemplate(
           columnEnd: page.columnEnd,
         })),
         displayList,
+        profile,
       },
       resources,
       objects: expansion.objectMappings,

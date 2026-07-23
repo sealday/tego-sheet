@@ -296,6 +296,7 @@ export type {
   CompiledTemplate,
   CompiledTemplateExpression,
   ConditionalRangeBinding,
+  GeneratedCalculatedCell,
   GeneratedDocument,
   GeneratedPrintPage,
   PageBand,

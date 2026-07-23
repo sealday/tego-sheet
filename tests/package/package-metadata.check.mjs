@@ -30,6 +30,7 @@ test('metadata describes React peers and explicit output dependencies and export
     './locales/nl',
     './locales/zh-cn',
     './output/pdf',
+    './output/xlsx',
     './package.json',
   ]);
   assert.equal(pkg.scripts['test:ssr'], 'node scripts/test-ssr.mjs');
@@ -103,6 +104,9 @@ test('packed files contain publishable outputs but no workspace source or depend
     'dist/output/pdf.js',
     'dist/output/pdf.cjs',
     'dist/output/pdf/index.d.ts',
+    'dist/output/xlsx.js',
+    'dist/output/xlsx.cjs',
+    'dist/output/xlsx/index.d.ts',
   ])
     assert.equal(files.includes(required), true, `${required} must be packed`);
   assert.equal(

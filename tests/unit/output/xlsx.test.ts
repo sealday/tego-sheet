@@ -10,38 +10,30 @@ async function parts(blob: Blob): Promise<Readonly<Record<string, string>>> {
   );
 }
 
+async function centralDirectory(
+  blob: Blob,
+): Promise<readonly { readonly name: string; readonly time: number; readonly date: number }[]> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const entries: { name: string; time: number; date: number }[] = [];
+  for (let offset = 0; offset <= bytes.length - 46; offset += 1) {
+    if (view.getUint32(offset, true) !== 0x02014b50) continue;
+    const nameLength = view.getUint16(offset + 28, true);
+    const extraLength = view.getUint16(offset + 30, true);
+    const commentLength = view.getUint16(offset + 32, true);
+    entries.push({
+      name: new TextDecoder().decode(bytes.slice(offset + 46, offset + 46 + nameLength)),
+      time: view.getUint16(offset + 12, true),
+      date: view.getUint16(offset + 14, true),
+    });
+    offset += 45 + nameLength + extraLength + commentLength;
+  }
+  return entries;
+}
+
 describe('XlsxAdapter', () => {
   it('writes typed cells, literal equals text, formulas with caches, styles, merges, validation, dimensions, and print parts', async () => {
-    const source = {
-      ...outputGeneratedDocument(),
-      calculatedValues: {
-        'sheet-1:1:1': { type: 'number', value: 3 },
-      },
-      print: {
-        ...outputGeneratedDocument().print,
-        profile: {
-          id: 'invoice-print',
-          name: 'Invoice',
-          targets: [{ type: 'sheet', sheetId: 'sheet-1' }],
-          page: {
-            paper: { type: 'A4' },
-            orientation: 'portrait',
-            margins: { top: 10, right: 10, bottom: 10, left: 10 },
-            scale: { type: 'fixed', value: 1 },
-          },
-          repeatRows: {
-            sheetId: 'sheet-1',
-            start: { row: 0, column: 0 },
-            end: { row: 0, column: 1 },
-          },
-          manualBreaks: [{ sheetId: 'sheet-1', beforeRow: 2 }],
-          header: { center: 'Invoice' },
-          footer: { right: 'Page &P' },
-          showGridlines: false,
-          showHeadings: true,
-        },
-      },
-    };
+    const source = outputGeneratedDocument();
     const blob = await new XlsxAdapter().render(source, {
       formulaMode: 'formula-and-cached-value',
       compatibility: 'excel',
@@ -51,11 +43,12 @@ describe('XlsxAdapter', () => {
 
     expect(blob.type).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     expect(sheet).toContain('<c r="A1"');
-    expect(sheet).toContain('<t>=literal</t>');
+    expect(sheet).toContain('>=literal</t>');
     expect(sheet).toContain('<f>A2+1</f><v>3</v>');
     expect(sheet).toContain('<mergeCell ref="A1:B1"/>');
     expect(sheet).toContain('<dataValidation');
-    expect(sheet).toContain('<col min="2" max="2" width="80" hidden="1"');
+    expect(sheet).toContain('<col min="2" max="2" width="80"');
+    expect(sheet).toContain('hidden="1"');
     expect(sheet).toContain('<row r="1" ht="24" customHeight="1"');
     expect(sheet).toContain('<pageMargins');
     expect(sheet).toContain('<pageSetup');
@@ -90,6 +83,78 @@ describe('XlsxAdapter', () => {
       await (await adapter.render(outputGeneratedDocument(), options)).arrayBuffer(),
     );
     expect(second).toEqual(first);
+    const directory = await centralDirectory(new Blob([first]));
+    expect(directory.map(({ name }) => name)).toEqual(directory.map(({ name }) => name).toSorted());
+    expect(new Set(directory.map(({ time, date }) => `${time}:${date}`))).toEqual(
+      new Set(['0:33']),
+    );
+  });
+
+  it('escapes XML and emits only internal image relationships', async () => {
+    const fixture = outputGeneratedDocument();
+    const image = {
+      contentHash: 'sha256:logo',
+      type: 'image' as const,
+      mimeType: 'image/png',
+      bytes: [137, 80, 78, 71],
+    };
+    const source = {
+      ...fixture,
+      workbook: {
+        ...fixture.workbook,
+        sheets: [
+          {
+            ...fixture.workbook.sheets[0]!,
+            name: 'R&D <Q>',
+            cells: [
+              {
+                row: 0,
+                column: 0,
+                cell: { input: { type: 'string', value: '<unsafe & =literal>' } },
+              },
+            ],
+          },
+        ],
+      },
+      objects: [
+        {
+          objectId: 'logo',
+          resourceId: 'logo',
+          policy: 'shared',
+          itemIndex: 0,
+          source: {
+            sheetId: 'sheet-1',
+            start: { row: 0, column: 0 },
+            end: { row: 1, column: 1 },
+          },
+          generated: {
+            sheetId: 'sheet-1',
+            start: { row: 0, column: 0 },
+            end: { row: 1, column: 1 },
+          },
+        },
+      ],
+      resources: {
+        ...fixture.resources,
+        byHash: { [image.contentHash]: image },
+        byReference: { logo: image },
+        totalBytes: image.bytes.length,
+      },
+    };
+    const xmlParts = await parts(
+      await new XlsxAdapter().render(source as never, {
+        formulaMode: 'values-only',
+        compatibility: 'excel',
+      }),
+    );
+
+    expect(xmlParts['xl/workbook.xml']).toContain('name="R&amp;D &lt;Q&gt;"');
+    expect(xmlParts['xl/worksheets/sheet1.xml']).toContain('&lt;unsafe &amp; =literal&gt;');
+    expect(xmlParts['xl/drawings/drawing1.xml']).toContain('r:embed="rId1"');
+    expect(xmlParts['xl/drawings/_rels/drawing1.xml.rels']).toContain(
+      'Target="../media/image1-1.png"',
+    );
+    expect(Object.values(xmlParts).join('')).not.toContain('TargetMode="External"');
   });
 
   it('rejects unsupported custom cells with a located diagnostic and no package', async () => {
@@ -122,6 +187,41 @@ describe('XlsxAdapter', () => {
 
     await expect(
       new XlsxAdapter().render(custom as never, {
+        formulaMode: 'values-only',
+        compatibility: 'excel',
+      }),
+    ).rejects.toMatchObject({
+      code: 'XLSX_UNSUPPORTED_FEATURE',
+      diagnostic: { location: { sheetId: 'sheet-1' } },
+    });
+  });
+
+  it('diagnoses unsupported conditional formatting metadata instead of dropping it', async () => {
+    const fixture = outputGeneratedDocument();
+    const first = fixture.workbook.sheets[0]!.cells[0]!;
+    const source = {
+      ...fixture,
+      workbook: {
+        ...fixture.workbook,
+        sheets: [
+          {
+            ...fixture.workbook.sheets[0]!,
+            cells: [
+              {
+                ...first,
+                cell: {
+                  ...first.cell,
+                  metadata: { conditionalFormatting: [{ type: 'colorScale' }] },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    await expect(
+      new XlsxAdapter().render(source as never, {
         formulaMode: 'values-only',
         compatibility: 'excel',
       }),

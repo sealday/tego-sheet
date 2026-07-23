@@ -51,6 +51,7 @@ export type {
   CompiledTemplate,
   ConditionalRangeBinding,
   GeneratedDocument,
+  GeneratedCalculatedCell,
   GeneratedPrintPage,
   PageBand,
   PageBreak,

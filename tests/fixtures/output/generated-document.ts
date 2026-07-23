@@ -68,6 +68,12 @@ export function outputGeneratedDocument(): GeneratedDocument {
       ],
       settings: { dateSystem: 'excel-1900', localeHint: 'zh-CN' },
     },
+    calculatedCells: [
+      {
+        address: { sheetId: 'sheet-1', row: 1, column: 1 },
+        value: { type: 'number', value: 3 },
+      },
+    ],
     print: {
       pages: [
         {
@@ -148,6 +154,27 @@ export function outputGeneratedDocument(): GeneratedDocument {
             ],
           },
         ],
+      },
+      profile: {
+        id: 'invoice-print',
+        name: 'Invoice',
+        targets: [{ type: 'sheet', sheetId: 'sheet-1' }],
+        page: {
+          paper: { type: 'A4' },
+          orientation: 'portrait',
+          margins: { top: 10, right: 10, bottom: 10, left: 10 },
+          scale: { type: 'fixed', value: 1 },
+        },
+        repeatRows: {
+          sheetId: 'sheet-1',
+          start: { row: 0, column: 0 },
+          end: { row: 0, column: 1 },
+        },
+        manualBreaks: [{ sheetId: 'sheet-1', beforeRow: 2 }],
+        header: { center: 'Invoice' },
+        footer: { right: 'Page &P' },
+        showGridlines: false,
+        showHeadings: true,
       },
     },
     resources: {

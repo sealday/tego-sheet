@@ -14,6 +14,7 @@ const expectedExports = [
   './locales/nl',
   './locales/zh-cn',
   './output/pdf',
+  './output/xlsx',
   './package.json',
 ];
 
@@ -140,6 +141,24 @@ test('the optional PDF subpath exposes only its adapter contract', () => {
       const expected = ['OutputAdapterError', 'PdfAdapter'];
       if (JSON.stringify(Object.keys(pdf)) !== JSON.stringify(expected)) {
         throw new Error('Unexpected PDF exports: ' + Object.keys(pdf).join(','));
+      }
+    `,
+    ],
+    { cwd: consumer, stdio: 'pipe' },
+  );
+});
+
+test('the optional XLSX subpath exposes only its adapter contract', () => {
+  execFileSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '--eval',
+      `
+      const xlsx = await import('tego-sheet/output/xlsx');
+      const expected = ['OutputAdapterError', 'XlsxAdapter'];
+      if (JSON.stringify(Object.keys(xlsx)) !== JSON.stringify(expected)) {
+        throw new Error('Unexpected XLSX exports: ' + Object.keys(xlsx).join(','));
       }
     `,
     ],

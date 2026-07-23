@@ -14,6 +14,10 @@ export default defineConfig({
         replacement: resolve(projectRoot, 'src/output/pdf/index.ts'),
       },
       {
+        find: 'tego-sheet/output/xlsx',
+        replacement: resolve(projectRoot, 'src/output/xlsx/index.ts'),
+      },
+      {
         find: 'tego-sheet/styles.css',
         replacement: resolve(projectRoot, 'src/ui/styles/index.less'),
       },

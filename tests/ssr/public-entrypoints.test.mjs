@@ -11,6 +11,7 @@ const publicEntries = [
   'tego-sheet/locales/nl',
   'tego-sheet/locales/zh-cn',
   'tego-sheet/output/pdf',
+  'tego-sheet/output/xlsx',
 ];
 const browserGlobals = [
   'window',

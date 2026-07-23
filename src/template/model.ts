@@ -8,6 +8,7 @@ import type {
   StoredSpreadsheetTemplate,
   TemplateId,
 } from '../document';
+import type { FormulaValue } from '../formula';
 import type { FontMetrics } from '../presentation';
 import type { PrintDisplayList } from '../print';
 import type { CompiledTemplateExpression, TemplateFormatterRegistry } from './expression';
@@ -484,12 +485,24 @@ export interface PrintDocument {
   readonly pages: readonly GeneratedPrintPage[];
   /** Exact renderer-neutral display commands for those pages. */
   readonly displayList: PrintDisplayList;
+  /** Exact immutable print profile selected for this render. */
+  readonly profile: TemplatePrintProfile;
+}
+
+/** One calculated value retained for semantic output adapters. */
+export interface GeneratedCalculatedCell {
+  /** Stable generated-workbook address. */
+  readonly address: DocumentCellAddress;
+  /** Typed calculated or input value used by presentation. */
+  readonly value: FormulaValue;
 }
 
 /** Atomic render artifact consumed by every TP1 output surface. */
 export interface GeneratedDocument {
   /** Expanded and recalculated semantic workbook. */
   readonly workbook: SpreadsheetDocument['workbook'];
+  /** Canonically ordered calculated values for generated sparse cells. */
+  readonly calculatedCells: readonly GeneratedCalculatedCell[];
   /** Shared immutable print pages and commands. */
   readonly print: PrintDocument;
   /** Session-owned, content-addressed resolved resource store. */
