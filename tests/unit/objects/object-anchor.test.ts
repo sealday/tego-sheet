@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { DocumentSheetId, ResourceId } from '../../../src/document';
 import {
   objectToDisplayCommands,
   resolveObjectAnchor,
@@ -6,6 +7,7 @@ import {
 } from '../../../src/objects';
 
 describe('OBJ-01 shared object anchors', () => {
+  const sheetId = 'sheet-1' as DocumentSheetId;
   const geometry = {
     rowOffset: (row: number) => row * 20,
     columnOffset: (column: number) => column * 80,
@@ -16,7 +18,7 @@ describe('OBJ-01 shared object anchors', () => {
       resolveObjectAnchor(
         {
           type: 'one-cell',
-          cell: { sheetId: 'sheet-1', row: 2, column: 1 },
+          cell: { sheetId, row: 2, column: 1 },
           offset: { x: 4, y: 5 },
           size: { width: 100, height: 40 },
         },
@@ -27,8 +29,8 @@ describe('OBJ-01 shared object anchors', () => {
       transformObjectAnchor(
         {
           type: 'two-cell',
-          from: { sheetId: 'sheet-1', row: 1, column: 1, offset: { x: 0, y: 0 } },
-          to: { sheetId: 'sheet-1', row: 3, column: 2, offset: { x: 0, y: 0 } },
+          from: { sheetId, row: 1, column: 1, offset: { x: 0, y: 0 } },
+          to: { sheetId, row: 3, column: 2, offset: { x: 0, y: 0 } },
         },
         { type: 'insert-row', sheetId: 'sheet-1', index: 2, count: 2 },
       ),
@@ -48,12 +50,12 @@ describe('OBJ-01 shared object anchors', () => {
           zIndex: 2,
           locked: false,
           templateRepeat: 'shared',
-          resourceId: 'missing',
+          resourceId: 'missing' as ResourceId,
           accessibility: { name: 'Logo' },
         },
         { resources: {}, geometry },
       ),
-    ).toMatchObject({ code: 'OBJECT_RESOURCE_MISSING' });
+    ).toThrowError(expect.objectContaining({ code: 'OBJECT_RESOURCE_MISSING' }));
     expect(
       objectToDisplayCommands(
         {
