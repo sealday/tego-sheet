@@ -1,0 +1,314 @@
+import type {
+  Cell,
+  Diagnostic,
+  DocumentCellRange,
+  Sheet,
+  SpreadsheetDocument,
+} from '../../document';
+import { parseFormula, renderFormula, translateFormula } from '../../formula';
+import { evaluateTemplateExpression, type TemplateFormatterRegistry } from '../expression';
+import type { RenderLimits, SpreadsheetTemplate, TemplateIRBinding } from '../model';
+
+export interface ExpansionResult {
+  readonly document?: SpreadsheetDocument;
+  readonly diagnostics: readonly Diagnostic[];
+  readonly insertedRows: ReadonlyMap<string, readonly RowInsertion[]>;
+}
+
+export interface RowInsertion {
+  readonly afterSourceRow: number;
+  readonly delta: number;
+}
+
+function freeze<T>(value: T): T {
+  if (Array.isArray(value)) return Object.freeze(value.map(freeze)) as T;
+  if (value !== null && typeof value === 'object') {
+    for (const child of Object.values(value as Record<string, unknown>)) freeze(child);
+    return Object.freeze(value);
+  }
+  return value;
+}
+
+function cellInput(value: unknown): Cell['input'] {
+  if (value === undefined || value === null) return { type: 'blank' };
+  if (typeof value === 'string') return { type: 'string', value };
+  if (typeof value === 'number' && Number.isFinite(value)) return { type: 'number', value };
+  if (typeof value === 'boolean') return { type: 'boolean', value };
+  return { type: 'string', value: JSON.stringify(value) };
+}
+
+function translatedCell(cell: Cell, rowDelta: number): Cell {
+  if (cell.input.type !== 'formula' || rowDelta === 0) return cell;
+  try {
+    return {
+      ...cell,
+      input: {
+        type: 'formula',
+        source: renderFormula(
+          translateFormula(parseFormula(cell.input.source), { rowDelta, columnDelta: 0 }),
+        ),
+      },
+    };
+  } catch {
+    return cell;
+  }
+}
+
+function mapRow(row: number, insertions: readonly RowInsertion[]): number {
+  return (
+    row +
+    insertions.reduce(
+      (delta, insertion) => delta + (row > insertion.afterSourceRow ? insertion.delta : 0),
+      0,
+    )
+  );
+}
+
+function removeRange(sheet: Sheet, range: DocumentCellRange): Sheet {
+  const count = range.end.row - range.start.row + 1;
+  const cells = sheet.cells
+    .filter(({ row }) => row < range.start.row || row > range.end.row)
+    .map((entry) => (entry.row > range.end.row ? { ...entry, row: entry.row - count } : entry));
+  const rows = sheet.rows
+    .filter(({ index }) => index < range.start.row || index > range.end.row)
+    .map((row) => (row.index > range.end.row ? { ...row, index: row.index - count } : row));
+  const merges = sheet.merges
+    .filter((merge) => merge.end.row < range.start.row || merge.start.row > range.end.row)
+    .map((merge) =>
+      merge.start.row > range.end.row
+        ? {
+            start: { ...merge.start, row: merge.start.row - count },
+            end: { ...merge.end, row: merge.end.row - count },
+          }
+        : merge,
+    );
+  return { ...sheet, cells, rows, merges };
+}
+
+function expandRepeat(
+  sheet: Sheet,
+  binding: Extract<TemplateIRBinding, { readonly type: 'repeat-rows' }>,
+  items: readonly unknown[],
+  data: unknown,
+  formatters: TemplateFormatterRegistry,
+  valueBindings: readonly Extract<TemplateIRBinding, { readonly type: 'value' }>[],
+): Sheet {
+  const height = binding.range.end.row - binding.range.start.row + 1;
+  const copies = items.length === 0 && binding.empty === 'keep-template-row' ? [undefined] : items;
+  if (copies.length === 0) return removeRange(sheet, binding.range);
+  const delta = height * (copies.length - 1);
+  const sourceCells = sheet.cells.filter(
+    ({ row }) => row >= binding.range.start.row && row <= binding.range.end.row,
+  );
+  const before = sheet.cells.filter(({ row }) => row < binding.range.start.row);
+  const after = sheet.cells
+    .filter(({ row }) => row > binding.range.end.row)
+    .map((entry) => ({ ...entry, row: entry.row + delta }));
+  const repeated = copies.flatMap((item, itemIndex) => {
+    const rowDelta = itemIndex * height;
+    return sourceCells.map((entry) => {
+      const row = entry.row + rowDelta;
+      const valueBinding = valueBindings.find(
+        ({ target }) => target.row === entry.row && target.column === entry.column,
+      );
+      const cell =
+        valueBinding === undefined
+          ? translatedCell(entry.cell, rowDelta)
+          : {
+              ...entry.cell,
+              input: cellInput(
+                evaluateTemplateExpression(
+                  valueBinding.expression,
+                  {
+                    root: data,
+                    item,
+                    index: itemIndex,
+                    first: itemIndex === 0,
+                    last: itemIndex === copies.length - 1,
+                  },
+                  formatters,
+                ),
+              ),
+            };
+      return { ...entry, row, cell };
+    });
+  });
+  const sourceRows = sheet.rows.filter(
+    ({ index }) => index >= binding.range.start.row && index <= binding.range.end.row,
+  );
+  const rows = [
+    ...sheet.rows.filter(({ index }) => index < binding.range.start.row),
+    ...copies.flatMap((_, itemIndex) =>
+      sourceRows.map((row) => ({ ...row, index: row.index + itemIndex * height })),
+    ),
+    ...sheet.rows
+      .filter(({ index }) => index > binding.range.end.row)
+      .map((row) => ({ ...row, index: row.index + delta })),
+  ];
+  const sourceMerges = sheet.merges.filter(
+    ({ start, end }) => start.row >= binding.range.start.row && end.row <= binding.range.end.row,
+  );
+  const merges = [
+    ...sheet.merges.filter(({ end }) => end.row < binding.range.start.row),
+    ...copies.flatMap((_, itemIndex) =>
+      sourceMerges.map((merge) => ({
+        start: { ...merge.start, row: merge.start.row + itemIndex * height },
+        end: { ...merge.end, row: merge.end.row + itemIndex * height },
+      })),
+    ),
+    ...sheet.merges
+      .filter(({ start }) => start.row > binding.range.end.row)
+      .map((merge) => ({
+        start: { ...merge.start, row: merge.start.row + delta },
+        end: { ...merge.end, row: merge.end.row + delta },
+      })),
+  ];
+  return { ...sheet, cells: [...before, ...repeated, ...after], rows, merges };
+}
+
+/** Expands scalar, repeat-row, and conditional bindings on an isolated document graph. */
+export function expandTemplate(
+  source: SpreadsheetDocument,
+  template: SpreadsheetTemplate,
+  bindings: readonly TemplateIRBinding[],
+  data: unknown,
+  formatters: TemplateFormatterRegistry,
+  limits: RenderLimits,
+): ExpansionResult {
+  const diagnostics: Diagnostic[] = [];
+  const insertions = new Map<string, RowInsertion[]>();
+  let expandedRows = 0;
+  const sheets = source.workbook.sheets.map((sheet) => ({ ...sheet }));
+  const repeats = bindings
+    .filter(
+      (binding): binding is Extract<TemplateIRBinding, { readonly type: 'repeat-rows' }> =>
+        binding.type === 'repeat-rows',
+    )
+    .sort((left, right) => right.range.start.row - left.range.start.row);
+  for (const binding of repeats) {
+    const value = evaluateTemplateExpression(binding.source, { root: data }, formatters);
+    const items = Array.isArray(value) ? value : [];
+    const height = binding.range.end.row - binding.range.start.row + 1;
+    const copies = items.length === 0 && binding.empty === 'keep-template-row' ? 1 : items.length;
+    expandedRows += height * copies;
+    if (expandedRows > limits.maxExpandedRows) {
+      return freeze({
+        diagnostics: [
+          {
+            code: 'EXPANSION_LIMIT_EXCEEDED',
+            severity: 'error',
+            domain: 'template',
+            stage: 'expand',
+            message: `Expanded rows exceed ${limits.maxExpandedRows}`,
+            location: { bindingId: binding.id },
+          },
+        ],
+        insertedRows: insertions,
+      });
+    }
+    const sheetIndex = sheets.findIndex(({ id }) => id === binding.range.sheetId);
+    if (sheetIndex < 0) continue;
+    const valueBindings = bindings.filter(
+      (candidate): candidate is Extract<TemplateIRBinding, { readonly type: 'value' }> =>
+        candidate.type === 'value' &&
+        candidate.target.sheetId === binding.range.sheetId &&
+        candidate.target.row >= binding.range.start.row &&
+        candidate.target.row <= binding.range.end.row,
+    );
+    sheets[sheetIndex] = expandRepeat(
+      sheets[sheetIndex]!,
+      binding,
+      items,
+      data,
+      formatters,
+      valueBindings,
+    );
+    const delta = height * (copies - 1);
+    const list = insertions.get(binding.range.sheetId) ?? [];
+    list.push({ afterSourceRow: binding.range.end.row, delta });
+    insertions.set(binding.range.sheetId, list);
+  }
+  for (const binding of bindings) {
+    if (binding.type !== 'conditional-range') continue;
+    if (evaluateTemplateExpression(binding.when, { root: data }, formatters)) continue;
+    const sheetIndex = sheets.findIndex(({ id }) => id === binding.range.sheetId);
+    if (sheetIndex < 0) continue;
+    const sheetInsertions = insertions.get(binding.range.sheetId) ?? [];
+    const mappedRange = {
+      ...binding.range,
+      start: { ...binding.range.start, row: mapRow(binding.range.start.row, sheetInsertions) },
+      end: { ...binding.range.end, row: mapRow(binding.range.end.row, sheetInsertions) },
+    };
+    sheets[sheetIndex] = removeRange(sheets[sheetIndex]!, mappedRange);
+  }
+  for (const binding of bindings) {
+    if (binding.type !== 'value') continue;
+    if (
+      repeats.some(
+        ({ range }) =>
+          range.sheetId === binding.target.sheetId &&
+          binding.target.row >= range.start.row &&
+          binding.target.row <= range.end.row,
+      )
+    ) {
+      continue;
+    }
+    const sheetIndex = sheets.findIndex(({ id }) => id === binding.target.sheetId);
+    if (sheetIndex < 0) continue;
+    const sheet = sheets[sheetIndex]!;
+    const row = mapRow(binding.target.row, insertions.get(binding.target.sheetId) ?? []);
+    let value = evaluateTemplateExpression(binding.expression, { root: data }, formatters);
+    if (value === undefined) {
+      diagnostics.push({
+        code: 'MISSING_DATA',
+        severity: 'error',
+        domain: 'template',
+        stage: 'resolve',
+        message: `Binding ${binding.id} resolved to a missing value`,
+        location: { bindingId: binding.id },
+      });
+      value = null;
+    }
+    const existing = sheet.cells.find(
+      (entry) => entry.row === row && entry.column === binding.target.column,
+    );
+    const replacement = {
+      row,
+      column: binding.target.column,
+      cell: { ...existing?.cell, input: cellInput(value) },
+    };
+    sheets[sheetIndex] = {
+      ...sheet,
+      cells: [
+        ...sheet.cells.filter(
+          (entry) => entry.row !== row || entry.column !== binding.target.column,
+        ),
+        replacement,
+      ].sort((left, right) => left.row - right.row || left.column - right.column),
+    };
+  }
+  const cellCount = sheets.reduce((count, sheet) => count + sheet.cells.length, 0);
+  if (cellCount > limits.maxExpandedCells) {
+    return freeze({
+      diagnostics: [
+        {
+          code: 'EXPANSION_LIMIT_EXCEEDED',
+          severity: 'error',
+          domain: 'template',
+          stage: 'expand',
+          message: `Expanded cells exceed ${limits.maxExpandedCells}`,
+        },
+      ],
+      insertedRows: insertions,
+    });
+  }
+  return freeze({
+    document: {
+      ...source,
+      workbook: { ...source.workbook, sheets },
+      templates: source.templates,
+    },
+    diagnostics,
+    insertedRows: insertions,
+  });
+}

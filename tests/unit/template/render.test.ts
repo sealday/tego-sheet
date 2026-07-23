@@ -1,0 +1,215 @@
+import { describe, expect, it } from 'vitest';
+import type { SpreadsheetDocument } from '../../../src/document';
+import { createFontMetrics } from '../../../src/presentation';
+import { compileSpreadsheetTemplate } from '../../../src/template/compiler';
+import { renderSpreadsheetTemplate } from '../../../src/template/render';
+import type { SpreadsheetTemplate } from '../../../src/template/model';
+
+const source = {
+  schemaVersion: 2,
+  id: 'document-1',
+  workbook: {
+    sheets: [
+      {
+        id: 'sheet-1',
+        name: 'Invoice',
+        cells: [
+          { row: 0, column: 0, cell: { input: { type: 'string', value: 'Name' } } },
+          { row: 1, column: 0, cell: { input: { type: 'string', value: 'item' } } },
+          { row: 1, column: 1, cell: { input: { type: 'formula', source: '=A2' } } },
+          { row: 3, column: 0, cell: { input: { type: 'string', value: 'conditional' } } },
+        ],
+        merges: [],
+        rows: [{ index: 1, height: 20 }],
+        columns: [
+          { index: 0, width: 90 },
+          { index: 1, width: 90 },
+        ],
+      },
+    ],
+    styles: [],
+    validations: [],
+    settings: { dateSystem: 'excel-1900' },
+  },
+  templates: [],
+  resources: { items: [] },
+  extensions: {},
+} as unknown as SpreadsheetDocument;
+
+const template: SpreadsheetTemplate = {
+  id: 'template-1' as never,
+  name: 'Invoice',
+  bindings: [
+    {
+      id: 'name' as never,
+      type: 'value',
+      target: { sheetId: 'sheet-1' as never, row: 0, column: 1 },
+      expression: 'customer.name',
+    },
+    {
+      id: 'lines' as never,
+      type: 'repeat-rows',
+      range: {
+        sheetId: 'sheet-1' as never,
+        start: { row: 1, column: 0 },
+        end: { row: 1, column: 1 },
+      },
+      source: 'items',
+      empty: 'remove',
+      pageBreak: 'auto',
+    },
+    {
+      id: 'show-note' as never,
+      type: 'conditional-range',
+      range: {
+        sheetId: 'sheet-1' as never,
+        start: { row: 3, column: 0 },
+        end: { row: 3, column: 1 },
+      },
+      when: 'showNote',
+    },
+  ],
+  printProfiles: [
+    {
+      id: 'profile-1',
+      name: 'A4',
+      targets: [
+        {
+          type: 'range',
+          range: {
+            sheetId: 'sheet-1' as never,
+            start: { row: 0, column: 0 },
+            end: { row: 5, column: 1 },
+          },
+        },
+      ],
+      page: {
+        paper: { type: 'custom', width: 240, height: 160 },
+        orientation: 'portrait',
+        margins: { top: 10, right: 10, bottom: 10, left: 10 },
+        scale: { type: 'fixed', value: 1 },
+      },
+      manualBreaks: [],
+      showGridlines: true,
+      showHeadings: false,
+    },
+  ],
+};
+
+const environment = {
+  locale: 'en-US',
+  timeZone: 'UTC',
+  dateSystem: 'excel-1900' as const,
+  clock: new Date('2026-01-01T00:00:00.000Z'),
+  fontMetrics: createFontMetrics({
+    fonts: { Arial: { averageAdvance: 6, lineHeight: 12 } },
+    fallbackFont: 'Arial',
+    fallback: { averageAdvance: 6, lineHeight: 12 },
+  }),
+};
+
+describe('template render pipeline', () => {
+  it('rejects stale compiled sources without partial output', async () => {
+    const compiled = compileSpreadsheetTemplate(source, template).template!;
+    const result = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: 'changed',
+        data: {},
+        profileId: 'profile-1',
+        missingValue: 'error',
+      },
+      environment,
+    );
+    expect(result.document).toBeUndefined();
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ code: 'TEMPLATE_SOURCE_STALE' }),
+    ]);
+  });
+
+  it('expands rows, translates relative formulas, removes false conditions, and paginates', async () => {
+    const compiled = compileSpreadsheetTemplate(source, template).template!;
+    const result = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: {
+          customer: { name: 'Ada' },
+          items: [{ name: 'A' }, { name: 'B' }, { name: 'C' }],
+          showNote: false,
+        },
+        profileId: 'profile-1',
+        missingValue: 'error',
+      },
+      environment,
+    );
+    expect(result.diagnostics.filter(({ severity }) => severity === 'error')).toEqual([]);
+    expect(result.document?.workbook.sheets[0]?.cells).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          row: 0,
+          column: 1,
+          cell: { input: { type: 'string', value: 'Ada' } },
+        }),
+        expect.objectContaining({
+          row: 2,
+          column: 1,
+          cell: { input: { type: 'formula', source: '=A3' } },
+        }),
+        expect.objectContaining({
+          row: 3,
+          column: 1,
+          cell: { input: { type: 'formula', source: '=A4' } },
+        }),
+      ]),
+    );
+    expect(
+      result.document?.workbook.sheets[0]?.cells.some(
+        ({ cell }) => cell.input.type === 'string' && cell.input.value === 'conditional',
+      ),
+    ).toBe(false);
+    expect(result.document?.print.pages.length).toBeGreaterThan(0);
+    expect(result.document?.print.displayList.pages).toHaveLength(
+      result.document?.print.pages.length ?? 0,
+    );
+  });
+
+  it('supports abort and expansion limits atomically', async () => {
+    const compiled = compileSpreadsheetTemplate(source, template).template!;
+    const controller = new AbortController();
+    controller.abort();
+    const aborted = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: { items: [] },
+        profileId: 'profile-1',
+        missingValue: 'error',
+        signal: controller.signal,
+      },
+      environment,
+    );
+    expect(aborted.document).toBeUndefined();
+    expect(aborted.diagnostics[0]).toMatchObject({ code: 'RENDER_ABORTED' });
+
+    const limited = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: {
+          customer: { name: 'A' },
+          items: Array.from({ length: 10 }, () => ({})),
+          showNote: true,
+        },
+        profileId: 'profile-1',
+        missingValue: 'error',
+        limits: { maxExpandedRows: 2 },
+      },
+      environment,
+    );
+    expect(limited.document).toBeUndefined();
+    expect(limited.diagnostics).toEqual([
+      expect.objectContaining({ code: 'EXPANSION_LIMIT_EXCEEDED' }),
+    ]);
+  });
+});
