@@ -608,18 +608,41 @@ function styleXml(
         details: { styleId: entry.id, fields: unsupported },
       });
     }
+    for (const key of ['bold', 'italic', 'underline', 'strike', 'wrap'] as const) {
+      if (style[key] !== undefined && typeof style[key] !== 'boolean') {
+        throw outputError(
+          'XLSX_UNSUPPORTED_FEATURE',
+          `Style ${entry.id} has an invalid ${key} value`,
+        );
+      }
+    }
+    if (
+      style.fontFamily !== undefined &&
+      (typeof style.fontFamily !== 'string' ||
+        style.fontFamily.length === 0 ||
+        style.fontFamily.length > 255)
+    ) {
+      throw outputError('XLSX_UNSUPPORTED_FEATURE', `Style ${entry.id} has an invalid font family`);
+    }
+    if (
+      style.fontSize !== undefined &&
+      (typeof style.fontSize !== 'number' ||
+        !Number.isFinite(style.fontSize) ||
+        style.fontSize <= 0 ||
+        style.fontSize > 409)
+    ) {
+      throw outputError('XLSX_UNSUPPORTED_FEATURE', `Style ${entry.id} has an invalid font size`);
+    }
     const name = typeof style.fontFamily === 'string' ? style.fontFamily : 'Arial';
     const size = typeof style.fontSize === 'number' ? style.fontSize : 10;
-    const color = typeof style.color === 'string' ? style.color.replace('#', '') : 'FF000000';
+    const color = style.color === undefined ? 'FF000000' : xlsxColor(String(style.color));
     return `<font>${style.bold === true ? '<b/>' : ''}${style.italic === true ? '<i/>' : ''}${style.underline === true ? '<u/>' : ''}${style.strike === true ? '<strike/>' : ''}<sz val="${size}"/><color rgb="${color.length === 6 ? `FF${color}` : color}"/><name val="${xml(name)}"/></font>`;
   });
   const fills = workbook.styles.map((entry) => {
     const style = asRecord(entry.value)!;
     const color =
-      typeof style.backgroundColor === 'string'
-        ? style.backgroundColor.replace('#', '')
-        : 'FFFFFFFF';
-    return `<fill><patternFill patternType="solid"><fgColor rgb="${color.length === 6 ? `FF${color}` : color}"/><bgColor indexed="64"/></patternFill></fill>`;
+      style.backgroundColor === undefined ? 'FFFFFFFF' : xlsxColor(String(style.backgroundColor));
+    return `<fill><patternFill patternType="solid"><fgColor rgb="${color}"/><bgColor indexed="64"/></patternFill></fill>`;
   });
   const borders = workbook.styles.map((entry) => {
     const style = asRecord(entry.value)!;
@@ -648,8 +671,8 @@ function styleXml(
           details: { styleId: entry.id, side: name, lineStyle },
         });
       }
-      const color = typeof value[1] === 'string' ? value[1].replace('#', '') : 'FF000000';
-      return `<${name} style="${xml(lineStyle)}"><color rgb="${color.length === 6 ? `FF${color}` : color}"/></${name}>`;
+      const color = value[1] === undefined ? 'FF000000' : xlsxColor(String(value[1]));
+      return `<${name} style="${xml(lineStyle)}"><color rgb="${color}"/></${name}>`;
     };
     return `<border>${side('left')}${side('right')}${side('top')}${side('bottom')}<diagonal/></border>`;
   });
@@ -739,14 +762,21 @@ function validationXml(sheet: Sheet, workbook: Workbook): string {
       );
     }
     const allowBlank = rule.allowBlank === true ? ' allowBlank="1"' : '';
+    const validationFormula = (value: JsonValue | undefined): string => {
+      if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+      if (typeof value === 'string') return safeFormula(value, workbook, sheet.id, 'forbidden');
+      throw outputError('XLSX_UNSUPPORTED_FEATURE', 'Validation formula is unsupported', {
+        location: { sheetId: sheet.id, cell: { sheetId: sheet.id, row, column } },
+      });
+    };
     const formula1 =
-      typeof rule.formula1 === 'string' || typeof rule.formula1 === 'number'
-        ? `<formula1>${xml(String(rule.formula1))}</formula1>`
-        : '';
+      rule.formula1 === undefined
+        ? ''
+        : `<formula1>${xml(validationFormula(rule.formula1))}</formula1>`;
     const formula2 =
-      typeof rule.formula2 === 'string' || typeof rule.formula2 === 'number'
-        ? `<formula2>${xml(String(rule.formula2))}</formula2>`
-        : '';
+      rule.formula2 === undefined
+        ? ''
+        : `<formula2>${xml(validationFormula(rule.formula2))}</formula2>`;
     return [
       `<dataValidation type="${xml(rule.type)}"${operator}${allowBlank} sqref="${cellReference(row, column)}">${formula1}${formula2}</dataValidation>`,
     ];

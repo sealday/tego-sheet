@@ -548,6 +548,50 @@ describe('XlsxAdapter', () => {
     ).rejects.toMatchObject({ code: 'XLSX_UNSUPPORTED_FEATURE' });
   });
 
+  it('rejects unsafe validation formulas and malformed style values', async () => {
+    const fixture = outputGeneratedDocument();
+    const options = {
+      formulaMode: 'values-only' as const,
+      compatibility: 'excel' as const,
+    };
+    const validation = (formula1: string) => ({
+      ...fixture,
+      workbook: {
+        ...fixture.workbook,
+        validations: [
+          {
+            id: 'positive',
+            value: { type: 'custom', formula1 },
+          },
+        ],
+      },
+    });
+    await expect(
+      new XlsxAdapter().render(validation('HYPERLINK("https://example.com")') as never, options),
+    ).rejects.toMatchObject({ code: 'XLSX_UNSUPPORTED_FEATURE' });
+    await expect(
+      new XlsxAdapter().render(validation('[external.xlsx]Sheet1!A1') as never, options),
+    ).rejects.toMatchObject({ code: 'XLSX_UNSUPPORTED_FEATURE' });
+
+    for (const value of [
+      { color: '#not-a-color' },
+      { backgroundColor: '#12345' },
+      { fontSize: Number.NaN },
+      { fontSize: 0 },
+      { border: { left: ['thin', '#invalid'] } },
+    ]) {
+      await expect(
+        new XlsxAdapter().render(
+          {
+            ...fixture,
+            workbook: { ...fixture.workbook, styles: [{ id: 'bad', value }] },
+          } as never,
+          options,
+        ),
+      ).rejects.toMatchObject({ code: 'XLSX_UNSUPPORTED_FEATURE' });
+    }
+  });
+
   it('preflights source strings, resources, and uncompressed parts before publishing', async () => {
     const fixture = outputGeneratedDocument();
     const options = {

@@ -156,6 +156,53 @@ describe('PdfAdapter', () => {
     ).rejects.toMatchObject({ code: 'PDF_FONT_EMBEDDING_FORBIDDEN' });
   });
 
+  it('does not inspect or register fonts unused by the selected pages', async () => {
+    const fixture = outputGeneratedDocument();
+    const encoded = readFileSync(
+      new URL('../../fixtures/output/NotoSansSC-CJK.subset.ttf.base64', import.meta.url),
+      'utf8',
+    ).trim();
+    const resource = {
+      contentHash: 'sha256:unused-restricted-font',
+      type: 'font' as const,
+      mimeType: 'font/ttf',
+      bytes: withFontFsType(Buffer.from(encoded, 'base64'), 0x0002),
+      fontFamily: 'Unused Restricted Font',
+    };
+    const page = fixture.print.displayList.pages[0]!;
+    const blob = await new PdfAdapter().render(
+      {
+        ...fixture,
+        resources: {
+          ...fixture.resources,
+          byHash: { [resource.contentHash]: resource },
+          byReference: { unused: resource },
+          totalBytes: resource.bytes.length,
+        },
+        print: {
+          ...fixture.print,
+          displayList: {
+            ...fixture.print.displayList,
+            pages: [
+              {
+                ...page,
+                commands: page.commands.map((command) =>
+                  command.kind === 'text'
+                    ? { ...command, text: 'Invoice', fontFamily: 'Helvetica' }
+                    : command,
+                ),
+              },
+              fixture.print.displayList.pages[1]!,
+            ],
+          },
+        },
+      },
+      { pages: [0], tagged: false },
+    );
+
+    expect(blob.type).toBe('application/pdf');
+  });
+
   it('produces byte-identical output for equal inputs and metadata', async () => {
     const fixture = outputGeneratedDocument();
     const source = {

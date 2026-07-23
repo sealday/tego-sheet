@@ -115,11 +115,28 @@ function requiresEmbeddedFont(text: string): boolean {
   return [...text].some((character) => character.codePointAt(0)! > 0xff);
 }
 
-function fontResources(document: GeneratedDocument): ReadonlyMap<string, ResolvedResource> {
+function usedFontFamilies(commands: readonly PrintDisplayCommand[], families: Set<string>): void {
+  for (const command of commands) {
+    if (command.kind === 'text') families.add(command.fontFamily);
+    else if (command.kind === 'clip') usedFontFamilies(command.commands, families);
+  }
+}
+
+function fontResources(
+  document: GeneratedDocument,
+  pageIndices: readonly number[],
+): ReadonlyMap<string, ResolvedResource> {
+  const families = new Set<string>();
+  for (const pageIndex of pageIndices) {
+    const page = document.print.displayList.pages[pageIndex];
+    if (page !== undefined) usedFontFamilies(page.commands, families);
+  }
   const entries = Object.values(document.resources.byHash)
     .filter(
       (resource): resource is ResolvedResource & { readonly fontFamily: string } =>
-        resource.type === 'font' && resource.fontFamily !== undefined,
+        resource.type === 'font' &&
+        resource.fontFamily !== undefined &&
+        families.has(resource.fontFamily),
     )
     .sort((left, right) => left.contentHash.localeCompare(right.contentHash));
   const resources = new Map<string, ResolvedResource>();
@@ -491,7 +508,7 @@ export class PdfAdapter {
       fontLayoutCache: false,
     }) as DestroyablePdfDocument;
     const output = collectPdf(pdf, options.signal, this.#limits.maxOutputBytes, deadline);
-    const fonts = fontResources(document);
+    const fonts = fontResources(document, pageIndices);
     try {
       for (const resource of fonts.values()) {
         checkFontPermission(resource);
