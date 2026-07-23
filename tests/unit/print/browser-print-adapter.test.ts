@@ -10,9 +10,8 @@ import {
 } from '../../../src/output/browser-print-adapter';
 
 function generatedDocument(): GeneratedDocumentForBrowserPrint {
-  const pages: readonly (PrintDisplayList['pages'][number] & { readonly id: string })[] = [
+  const pages: PrintDisplayList['pages'] = [
     {
-      id: 'invoice-cover',
       index: 0,
       width: 210,
       height: 297,
@@ -36,7 +35,6 @@ function generatedDocument(): GeneratedDocumentForBrowserPrint {
       ],
     },
     {
-      id: 'invoice-lines',
       index: 1,
       width: 210,
       height: 297,
@@ -53,7 +51,13 @@ function generatedDocument(): GeneratedDocumentForBrowserPrint {
       ],
     },
   ];
-  const print: GeneratedDocumentForBrowserPrint['print'] = { diagnostics: [], pages };
+  const print: GeneratedDocumentForBrowserPrint['print'] = {
+    pages: [
+      { id: 'invoice-cover', index: 0, width: 210, height: 297 },
+      { id: 'invoice-lines', index: 1, width: 210, height: 297 },
+    ],
+    displayList: { diagnostics: [], pages },
+  };
   return { print };
 }
 

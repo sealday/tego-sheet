@@ -1,16 +1,18 @@
-import type {
-  DisplayRect,
-  PrintDisplayCommand,
-  PrintDisplayList,
-  PrintDisplayPage,
-} from '../print';
+import type { DisplayRect, PrintDisplayCommand, PrintDisplayList } from '../print';
 
 /** The immutable GeneratedDocument surface required by browser printing. */
 export interface GeneratedDocumentForBrowserPrint {
   /** Pre-paginated output shared with preview adapters. */
-  readonly print: PrintDisplayList & {
-    /** Pages may carry a compiler-issued identity in addition to their stable index. */
-    readonly pages: readonly (PrintDisplayPage & { readonly id?: string })[];
+  readonly print: {
+    /** Compiler-issued semantic page identities. */
+    readonly pages: readonly {
+      readonly id: string;
+      readonly index: number;
+      readonly width: number;
+      readonly height: number;
+    }[];
+    /** Exact display list shared with SVG preview and browser output. */
+    readonly displayList: PrintDisplayList;
   };
 }
 
@@ -145,17 +147,21 @@ function serializeCommands(commands: readonly PrintDisplayCommand[], path: strin
     .join('');
 }
 
-function pageId(page: PrintDisplayPage & { readonly id?: string }): string {
-  return page.id ?? `page-${page.index + 1}`;
-}
-
 /** Serializes the exact immutable pages consumed by preview and browser print. */
 export function serializeGeneratedDocumentSvgPages(
   document: GeneratedDocumentForBrowserPrint,
 ): readonly BrowserPrintSvgPage[] {
   return Object.freeze(
-    document.print.pages.map((page) => {
-      const id = pageId(page);
+    document.print.displayList.pages.map((page) => {
+      const semantic = document.print.pages[page.index];
+      if (
+        semantic === undefined ||
+        semantic.width !== page.width ||
+        semantic.height !== page.height
+      ) {
+        throw new TypeError('Generated print pages and display list are inconsistent');
+      }
+      const id = semantic.id;
       return Object.freeze({
         id,
         width: page.width,
