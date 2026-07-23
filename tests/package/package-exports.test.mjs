@@ -82,6 +82,7 @@ test('the built root has only the approved runtime exports and internal subpaths
         'createValidationResolverRegistry',
         'createXlsxReader',
         'evaluateTemplateExpression',
+        'executeValidatedCellEdit',
         'expandAdvancedTemplate',
         'hashSpreadsheetDocument',
         'migrateLegacyWorkbook',

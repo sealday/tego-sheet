@@ -49,6 +49,12 @@ export interface ValidationEngineOptions {
   };
 }
 
+/** Side-effect-free validation service used before document mutation. */
+export interface ValidationEngine {
+  /** Validates one immutable edit candidate. */
+  validate(request: ValidationRequest): Promise<ValidationResult>;
+}
+
 function failure(request: ValidationRequest, status: 'rejected' | 'warning'): ValidationResult {
   return {
     status,
@@ -58,9 +64,7 @@ function failure(request: ValidationRequest, status: 'rejected' | 'warning'): Va
 }
 
 /** Creates a side-effect-free validation engine. */
-export function createValidationEngine(options: ValidationEngineOptions = {}): {
-  validate(request: ValidationRequest): Promise<ValidationResult>;
-} {
+export function createValidationEngine(options: ValidationEngineOptions = {}): ValidationEngine {
   const maxListItems = options.limits?.maxListItems ?? 10_000;
   const timeoutMs = options.limits?.resolverTimeoutMs ?? 5_000;
   return {

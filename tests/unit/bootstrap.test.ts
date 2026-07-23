@@ -30,6 +30,7 @@ it('imports the library entry without browser globals', async () => {
     'renderNumberFormatToken',
     'createValidationEngine',
     'createValidationResolverRegistry',
+    'executeValidatedCellEdit',
     'applyFilterView',
     'createFilterViewSession',
     'createDataTransformPlanner',

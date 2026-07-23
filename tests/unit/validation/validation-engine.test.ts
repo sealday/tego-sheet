@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { DocumentSheetId } from '../../../src/document';
-import { createValidationEngine, createValidationResolverRegistry } from '../../../src/validation';
+import { createSpreadsheetDocument } from '../../../src/document';
+import { createDocumentController } from '../../../src/document-controller';
+import {
+  createValidationEngine,
+  createValidationResolverRegistry,
+  executeValidatedCellEdit,
+} from '../../../src/validation';
 
 describe('VAL-01 validation foundation', () => {
   const sheetId = 'sheet-1' as DocumentSheetId;
@@ -74,5 +80,40 @@ describe('VAL-01 validation foundation', () => {
         },
       }),
     ).resolves.toMatchObject({ status: 'error', code: 'VALIDATION_SOURCE_TOO_LARGE' });
+  });
+
+  it('commits accepted and confirmed warning edits through one document transaction', async () => {
+    const controller = createDocumentController(
+      createSpreadsheetDocument({ id: 'document-1', sheetId: 'sheet-1' }),
+    );
+    const engine = createValidationEngine();
+    const request = {
+      address: { sheetId, row: 0, column: 0 },
+      value: { type: 'number' as const, value: 12 },
+      rule: {
+        id: 'amount',
+        type: 'number' as const,
+        predicate: { operator: 'between' as const, minimum: 0, maximum: 10 },
+        behavior: 'reject' as const,
+        allowBlank: false,
+      },
+    };
+
+    await expect(
+      executeValidatedCellEdit({ controller, engine, request, text: '12' }),
+    ).resolves.toMatchObject({ status: 'rejected', code: 'VALIDATION_REJECTED' });
+    expect(controller.getSnapshot().revision).toBe(0);
+
+    await expect(
+      executeValidatedCellEdit({
+        controller,
+        engine,
+        request: { ...request, rule: { ...request.rule, behavior: 'warn' } },
+        text: '12',
+        confirmWarning: () => true,
+      }),
+    ).resolves.toMatchObject({ status: 'committed' });
+    expect(controller.getSnapshot().revision).toBe(1);
+    expect(controller.undo()).toMatchObject({ status: 'committed' });
   });
 });

@@ -239,8 +239,15 @@ export type {
   NumberFormatSection,
   NumberFormatToken,
 } from './format';
-export { createValidationEngine, createValidationResolverRegistry } from './validation';
+export {
+  createValidationEngine,
+  createValidationResolverRegistry,
+  executeValidatedCellEdit,
+} from './validation';
 export type {
+  ValidatedCellEditRequest,
+  ValidatedCellEditResult,
+  ValidationEngine,
   ValidationEngineOptions,
   ValidationListSource,
   ValidationRequest as AdvancedValidationRequest,
