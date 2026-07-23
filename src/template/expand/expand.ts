@@ -17,6 +17,7 @@ export interface ExpansionResult {
   readonly document?: SpreadsheetDocument;
   readonly diagnostics: readonly Diagnostic[];
   readonly insertedRows: ReadonlyMap<string, readonly RowInsertion[]>;
+  readonly repeatPageBreaks: ReadonlyMap<string, readonly number[]>;
 }
 
 export interface RowInsertion {
@@ -232,6 +233,7 @@ export function expandTemplate(
 ): ExpansionResult {
   const diagnostics: Diagnostic[] = [];
   const insertions = new Map<string, RowInsertion[]>();
+  const repeatPageBreaks = new Map<string, number[]>();
   let expandedRows = 0;
   const sheets = source.workbook.sheets.map((sheet) => ({ ...sheet }));
   const repeats = bindings
@@ -253,6 +255,7 @@ export function expandTemplate(
           },
         ],
         insertedRows: insertions,
+        repeatPageBreaks,
       });
     }
     const value = evaluateTemplateExpression(binding.source, { root: data }, formatters);
@@ -273,6 +276,7 @@ export function expandTemplate(
           },
         ],
         insertedRows: insertions,
+        repeatPageBreaks,
       });
     }
     const sheetIndex = sheets.findIndex(({ id }) => id === binding.range.sheetId);
@@ -315,6 +319,7 @@ export function expandTemplate(
           },
         ],
         insertedRows: insertions,
+        repeatPageBreaks,
       });
     }
     sheets[sheetIndex] = expandRepeat(
@@ -328,6 +333,16 @@ export function expandTemplate(
       signal,
     );
     const delta = height * (copies - 1);
+    const existingBreaks = repeatPageBreaks.get(binding.range.sheetId) ?? [];
+    const shiftedBreaks = existingBreaks.map((row) =>
+      row > binding.range.end.row ? row + delta : row,
+    );
+    if (binding.pageBreak === 'before-each-item') {
+      for (let itemIndex = 1; itemIndex < copies; itemIndex += 1) {
+        shiftedBreaks.push(binding.range.start.row + itemIndex * height);
+      }
+    }
+    repeatPageBreaks.set(binding.range.sheetId, shiftedBreaks);
     const list = insertions.get(binding.range.sheetId) ?? [];
     list.push({ afterSourceRow: binding.range.end.row, delta });
     insertions.set(binding.range.sheetId, list);
@@ -345,6 +360,7 @@ export function expandTemplate(
           },
         ],
         insertedRows: insertions,
+        repeatPageBreaks,
       });
     }
     if (binding.type !== 'conditional-range') continue;
@@ -413,6 +429,7 @@ export function expandTemplate(
           },
         ],
         insertedRows: insertions,
+        repeatPageBreaks,
       });
     }
     sheets[sheetIndex] = {
@@ -438,6 +455,7 @@ export function expandTemplate(
         },
       ],
       insertedRows: insertions,
+      repeatPageBreaks,
     });
   }
   return freeze({
@@ -448,5 +466,6 @@ export function expandTemplate(
     },
     diagnostics,
     insertedRows: insertions,
+    repeatPageBreaks,
   });
 }

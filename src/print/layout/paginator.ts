@@ -4,7 +4,9 @@ import type { PrintScale } from '../../template/model';
 export interface PaginationTarget {
   readonly id: string;
   readonly rows: readonly number[];
-  readonly width: number;
+  readonly columns: readonly number[];
+  readonly repeatRows?: readonly number[];
+  readonly repeatColumns?: readonly number[];
 }
 
 export interface PaginationBreak {
@@ -36,6 +38,8 @@ export interface PaginationPage {
   readonly height: number;
   readonly rowStart: number;
   readonly rowEnd: number;
+  readonly columnStart: number;
+  readonly columnEnd: number;
   readonly scale: number;
 }
 
@@ -62,10 +66,11 @@ function scaleFor(input: PaginationInput, target: PaginationTarget): number {
   const availableWidth = input.paper.width - input.margins.left - input.margins.right;
   const availableHeight = input.paper.height - input.margins.top - input.margins.bottom;
   if (input.scale.type === 'fixed') return input.scale.value;
+  const targetWidth = target.columns.reduce((sum, width) => sum + width, 0);
   const widthScale =
-    target.width <= 0
+    targetWidth <= 0
       ? 1
-      : (availableWidth * ('pages' in input.scale ? input.scale.pages : 1)) / target.width;
+      : (availableWidth * ('pages' in input.scale ? input.scale.pages : 1)) / targetWidth;
   if (input.scale.type === 'fit-width') return Math.min(1, widthScale);
   const totalHeight = target.rows.reduce((sum, height) => sum + height, 0);
   const heightScale = totalHeight <= 0 ? 1 : availableHeight / totalHeight;
@@ -94,6 +99,44 @@ export function paginateTemplateTargets(input: PaginationInput): PaginationResul
       break;
     }
     const scale = scaleFor(input, target);
+    const availableTargetHeight =
+      availableHeight - (target.repeatRows ?? []).reduce((sum, height) => sum + height * scale, 0);
+    const availableTargetWidth =
+      input.paper.width -
+      input.margins.left -
+      input.margins.right -
+      (target.repeatColumns ?? []).reduce((sum, width) => sum + width * scale, 0);
+    if (availableTargetHeight <= 0 || availableTargetWidth <= 0) {
+      terminalDiagnostic = diagnostic(
+        'INVALID_PRINT_TARGET',
+        `Repeated titles consume the page for ${target.id}`,
+      );
+      break;
+    }
+    const columnSegments: { readonly start: number; readonly end: number }[] = [];
+    let columnStart = 0;
+    let columnWidth = 0;
+    for (let column = 0; column < target.columns.length; column += 1) {
+      const width = target.columns[column]! * scale;
+      if (width > availableTargetWidth) {
+        diagnostics.push(
+          diagnostic(
+            'COLUMN_EXCEEDS_PAGE',
+            `Column ${column} in ${target.id} exceeds the printable page`,
+          ),
+        );
+        continue;
+      }
+      if (columnWidth + width > availableTargetWidth && column > columnStart) {
+        columnSegments.push({ start: columnStart, end: column - 1 });
+        columnStart = column;
+        columnWidth = 0;
+      }
+      columnWidth += width;
+    }
+    if (target.columns.length > 0 && columnStart < target.columns.length) {
+      columnSegments.push({ start: columnStart, end: target.columns.length - 1 });
+    }
     const breaks = new Set(
       input.manualBreaks
         .filter(({ targetId }) => targetId === target.id)
@@ -104,25 +147,29 @@ export function paginateTemplateTargets(input: PaginationInput): PaginationResul
     let pageWithinTarget = 0;
     const emit = (end: number): void => {
       if (end < start || terminalDiagnostic !== undefined) return;
-      if (pages.length >= input.maxPages) {
-        terminalDiagnostic = diagnostic(
-          'PAGE_LIMIT_EXCEEDED',
-          `Pagination exceeds ${input.maxPages} pages`,
+      for (const columns of columnSegments) {
+        if (pages.length >= input.maxPages) {
+          terminalDiagnostic = diagnostic(
+            'PAGE_LIMIT_EXCEEDED',
+            `Pagination exceeds ${input.maxPages} pages`,
+          );
+          return;
+        }
+        pages.push(
+          Object.freeze({
+            id: `${target.id}:${pageWithinTarget++}`,
+            index: pages.length,
+            targetId: target.id,
+            width: input.paper.width,
+            height: input.paper.height,
+            rowStart: start,
+            rowEnd: end,
+            columnStart: columns.start,
+            columnEnd: columns.end,
+            scale,
+          }),
         );
-        return;
       }
-      pages.push(
-        Object.freeze({
-          id: `${target.id}:${pageWithinTarget++}`,
-          index: pages.length,
-          targetId: target.id,
-          width: input.paper.width,
-          height: input.paper.height,
-          rowStart: start,
-          rowEnd: end,
-          scale,
-        }),
-      );
     };
     for (let row = 0; row < target.rows.length; row += 1) {
       if (aborted(input)) {
@@ -137,7 +184,7 @@ export function paginateTemplateTargets(input: PaginationInput): PaginationResul
         break;
       }
       const rowHeight = target.rows[row]! * scale;
-      if (rowHeight > availableHeight) {
+      if (rowHeight > availableTargetHeight) {
         emit(row - 1);
         diagnostics.push(
           diagnostic('ROW_EXCEEDS_PAGE', `Row ${row} in ${target.id} exceeds the printable page`),
@@ -146,7 +193,7 @@ export function paginateTemplateTargets(input: PaginationInput): PaginationResul
         height = 0;
         continue;
       }
-      if ((breaks.has(row) && row > start) || height + rowHeight > availableHeight) {
+      if ((breaks.has(row) && row > start) || height + rowHeight > availableTargetHeight) {
         emit(row - 1);
         start = row;
         height = 0;

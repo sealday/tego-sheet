@@ -326,6 +326,121 @@ describe('template render pipeline', () => {
     ]);
   });
 
+  it('starts every repeated item on a new page when requested', async () => {
+    const repeat = template.bindings.find(
+      (
+        binding,
+      ): binding is Extract<SpreadsheetTemplate['bindings'][number], { type: 'repeat-rows' }> =>
+        binding.type === 'repeat-rows',
+    )!;
+    const pageBreakTemplate: SpreadsheetTemplate = {
+      ...template,
+      bindings: [
+        {
+          ...repeat,
+          pageBreak: 'before-each-item',
+        },
+      ],
+      printProfiles: [
+        {
+          ...template.printProfiles[0]!,
+          page: {
+            ...template.printProfiles[0]!.page,
+            paper: { type: 'custom', width: 400, height: 400 },
+          },
+        },
+      ],
+    };
+    const compiled = compileSpreadsheetTemplate(source, pageBreakTemplate).template!;
+    const result = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: { items: [{}, {}, {}] },
+        profileId: 'profile-1',
+        missingValue: 'error',
+      },
+      environment,
+    );
+    expect(result.diagnostics.filter(({ severity }) => severity === 'error')).toEqual([]);
+    expect(result.document?.print.pages).toHaveLength(3);
+  });
+
+  it('renders merged geometry, titles, headings, bands, and gridline policy into the display list', async () => {
+    const displaySource = {
+      ...source,
+      workbook: {
+        ...source.workbook,
+        sheets: [
+          {
+            ...source.workbook.sheets[0]!,
+            merges: [{ start: { row: 0, column: 0 }, end: { row: 0, column: 1 } }],
+          },
+        ],
+      },
+    } as SpreadsheetDocument;
+    const displayTemplate: SpreadsheetTemplate = {
+      ...template,
+      bindings: [],
+      printProfiles: [
+        {
+          ...template.printProfiles[0]!,
+          targets: [
+            {
+              type: 'range',
+              range: {
+                sheetId: 'sheet-1' as never,
+                start: { row: 0, column: 0 },
+                end: { row: 3, column: 1 },
+              },
+            },
+          ],
+          page: {
+            ...template.printProfiles[0]!.page,
+            paper: { type: 'custom', width: 260, height: 100 },
+          },
+          repeatRows: {
+            sheetId: 'sheet-1' as never,
+            start: { row: 0, column: 0 },
+            end: { row: 0, column: 1 },
+          },
+          header: { left: 'Invoice {{customer.name}}' },
+          footer: { center: 'Page {{page}}/{{pages}} {{date}}' },
+          showGridlines: false,
+          showHeadings: true,
+        },
+      ],
+    };
+    const compiled = compileSpreadsheetTemplate(displaySource, displayTemplate).template!;
+    const result = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: { customer: { name: 'Ada' } },
+        profileId: 'profile-1',
+        missingValue: 'error',
+      },
+      environment,
+    );
+    expect(result.diagnostics.filter(({ severity }) => severity === 'error')).toEqual([]);
+    expect(result.document?.print.pages.length).toBeGreaterThan(1);
+    const pageCommands =
+      result.document?.print.displayList.pages.map(({ commands }) => commands) ?? [];
+    const texts = pageCommands.map((commands) =>
+      commands.filter((command) => command.kind === 'text').map((command) => command.text),
+    );
+    expect(texts[0]).toEqual(
+      expect.arrayContaining(['Invoice Ada', 'Page 1/2 2026-01-01', 'A', 'B', '1', 'Name']),
+    );
+    expect(texts[1]).toContain('Name');
+    expect(pageCommands.flat().some((command) => command.kind === 'stroke-rect')).toBe(false);
+    expect(
+      pageCommands[0]?.some(
+        (command) => command.kind === 'fill-rect' && command.rect.width === 178,
+      ),
+    ).toBe(true);
+  });
+
   it('returns an atomic diagnostic when a formatter is not registered', async () => {
     const formatterTemplate: SpreadsheetTemplate = {
       ...template,

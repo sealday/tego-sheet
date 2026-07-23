@@ -171,6 +171,10 @@ export interface PrintDisplayPageInput {
   readonly height: number;
   /** Positioned shared cell presentations. */
   readonly cells: readonly PrintDisplayCell[];
+  /** Page decorations such as headings, headers, and footers. */
+  readonly decorations?: readonly PrintDisplayCommand[];
+  /** Whether default cell gridlines are emitted. */
+  readonly showGridlines?: boolean;
 }
 
 /** Explicit inputs for deterministic display-list generation. */
@@ -179,6 +183,10 @@ export interface PrintDisplayListInput {
   readonly pages: readonly PrintDisplayPageInput[];
   /** Explicit deterministic font measurements. */
   readonly fontMetrics: FontMetrics;
+  /** Optional cancellation shared with the render session. */
+  readonly signal?: AbortSignal;
+  /** Optional wall-clock deadline for display-list construction. */
+  readonly deadline?: number;
 }
 
 function finiteNonNegative(value: number, name: string): void {
@@ -274,9 +282,30 @@ export function createPrintDisplayList(input: PrintDisplayListInput): PrintDispl
   const diagnostics: Diagnostic[] = [];
   const missingFonts = new Set<string>();
   const pages = input.pages.map((page, index): PrintDisplayPage => {
+    if (
+      input.signal?.aborted === true ||
+      (input.deadline !== undefined && Date.now() > input.deadline)
+    ) {
+      diagnostics.push({
+        code: input.signal?.aborted === true ? 'RENDER_ABORTED' : 'LAYOUT_TIME_EXCEEDED',
+        severity: 'error',
+        domain: 'layout',
+        stage: 'render',
+        message:
+          input.signal?.aborted === true
+            ? 'Template rendering was aborted'
+            : 'Template layout exceeded its limit',
+      });
+      return Object.freeze({
+        index,
+        width: page.width,
+        height: page.height,
+        commands: Object.freeze([]),
+      });
+    }
     finiteNonNegative(page.width, 'page width');
     finiteNonNegative(page.height, 'page height');
-    const commands: PrintDisplayCommand[] = [];
+    const commands: PrintDisplayCommand[] = [...(page.decorations ?? [])];
     for (const { rect, presentation } of page.cells) {
       finiteNonNegative(rect.width, 'cell width');
       finiteNonNegative(rect.height, 'cell height');
@@ -291,7 +320,9 @@ export function createPrintDisplayList(input: PrintDisplayListInput): PrintDispl
         },
         color: presentation.style.backgroundColor,
       });
-      commands.push({ kind: 'stroke-rect', rect, color: '#d0d0d0', width: 1 });
+      if (page.showGridlines !== false) {
+        commands.push({ kind: 'stroke-rect', rect, color: '#d0d0d0', width: 1 });
+      }
       if (!presentation.visibility.printable) continue;
       if (presentation.accessibility.invalid) {
         diagnostics.push({

@@ -11,7 +11,11 @@ import {
   createPresentationResolver,
   type CellPresentation,
 } from '../presentation';
-import { createPrintDisplayList, type PrintDisplayPageInput } from '../print';
+import {
+  createPrintDisplayList,
+  type PrintDisplayCommand,
+  type PrintDisplayPageInput,
+} from '../print';
 import {
   paginateTemplateTargets,
   type PaginationPage,
@@ -164,47 +168,105 @@ function paper(profile: TemplatePrintProfile): { readonly width: number; readonl
     : { width: definition.height, height: definition.width };
 }
 
-function paginationTargets(resolved: readonly ResolvedTarget[]): readonly PaginationTarget[] {
+function paginationTargets(
+  resolved: readonly ResolvedTarget[],
+  profile: TemplatePrintProfile,
+  insertions: ReadonlyMap<string, readonly RowInsertion[]>,
+): readonly PaginationTarget[] {
   return resolved.map(({ id, sheet, range }) => ({
     id,
     rows: Array.from({ length: range.end.row - range.start.row + 1 }, (_, index) =>
       rowHeight(sheet, range.start.row + index),
     ),
-    width: Array.from({ length: range.end.column - range.start.column + 1 }, (_, index) =>
+    columns: Array.from({ length: range.end.column - range.start.column + 1 }, (_, index) =>
       columnWidth(sheet, range.start.column + index),
-    ).reduce((sum, width) => sum + width, 0),
+    ),
+    ...(profile.repeatRows?.sheetId === sheet.id
+      ? {
+          repeatRows: (() => {
+            const repeated = transformRange(profile.repeatRows, insertions);
+            return Array.from({ length: repeated.end.row - repeated.start.row + 1 }, (_, index) =>
+              rowHeight(sheet, repeated.start.row + index),
+            );
+          })(),
+        }
+      : {}),
+    ...(profile.repeatColumns?.sheetId === sheet.id
+      ? {
+          repeatColumns: Array.from(
+            { length: profile.repeatColumns.end.column - profile.repeatColumns.start.column + 1 },
+            (_, index) => columnWidth(sheet, profile.repeatColumns!.start.column + index),
+          ),
+        }
+      : {}),
   }));
 }
 
-function cellRect(
-  sheet: Sheet,
-  range: DocumentCellRange,
+function columnLabel(column: number): string {
+  let value = column + 1;
+  let label = '';
+  while (value > 0) {
+    value -= 1;
+    label = String.fromCharCode(65 + (value % 26)) + label;
+    value = Math.floor(value / 26);
+  }
+  return label;
+}
+
+function bandText(source: string, page: number, pages: number, data: unknown, date: Date): string {
+  return source.replace(/\{\{\s*([^}]+?)\s*\}\}/gu, (_, token: string) => {
+    if (token === 'page') return String(page);
+    if (token === 'pages') return String(pages);
+    if (token === 'date') return date.toISOString().slice(0, 10);
+    let value = data;
+    for (const part of token.split('.')) {
+      if (
+        ['__proto__', 'prototype', 'constructor'].includes(part) ||
+        value === null ||
+        typeof value !== 'object' ||
+        !Object.prototype.hasOwnProperty.call(value, part)
+      ) {
+        return '';
+      }
+      value = (value as Readonly<Record<string, unknown>>)[part];
+    }
+    return value === undefined || value === null ? '' : String(value);
+  });
+}
+
+function bandCommands(
+  profile: TemplatePrintProfile,
   page: PaginationPage,
-  row: number,
-  column: number,
-  marginLeft: number,
-  marginTop: number,
-): { readonly x: number; readonly y: number; readonly width: number; readonly height: number } {
-  const firstRow = range.start.row + page.rowStart;
-  const x =
-    marginLeft +
-    Array.from({ length: column - range.start.column }, (_, index) =>
-      columnWidth(sheet, range.start.column + index),
-    ).reduce((sum, width) => sum + width, 0) *
-      page.scale;
-  const y =
-    marginTop +
-    Array.from({ length: row - firstRow }, (_, index) => rowHeight(sheet, firstRow + index)).reduce(
-      (sum, height) => sum + height,
-      0,
-    ) *
-      page.scale;
-  return {
-    x,
-    y,
-    width: columnWidth(sheet, column) * page.scale,
-    height: rowHeight(sheet, row) * page.scale,
-  };
+  totalPages: number,
+  data: unknown,
+  date: Date,
+): readonly PrintDisplayCommand[] {
+  const commands: PrintDisplayCommand[] = [];
+  for (const [band, y] of [
+    [profile.header, Math.max(10, profile.page.margins.top / 2)],
+    [profile.footer, page.height - Math.max(10, profile.page.margins.bottom / 2)],
+  ] as const) {
+    if (band === undefined) continue;
+    for (const [source, align, x] of [
+      [band.left, 'left', profile.page.margins.left],
+      [band.center, 'center', page.width / 2],
+      [band.right, 'right', page.width - profile.page.margins.right],
+    ] as const) {
+      if (source === undefined) continue;
+      commands.push({
+        kind: 'text',
+        text: bandText(source, page.index + 1, totalPages, data, date),
+        x,
+        y,
+        maxWidth: Math.max(0, page.width / 3),
+        fontFamily: 'Arial',
+        fontSize: 10,
+        color: '#0a0a0a',
+        horizontalAlign: align,
+      });
+    }
+  }
+  return commands;
 }
 
 function displayPages(
@@ -212,29 +274,146 @@ function displayPages(
   resolved: readonly ResolvedTarget[],
   profile: TemplatePrintProfile,
   resolvePresentation: (sheetId: DocumentSheetId, row: number, column: number) => CellPresentation,
+  insertions: ReadonlyMap<string, readonly RowInsertion[]>,
+  data: unknown,
+  date: Date,
 ): readonly PrintDisplayPageInput[] {
   return pages.map((page) => {
     const target = resolved.find(({ id }) => id === page.targetId)!;
     const startRow = target.range.start.row + page.rowStart;
     const endRow = target.range.start.row + page.rowEnd;
+    const startColumn = target.range.start.column + page.columnStart;
+    const endColumn = target.range.start.column + page.columnEnd;
+    const bodyRows = Array.from({ length: endRow - startRow + 1 }, (_, index) => startRow + index);
+    const bodyColumns = Array.from(
+      { length: endColumn - startColumn + 1 },
+      (_, index) => startColumn + index,
+    );
+    const titleRows =
+      profile.repeatRows?.sheetId === target.sheet.id
+        ? (() => {
+            const range = transformRange(profile.repeatRows, insertions);
+            return Array.from(
+              { length: range.end.row - range.start.row + 1 },
+              (_, index) => range.start.row + index,
+            ).filter((row) => !bodyRows.includes(row));
+          })()
+        : [];
+    const titleColumns =
+      profile.repeatColumns?.sheetId === target.sheet.id
+        ? Array.from(
+            {
+              length: profile.repeatColumns.end.column - profile.repeatColumns.start.column + 1,
+            },
+            (_, index) => profile.repeatColumns!.start.column + index,
+          ).filter((column) => !bodyColumns.includes(column))
+        : [];
+    const rows = [...titleRows, ...bodyRows];
+    const columns = [...titleColumns, ...bodyColumns];
+    const headingSize = profile.showHeadings ? 20 : 0;
     const cells = [];
-    for (let row = startRow; row <= endRow; row += 1) {
-      for (let column = target.range.start.column; column <= target.range.end.column; column += 1) {
+    for (const [rowIndex, row] of rows.entries()) {
+      for (const [columnIndex, column] of columns.entries()) {
+        const merge = target.sheet.merges.find(
+          ({ start, end }) =>
+            row >= start.row && row <= end.row && column >= start.column && column <= end.column,
+        );
+        if (merge !== undefined && (row !== merge.start.row || column !== merge.start.column)) {
+          continue;
+        }
+        const mergeRows =
+          merge === undefined
+            ? [row]
+            : rows.filter(
+                (candidate) => candidate >= merge.start.row && candidate <= merge.end.row,
+              );
+        const mergeColumns =
+          merge === undefined
+            ? [column]
+            : columns.filter(
+                (candidate) => candidate >= merge.start.column && candidate <= merge.end.column,
+              );
         cells.push({
-          rect: cellRect(
-            target.sheet,
-            target.range,
-            page,
-            row,
-            column,
-            profile.page.margins.left,
-            profile.page.margins.top,
-          ),
+          rect: {
+            x:
+              profile.page.margins.left +
+              headingSize +
+              columns
+                .slice(0, columnIndex)
+                .reduce((sum, candidate) => sum + columnWidth(target.sheet, candidate), 0) *
+                page.scale,
+            y:
+              profile.page.margins.top +
+              headingSize +
+              rows
+                .slice(0, rowIndex)
+                .reduce((sum, candidate) => sum + rowHeight(target.sheet, candidate), 0) *
+                page.scale,
+            width:
+              mergeColumns.reduce(
+                (sum, candidate) => sum + columnWidth(target.sheet, candidate),
+                0,
+              ) * page.scale,
+            height:
+              mergeRows.reduce((sum, candidate) => sum + rowHeight(target.sheet, candidate), 0) *
+              page.scale,
+          },
           presentation: resolvePresentation(target.sheet.id, row, column),
         });
       }
     }
-    return { width: page.width, height: page.height, cells };
+    const decorations: PrintDisplayCommand[] = [
+      ...bandCommands(profile, page, pages.length, data, date),
+    ];
+    if (profile.showHeadings) {
+      for (const [index, column] of columns.entries()) {
+        decorations.push({
+          kind: 'text',
+          text: columnLabel(column),
+          x:
+            profile.page.margins.left +
+            headingSize +
+            columns
+              .slice(0, index)
+              .reduce((sum, candidate) => sum + columnWidth(target.sheet, candidate), 0) *
+              page.scale +
+            (columnWidth(target.sheet, column) * page.scale) / 2,
+          y: profile.page.margins.top + headingSize / 2,
+          maxWidth: columnWidth(target.sheet, column) * page.scale,
+          fontFamily: 'Arial',
+          fontSize: 10,
+          color: '#0a0a0a',
+          horizontalAlign: 'center',
+        });
+      }
+      for (const [index, row] of rows.entries()) {
+        decorations.push({
+          kind: 'text',
+          text: String(row + 1),
+          x: profile.page.margins.left + headingSize / 2,
+          y:
+            profile.page.margins.top +
+            headingSize +
+            rows
+              .slice(0, index)
+              .reduce((sum, candidate) => sum + rowHeight(target.sheet, candidate), 0) *
+              page.scale +
+            (rowHeight(target.sheet, row) * page.scale) / 2,
+          maxWidth: headingSize,
+          fontFamily: 'Arial',
+          fontSize: 10,
+          color: '#0a0a0a',
+          horizontalAlign: 'center',
+        });
+      }
+    }
+    return {
+      width: page.width,
+      height: page.height,
+      cells,
+      decorations,
+      showGridlines: profile.showGridlines,
+    };
   });
 }
 
@@ -319,19 +498,38 @@ export async function renderSpreadsheetTemplate(
   });
   const resolvedTargets = targets(expansion.document, profile, expansion.insertedRows);
   const pageSize = paper(profile);
+  const headingSize = profile.showHeadings ? 20 : 0;
   const pagination = paginateTemplateTargets({
-    targets: paginationTargets(resolvedTargets),
+    targets: paginationTargets(resolvedTargets, profile, expansion.insertedRows),
     paper: pageSize,
-    margins: profile.page.margins,
+    margins: {
+      ...profile.page.margins,
+      top: profile.page.margins.top + headingSize,
+      left: profile.page.margins.left + headingSize,
+    },
     scale: profile.page.scale,
-    manualBreaks: profile.manualBreaks.flatMap((pageBreak) =>
-      resolvedTargets
-        .filter(({ sheet }) => sheet.id === pageBreak.sheetId)
-        .map((target) => ({
-          targetId: target.id,
-          beforeRow: Math.max(0, pageBreak.beforeRow - target.range.start.row),
-        })),
-    ),
+    manualBreaks: profile.manualBreaks
+      .flatMap((pageBreak) =>
+        resolvedTargets
+          .filter(({ sheet }) => sheet.id === pageBreak.sheetId)
+          .map((target) => ({
+            targetId: target.id,
+            beforeRow: Math.max(0, pageBreak.beforeRow - target.range.start.row),
+          })),
+      )
+      .concat(
+        resolvedTargets.flatMap((target) =>
+          (expansion.repeatPageBreaks.get(target.sheet.id) ?? [])
+            .filter(
+              (beforeRow) =>
+                beforeRow >= target.range.start.row && beforeRow <= target.range.end.row,
+            )
+            .map((beforeRow) => ({
+              targetId: target.id,
+              beforeRow: beforeRow - target.range.start.row,
+            })),
+        ),
+      ),
     maxPages: limits.maxPages,
     signal: request.signal,
     deadline: start + limits.maxLayoutTimeMs,
@@ -376,10 +574,15 @@ export async function renderSpreadsheetTemplate(
     resolvedTargets,
     profile,
     (sheetId, row, column) => presentation.resolve({ sheetId, row, column }),
+    expansion.insertedRows,
+    request.data,
+    environment.clock,
   );
   const displayList = createPrintDisplayList({
     pages: pageInputs,
     fontMetrics: environment.fontMetrics,
+    signal: request.signal,
+    deadline: start + limits.maxLayoutTimeMs,
   });
   const diagnostics = [
     ...request.template.diagnostics,
@@ -401,6 +604,8 @@ export async function renderSpreadsheetTemplate(
         height: page.height,
         rowStart: page.rowStart,
         rowEnd: page.rowEnd,
+        columnStart: page.columnStart,
+        columnEnd: page.columnEnd,
       })),
       displayList,
     },

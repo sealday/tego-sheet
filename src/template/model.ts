@@ -293,6 +293,10 @@ export interface GeneratedPrintPage {
   readonly rowStart: number;
   /** Last target-relative row on the page. */
   readonly rowEnd: number;
+  /** First target-relative column on the page. */
+  readonly columnStart: number;
+  /** Last target-relative column on the page. */
+  readonly columnEnd: number;
 }
 
 /** Immutable pagination output shared by preview and output adapters. */
