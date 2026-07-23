@@ -294,6 +294,15 @@ function projectedTargetRows(
   ];
 }
 
+function projectedBreakIndex(
+  target: ResolvedTarget,
+  logicalRow: number,
+  projection: ViewProjection | undefined,
+): number | undefined {
+  const index = projectedTargetRows(target.range, projection).indexOf(logicalRow);
+  return index < 0 ? undefined : index;
+}
+
 function paginationTargets(
   resolved: readonly ResolvedTarget[],
   profile: TemplatePrintProfile,
@@ -956,15 +965,17 @@ export async function renderSpreadsheetTemplate(
                     source.sheetId === pageBreak.sheetId && generated.sheetId === sheet.id,
                 ),
             )
-            .map((target) => {
+            .flatMap((target) => {
               const beforeRow = mappedRow(
                 pageBreak.beforeRow,
                 expansion.insertedRows.get(pageBreak.sheetId) ?? [],
               );
-              return {
-                targetId: target.id,
-                beforeRow: Math.max(0, beforeRow - target.range.start.row),
-              };
+              const projected = projectedBreakIndex(
+                target,
+                beforeRow,
+                viewProjections.get(target.sheet.id),
+              );
+              return projected === undefined ? [] : [{ targetId: target.id, beforeRow: projected }];
             }),
         )
         .concat(
@@ -974,10 +985,16 @@ export async function renderSpreadsheetTemplate(
                 (beforeRow) =>
                   beforeRow >= target.range.start.row && beforeRow <= target.range.end.row,
               )
-              .map((beforeRow) => ({
-                targetId: target.id,
-                beforeRow: beforeRow - target.range.start.row,
-              })),
+              .flatMap((beforeRow) => {
+                const projected = projectedBreakIndex(
+                  target,
+                  beforeRow,
+                  viewProjections.get(target.sheet.id),
+                );
+                return projected === undefined
+                  ? []
+                  : [{ targetId: target.id, beforeRow: projected }];
+              }),
           ),
         ),
       maxPages: limits.maxPages,
