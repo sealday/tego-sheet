@@ -400,24 +400,37 @@ function displayPages(
       (_, index) => startColumn + index,
     );
     const titleRows =
-      profile.repeatRows?.sheetId === target.sheet.id
-        ? (() => {
-            const range = transformRange(profile.repeatRows, insertions, structuralMappings);
+      profile.repeatRows === undefined
+        ? []
+        : (() => {
+            const range = profileRangeForSheet(
+              profile.repeatRows,
+              target.sheet.id,
+              insertions,
+              structuralMappings,
+            );
+            if (range === undefined) return [];
             return Array.from(
               { length: range.end.row - range.start.row + 1 },
               (_, index) => range.start.row + index,
             ).filter((row) => !bodyRows.includes(row));
-          })()
-        : [];
+          })();
     const titleColumns =
-      profile.repeatColumns?.sheetId === target.sheet.id
-        ? Array.from(
-            {
-              length: profile.repeatColumns.end.column - profile.repeatColumns.start.column + 1,
-            },
-            (_, index) => profile.repeatColumns!.start.column + index,
-          ).filter((column) => !bodyColumns.includes(column))
-        : [];
+      profile.repeatColumns === undefined
+        ? []
+        : (() => {
+            const range = profileRangeForSheet(
+              profile.repeatColumns,
+              target.sheet.id,
+              insertions,
+              structuralMappings,
+            );
+            if (range === undefined) return [];
+            return Array.from(
+              { length: range.end.column - range.start.column + 1 },
+              (_, index) => range.start.column + index,
+            ).filter((column) => !bodyColumns.includes(column));
+          })();
     const rows = [...titleRows, ...bodyRows];
     const columns = [...titleColumns, ...bodyColumns];
     const headingSize = profile.showHeadings ? 20 : 0;

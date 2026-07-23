@@ -80,6 +80,63 @@ describe('TP3 resource pipeline', () => {
     );
   });
 
+  it('requires a real raster decoder instead of accepting structural marker bytes', async () => {
+    const result = await resolveTemplateResources(
+      [{ id: 'forged', type: 'image', resolverId: 'app', key: 'forged' }],
+      {
+        registry: createResourceResolverRegistry([
+          resolver('app', async () => ({ bytes: png(), mimeType: 'image/png' })),
+        ]),
+        signal: new AbortController().signal,
+        purpose: 'preview',
+      },
+    );
+
+    expect(result.store).toBeUndefined();
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'RESOURCE_DECODE_FAILED' }),
+    );
+  });
+
+  it('disposes an image decoder result that arrives after the decode timeout', async () => {
+    const lateDispose = vi.fn();
+    const result = await resolveTemplateResources(
+      [{ id: 'late-image', type: 'image', resolverId: 'app', key: 'late-image' }],
+      {
+        registry: createResourceResolverRegistry([
+          resolver('app', async () => ({ bytes: png(), mimeType: 'image/png' })),
+        ]),
+        signal: new AbortController().signal,
+        purpose: 'preview',
+        limits: {
+          maxResources: 1,
+          maxResourceBytes: 100,
+          maxTotalResourceBytes: 100,
+          maxResolveConcurrency: 1,
+          maxPixels: 10,
+          maxSvgNodes: 10,
+          maxFonts: 1,
+          maxResolveTimeMs: 5,
+          maxDecompressedBytes: 100,
+        },
+        decodeImage: async () =>
+          new Promise((resolve) =>
+            setTimeout(
+              () => resolve({ width: 1, height: 1, representation: {}, dispose: lateDispose }),
+              20,
+            ),
+          ),
+      },
+    );
+
+    expect(result.store).toBeUndefined();
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'RESOURCE_DECODE_FAILED' }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(lateDispose).toHaveBeenCalledOnce();
+  });
+
   it('snapshots resolver bytes before decoding and disposes decoded handles with the session', async () => {
     const decodedDispose = vi.fn();
     const source = png();

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createSpreadsheetDocument } from '../../../src/document';
 import type { SpreadsheetDocument } from '../../../src/document';
 import { createFontMetrics } from '../../../src/presentation';
@@ -216,6 +216,55 @@ describe('TP2 advanced template structures', () => {
       .filter(({ column, cell }) => column === 0 && cell.input.type === 'string')
       .map(({ cell }) => (cell.input.type === 'string' ? cell.input.value : ''));
     expect(values).toEqual(expect.arrayContaining(['A:a1', 'A:a2', 'B:b1']));
+  });
+
+  it('materializes a vertical repeat-range inside a repeat-rows scope', () => {
+    const { document, template } = source([
+      {
+        id: 'outer',
+        type: 'repeat-rows',
+        range: range(0, 2, 0, 0),
+        source: 'groups',
+        empty: 'remove',
+        pageBreak: 'auto',
+      },
+      {
+        id: 'inner-range',
+        type: 'repeat-range',
+        range: range(1, 1, 0, 0),
+        source: 'item.values',
+        axis: 'vertical',
+        empty: 'remove',
+      },
+      {
+        id: 'inner-value',
+        type: 'value',
+        target: { sheetId: 'sheet-1', row: 1, column: 0 },
+        expression: 'item',
+      },
+    ] as never);
+    const compiled = compileSpreadsheetTemplate(document, template.id, options).template!;
+    const expanded = expandAdvancedTemplate(
+      compiled,
+      { groups: [{ values: ['A', 'B'] }, { values: ['C'] }] },
+      options.limits,
+    );
+
+    expect(expanded.diagnostics).toEqual([]);
+    expect(
+      expanded.document?.workbook.sheets[0]?.cells
+        .filter(({ cell }) => cell.input.type === 'string')
+        .map(({ row, cell }) => [row, cell.input.type === 'string' ? cell.input.value : '']),
+    ).toEqual(
+      expect.arrayContaining([
+        [1, 'A'],
+        [2, 'B'],
+        [5, 'C'],
+      ]),
+    );
+    expect(
+      expanded.structuralMappings.filter(({ bindingId }) => bindingId === 'inner-range'),
+    ).toHaveLength(3);
   });
 
   it('binds nested horizontal repeats to their parent item scope', () => {
@@ -808,7 +857,24 @@ describe('TP2 advanced template structures', () => {
         },
       ],
     } as unknown as SpreadsheetTemplate;
-    const document = { ...fixture.document, templates: [printable] };
+    const document = {
+      ...fixture.document,
+      workbook: {
+        ...fixture.document.workbook,
+        sheets: fixture.document.workbook.sheets.map((sheet) => ({
+          ...sheet,
+          cells: sheet.cells.map((entry) =>
+            entry.row === 1
+              ? {
+                  ...entry,
+                  cell: { input: { type: 'string' as const, value: 'BODY' } },
+                }
+              : entry,
+          ),
+        })),
+      },
+      templates: [printable],
+    };
     const compiled = compileSpreadsheetTemplate(document, printable.id, options).template!;
     const result = await renderSpreadsheetTemplate(
       {
@@ -882,6 +948,14 @@ describe('TP2 advanced template structures', () => {
       expect.stringContaining('sheet-1~sheets~2'),
       expect.stringContaining('sheet-1~sheets~2'),
     ]);
+    expect(
+      rangeResult.document?.print.displayList.pages.map(({ commands }) =>
+        commands
+          .filter((command) => command.kind === 'text')
+          .map((command) => command.text)
+          .filter((text) => text === 'North' || text === 'South'),
+      ),
+    ).toEqual([['North'], ['North'], ['South'], ['South']]);
     await rangeResult.document?.resources.dispose();
   });
 
@@ -1122,6 +1196,45 @@ describe('TP2 advanced template structures', () => {
     expect(expanded.diagnostics).toContainEqual(
       expect.objectContaining({ code: 'EXPANSION_LIMIT_EXCEEDED' }),
     );
+  });
+
+  it('preflights pure nested columns before evaluating cloned value formatters', () => {
+    const tick = vi.fn((value: unknown) => value);
+    const { document, template } = source([
+      {
+        id: 'outer-columns',
+        type: 'repeat-columns',
+        range: range(0, 1, 0, 2),
+        source: 'groups',
+        empty: 'remove',
+      },
+      {
+        id: 'inner-columns',
+        type: 'repeat-columns',
+        range: range(0, 1, 1, 1),
+        source: 'item.values',
+        empty: 'remove',
+      },
+      {
+        id: 'formatted',
+        type: 'value',
+        target: { sheetId: 'sheet-1', row: 0, column: 1 },
+        expression: 'tick(item)',
+      },
+    ] as never);
+    const compiled = compileSpreadsheetTemplate(document, template.id, options).template!;
+    const expanded = expandAdvancedTemplate(
+      compiled,
+      { groups: [{ values: ['A', 'B', 'C'] }] },
+      { ...options.limits, maxExpandedCells: 2 },
+      { tick },
+    );
+
+    expect(expanded.document).toBeUndefined();
+    expect(expanded.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'EXPANSION_LIMIT_EXCEEDED' }),
+    );
+    expect(tick).not.toHaveBeenCalled();
   });
 
   it('counts value-created cells before cloning an empty advanced range', () => {

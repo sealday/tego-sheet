@@ -920,6 +920,10 @@ export async function resolveTemplateResources(
         fail('RESOURCE_DECODE_FAILED', `Resource ${ref.id} has incomplete image data`, ref);
         return;
       }
+      if (ref.type === 'image' && options.decodeImage === undefined) {
+        fail('RESOURCE_DECODE_FAILED', `Resource ${ref.id} requires an image decoder`, ref);
+        return;
+      }
       const encodedDimensions =
         ref.type === 'image' ? encodedImageDimensions(verifiedBytes, raw.mimeType) : undefined;
       const declaredWidth = raw.width ?? encodedDimensions?.width;
@@ -949,12 +953,19 @@ export async function resolveTemplateResources(
           let width = declaredWidth;
           let height = declaredHeight;
           if (ref.type === 'image' && options.decodeImage !== undefined) {
+            const pendingDecode = options.decodeImage(
+              Uint8Array.from(verifiedBytes),
+              raw.mimeType,
+              sessionController.signal,
+            );
+            void pendingDecode.then(
+              (late) => {
+                if (sessionController.signal.aborted) void late.dispose?.();
+              },
+              () => undefined,
+            );
             const image = await controlled(
-              options.decodeImage(
-                Uint8Array.from(verifiedBytes),
-                raw.mimeType,
-                sessionController.signal,
-              ),
+              pendingDecode,
               sessionController.signal,
               limits.maxResolveTimeMs - (Date.now() - started),
             );

@@ -25,13 +25,21 @@ export interface GeneratedDocumentForBrowserPrint {
       Record<
         string,
         {
+          /** Resolved logical resource category. */
           readonly type: string;
+          /** Verified media type matching the stored bytes. */
           readonly mimeType: string;
+          /** Immutable encoded resource payload. */
           readonly bytes: readonly number[];
+          /** Optional sanitized vector projection. */
           readonly vector?: {
+            /** Source vector viewport as x, y, width and height. */
             readonly viewBox: readonly [number, number, number, number];
+            /** Sanitized SVG path data in paint order. */
             readonly paths: readonly string[];
+            /** Foreground paint color. */
             readonly foreground: string;
+            /** Background paint color. */
             readonly background: string;
           };
         }

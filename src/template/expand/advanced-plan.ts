@@ -32,7 +32,17 @@ export interface AllocationEstimate {
 }
 
 export function createExpansionPlan(compiled: CompiledTemplate): ExpansionPlan {
-  const bindingType = new Map(compiled.ir.bindings.map((binding) => [binding.id, binding.type]));
+  const bindingById = new Map(compiled.ir.bindings.map((binding) => [binding.id, binding]));
+  const axis = (
+    node: TemplateRegionNode,
+  ): 'vertical' | 'horizontal' | 'conditional' | undefined => {
+    const binding = bindingById.get(node.bindingId);
+    if (binding?.type === 'repeat-rows') return 'vertical';
+    if (binding?.type === 'repeat-columns') return 'horizontal';
+    if (binding?.type === 'conditional-range') return 'conditional';
+    if (binding?.type === 'repeat-range' && binding.axis !== 'both') return binding.axis;
+    return undefined;
+  };
   const horizontalNestedIds = new Set<string>();
   const mixedTreeIds = new Set<string>();
   const collectMixedTree = (node: TemplateRegionNode): void => {
@@ -40,32 +50,24 @@ export function createExpansionPlan(compiled: CompiledTemplate): ExpansionPlan {
     node.children.forEach(collectMixedTree);
   };
   const isMixedTree = (node: TemplateRegionNode): boolean => {
-    const type = bindingType.get(node.bindingId);
-    return (
-      (type === 'repeat-rows' || type === 'repeat-columns' || type === 'conditional-range') &&
-      node.children.every(isMixedTree)
-    );
+    return axis(node) !== undefined && node.children.every(isMixedTree);
   };
   const hasVerticalOrConditionalDescendant = (node: TemplateRegionNode): boolean =>
     node.children.some(
-      (child) =>
-        bindingType.get(child.bindingId) !== 'repeat-columns' ||
-        hasVerticalOrConditionalDescendant(child),
+      (child) => axis(child) !== 'horizontal' || hasVerticalOrConditionalDescendant(child),
     );
   const mixedRoots = (compiled.ir.regionTree ?? []).filter((node) => {
     if (!isMixedTree(node)) return false;
-    const type = bindingType.get(node.bindingId);
+    const binding = bindingById.get(node.bindingId);
+    if (binding?.type === 'repeat-range' && node.children.length === 0) return false;
+    const type = axis(node);
     return (
-      type === 'repeat-rows' ||
-      (type === 'repeat-columns' && hasVerticalOrConditionalDescendant(node))
+      type === 'vertical' || (type === 'horizontal' && hasVerticalOrConditionalDescendant(node))
     );
   });
   mixedRoots.forEach(collectMixedTree);
   const collectHorizontal = (node: TemplateRegionNode): boolean => {
-    if (
-      bindingType.get(node.bindingId) !== 'repeat-columns' ||
-      !node.children.every(collectHorizontal)
-    ) {
+    if (axis(node) !== 'horizontal' || !node.children.every(collectHorizontal)) {
       return false;
     }
     horizontalNestedIds.add(node.bindingId);

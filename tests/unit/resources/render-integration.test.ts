@@ -65,6 +65,7 @@ const environment = {
     fallbackFont: 'Arial',
     fallback: { averageAdvance: 6, lineHeight: 12 },
   }),
+  decodeImage: async () => ({ width: 1, height: 1, representation: {} }),
 };
 
 describe('resource/render atomic boundary', () => {
