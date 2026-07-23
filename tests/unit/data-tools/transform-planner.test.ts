@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { createDataTransformPlanner } from '../../../src/data-tools';
-import { createSpreadsheetDocument } from '../../../src/document';
+import { createSpreadsheetDocument, type DocumentSheetId } from '../../../src/document';
+import type { SheetId } from '../../../src/core';
 import { createDocumentController } from '../../../src/document-controller';
 
 describe('DATA-01 revision-bound transform planner', () => {
+  const documentSheetId = 'sheet-1' as DocumentSheetId;
+  const sheetId = 'sheet-1' as SheetId;
+
   it('previews without mutation and commits one undoable transaction', async () => {
     const controller = createDocumentController(
       createSpreadsheetDocument({ id: 'document-1', sheetId: 'sheet-1' }),
@@ -13,7 +17,7 @@ describe('DATA-01 revision-bound transform planner', () => {
       id: 'seed',
       command: {
         type: 'set-cell-text',
-        address: { sheet: 'sheet-1', row: 0, column: 0 },
+        address: { sheet: sheetId, row: 0, column: 0 },
         text: 'draft invoice',
       },
     });
@@ -21,7 +25,7 @@ describe('DATA-01 revision-bound transform planner', () => {
     const preview = await planner.preview(controller.getSnapshot(), {
       type: 'find-replace',
       range: {
-        sheetId: 'sheet-1',
+        sheetId: documentSheetId,
         start: { row: 0, column: 0 },
         end: { row: 0, column: 0 },
       },
@@ -48,7 +52,7 @@ describe('DATA-01 revision-bound transform planner', () => {
     const preview = await planner.preview(controller.getSnapshot(), {
       type: 'find-replace',
       range: {
-        sheetId: 'sheet-1',
+        sheetId: documentSheetId,
         start: { row: 0, column: 0 },
         end: { row: 0, column: 0 },
       },
@@ -61,7 +65,7 @@ describe('DATA-01 revision-bound transform planner', () => {
       id: 'newer',
       command: {
         type: 'set-cell-text',
-        address: { sheet: 'sheet-1', row: 1, column: 0 },
+        address: { sheet: sheetId, row: 1, column: 0 },
         text: 'newer',
       },
     });
