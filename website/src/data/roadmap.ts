@@ -172,6 +172,7 @@ export const allRoadmapItems = [
     'PDF Blob output',
     'Translate the shared page display list into downloadable PDF data.',
     '/docs/roadmap/template-printing',
+    'shipped',
   ),
   item(
     'xlsx-output',
@@ -186,6 +187,7 @@ export const allRoadmapItems = [
     'SVG and PNG page output',
     'Render selected generated pages as vector or bitmap images.',
     '/docs/roadmap/template-printing',
+    'shipped',
   ),
   item(
     'conditional-formatting',

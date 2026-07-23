@@ -16,6 +16,8 @@ verification commands pass.
 | 1     | Page preview and isolated browser printing               | shipped | [Template printing](template-printing.md) |
 | 2     | Nested, horizontal, range and page repeats               | shipped | [Template printing](template-printing.md) |
 | 2     | Image, font, QR code and async resource pipeline         | shipped | [Template printing](template-printing.md) |
+| 2     | PDF Blob output                                          | shipped | [Template printing](template-printing.md) |
+| 2     | SVG and PNG page output                                  | shipped | [Template printing](template-printing.md) |
 
 Workbook 2.0 completed its schema boundary, legacy migration, runtime-controller integration,
 React ingress migration, and command-based rich-cell transforms on 2026-07-23. Its acceptance
@@ -54,3 +56,12 @@ column, two-dimensional, page, sheet, and subtemplate expansion; stable structur
 mappings; clone-before-allocation limits; bounded image, font, SVG, and standard QR resolution;
 session-owned cleanup; and resolved-resource display-list output. Their adversarial axis,
 resource-safety, package, TypeDoc, and print regression gates passed before shipment.
+
+PDF and image output shipped on 2026-07-23 as isolated optional adapters that translate the
+immutable generated display list without re-layout. PDF includes searchable vector text, licensed
+CJK glyph subsets, deterministic metadata, page selection, links, and bounded generation. Image
+output provides safe standalone SVG and DPI-accurate PNG in browsers and Workers. Their package,
+browser, Worker, visual, font, cancellation, and resource-isolation gates passed before shipment.
+
+The XLSX adapter implementation is complete and locally verified, but its Roadmap item remains
+planned until the recorded Excel Desktop and Excel Web external interoperability gates pass.

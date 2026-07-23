@@ -35,7 +35,7 @@ const miniRfcs = {
 describe('product roadmap data', () => {
   it('contains the approved capabilities in dependency order', () => {
     expect(roadmapPhases.map((phase) => phase.id)).toEqual([0, 1, 2, 3, 4]);
-    expect(roadmapItems).toHaveLength(22);
+    expect(roadmapItems).toHaveLength(20);
     expect(allRoadmapItems).toHaveLength(roadmapItems.length + shippedRoadmapItems.length);
     expect(shippedRoadmapItems.map((item) => item.id)).toEqual([
       'workbook-2',
@@ -49,10 +49,12 @@ describe('product roadmap data', () => {
       'print-preview',
       'advanced-repeats',
       'resource-pipeline',
+      'pdf-output',
+      'image-output',
     ]);
-    expect(new Set(roadmapItems.map((item) => item.id))).toHaveProperty('size', 22);
+    expect(new Set(roadmapItems.map((item) => item.id))).toHaveProperty('size', 20);
     expect(roadmapItems.every((item) => item.status === 'planned')).toBe(true);
-    expect(roadmapItems[0]?.title).toBe('PDF Blob output');
+    expect(roadmapItems[0]?.title).toBe('XLSX template output');
   });
 
   it('renders status copy from the canonical status-label mapping', () => {
@@ -163,7 +165,9 @@ describe('product roadmap data', () => {
             id === 'F5' ||
             id === 'TP1' ||
             id === 'TP2' ||
-            id === 'TP3'
+            id === 'TP3' ||
+            id === 'TP4' ||
+            id === 'TP6'
             ? 'shipped'
             : 'planned',
         );

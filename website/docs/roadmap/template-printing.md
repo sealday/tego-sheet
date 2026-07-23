@@ -471,7 +471,7 @@ interface ResolveContext {
 
 ## TP4. PDF Adapter
 
-**Status:** planned
+**Status:** shipped
 **Delivery:** Phase 2
 
 ### 产品目标与场景
@@ -621,7 +621,7 @@ XLSX adapter 只保证本项目明确支持的语义。导入的未知 OOXML 扩
 
 ## TP6. Image Adapter
 
-**Status:** planned
+**Status:** shipped
 **Delivery:** Phase 2
 
 ### 产品目标与场景

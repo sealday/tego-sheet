@@ -12,9 +12,7 @@
 
 | Phase | Capability                                                   | Status  | Design                                                  |
 | ----- | ------------------------------------------------------------ | ------- | ------------------------------------------------------- |
-| 2     | PDF Blob output                                              | planned | [Template printing](template-printing.md)               |
 | 2     | XLSX template output                                         | planned | [Template printing](template-printing.md)               |
-| 2     | SVG and PNG page output                                      | planned | [Template printing](template-printing.md)               |
 | 3     | Conditional formatting                                       | planned | [Formulas and data](formulas-data.md)                   |
 | 3     | Advanced validation, dropdown and checkbox cells             | planned | [Formulas and data](formulas-data.md)                   |
 | 3     | Expanded function library and cross-sheet references         | planned | [Formulas and data](formulas-data.md)                   |
