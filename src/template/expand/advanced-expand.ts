@@ -224,20 +224,22 @@ function expandNestedRows(
                   destinationStart + height,
                   child.range.start.column,
                 )
-              : childAxis === 'conditional'
-                ? evaluateTemplateExpression(
-                    (
-                      byId.get(child.bindingId) as Extract<
-                        TemplateIRBinding,
-                        { readonly type: 'conditional-range' }
-                      >
-                    ).when,
-                    scope,
-                    formatters,
-                  )
-                  ? renderRange(child.range, child.children, scope, destinationStart + height)
-                  : { cells: [], rows: [], merges: [], height: 0 }
-                : renderNode(child, scope, destinationStart + height);
+              : childAxis === 'both'
+                ? renderBothNode(child, scope, destinationStart + height, child.range.start.column)
+                : childAxis === 'conditional'
+                  ? evaluateTemplateExpression(
+                      (
+                        byId.get(child.bindingId) as Extract<
+                          TemplateIRBinding,
+                          { readonly type: 'conditional-range' }
+                        >
+                      ).when,
+                      scope,
+                      formatters,
+                    )
+                    ? renderRange(child.range, child.children, scope, destinationStart + height)
+                    : { cells: [], rows: [], merges: [], height: 0 }
+                  : renderNode(child, scope, destinationStart + height);
           cells.push(...fragment.cells);
           rows.push(...fragment.rows);
           merges.push(...fragment.merges);
@@ -407,26 +409,33 @@ function expandNestedRows(
                   destinationRow + height,
                   destinationColumn + (child.range.start.column - range.start.column),
                 )
-              : childAxis === 'conditional'
-                ? evaluateTemplateExpression(
-                    (
-                      byId.get(child.bindingId) as Extract<
-                        TemplateIRBinding,
-                        { readonly type: 'conditional-range' }
-                      >
-                    ).when,
+              : childAxis === 'both'
+                ? renderBothNode(
+                    child,
                     scope,
-                    formatters,
+                    destinationRow + height,
+                    destinationColumn + (child.range.start.column - range.start.column),
                   )
-                  ? renderHorizontalRange(
-                      child.range,
-                      child.children,
+                : childAxis === 'conditional'
+                  ? evaluateTemplateExpression(
+                      (
+                        byId.get(child.bindingId) as Extract<
+                          TemplateIRBinding,
+                          { readonly type: 'conditional-range' }
+                        >
+                      ).when,
                       scope,
-                      destinationRow + height,
-                      destinationColumn + (child.range.start.column - range.start.column),
+                      formatters,
                     )
-                  : { cells: [], rows: [], merges: [], height: 0, width: 0 }
-                : renderNode(child, scope, destinationRow + height);
+                    ? renderHorizontalRange(
+                        child.range,
+                        child.children,
+                        scope,
+                        destinationRow + height,
+                        destinationColumn + (child.range.start.column - range.start.column),
+                      )
+                    : { cells: [], rows: [], merges: [], height: 0, width: 0 }
+                  : renderNode(child, scope, destinationRow + height);
           const columnDelta = destinationColumn - range.start.column;
           if (childAxis !== 'horizontal') {
             for (let index = mappingStart; index < mappings.length; index += 1) {
@@ -543,6 +552,77 @@ function expandNestedRows(
       };
     };
 
+    const renderBothNode = (
+      node: TemplateRegionNode,
+      parentScope: Scope,
+      destinationRow: number,
+      destinationColumn: number,
+    ): HorizontalFragment => {
+      const binding = byId.get(node.bindingId);
+      if (binding?.type !== 'repeat-range' || binding.axis !== 'both') {
+        return { cells: [], rows: [], merges: [], height: 0, width: 0 };
+      }
+      const resolved = evaluateTemplateExpression(binding.source, parentScope, formatters);
+      const rows = Array.isArray(resolved) ? resolved : [];
+      const matrix =
+        rows.length === 0 && binding.empty === 'keep-template-row'
+          ? [[undefined]]
+          : rows.map((row) => (Array.isArray(row) ? row : [row]));
+      const rowCopies = matrix.length;
+      const columnCopies = Math.max(0, ...matrix.map((row) => row.length));
+      const sourceHeight = node.range.end.row - node.range.start.row + 1;
+      const sourceWidth = node.range.end.column - node.range.start.column + 1;
+      const cells: Sheet['cells'][number][] = [];
+      const renderedRows: Sheet['rows'][number][] = [];
+      const merges: Sheet['merges'][number][] = [];
+      for (let rowIndex = 0; rowIndex < rowCopies; rowIndex += 1) {
+        for (let columnIndex = 0; columnIndex < columnCopies; columnIndex += 1) {
+          const itemIndex = rowIndex * columnCopies + columnIndex;
+          const fragment = renderHorizontalRange(
+            node.range,
+            node.children,
+            {
+              root: data,
+              item: matrix[rowIndex]?.[columnIndex],
+              parent: parentScope.item,
+              index: itemIndex,
+              first: itemIndex === 0,
+              last: itemIndex === rowCopies * columnCopies - 1,
+            },
+            destinationRow + rowIndex * sourceHeight,
+            destinationColumn + columnIndex * sourceWidth,
+          );
+          mappings.push({
+            bindingId: binding.id,
+            itemIndex,
+            source: binding.range,
+            generated: {
+              sheetId: binding.range.sheetId,
+              start: {
+                row: destinationRow + rowIndex * sourceHeight,
+                column: destinationColumn + columnIndex * sourceWidth,
+              },
+              end: {
+                row: destinationRow + rowIndex * sourceHeight + Math.max(0, fragment.height - 1),
+                column:
+                  destinationColumn + columnIndex * sourceWidth + Math.max(0, fragment.width - 1),
+              },
+            },
+          });
+          cells.push(...fragment.cells);
+          renderedRows.push(...fragment.rows);
+          merges.push(...fragment.merges);
+        }
+      }
+      return {
+        cells,
+        rows: renderedRows,
+        merges,
+        height: rowCopies * sourceHeight,
+        width: columnCopies * sourceWidth,
+      };
+    };
+
     const estimateNode = (
       node: TemplateRegionNode,
       parentScope: Scope,
@@ -572,6 +652,43 @@ function expandNestedRows(
         };
       }
       const bindingAxis = axis(node);
+      if (binding?.type === 'repeat-range' && bindingAxis === 'both') {
+        const resolved = evaluateTemplateExpression(binding.source, parentScope, formatters);
+        const rows = Array.isArray(resolved) ? resolved : [];
+        const matrix =
+          rows.length === 0 && binding.empty === 'keep-template-row'
+            ? [[undefined]]
+            : rows.map((row) => (Array.isArray(row) ? row : [row]));
+        const rowCopies = matrix.length;
+        const columnCopies = Math.max(0, ...matrix.map((row) => row.length));
+        const sourceCells = sourceSheet.cells.filter(
+          ({ row, column }) =>
+            row >= node.range.start.row &&
+            row <= node.range.end.row &&
+            column >= node.range.start.column &&
+            column <= node.range.end.column,
+        );
+        const sourceCoordinates = new Set(sourceCells.map(({ row, column }) => `${row}:${column}`));
+        const createdCells = valueBindings.filter(
+          ({ target }) =>
+            target.sheetId === sourceSheet.id &&
+            target.row >= node.range.start.row &&
+            target.row <= node.range.end.row &&
+            target.column >= node.range.start.column &&
+            target.column <= node.range.end.column &&
+            !sourceCoordinates.has(`${target.row}:${target.column}`),
+        ).length;
+        const cells = (sourceCells.length + createdCells) * rowCopies * columnCopies;
+        const result = {
+          rows: (node.range.end.row - node.range.start.row + 1) * rowCopies,
+          columns: (node.range.end.column - node.range.start.column + 1) * columnCopies,
+          cells,
+          exceeded:
+            totalRows + (node.range.end.row - node.range.start.row + 1) * rowCopies >
+              limits.maxExpandedRows || totalCells + cells > limits.maxExpandedCells,
+        };
+        return result;
+      }
       if (
         (bindingAxis !== 'vertical' && bindingAxis !== 'horizontal') ||
         (binding?.type !== 'repeat-rows' &&

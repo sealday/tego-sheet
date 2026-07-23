@@ -1318,6 +1318,128 @@ describe('TP2 advanced template structures', () => {
     );
   });
 
+  it('materializes a nested two-dimensional range in deterministic row-major order', () => {
+    const { document, template } = source([
+      {
+        id: 'outer-rows',
+        type: 'repeat-rows',
+        range: range(0, 2, 0, 2),
+        source: 'groups',
+        empty: 'remove',
+        pageBreak: 'auto',
+      },
+      {
+        id: 'matrix',
+        type: 'repeat-range',
+        range: range(1, 1, 1, 1),
+        source: 'item.matrix',
+        axis: 'both',
+        empty: 'remove',
+      },
+      {
+        id: 'matrix-value',
+        type: 'value',
+        target: { sheetId: 'sheet-1', row: 1, column: 1 },
+        expression: 'item',
+      },
+    ] as never);
+    const compiled = compileSpreadsheetTemplate(document, template.id, options).template!;
+    const expanded = expandAdvancedTemplate(
+      compiled,
+      {
+        groups: [
+          {
+            matrix: [
+              ['A', 'B'],
+              ['C', 'D'],
+            ],
+          },
+        ],
+      },
+      options.limits,
+    );
+
+    expect(expanded.diagnostics).toEqual([]);
+    expect(
+      expanded.document?.workbook.sheets[0]?.cells
+        .filter(({ cell }) => cell.input.type === 'string' && cell.input.value !== 'seed')
+        .map(({ row, column, cell }) => [
+          row,
+          column,
+          cell.input.type === 'string' ? cell.input.value : '',
+        ]),
+    ).toEqual([
+      [1, 1, 'A'],
+      [1, 2, 'B'],
+      [2, 1, 'C'],
+      [2, 2, 'D'],
+    ]);
+    expect(
+      expanded.structuralMappings
+        .filter(({ bindingId }) => bindingId === 'matrix')
+        .map(({ itemIndex, generated }) => [
+          itemIndex,
+          generated.start.row,
+          generated.start.column,
+        ]),
+    ).toEqual([
+      [0, 1, 1],
+      [1, 1, 2],
+      [2, 2, 1],
+      [3, 2, 2],
+    ]);
+  });
+
+  it('preflights nested two-dimensional cells before evaluating value formatters', () => {
+    const tick = vi.fn((value: unknown) => value);
+    const { document, template } = source([
+      {
+        id: 'outer-rows',
+        type: 'repeat-rows',
+        range: range(0, 2, 0, 2),
+        source: 'groups',
+        empty: 'remove',
+        pageBreak: 'auto',
+      },
+      {
+        id: 'matrix',
+        type: 'repeat-range',
+        range: range(1, 1, 1, 1),
+        source: 'item.matrix',
+        axis: 'both',
+        empty: 'remove',
+      },
+      {
+        id: 'matrix-value',
+        type: 'value',
+        target: { sheetId: 'sheet-1', row: 1, column: 1 },
+        expression: 'tick(item)',
+      },
+    ] as never);
+    const compiled = compileSpreadsheetTemplate(document, template.id, options).template!;
+    const expanded = expandAdvancedTemplate(
+      compiled,
+      {
+        groups: [
+          {
+            matrix: [
+              ['A', 'B'],
+              ['C', 'D'],
+            ],
+          },
+        ],
+      },
+      { ...options.limits, maxExpandedCells: 2 },
+      { tick },
+    );
+
+    expect(expanded.document).toBeUndefined();
+    expect(expanded.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'EXPANSION_LIMIT_EXCEEDED' }),
+    );
+    expect(tick).not.toHaveBeenCalled();
+  });
+
   it('counts value-created cells before cloning an empty advanced range', () => {
     const base = createSpreadsheetDocument({
       id: 'blank-allocation',
