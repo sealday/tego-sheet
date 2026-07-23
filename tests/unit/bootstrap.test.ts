@@ -27,6 +27,7 @@ it('imports the library entry without browser globals', async () => {
     'createPresentationCache',
     'createPresentationResolver',
     'createPrintDisplayList',
+    'validatePrintDisplayCommands',
     'TegoSheet',
   ]);
 });

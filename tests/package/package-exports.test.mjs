@@ -57,6 +57,7 @@ test('the built root has only the approved runtime exports and internal subpaths
         'resolveFormulaReferences',
         'serializeSpreadsheetDocument',
         'translateFormula',
+        'validatePrintDisplayCommands',
       ];
       if (JSON.stringify(Object.keys(root)) !== JSON.stringify(expected)) {
         throw new Error('Unexpected root exports: ' + Object.keys(root).join(','));

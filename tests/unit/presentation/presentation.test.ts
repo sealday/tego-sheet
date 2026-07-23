@@ -5,7 +5,10 @@ import {
   createPresentationResolver,
   type CellPresentation,
 } from '../../../src/presentation';
-import { createPrintDisplayList } from '../../../src/print/display-list';
+import {
+  createPrintDisplayList,
+  validatePrintDisplayCommands,
+} from '../../../src/print/display-list';
 import { createFormulaEngine } from '../../../src/formula';
 import { parseSpreadsheetDocument } from '../../../src/document';
 import { CanvasEngine, createSheetGridModel, createViewportMetrics } from '../../../src/engine';
@@ -67,8 +70,11 @@ function documentFixture() {
             },
           ],
           merges: [],
-          rows: [{ index: 1, hidden: true }],
-          columns: [],
+          rows: [
+            { index: 1, hidden: true },
+            { index: 2, styleId: 'row-style' },
+          ],
+          columns: [{ index: 0, styleId: 'column-style' }],
         },
       ],
       styles: [
@@ -84,6 +90,8 @@ function documentFixture() {
             horizontalAlign: 'right',
           },
         },
+        { id: 'row-style', value: { backgroundColor: '#eeeeff', bold: true } },
+        { id: 'column-style', value: { color: '#334455', italic: true } },
       ],
       validations: [{ id: 'required', value: { message: 'Required value' } }],
       settings: { dateSystem: 'excel-1900', localeHint: 'en-US' },
@@ -198,6 +206,12 @@ describe('shared cell presentation', () => {
       expect.objectContaining({
         value: { type: 'boolean', value: true },
         formattedText: 'Approved',
+        style: expect.objectContaining({
+          backgroundColor: '#eeeeff',
+          color: '#334455',
+          bold: true,
+          italic: true,
+        }),
         accessibility: expect.objectContaining({
           label: 'Approved: checked',
           role: 'checkbox',
@@ -227,9 +241,64 @@ describe('shared cell presentation', () => {
     expect(resolver.resolve({ sheetId: 'sheet-1' as never, row: 0, column: 0 })).not.toBe(first);
     expect(cache.stats().bytes).toBeLessThanOrEqual(16_384);
   });
+
+  it('includes actual presentation environment values in cache identity', () => {
+    const { document, cache, resolver } = resolverFixture();
+    const formulaEngine = createFormulaEngine();
+    const program = formulaEngine.compile(document);
+    const address = { sheetId: 'sheet-1' as never, row: 0, column: 0 };
+    const english = resolver.resolve(address);
+    const german = createPresentationResolver({
+      document,
+      formulaProgram: program,
+      cache,
+      revisions: {
+        document: 1,
+        calculation: 1,
+        condition: 0,
+        style: 1,
+        environment: 1,
+      },
+      environment: {
+        locale: 'de-DE',
+        timeZone: 'Europe/Berlin',
+        dateSystem: 'excel-1900',
+        target: 'print',
+      },
+    }).resolve(address);
+
+    expect(german).not.toBe(english);
+    expect(german.formattedText).toBe('$1.234,50');
+  });
 });
 
 describe('device-independent print display list', () => {
+  it('supports the full draw-command vocabulary and diagnoses unknown commands', () => {
+    const knownKinds = [
+      'fill-rect',
+      'stroke-rect',
+      'text',
+      'line',
+      'image',
+      'path',
+      'clip',
+      'link',
+    ];
+
+    expect(
+      validatePrintDisplayCommands([
+        ...knownKinds.map((kind) => ({ kind })),
+        { kind: 'script', source: 'alert(1)' },
+      ]),
+    ).toEqual([
+      expect.objectContaining({
+        code: 'DRAW_COMMAND_UNSUPPORTED',
+        severity: 'error',
+        details: { index: 8, kind: 'script' },
+      }),
+    ]);
+  });
+
   it('keeps Canvas and print text in parity by consuming the same presentation', () => {
     const { resolver } = resolverFixture();
     const harness = createCanvasHarness();
@@ -326,7 +395,45 @@ describe('device-independent print display list', () => {
     expect(JSON.stringify(first)).not.toMatch(/devicePixelRatio|scroll|selection|zoom/u);
   });
 
-  it('reports a stable missing-font diagnostic and uses injected fallback metrics', () => {
+  it('keeps non-printable cell geometry and style while suppressing its content', () => {
+    const presentation = resolverFixture().resolver.resolve({
+      sheetId: 'sheet-1' as never,
+      row: 0,
+      column: 0,
+    });
+    const list = createPrintDisplayList({
+      pages: [
+        {
+          width: 200,
+          height: 200,
+          cells: [
+            {
+              rect: { x: 1, y: 2, width: 100, height: 40 },
+              presentation: {
+                ...presentation,
+                style: { ...presentation.style, backgroundColor: '#ffeecc' },
+                visibility: { hidden: false, printable: false },
+              },
+            },
+          ],
+        },
+      ],
+      fontMetrics: createFontMetrics({
+        fonts: { Inter: { averageAdvance: 6, lineHeight: 14 } },
+        fallbackFont: 'Fallback',
+        fallback: { averageAdvance: 7, lineHeight: 15 },
+      }),
+    });
+
+    expect(list.pages[0]!.commands).toContainEqual({
+      kind: 'fill-rect',
+      rect: { x: 2, y: 3, width: 98, height: 38 },
+      color: '#ffeecc',
+    });
+    expect(list.pages[0]!.commands.some(({ kind }) => kind === 'text')).toBe(false);
+  });
+
+  it('fails text emission with a stable diagnostic when required font metrics are missing', () => {
     const presentation: CellPresentation = {
       address: { sheetId: 'sheet-1' as never, row: 0, column: 0 },
       value: { type: 'string', value: 'hello' },
@@ -364,13 +471,52 @@ describe('device-independent print display list', () => {
 
     expect(list.diagnostics).toEqual([
       expect.objectContaining({
-        code: 'PRESENTATION_FONT_MISSING',
-        severity: 'warning',
+        code: 'FONT_METRICS_UNAVAILABLE',
+        severity: 'error',
         details: { requestedFont: 'Missing', fallbackFont: 'Fallback' },
       }),
     ]);
-    expect(list.pages[0]!.commands).toContainEqual(
-      expect.objectContaining({ kind: 'text', fontFamily: 'Fallback' }),
-    );
+    expect(list.pages[0]!.commands.some(({ kind }) => kind === 'text')).toBe(false);
+  });
+
+  it('uses injected font metrics to produce deterministic wrapped text geometry', () => {
+    const presentation = resolverFixture().resolver.resolve({
+      sheetId: 'sheet-1' as never,
+      row: 0,
+      column: 0,
+    });
+    const list = createPrintDisplayList({
+      pages: [
+        {
+          width: 200,
+          height: 200,
+          cells: [
+            {
+              rect: { x: 0, y: 0, width: 30, height: 60 },
+              presentation: {
+                ...presentation,
+                formattedText: 'abcdefghij',
+                style: { ...presentation.style, fontSize: 10, wrap: true },
+              },
+            },
+          ],
+        },
+      ],
+      fontMetrics: createFontMetrics({
+        fonts: { Inter: { averageAdvance: 10, lineHeight: 12 } },
+        fallbackFont: 'Fallback',
+        fallback: { averageAdvance: 7, lineHeight: 15 },
+      }),
+    });
+
+    const lines = list.pages[0]!.commands.filter(({ kind }) => kind === 'text');
+    expect(lines).toHaveLength(5);
+    expect(lines.map((line) => (line.kind === 'text' ? line.text : ''))).toEqual([
+      'ab',
+      'cd',
+      'ef',
+      'gh',
+      'ij',
+    ]);
   });
 });

@@ -28,7 +28,7 @@ function presentation({ row, column }: { row: number; column: number }): CellPre
     },
     validation: invalid ? { status: 'error', message: 'Division by zero' } : { status: 'valid' },
     annotations: [],
-    visibility: { hidden: false, printable: true },
+    visibility: { hidden: row === 4 && column === 4, printable: true },
     accessibility: {
       label: invalid ? '#DIV/0!, Division by zero' : text,
       readOnly: false,
@@ -73,6 +73,7 @@ it('keeps one active gridcell, exposes error semantics and summarizes large sele
   const active = rendered.getByRole('gridcell', { name: '#DIV/0!, Division by zero' });
   expect(active.getAttribute('tabindex')).toBe('0');
   expect(active.getAttribute('aria-invalid')).toBe('true');
+  expect(rendered.queryByRole('gridcell', { name: 'R5C5' })).toBeNull();
   expect(
     [...rendered.container.querySelectorAll('[role="gridcell"]')].filter(
       (cell) => cell.getAttribute('tabindex') === '0',
@@ -149,6 +150,20 @@ it('mounts the bounded semantic grid beside the Canvas surface', async () => {
 
   await waitFor(() => expect(rendered.queryByRole('grid')).not.toBeNull());
   expect(rendered.container.querySelector('canvas')).not.toBeNull();
-  expect(rendered.getByRole('gridcell', { name: 'shared text' }).textContent).toBe('shared text');
+  const semanticCell = rendered.getByRole('gridcell', { name: 'shared text' });
+  expect(semanticCell.textContent).toBe('shared text');
+  expect(semanticCell.getAttribute('aria-readonly')).toBe('false');
   expect(rendered.container.querySelectorAll('[role="gridcell"]').length).toBeLessThan(500);
+
+  rendered.rerender(
+    <TegoSheet
+      defaultDocument={testDocument([{ rows: { 0: { cells: { 0: { text: 'shared text' } } } } }])}
+      readOnly
+    />,
+  );
+  await waitFor(() =>
+    expect(
+      rendered.getByRole('gridcell', { name: 'shared text' }).getAttribute('aria-readonly'),
+    ).toBe('true'),
+  );
 });

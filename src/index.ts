@@ -240,7 +240,7 @@ export type {
   ResolvedFontMetrics,
   ResolvedStyle,
 } from './presentation';
-export { createPrintDisplayList } from './print';
+export { createPrintDisplayList, validatePrintDisplayCommands } from './print';
 export type {
   DisplayRect,
   PrintDisplayCell,
@@ -249,7 +249,12 @@ export type {
   PrintDisplayListInput,
   PrintDisplayPage,
   PrintDisplayPageInput,
+  PrintClipCommand,
   PrintFillRectCommand,
+  PrintImageCommand,
+  PrintLineCommand,
+  PrintLinkCommand,
+  PrintPathCommand,
   PrintStrokeRectCommand,
   PrintTextCommand,
 } from './print';

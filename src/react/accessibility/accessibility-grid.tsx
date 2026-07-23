@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from 'react';
+import { useId, useLayoutEffect, useRef } from 'react';
 import type { CellPoint } from '../../document';
 import type { CellPresentation } from '../../presentation';
 
@@ -25,7 +25,10 @@ export interface AccessibilityGridProps {
   readonly activeCell: CellPoint;
   readonly selection: AccessibilitySelection;
   readonly resolvePresentation: (point: CellPoint) => CellPresentation;
+  readonly readOnly?: boolean;
   readonly editorOpen?: boolean;
+  readonly idPrefix?: string;
+  readonly restoreFocus?: boolean;
   readonly onActivate?: (point: CellPoint) => void;
   readonly onRequestEdit?: (point: CellPoint) => void;
 }
@@ -65,20 +68,25 @@ export function AccessibilityGrid({
   activeCell,
   selection,
   resolvePresentation,
+  readOnly = false,
   editorOpen = false,
+  idPrefix,
+  restoreFocus = true,
   onActivate,
   onRequestEdit,
 }: AccessibilityGridProps) {
   const activeReference = useRef<HTMLDivElement>(null);
   const previousEditorOpen = useRef(editorOpen);
   useLayoutEffect(() => {
-    if (previousEditorOpen.current && !editorOpen) activeReference.current?.focus();
+    if (restoreFocus && previousEditorOpen.current && !editorOpen) activeReference.current?.focus();
     previousEditorOpen.current = editorOpen;
-  }, [editorOpen]);
+  }, [editorOpen, restoreFocus]);
   const rows = bounds(rowCount, viewport.rowStart, viewport.rowEnd, overscan);
   const columns = bounds(columnCount, viewport.columnStart, viewport.columnEnd, overscan);
   const selectedCount = selectionSize(selection);
-  const selectionDescriptionId = 'tego-sheet-accessibility-selection';
+  const selectionDescriptionId = useId();
+  const generatedCellIdPrefix = useId();
+  const cellIdPrefix = idPrefix ?? generatedCellIdPrefix;
 
   return (
     <div
@@ -96,15 +104,25 @@ export function AccessibilityGrid({
           {columns.map((column) => {
             const point = { row, column };
             const presentation = resolvePresentation(point);
+            if (presentation.visibility.hidden) return null;
             const active = row === activeCell.row && column === activeCell.column;
             return (
               <div
+                id={`${cellIdPrefix}-r${row}-c${column}`}
                 role="gridcell"
                 aria-rowindex={row + 1}
                 aria-colindex={column + 1}
                 aria-label={presentation.accessibility.label}
-                aria-readonly={presentation.accessibility.readOnly}
+                aria-readonly={readOnly || presentation.accessibility.readOnly}
                 aria-invalid={presentation.accessibility.invalid || undefined}
+                aria-checked={
+                  presentation.accessibility.role === 'checkbox'
+                    ? presentation.accessibility.checked
+                    : undefined
+                }
+                aria-haspopup={
+                  presentation.accessibility.role === 'combobox' ? 'listbox' : undefined
+                }
                 aria-selected={selected(point, selection)}
                 key={column}
                 ref={active ? activeReference : undefined}

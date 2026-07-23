@@ -1,6 +1,7 @@
 import {
   forwardRef,
   useCallback,
+  useId,
   useLayoutEffect,
   useMemo,
   useReducer,
@@ -29,7 +30,7 @@ import { deletionSplitsMerge } from '../core/operations/structure';
 import { createEngineAdapterSlot, useCanvasEngine } from './hooks/use-canvas-engine';
 import { useControllerEpoch, type ControllerEpoch } from './hooks/use-controller-epoch';
 import { useInteractionManager } from './hooks/use-interaction-manager';
-import type { InteractionManager } from '../engine';
+import { createSelectionState, visibleCellRange, type InteractionManager } from '../engine';
 import { useSheetChromeState } from './hooks/use-sheet-chrome-state';
 import { useCellEditorRuntime, type ActiveCellEditor } from './hooks/use-cell-editor-runtime';
 import {
@@ -58,7 +59,7 @@ import {
   mountActiveSheetPrint,
 } from './sheet-chrome-runtime';
 import { AccessibilityGrid } from './accessibility/accessibility-grid';
-import { createLegacyPresentationResolver } from '../presentation';
+import { createPresentationCache, createPresentationResolver } from '../presentation';
 
 function callbacksFromProps(props: TegoSheetProps): TegoSheetCallbacks {
   return {
@@ -309,12 +310,22 @@ function toolbarCommand(runtime: SlotRuntime, action: ToolbarAction): WorkbookCo
     case 'set-style':
       return { type: 'set-style', selection, patch: action.patch };
     case 'set-border':
-      return { type: 'set-border', selection, mode: action.mode, line: action.line };
+      return {
+        type: 'set-border',
+        selection,
+        mode: action.mode,
+        line: action.line,
+      };
     case 'merge':
     case 'unmerge':
       return { type: action.type, selection };
     case 'freeze':
-      return { type: 'set-freeze', sheet, row: active.row, column: active.column };
+      return {
+        type: 'set-freeze',
+        sheet,
+        row: active.row,
+        column: active.column,
+      };
     case 'insert-row':
     case 'delete-row':
       return {
@@ -362,7 +373,12 @@ function toolbarCommand(runtime: SlotRuntime, action: ToolbarAction): WorkbookCo
       };
     }
     case 'sort':
-      return { type: 'sort', sheet, column: active.column, order: action.order };
+      return {
+        type: 'sort',
+        sheet,
+        column: active.column,
+        order: action.order,
+      };
   }
 }
 
@@ -375,7 +391,11 @@ function executeAction(
   const actionRuntime =
     selection === runtime.selection
       ? runtime
-      : { ...runtime, activeSheet: selection?.sheet ?? runtime.activeSheet, selection };
+      : {
+          ...runtime,
+          activeSheet: selection?.sheet ?? runtime.activeSheet,
+          selection,
+        };
   if (disabledToolbarActions(actionRuntime).has(action.type)) {
     uiError(
       runtime,
@@ -470,7 +490,11 @@ function activateSheetFromTabs(
     return;
   }
   authority.activate(sheet);
-  runtime.dispatcher.emitActiveSheetChange({ sheet, index, source: 'sheet-tabs' });
+  runtime.dispatcher.emitActiveSheetChange({
+    sheet,
+    index,
+    source: 'sheet-tabs',
+  });
 }
 
 function CommitAuthority(props: { readonly commit: () => void }) {
@@ -494,6 +518,12 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const interactionManagerRef = useRef<InteractionManager | null>(null);
   const [engineSlot] = useState(createEngineAdapterSlot);
+  const [accessibilityCache] = useState(() =>
+    createPresentationCache({
+      maximumEntries: 2_000,
+      maximumBytes: 2 * 1024 * 1024,
+    }),
+  );
   const [callbackStore] = useState(() => createCallbackStore(callbacksFromProps(props)));
   const initialOptions = props.mountOptions;
   const initialActiveSheetIndex = props.mountActiveSheetIndex ?? 0;
@@ -504,6 +534,10 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
     sheet: null as SheetId | null,
   }));
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [accessibilityViewportRevision, refreshAccessibilityViewport] = useReducer(
+    (value: number) => value + 1,
+    0,
+  );
   const controller = props.epoch.controller;
   const isActive = props.epoch.isActive;
   const requestSurfaceFocus = useCallback(() => {
@@ -647,7 +681,10 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
       props.epoch.store.refresh();
     }
     engineSlot.get()?.updateReadOnly(renderRuntime.readOnly);
-    runtimeAuthority.commit(renderToken, { ...renderRuntime, root: rootRef.current });
+    runtimeAuthority.commit(renderToken, {
+      ...renderRuntime,
+      root: rootRef.current,
+    });
   };
   const rootCallback = useCallback(
     (node: HTMLDivElement | null) => {
@@ -675,6 +712,10 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
     runtimeAuthority,
     setSelection,
   });
+  const handleViewportChange = useCallback(() => {
+    refreshEditorAnchor();
+    refreshAccessibilityViewport();
+  }, [refreshEditorAnchor]);
   const requestDelete = useCallback(
     (target: Selection, source: ChangeSource) => {
       if (!isActive()) return;
@@ -710,7 +751,12 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
           patch:
             format === 'underline'
               ? { underline: current.underline !== true }
-              : { font: { ...current.font, [format]: current.font?.[format] !== true } },
+              : {
+                  font: {
+                    ...current.font,
+                    [format]: current.font?.[format] !== true,
+                  },
+                },
         },
         'keyboard',
       );
@@ -747,7 +793,7 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
     showContextMenu: props.options?.showContextMenu,
     minimumColumnWidth: initialOptions.columns?.minimumWidth,
     onSelectionChange: setSelection,
-    onViewportChange: refreshEditorAnchor,
+    onViewportChange: handleViewportChange,
     commitEditor,
     requestCancelTransient: cancelTransient,
     requestContextMenu,
@@ -936,23 +982,58 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
   };
   const addFirstSheet = () => tabActions.add();
   const activeData = runtimeSheet(renderRuntime);
+  const activeDocumentSheet =
+    activeSheet === null
+      ? undefined
+      : props.epoch.snapshot.document.workbook.sheets.find(
+          ({ id }) => id === (activeSheet as string),
+        );
   const accessibilityPresentations = useMemo(
     () =>
-      activeData === null
+      activeDocumentSheet === undefined
         ? null
-        : createLegacyPresentationResolver(
-            activeData,
-            initialOptions.defaultStyle ?? {
-              bgcolor: '#ffffff',
-              color: '#0a0a0a',
-              align: 'left',
-              valign: 'middle',
-              textwrap: false,
-              font: { name: 'Arial', size: 10, bold: false, italic: false },
+        : createPresentationResolver({
+            document: props.epoch.snapshot.document,
+            formulaValues: new Map(
+              props.epoch.snapshot.calculation.values.map(({ address, value }) => [address, value]),
+            ),
+            cache: accessibilityCache,
+            revisions: {
+              document: props.epoch.snapshot.revision,
+              calculation: props.epoch.snapshot.calculation.revision,
+              condition: props.epoch.snapshot.revision,
+              style: props.epoch.snapshot.revision,
+              environment: props.epoch.snapshot.revision,
             },
-          ),
-    [activeData, initialOptions.defaultStyle],
+            environment: {
+              locale:
+                props.locale?.id ??
+                props.epoch.snapshot.document.workbook.settings.localeHint ??
+                'en-US',
+              timeZone: 'UTC',
+              dateSystem: props.epoch.snapshot.document.workbook.settings.dateSystem,
+              target: 'accessibility',
+            },
+          }),
+    [accessibilityCache, activeDocumentSheet, props.epoch.snapshot, props.locale?.id],
   );
+  const accessibilityViewport = (() => {
+    void accessibilityViewportRevision;
+    const viewport = engineSlot.get()?.interactionSnapshot()?.viewport;
+    const visible = viewport === undefined ? null : visibleCellRange(viewport);
+    if (visible !== null) return visible;
+    if (selection === null) return null;
+    return {
+      start: {
+        row: Math.max(0, selection.active.row - 9),
+        column: Math.max(0, selection.active.column - 4),
+      },
+      end: {
+        row: selection.active.row + 10,
+        column: selection.active.column + 5,
+      },
+    };
+  })();
   const activeStyle =
     selection === null || activeData === null
       ? (initialOptions.defaultStyle ?? {})
@@ -990,6 +1071,7 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
   const filterSelection = filterAuthority?.selection ?? selection;
   const filterValues = filterAuthority?.values ?? [];
   const t = createTranslator(props.locale);
+  const accessibilityIdPrefix = useId();
   return (
     <div
       ref={rootCallback}
@@ -999,6 +1081,11 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
       data-mode={props.epoch.mode}
       data-grid-visible={props.options?.showGrid === false ? 'false' : 'true'}
       data-context-menu-enabled={props.options?.showContextMenu === false ? 'false' : 'true'}
+      aria-activedescendant={
+        selection === null
+          ? undefined
+          : `${accessibilityIdPrefix}-r${selection.active.row}-c${selection.active.column}`
+      }
       tabIndex={0}
     >
       <CommitAuthority commit={commitRuntime} />
@@ -1085,6 +1172,8 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
             <canvas ref={canvasRef} className="tego-sheet__canvas" />
             {selection === null ||
             activeData === null ||
+            activeDocumentSheet === undefined ||
+            accessibilityViewport === null ||
             accessibilityPresentations === null ? null : (
               <div className="tego-sheet__accessibility-grid">
                 <AccessibilityGrid
@@ -1097,16 +1186,37 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
                     typeof activeData.cols?.len === 'number' ? activeData.cols.len : 0,
                   )}
                   viewport={{
-                    rowStart: Math.max(0, selection.active.row - 9),
-                    rowEnd: selection.active.row + 10,
-                    columnStart: Math.max(0, selection.active.column - 4),
-                    columnEnd: selection.active.column + 5,
+                    rowStart: accessibilityViewport.start.row,
+                    rowEnd: accessibilityViewport.end.row,
+                    columnStart: accessibilityViewport.start.column,
+                    columnEnd: accessibilityViewport.end.column,
                   }}
                   activeCell={selection.active}
                   selection={selection.range}
+                  editorOpen={editor !== null}
+                  idPrefix={accessibilityIdPrefix}
+                  readOnly={renderRuntime.readOnly || props.epoch.snapshot.readOnly}
+                  restoreFocus={false}
                   resolvePresentation={(point) =>
-                    accessibilityPresentations.resolve(point, 'screen')
+                    accessibilityPresentations.resolve({
+                      sheetId: activeDocumentSheet.id,
+                      ...point,
+                    })
                   }
+                  onActivate={(point) => {
+                    if (activeSheet === null) return;
+                    const state = createSelectionState(point);
+                    const target = {
+                      sheet: activeSheet,
+                      range: state.range,
+                      active: state.active,
+                    };
+                    engineSlot.get()?.stageSelection(state);
+                    setSelection(target);
+                    dispatcher.emitSelectionChange(target);
+                    engineSlot.get()?.render(controller.getSnapshot(), activeSheet);
+                  }}
+                  onRequestEdit={(point) => requestEdit(point, undefined, 'pointer')}
                 />
               </div>
             )}

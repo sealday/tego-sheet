@@ -54,3 +54,14 @@ it('[ARCH-F4] prevents Canvas and print renderers from owning formula formatting
     );
   }
 });
+
+it('[ARCH-F4] wires production Canvas and print adapters through shared presentation artifacts', () => {
+  const engineAdapter = readFileSync(resolve(root, 'src/react/adapters/engine-adapter.ts'), 'utf8');
+  const printAdapter = readFileSync(resolve(root, 'src/react/sheet-chrome-runtime.ts'), 'utf8');
+
+  expect(engineAdapter).toContain('createPresentationResolver');
+  expect(engineAdapter).toContain('presentations:');
+  expect(printAdapter).toContain('createPrintDisplayList');
+  expect(printAdapter).toContain('mountPrintDisplayPages');
+  expect(printAdapter).not.toContain('mountPrintPages');
+});

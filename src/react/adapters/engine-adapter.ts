@@ -7,6 +7,7 @@ import {
   type SheetOptions,
 } from '../../core';
 import type { SpreadsheetControllerSnapshot } from '../../core/controller/spreadsheet-document-controller';
+import type { DocumentSheetId } from '../../document';
 import {
   CanvasEngine,
   clampScroll,
@@ -24,6 +25,7 @@ import {
   type SelectionState,
   type ViewportMetrics,
 } from '../../engine';
+import { createPresentationCache, createPresentationResolver } from '../../presentation';
 
 export interface EngineAdapterOptions {
   readonly root: HTMLElement;
@@ -108,6 +110,10 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
   let disposed = false;
   let liveReadOnly: boolean | null = null;
   let showGrid = options.showGrid;
+  const presentationCache = createPresentationCache({
+    maximumEntries: 10_000,
+    maximumBytes: 8 * 1024 * 1024,
+  });
 
   const activeIndex = (): number => {
     if (latestSnapshot === null || activeSheet === null) return -1;
@@ -124,10 +130,40 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
       return;
     const index = activeIndex();
     const sheet = index < 0 ? undefined : latestSnapshot.projection[index];
-    if (sheet === undefined) return;
+    const documentSheet = index < 0 ? undefined : latestSnapshot.document.workbook.sheets[index];
+    if (sheet === undefined || documentSheet === undefined) return;
+    const resolver = createPresentationResolver({
+      document: latestSnapshot.document,
+      formulaValues: new Map(
+        latestSnapshot.calculation.values.map(({ address, value }) => [address, value]),
+      ),
+      cache: presentationCache,
+      revisions: {
+        document: latestSnapshot.revision,
+        calculation: latestSnapshot.calculation.revision,
+        condition: latestSnapshot.revision,
+        style: latestSnapshot.revision,
+        environment: latestSnapshot.revision,
+      },
+      environment: {
+        locale:
+          options.locale?.id ?? latestSnapshot.document.workbook.settings.localeHint ?? 'en-US',
+        timeZone: 'UTC',
+        dateSystem: latestSnapshot.document.workbook.settings.dateSystem,
+        target: 'screen',
+      },
+    });
     const renderSnapshot: CanvasRenderSnapshot = {
       sheet,
       viewport,
+      presentations: {
+        resolve: ({ row, column }) =>
+          resolver.resolve({
+            sheetId: documentSheet.id as DocumentSheetId,
+            row,
+            column,
+          }),
+      },
       ...(selection === null ? {} : { selection: selection.range }),
       showGrid,
     };
@@ -343,6 +379,7 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
       failedSnapshot = null;
       viewport = null;
       selection = null;
+      presentationCache.clear();
       engine.dispose();
     },
   };

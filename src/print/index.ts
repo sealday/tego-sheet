@@ -6,8 +6,13 @@ export type {
   PrintDisplayListInput,
   PrintDisplayPage,
   PrintDisplayPageInput,
+  PrintClipCommand,
   PrintFillRectCommand,
+  PrintImageCommand,
+  PrintLineCommand,
+  PrintLinkCommand,
+  PrintPathCommand,
   PrintStrokeRectCommand,
   PrintTextCommand,
 } from './display-list';
-export { createPrintDisplayList } from './display-list';
+export { createPrintDisplayList, validatePrintDisplayCommands } from './display-list';

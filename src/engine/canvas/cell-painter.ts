@@ -353,7 +353,8 @@ export function paintCells(
     const rect = cellRect(point, snapshot.viewport);
     const presentation = presentations.resolve(point, 'screen');
     paintCellAppearance(draw, rect, presentation, 1, () => {
-      if (invalid.has(`${point.row}:${point.column}`)) marker(draw, rect, 'rgba(255, 0, 0, .65)');
+      if (invalid.has(`${point.row}:${point.column}`) || presentation.accessibility.invalid)
+        marker(draw, rect, 'rgba(255, 0, 0, .65)');
       if (presentation.accessibility.readOnly) marker(draw, rect, 'rgba(0, 255, 0, .85)');
     });
   }

@@ -71,6 +71,8 @@ export interface PrintLayoutOptions {
   readonly padding?: number;
   readonly invalidCells?: readonly CellPoint[];
   readonly defaultStyle?: CellStyle;
+  /** Shared presentation batch supplied by production document adapters. */
+  readonly presentations?: LegacyPresentationResolver;
 }
 
 export interface PrintPaper {
@@ -314,7 +316,8 @@ export function createPrintLayout(
     (options.invalidCells ?? []).map((point) => `${point.row}:${point.column}`),
   );
   const defaultStyle = configuredCellDefaultStyle(options.defaultStyle);
-  const presentations = createLegacyPresentationResolver(sheet, defaultStyle);
+  const presentations =
+    options.presentations ?? createLegacyPresentationResolver(sheet, defaultStyle);
   const pages = rows.map((range, index) =>
     Object.freeze({
       index,

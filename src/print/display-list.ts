@@ -15,7 +15,15 @@ export interface DisplayRect {
 }
 
 /** Immutable rendering operation understood by output adapters. */
-export type PrintDisplayCommand = PrintFillRectCommand | PrintStrokeRectCommand | PrintTextCommand;
+export type PrintDisplayCommand =
+  | PrintFillRectCommand
+  | PrintStrokeRectCommand
+  | PrintTextCommand
+  | PrintLineCommand
+  | PrintImageCommand
+  | PrintPathCommand
+  | PrintClipCommand
+  | PrintLinkCommand;
 
 /** Filled rectangular display-list operation. */
 export interface PrintFillRectCommand {
@@ -59,6 +67,72 @@ export interface PrintTextCommand {
   readonly color: string;
   /** Horizontal alignment around the anchor. */
   readonly horizontalAlign: ResolvedStyle['horizontalAlign'];
+}
+
+/** Device-independent line segment. */
+export interface PrintLineCommand {
+  /** Stable operation discriminator. */
+  readonly kind: 'line';
+  /** Starting horizontal coordinate. */
+  readonly x1: number;
+  /** Starting vertical coordinate. */
+  readonly y1: number;
+  /** Ending horizontal coordinate. */
+  readonly x2: number;
+  /** Ending vertical coordinate. */
+  readonly y2: number;
+  /** Stroke color. */
+  readonly color: string;
+  /** Stroke width. */
+  readonly width: number;
+}
+
+/** Positioned immutable image resource reference. */
+export interface PrintImageCommand {
+  /** Stable operation discriminator. */
+  readonly kind: 'image';
+  /** Stable document resource identifier. */
+  readonly resourceId: string;
+  /** Image destination rectangle. */
+  readonly rect: DisplayRect;
+  /** Deterministic image fitting policy. */
+  readonly fit: 'contain' | 'cover' | 'fill';
+}
+
+/** Device-independent vector path operation. */
+export interface PrintPathCommand {
+  /** Stable operation discriminator. */
+  readonly kind: 'path';
+  /** SVG-compatible path data. */
+  readonly data: string;
+  /** Optional fill color. */
+  readonly fill?: string;
+  /** Optional stroke color. */
+  readonly stroke?: string;
+  /** Optional stroke width. */
+  readonly width?: number;
+}
+
+/** Nested clipping operation with structurally balanced commands. */
+export interface PrintClipCommand {
+  /** Stable operation discriminator. */
+  readonly kind: 'clip';
+  /** Clipping rectangle. */
+  readonly rect: DisplayRect;
+  /** Commands evaluated inside the clip. */
+  readonly commands: readonly PrintDisplayCommand[];
+}
+
+/** Accessible link region in generated output. */
+export interface PrintLinkCommand {
+  /** Stable operation discriminator. */
+  readonly kind: 'link';
+  /** Link hit rectangle. */
+  readonly rect: DisplayRect;
+  /** Explicit destination URI. */
+  readonly href: string;
+  /** Accessible link label. */
+  readonly label: string;
 }
 
 /** One immutable page in a print display list. */
@@ -112,10 +186,87 @@ function finiteNonNegative(value: number, name: string): void {
 }
 
 function freezeCommand(command: PrintDisplayCommand): PrintDisplayCommand {
+  if (command.kind === 'clip') {
+    return Object.freeze({
+      ...command,
+      rect: Object.freeze({ ...command.rect }),
+      commands: Object.freeze(command.commands.map(freezeCommand)),
+    });
+  }
   return Object.freeze({
     ...command,
-    ...(command.kind === 'text' ? {} : { rect: Object.freeze({ ...command.rect }) }),
+    ...('rect' in command ? { rect: Object.freeze({ ...command.rect }) } : {}),
   });
+}
+
+const DRAW_COMMAND_KINDS = new Set([
+  'fill-rect',
+  'stroke-rect',
+  'text',
+  'line',
+  'image',
+  'path',
+  'clip',
+  'link',
+]);
+
+/** Diagnoses unsupported commands before an output adapter consumes a display list. */
+export function validatePrintDisplayCommands(commands: readonly unknown[]): readonly Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  const visit = (command: unknown, index: number): void => {
+    if (command === null || typeof command !== 'object' || Array.isArray(command)) {
+      diagnostics.push({
+        code: 'DRAW_COMMAND_UNSUPPORTED',
+        severity: 'error',
+        domain: 'output',
+        stage: 'validate',
+        message: `Draw command ${index} is not an object`,
+      });
+      return;
+    }
+    const candidate = command as Readonly<Record<string, unknown>>;
+    if (typeof candidate.kind !== 'string' || !DRAW_COMMAND_KINDS.has(candidate.kind)) {
+      diagnostics.push({
+        code: 'DRAW_COMMAND_UNSUPPORTED',
+        severity: 'error',
+        domain: 'output',
+        stage: 'validate',
+        message: `Draw command ${index} has unsupported kind ${String(candidate.kind)}`,
+        details: { index, kind: String(candidate.kind) },
+      });
+      return;
+    }
+    if (candidate.kind === 'clip' && Array.isArray(candidate.commands)) {
+      candidate.commands.forEach(visit);
+    }
+  };
+  commands.forEach(visit);
+  return Object.freeze(diagnostics.map((diagnostic) => Object.freeze(diagnostic)));
+}
+
+function wrapText(
+  text: string,
+  maximumWidth: number,
+  fontFamily: string,
+  fontSize: number,
+  metrics: FontMetrics,
+): readonly string[] {
+  if (text === '') return [];
+  const lines: string[] = [];
+  for (const sourceLine of text.split('\n')) {
+    let line = '';
+    for (const character of sourceLine) {
+      const candidate = `${line}${character}`;
+      if (line !== '' && metrics.measure(candidate, fontFamily, fontSize) > maximumWidth) {
+        lines.push(line);
+        line = character;
+      } else {
+        line = candidate;
+      }
+    }
+    lines.push(line);
+  }
+  return lines;
 }
 
 /** Builds output commands using presentation text and injected font metrics only. */
@@ -129,29 +280,58 @@ export function createPrintDisplayList(input: PrintDisplayListInput): PrintDispl
     for (const { rect, presentation } of page.cells) {
       finiteNonNegative(rect.width, 'cell width');
       finiteNonNegative(rect.height, 'cell height');
-      if (presentation.visibility.hidden || !presentation.visibility.printable) continue;
+      if (presentation.visibility.hidden) continue;
       commands.push({
         kind: 'fill-rect',
-        rect,
+        rect: {
+          x: rect.x + 1,
+          y: rect.y + 1,
+          width: Math.max(0, rect.width - 2),
+          height: Math.max(0, rect.height - 2),
+        },
         color: presentation.style.backgroundColor,
       });
       commands.push({ kind: 'stroke-rect', rect, color: '#d0d0d0', width: 1 });
+      if (!presentation.visibility.printable) continue;
+      if (presentation.accessibility.invalid) {
+        diagnostics.push({
+          code: 'PRESENTATION_CELL_INVALID',
+          severity: 'error',
+          domain: 'layout',
+          stage: 'render',
+          message: presentation.accessibility.description ?? 'Cell presentation is invalid',
+          location: { cell: presentation.address },
+        });
+      }
+      for (const annotation of presentation.annotations) {
+        diagnostics.push({
+          code: 'PRESENTATION_ANNOTATION',
+          severity: 'info',
+          domain: 'output',
+          stage: 'render',
+          message: annotation.text,
+          location: { cell: presentation.address },
+          details: { kind: annotation.kind },
+        });
+      }
+      if (presentation.diagnostics !== undefined) diagnostics.push(...presentation.diagnostics);
       if (presentation.formattedText === '') continue;
       const font = input.fontMetrics.resolve(presentation.style.fontFamily);
       if (font.missing && !missingFonts.has(presentation.style.fontFamily)) {
         missingFonts.add(presentation.style.fontFamily);
         diagnostics.push({
-          code: 'PRESENTATION_FONT_MISSING',
-          severity: 'warning',
+          code: 'FONT_METRICS_UNAVAILABLE',
+          severity: 'error',
           domain: 'layout',
           stage: 'resolve',
-          message: `Font ${presentation.style.fontFamily} is unavailable; using ${font.fontFamily}`,
+          message: `Font ${presentation.style.fontFamily} is unavailable`,
           details: {
             requestedFont: presentation.style.fontFamily,
             fallbackFont: font.fontFamily,
           },
         });
       }
+      if (font.missing) continue;
       const padding = Math.min(5, rect.width / 2);
       const x =
         presentation.style.horizontalAlign === 'right'
@@ -159,17 +339,31 @@ export function createPrintDisplayList(input: PrintDisplayListInput): PrintDispl
           : presentation.style.horizontalAlign === 'center'
             ? rect.x + rect.width / 2
             : rect.x + padding;
-      commands.push({
-        kind: 'text',
-        text: presentation.formattedText,
-        x,
-        y: rect.y + rect.height / 2,
-        maxWidth: Math.max(0, rect.width - padding * 2),
-        fontFamily: font.fontFamily,
-        fontSize: presentation.style.fontSize,
-        color: presentation.style.color,
-        horizontalAlign: presentation.style.horizontalAlign,
-      });
+      const maximumWidth = Math.max(0, rect.width - padding * 2);
+      const lines = presentation.style.wrap
+        ? wrapText(
+            presentation.formattedText,
+            maximumWidth,
+            font.fontFamily,
+            presentation.style.fontSize,
+            input.fontMetrics,
+          )
+        : presentation.formattedText.split('\n');
+      const lineHeight = font.lineHeight * (presentation.style.fontSize / 10);
+      const firstY = rect.y + rect.height / 2 - ((lines.length - 1) * lineHeight) / 2;
+      for (const [lineIndex, text] of lines.entries()) {
+        commands.push({
+          kind: 'text',
+          text,
+          x,
+          y: firstY + lineIndex * lineHeight,
+          maxWidth: maximumWidth,
+          fontFamily: font.fontFamily,
+          fontSize: presentation.style.fontSize,
+          color: presentation.style.color,
+          horizontalAlign: presentation.style.horizontalAlign,
+        });
+      }
     }
     return Object.freeze({
       index,

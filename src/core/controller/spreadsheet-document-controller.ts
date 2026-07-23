@@ -55,6 +55,16 @@ export interface SpreadsheetControllerSnapshot extends Omit<ControllerSnapshot, 
   readonly ['document']: SpreadsheetDocument;
   /** Read-only projection consumed only by the current engine boundary. */
   readonly projection: ControllerSnapshot['value'];
+  /** JSON-safe typed formula values for read-only presentation adapters. */
+  readonly calculation: {
+    /** Formula calculation revision matching this snapshot. */
+    readonly revision: number;
+    /** Stable address/value entries without exposing mutable Map state. */
+    readonly values: readonly {
+      readonly address: string;
+      readonly value: FormulaValue;
+    }[];
+  };
 }
 
 export interface SpreadsheetControllerEvent {
@@ -480,6 +490,12 @@ export class SpreadsheetDocumentController {
     return cloneFrozenDocumentValue({
       ...metadata,
       ['document']: this.currentDocument,
+      calculation: {
+        revision: snapshot.revision,
+        values: [...this.formulaValues]
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([address, value]) => ({ address, value })),
+      },
       projection,
     });
   }

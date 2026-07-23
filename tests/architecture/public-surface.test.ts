@@ -114,6 +114,7 @@ it('[ARCH-1] exposes only the approved React and Workbook 2.0 runtime API', () =
     'resolveFormulaReferences',
     'serializeSpreadsheetDocument',
     'translateFormula',
+    'validatePrintDisplayCommands',
   ]);
 
   const source = readFileSync(resolve(root, 'src/index.ts'), 'utf8');

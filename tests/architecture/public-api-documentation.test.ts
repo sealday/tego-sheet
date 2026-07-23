@@ -141,6 +141,7 @@ const expectedPublicExports = [
   'PresentationRevisions',
   'PresentationValid',
   'PresentationValidation',
+  'PrintClipCommand',
   'PrintDisplayCell',
   'PrintDisplayCommand',
   'PrintDisplayList',
@@ -148,7 +149,11 @@ const expectedPublicExports = [
   'PrintDisplayPage',
   'PrintDisplayPageInput',
   'PrintFillRectCommand',
+  'PrintImageCommand',
+  'PrintLineCommand',
+  'PrintLinkCommand',
   'PrintMargins',
+  'PrintPathCommand',
   'PrintProfile',
   'PrintStrokeRectCommand',
   'PrintTextCommand',
@@ -241,6 +246,7 @@ const expectedPublicExports = [
   'resolveFormulaReferences',
   'serializeSpreadsheetDocument',
   'translateFormula',
+  'validatePrintDisplayCommands',
 ] as const;
 
 const structuredAliases = {

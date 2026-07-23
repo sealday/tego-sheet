@@ -63,7 +63,9 @@ export interface PresentationResolverOptions {
   /** Immutable Workbook 2.0 source snapshot. */
   readonly document: SpreadsheetDocument;
   /** Typed F3 formula program for the same document snapshot. */
-  readonly formulaProgram: FormulaProgram;
+  readonly formulaProgram?: FormulaProgram;
+  /** Typed F3 values supplied by a read-only controller snapshot adapter. */
+  readonly formulaValues?: ReadonlyMap<string, FormulaValue>;
   /** Explicit deterministic presentation environment. */
   readonly environment: PresentationEnvironment;
   /** Revisions included in every cache key. */
@@ -100,14 +102,55 @@ function number(value: Readonly<Record<string, JsonValue>>, key: string): number
   return typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : undefined;
 }
 
-function style(options: PresentationResolverOptions, cell: Cell | undefined): ResolvedStyle {
-  const styleEntry = options.document.workbook.styles.find(({ id }) => id === cell?.styleId);
-  const value = record(styleEntry?.value);
+function borders(value: Readonly<Record<string, JsonValue>>): ResolvedStyle['border'] | undefined {
+  const source = record(value.border);
+  const output: Partial<
+    Record<'top' | 'right' | 'bottom' | 'left', readonly [style: string, color?: string]>
+  > = {};
+  for (const side of ['top', 'right', 'bottom', 'left'] as const) {
+    const line = source[side];
+    if (!Array.isArray(line) || typeof line[0] !== 'string') continue;
+    output[side] = typeof line[1] === 'string' ? [line[0], line[1]] : [line[0]];
+  }
+  return Object.keys(output).length === 0 ? undefined : output;
+}
+
+function mergedStyleValue(
+  options: PresentationResolverOptions,
+  address: DocumentCellAddress,
+  cell: Cell | undefined,
+): Readonly<Record<string, JsonValue>> {
+  const sheet = options.document.workbook.sheets.find(({ id }) => id === address.sheetId);
+  const ids = [
+    sheet?.columns.find(({ index }) => index === address.column)?.styleId,
+    sheet?.rows.find(({ index }) => index === address.row)?.styleId,
+    cell?.styleId,
+  ];
+  let output: Record<string, JsonValue> = {};
+  for (const id of ids) {
+    const next = record(options.document.workbook.styles.find((entry) => entry.id === id)?.value);
+    output = {
+      ...output,
+      ...next,
+      font: { ...record(output.font), ...record(next.font) },
+      border: { ...record(output.border), ...record(next.border) },
+    };
+  }
+  return output;
+}
+
+function style(
+  options: PresentationResolverOptions,
+  address: DocumentCellAddress,
+  cell: Cell | undefined,
+): ResolvedStyle {
+  const value = mergedStyleValue(options, address, cell);
   const font = record(value.font);
   const fontSize = number(value, 'fontSize') ?? number(font, 'size') ?? DEFAULT_STYLE.fontSize;
   const horizontalAlign = string(value, 'horizontalAlign', 'align');
   const verticalAlign = string(value, 'verticalAlign', 'valign');
   const numberFormat = string(value, 'numberFormat', 'format');
+  const border = borders(value);
   return Object.freeze({
     color: string(value, 'color', 'color') ?? DEFAULT_STYLE.color,
     backgroundColor: string(value, 'backgroundColor', 'bgcolor') ?? DEFAULT_STYLE.backgroundColor,
@@ -124,6 +167,7 @@ function style(options: PresentationResolverOptions, cell: Cell | undefined): Re
       ? {}
       : { underline: boolean(value, 'underline') }),
     ...(boolean(value, 'strike') === undefined ? {} : { strike: boolean(value, 'strike') }),
+    ...(border === undefined ? {} : { border }),
   });
 }
 
@@ -212,8 +256,12 @@ function freezePresentation(value: CellPresentation): CellPresentation {
   });
 }
 
-function addressKey(address: DocumentCellAddress, revisions: PresentationRevisions): string {
-  return [
+function addressKey(
+  address: DocumentCellAddress,
+  revisions: PresentationRevisions,
+  environment: PresentationEnvironment,
+): string {
+  return JSON.stringify([
     address.sheetId,
     address.row,
     address.column,
@@ -222,7 +270,11 @@ function addressKey(address: DocumentCellAddress, revisions: PresentationRevisio
     revisions.condition,
     revisions.style,
     revisions.environment,
-  ].join(':');
+    environment.locale,
+    environment.timeZone,
+    environment.dateSystem,
+    environment.target,
+  ]);
 }
 
 function cellAt(
@@ -243,15 +295,16 @@ export function createPresentationResolver(
   const formatter = createNumberFormatter();
   const resolver: PresentationResolver = {
     resolve(address: DocumentCellAddress) {
-      const key = addressKey(address, options.revisions);
+      const key = addressKey(address, options.revisions, options.environment);
       const cached = options.cache.get(key);
       if (cached !== undefined) return cached;
       const sheet = options.document.workbook.sheets.find(({ id }) => id === address.sheetId);
       if (sheet === undefined) throw new RangeError(`Unknown sheet: ${address.sheetId}`);
       const cell = cellAt(options.document, address.sheetId, address.row, address.column);
-      const resolvedStyle = style(options, cell);
+      const resolvedStyle = style(options, address, cell);
       const formulaKey = formulaAddressKey(address);
-      const formulaValue = options.formulaProgram.values.get(formulaKey);
+      const formulaValue =
+        options.formulaValues?.get(formulaKey) ?? options.formulaProgram?.values.get(formulaKey);
       const custom = customPresentation(cell, options.environment);
       const value =
         custom?.value ??
