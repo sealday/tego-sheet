@@ -1,12 +1,19 @@
 export type {
+  ValidationComparison,
+  ValidationComparisonOperator,
   ValidationListSource,
+  ValidationRangeComparison,
   ValidationRequest,
   ValidationResult,
   ValidationRule,
+  ValidationRuleBase,
+  ValidationScalarComparison,
 } from './model';
 export type {
   ValidationEngineOptions,
   ValidationEngine,
+  ValidationFormulaContext,
+  ValidationFormulaEvaluator,
   ValidationResolver,
   ValidationResolverContext,
   ValidationResolverRegistry,
