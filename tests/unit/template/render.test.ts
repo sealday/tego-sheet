@@ -123,6 +123,56 @@ const environment = {
 };
 
 describe('template render pipeline', () => {
+  it('renders persistent floating text objects through the shared display list', async () => {
+    const objectSource = {
+      ...source,
+      workbook: {
+        ...source.workbook,
+        sheets: [
+          {
+            ...source.workbook.sheets[0]!,
+            objects: [
+              {
+                id: 'notice',
+                kind: 'text-box',
+                anchor: {
+                  type: 'absolute',
+                  rect: { x: 20, y: 30, width: 80, height: 24 },
+                },
+                zIndex: 1,
+                locked: false,
+                templateRepeat: 'shared',
+                text: 'Persistent notice',
+                style: { color: '#123456', fontFamily: 'Arial', fontSize: 11 },
+                accessibility: { name: 'Persistent notice' },
+              },
+            ],
+          },
+        ],
+      },
+    } as unknown as SpreadsheetDocument;
+    const compiled = compileSpreadsheetTemplate(objectSource, template).template!;
+    const result = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: { customer: { name: 'A' }, items: [{}], showNote: false },
+        profileId: 'profile-1',
+        missingValue: 'error',
+      },
+      environment,
+    );
+
+    expect(result.diagnostics.filter(({ severity }) => severity === 'error')).toEqual([]);
+    expect(result.document?.print.displayList.pages[0]?.commands).toContainEqual(
+      expect.objectContaining({
+        kind: 'text',
+        text: 'Persistent notice',
+        color: '#123456',
+      }),
+    );
+  });
+
   it('rejects stale compiled sources without partial output', async () => {
     const compiled = compileSpreadsheetTemplate(source, template).template!;
     const result = await renderSpreadsheetTemplate(

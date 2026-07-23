@@ -171,6 +171,96 @@ describe('resource/render atomic boundary', () => {
     await result.document?.resources.dispose();
   });
 
+  it('maps a persistent image object into print and XLSX structural output', async () => {
+    const objectSource = {
+      ...source,
+      workbook: {
+        ...source.workbook,
+        sheets: [
+          {
+            ...source.workbook.sheets[0]!,
+            objects: [
+              {
+                id: 'persistent-logo',
+                kind: 'image',
+                resourceId: 'logo',
+                anchor: {
+                  type: 'two-cell',
+                  from: {
+                    sheetId: 'sheet-1',
+                    row: 0,
+                    column: 0,
+                    offset: { x: 0, y: 0 },
+                  },
+                  to: {
+                    sheetId: 'sheet-1',
+                    row: 1,
+                    column: 1,
+                    offset: { x: 0, y: 0 },
+                  },
+                },
+                zIndex: 1,
+                locked: false,
+                templateRepeat: 'shared',
+                fit: 'contain',
+                accessibility: { name: 'Logo' },
+              },
+            ],
+          },
+        ],
+      },
+      resources: {
+        items: [{ id: 'logo', kind: 'image', mimeType: 'image/png', byteLength: 45 }],
+      },
+    } as unknown as SpreadsheetDocument;
+    const compiled = compileSpreadsheetTemplate(objectSource, template).template!;
+    const result = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: {},
+        profileId: 'profile',
+        missingValue: 'error',
+        resourceRefs: [
+          {
+            id: 'logo',
+            type: 'image',
+            resolverId: 'app',
+            key: 'logo',
+            expectedMime: 'image/png',
+          },
+        ],
+      },
+      {
+        ...environment,
+        resourceRegistry: createResourceResolverRegistry([
+          {
+            id: 'app',
+            supports: () => true,
+            resolve: async () => ({ bytes: png(), mimeType: 'image/png' }),
+          },
+        ]),
+      },
+    );
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.document?.print.displayList.pages[0]?.commands).toContainEqual(
+      expect.objectContaining({ kind: 'image', resourceId: 'logo' }),
+    );
+    expect(result.document?.objects).toContainEqual(
+      expect.objectContaining({
+        objectId: 'persistent-logo',
+        resourceId: 'logo',
+        generated: {
+          sheetId: 'sheet-1',
+          start: { row: 0, column: 0 },
+          end: { row: 1, column: 1 },
+        },
+      }),
+    );
+    await result.document?.resources.dispose();
+  });
+
   it('releases ready resources when a later render stage fails', async () => {
     const dispose = vi.fn();
     const failing = {

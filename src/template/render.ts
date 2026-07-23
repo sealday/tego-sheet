@@ -42,6 +42,7 @@ import type {
   TemplatePrintProfile,
   TemplateResourceBinding,
 } from './model';
+import { objectToDisplayCommands, resolveObjectAnchor } from '../objects';
 
 const DEFAULT_LIMITS: RenderLimits = Object.freeze({
   maxExpandedCells: 250_000,
@@ -385,6 +386,7 @@ function displayPages(
   insertions: ReadonlyMap<string, readonly RowInsertion[]>,
   structuralMappings: readonly StructuralMapping[],
   resourceBindings: readonly TemplateResourceBinding[],
+  resources: ResolvedResourceStore,
   data: unknown,
   date: Date,
 ): readonly PrintDisplayPageInput[] {
@@ -577,15 +579,104 @@ function displayPages(
         },
       ];
     });
+    const rowOffset = (row: number): number =>
+      Array.from({ length: row }, (_, index) => rowHeight(target.sheet, index)).reduce(
+        (sum, value) => sum + value,
+        0,
+      );
+    const columnOffset = (column: number): number =>
+      Array.from({ length: column }, (_, index) => columnWidth(target.sheet, index)).reduce(
+        (sum, value) => sum + value,
+        0,
+      );
+    const bodyOriginX = columnOffset(startColumn);
+    const bodyOriginY = rowOffset(startRow);
+    const objectOverlays = [...(target.sheet.objects ?? [])]
+      .sort((left, right) => left.zIndex - right.zIndex || left.id.localeCompare(right.id))
+      .flatMap((object): readonly PrintDisplayCommand[] => {
+        const rect = resolveObjectAnchor(object.anchor, { rowOffset, columnOffset });
+        const bodyRight = columnOffset(endColumn + 1);
+        const bodyBottom = rowOffset(endRow + 1);
+        if (
+          rect.x + rect.width <= bodyOriginX ||
+          rect.y + rect.height <= bodyOriginY ||
+          rect.x >= bodyRight ||
+          rect.y >= bodyBottom
+        ) {
+          return [];
+        }
+        return objectToDisplayCommands(object, {
+          geometry: { rowOffset, columnOffset },
+          resources: resources.byReference,
+        }).map((command) => {
+          const x =
+            profile.page.margins.left +
+            headingSize +
+            ((command.kind === 'image' ? command.rect.x : command.x) - bodyOriginX) * page.scale;
+          const y =
+            profile.page.margins.top +
+            headingSize +
+            ((command.kind === 'image' ? command.rect.y : command.y) - bodyOriginY) * page.scale;
+          if (command.kind === 'image') {
+            return {
+              ...command,
+              rect: {
+                x,
+                y,
+                width: command.rect.width * page.scale,
+                height: command.rect.height * page.scale,
+              },
+            };
+          }
+          return {
+            ...command,
+            x,
+            y,
+            maxWidth: command.maxWidth * page.scale,
+            fontSize: command.fontSize * page.scale,
+          };
+        });
+      });
     return {
       width: page.width,
       height: page.height,
       cells,
       decorations,
-      overlays,
+      overlays: [...overlays, ...objectOverlays],
       showGridlines: profile.showGridlines,
     };
   });
+}
+
+function persistentImageMappings(
+  document: SpreadsheetDocument,
+): readonly import('./expand').StructuralObjectMapping[] {
+  return document.workbook.sheets.flatMap((sheet) =>
+    (sheet.objects ?? []).flatMap((object) => {
+      if (object.kind !== 'image' || object.anchor.type !== 'two-cell') return [];
+      const range = {
+        sheetId: sheet.id,
+        start: {
+          row: object.anchor.from.row,
+          column: object.anchor.from.column,
+        },
+        end: {
+          row: object.anchor.to.row,
+          column: object.anchor.to.column,
+        },
+      };
+      return [
+        {
+          objectId: object.id,
+          resourceId: object.resourceId,
+          policy: 'shared' as const,
+          itemIndex: 0,
+          source: range,
+          generated: range,
+        },
+      ];
+    }),
+  );
 }
 
 function abortResult(): RenderResult {
@@ -678,6 +769,24 @@ export async function renderSpreadsheetTemplate(
             renderDiagnostic(
               'RESOURCE_TYPE_MISMATCH',
               `Template resource ${unsupportedResource.resourceId} is not displayable`,
+            ),
+          ],
+        }),
+      );
+    }
+    const unresolvedObject = request.template.sourceDocument.workbook.sheets
+      .flatMap((sheet) => sheet.objects ?? [])
+      .find(
+        (object) =>
+          object.kind === 'image' && resources.byReference[object.resourceId] === undefined,
+      );
+    if (unresolvedObject?.kind === 'image') {
+      return failAfterResources(
+        freeze({
+          diagnostics: [
+            renderDiagnostic(
+              'RESOURCE_BINDING_UNRESOLVED',
+              `Sheet object resource ${unresolvedObject.resourceId} was not resolved`,
             ),
           ],
         }),
@@ -867,6 +976,7 @@ export async function renderSpreadsheetTemplate(
       expansion.insertedRows,
       expansion.structuralMappings,
       resourceBindings,
+      resources,
       request.data,
       environment.clock,
     );
@@ -917,7 +1027,7 @@ export async function renderSpreadsheetTemplate(
         profile,
       },
       resources,
-      objects: expansion.objectMappings,
+      objects: [...expansion.objectMappings, ...persistentImageMappings(expansion.document)],
       diagnostics,
       metadata: {
         templateId: request.template.templateId,

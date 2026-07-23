@@ -6,6 +6,7 @@ import {
 } from '../../../src/document';
 import { createDocumentController } from '../../../src/document-controller';
 import type { SheetId } from '../../../src/core';
+import { remapWorkbookCommand } from '../../../src/react/control/controlled-reconciler';
 
 function fixture() {
   const parsed = parseSpreadsheetDocument({
@@ -220,6 +221,38 @@ describe('saved views and objects in Workbook 2.0', () => {
     expect(controller.getSnapshot().document.workbook.sheets[0]).toMatchObject({
       filterViews: [{ id: 'view-1' }],
       objects: [{ id: 'object-1' }],
+    });
+  });
+
+  it('remaps command ownership and nested anchors for controlled replay', () => {
+    const original = 'sheet-1' as SheetId;
+    const replayed = 'sheet-replayed' as SheetId;
+    const mapping = new Map([[original, replayed]]);
+    expect(
+      remapWorkbookCommand(
+        {
+          type: 'set-filter-view',
+          sheet: original,
+          view: fixture().workbook.sheets[0]!.filterViews[0]!,
+        },
+        mapping,
+      ),
+    ).toMatchObject({
+      sheet: replayed,
+      view: { range: { sheetId: replayed } },
+    });
+    expect(
+      remapWorkbookCommand(
+        {
+          type: 'set-sheet-object',
+          sheet: original,
+          object: fixture().workbook.sheets[0]!.objects[0]!,
+        },
+        mapping,
+      ),
+    ).toMatchObject({
+      sheet: replayed,
+      object: { anchor: { cell: { sheetId: replayed } } },
     });
   });
 });

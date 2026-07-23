@@ -1,4 +1,4 @@
-import type { PrintDisplayCommand } from '../print';
+import type { PrintImageCommand, PrintTextCommand } from '../print';
 import type { ObjectGeometry, SheetObject } from './model';
 import { resolveObjectAnchor } from './anchors';
 
@@ -19,7 +19,14 @@ export class SheetObjectError extends Error {
 export interface ObjectDisplayContext {
   /** Already-resolved document resources keyed by stable ID. */
   readonly resources: Readonly<
-    Record<string, Uint8Array | { readonly bytes: Uint8Array; readonly mimeType?: string }>
+    Record<
+      string,
+      | Uint8Array
+      | {
+          readonly bytes: Uint8Array | readonly number[];
+          readonly mimeType?: string;
+        }
+    >
   >;
   /** Worksheet geometry used to resolve anchors. */
   readonly geometry: ObjectGeometry;
@@ -29,7 +36,7 @@ export interface ObjectDisplayContext {
 export function objectToDisplayCommands(
   object: SheetObject,
   context: ObjectDisplayContext,
-): readonly PrintDisplayCommand[] {
+): readonly (PrintImageCommand | PrintTextCommand)[] {
   const rect = resolveObjectAnchor(object.anchor, context.geometry);
   if (object.kind === 'image') {
     if (context.resources[object.resourceId] === undefined) {

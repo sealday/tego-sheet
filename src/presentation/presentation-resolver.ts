@@ -328,7 +328,7 @@ function documentConditionalRules(
 ): readonly ConditionalRule[] {
   const sheet = document.workbook.sheets.find(({ id }) => id === address.sheetId);
   if (sheet === undefined) return [];
-  return sheet.conditionalFormatting.flatMap((rule, index): readonly ConditionalRule[] => {
+  return (sheet.conditionalFormatting ?? []).flatMap((rule, index): readonly ConditionalRule[] => {
     if (rule.type === 'color-scale') {
       return [
         {

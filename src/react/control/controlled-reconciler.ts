@@ -5,7 +5,7 @@ import type {
   SpreadsheetControllerCommit,
   SpreadsheetDocumentController,
 } from '../../core/controller/spreadsheet-document-controller';
-import type { SpreadsheetDocument } from '../../document';
+import type { DocumentSheetId, SpreadsheetDocument } from '../../document';
 import { classifyValueUpdate } from './classify-value-update';
 import { createPendingCheckpoint, type PendingCheckpoint } from './pending-checkpoint';
 
@@ -37,6 +37,13 @@ function replayError(cause?: unknown): TegoSheetError {
 
 function remapSheet(sheet: SheetId, mapping: ReadonlyMap<SheetId, SheetId>): SheetId {
   return mapping.get(sheet) ?? sheet;
+}
+
+function remapDocumentSheet(
+  sheet: DocumentSheetId,
+  mapping: ReadonlyMap<SheetId, SheetId>,
+): DocumentSheetId {
+  return (mapping.get(sheet as unknown as SheetId) ?? sheet) as unknown as DocumentSheetId;
 }
 
 function remapSelection(selection: Selection, mapping: ReadonlyMap<SheetId, SheetId>): Selection {
@@ -99,11 +106,51 @@ export function remapWorkbookCommand(
     case 'rename-sheet':
     case 'clear-filter':
     case 'sort':
-    case 'set-filter-view':
     case 'remove-filter-view':
-    case 'set-sheet-object':
     case 'remove-sheet-object':
       return { ...command, sheet: remapSheet(command.sheet, mapping) };
+    case 'set-filter-view':
+      return {
+        ...command,
+        sheet: remapSheet(command.sheet, mapping),
+        view: {
+          ...command.view,
+          range: {
+            ...command.view.range,
+            sheetId: remapDocumentSheet(command.view.range.sheetId, mapping),
+          },
+        },
+      };
+    case 'set-sheet-object':
+      return {
+        ...command,
+        sheet: remapSheet(command.sheet, mapping),
+        object: {
+          ...command.object,
+          anchor:
+            command.object.anchor.type === 'absolute'
+              ? command.object.anchor
+              : command.object.anchor.type === 'one-cell'
+                ? {
+                    ...command.object.anchor,
+                    cell: {
+                      ...command.object.anchor.cell,
+                      sheetId: remapDocumentSheet(command.object.anchor.cell.sheetId, mapping),
+                    },
+                  }
+                : {
+                    ...command.object.anchor,
+                    from: {
+                      ...command.object.anchor.from,
+                      sheetId: remapDocumentSheet(command.object.anchor.from.sheetId, mapping),
+                    },
+                    to: {
+                      ...command.object.anchor.to,
+                      sheetId: remapDocumentSheet(command.object.anchor.to.sheetId, mapping),
+                    },
+                  },
+        },
+      };
     case 'add-sheet':
     case 'undo':
     case 'redo':
