@@ -1,7 +1,9 @@
 import {
   BUILTIN_FORMULA_COMPATIBILITY,
+  createFormulaFunctionRegistry,
   parseFormula,
   type FormulaAst,
+  type ScalarFormulaValue,
   type FormulaValue,
 } from '../../formula';
 import type {
@@ -50,9 +52,9 @@ function scalar(value: FormulaValue): number | string | boolean | undefined {
 
 function compare(
   left: number | string | boolean | undefined,
-  operator: Extract<ConditionalExpression, { type: 'cell-is' }>['operator'],
-  right: number | string,
-  right2?: number | string,
+  operator: Extract<ConditionalExpression, { type: 'cell-is' | 'cell-is-formula' }>['operator'],
+  right: number | string | boolean,
+  right2?: number | string | boolean,
 ): boolean {
   if (left === undefined) return false;
   const comparison =
@@ -95,6 +97,126 @@ function validateFormula(ast: FormulaAst): void {
   }
 }
 
+function numeric(value: ScalarFormulaValue): number | undefined {
+  if (value.type === 'number') return value.value;
+  if (value.type === 'boolean') return value.value ? 1 : 0;
+  if (value.type === 'blank') return 0;
+  if (value.type === 'string') {
+    const converted = Number(value.value);
+    return Number.isFinite(converted) ? converted : undefined;
+  }
+  return undefined;
+}
+
+function truthy(value: ScalarFormulaValue): boolean {
+  if (value.type === 'blank' || value.type === 'error') return false;
+  return value.type === 'boolean' ? value.value : Boolean(value.value);
+}
+
+function evaluateFormulaAst(
+  ast: FormulaAst,
+  input: ConditionalEvaluationInput,
+): ScalarFormulaValue {
+  if (ast.kind === 'number' || ast.kind === 'string' || ast.kind === 'boolean') {
+    return { type: ast.kind, value: ast.value } as ScalarFormulaValue;
+  }
+  if (ast.kind === 'error') return { type: 'error', value: ast.value };
+  if (ast.kind === 'reference') {
+    const value = input.lookup?.({
+      sheetId: ast.reference.sheetId ?? input.address.sheetId,
+      row: ast.reference.row,
+      column: ast.reference.column,
+    }) ?? { type: 'blank' };
+    return value.type === 'array' ? { type: 'error', value: '#VALUE!' } : value;
+  }
+  if (ast.kind === 'range') {
+    throw new ConditionalFormatError(
+      'INVALID_CONDITIONAL_EXPRESSION',
+      'Conditional formula ranges are not scalar expressions',
+    );
+  }
+  if (ast.kind === 'unary') {
+    const value = numeric(evaluateFormulaAst(ast.operand, input));
+    return value === undefined
+      ? { type: 'error', value: '#VALUE!' }
+      : { type: 'number', value: -value };
+  }
+  if (ast.kind === 'call') {
+    const definition = createFormulaFunctionRegistry().resolve(ast.name);
+    if (definition === undefined || definition.mode !== 'sync') {
+      throw new ConditionalFormatError(
+        'INVALID_CONDITIONAL_EXPRESSION',
+        `Conditional formula function ${ast.name} is unsupported`,
+      );
+    }
+    const value = definition.evaluate(
+      ast.arguments.map((argument) => evaluateFormulaAst(argument, input)),
+      {
+        locale: 'en-US',
+        timeZone: 'UTC',
+        dateSystem: 'excel-1900',
+        now: 0,
+      },
+    );
+    if (value instanceof Promise || value.type === 'array') {
+      throw new ConditionalFormatError(
+        'INVALID_CONDITIONAL_EXPRESSION',
+        'Conditional formulas must resolve synchronously to a scalar',
+      );
+    }
+    return value;
+  }
+  const left = evaluateFormulaAst(ast.left, input);
+  const right = evaluateFormulaAst(ast.right, input);
+  if (left.type === 'error') return left;
+  if (right.type === 'error') return right;
+  const leftValue = left.type === 'blank' ? '' : left.value;
+  const rightValue = right.type === 'blank' ? '' : right.value;
+  if (ast.operator === '&') {
+    return { type: 'string', value: `${String(leftValue)}${String(rightValue)}` };
+  }
+  const leftNumber = numeric(left);
+  const rightNumber = numeric(right);
+  if (['=', '==', '<>', '!=', '>', '>=', '<', '<='].includes(ast.operator)) {
+    const first =
+      leftNumber === undefined || rightNumber === undefined ? String(leftValue) : leftNumber;
+    const second =
+      leftNumber === undefined || rightNumber === undefined ? String(rightValue) : rightNumber;
+    const value =
+      ast.operator === '=' || ast.operator === '=='
+        ? first === second
+        : ast.operator === '<>' || ast.operator === '!='
+          ? first !== second
+          : ast.operator === '>'
+            ? first > second
+            : ast.operator === '>='
+              ? first >= second
+              : ast.operator === '<'
+                ? first < second
+                : first <= second;
+    return { type: 'boolean', value };
+  }
+  if (leftNumber === undefined || rightNumber === undefined) {
+    return { type: 'error', value: '#VALUE!' };
+  }
+  if (ast.operator === '/' && rightNumber === 0) return { type: 'error', value: '#DIV/0!' };
+  const value =
+    ast.operator === '+'
+      ? leftNumber + rightNumber
+      : ast.operator === '-'
+        ? leftNumber - rightNumber
+        : ast.operator === '*'
+          ? leftNumber * rightNumber
+          : leftNumber / rightNumber;
+  return Number.isFinite(value) ? { type: 'number', value } : { type: 'error', value: '#NUM!' };
+}
+
+function parseConditionalFormula(source: string): FormulaAst {
+  const ast = parseFormula(source.startsWith('=') ? source : `=${source}`);
+  validateFormula(ast);
+  return ast;
+}
+
 function matches(condition: ConditionalExpression, input: ConditionalEvaluationInput): boolean {
   if (condition.type === 'blank') return input.value.type === 'blank';
   if (condition.type === 'not-blank') return input.value.type !== 'blank';
@@ -102,26 +224,32 @@ function matches(condition: ConditionalExpression, input: ConditionalEvaluationI
   if (condition.type === 'cell-is') {
     return compare(scalar(input.value), condition.operator, condition.value, condition.value2);
   }
-  try {
-    const ast = parseFormula(condition.source);
-    validateFormula(ast);
-    if (ast.kind === 'boolean') return ast.value;
-    if (ast.kind === 'number') return ast.value !== 0;
-    if (ast.kind === 'reference') {
-      return Boolean(
-        scalar(
-          input.lookup?.({
-            sheetId: ast.reference.sheetId ?? input.address.sheetId,
-            row: ast.reference.row,
-            column: ast.reference.column,
-          }) ?? { type: 'blank' },
-        ),
+  if (condition.type === 'cell-is-formula') {
+    try {
+      const first = evaluateFormulaAst(parseConditionalFormula(condition.source), input);
+      const second =
+        condition.source2 === undefined
+          ? undefined
+          : evaluateFormulaAst(parseConditionalFormula(condition.source2), input);
+      if (first.type === 'blank' || first.type === 'error') return false;
+      if (second?.type === 'blank' || second?.type === 'error') return false;
+      return compare(
+        scalar(input.value),
+        condition.operator,
+        first.value,
+        second === undefined ? undefined : second.value,
+      );
+    } catch (error) {
+      if (error instanceof ConditionalFormatError) throw error;
+      throw new ConditionalFormatError(
+        'INVALID_CONDITIONAL_EXPRESSION',
+        error instanceof Error ? error.message : String(error),
       );
     }
-    throw new ConditionalFormatError(
-      'INVALID_CONDITIONAL_EXPRESSION',
-      'Conditional formula is outside the synchronous boolean subset',
-    );
+  }
+  try {
+    const ast = parseConditionalFormula(condition.source);
+    return truthy(evaluateFormulaAst(ast, input));
   } catch (error) {
     if (error instanceof ConditionalFormatError) throw error;
     throw new ConditionalFormatError(
@@ -129,6 +257,71 @@ function matches(condition: ConditionalExpression, input: ConditionalEvaluationI
       error instanceof Error ? error.message : String(error),
     );
   }
+}
+
+function colorChannels(color: string): readonly [number, number, number] | undefined {
+  const hex = color.replace(/^#/u, '');
+  const rgb = hex.length === 8 ? hex.slice(2) : hex;
+  if (!/^[0-9a-f]{6}$/iu.test(rgb)) return undefined;
+  return [
+    Number.parseInt(rgb.slice(0, 2), 16),
+    Number.parseInt(rgb.slice(2, 4), 16),
+    Number.parseInt(rgb.slice(4, 6), 16),
+  ];
+}
+
+function interpolateColor(start: string, end: string, ratio: number): string | undefined {
+  const first = colorChannels(start);
+  const second = colorChannels(end);
+  if (first === undefined || second === undefined) return undefined;
+  return `#${first
+    .map((channel, index) =>
+      Math.round(channel + ((second[index] as number) - channel) * ratio)
+        .toString(16)
+        .padStart(2, '0'),
+    )
+    .join('')}`;
+}
+
+function colorScalePatch(
+  rule: ConditionalRule,
+  input: ConditionalEvaluationInput,
+): string | undefined {
+  if (rule.effect.type !== 'color-scale') return undefined;
+  const current = numeric(
+    input.value.type === 'array' ? { type: 'error', value: '#VALUE!' } : input.value,
+  );
+  if (current === undefined) return undefined;
+  const values: number[] = [];
+  for (const range of rule.ranges) {
+    for (let row = range.start.row; row <= range.end.row; row += 1) {
+      for (let column = range.start.column; column <= range.end.column; column += 1) {
+        const value =
+          row === input.address.row &&
+          column === input.address.column &&
+          range.sheetId === input.address.sheetId
+            ? input.value
+            : input.lookup?.({ sheetId: range.sheetId, row, column });
+        if (value === undefined || value.type === 'array') continue;
+        const number = numeric(value);
+        if (number !== undefined) values.push(number);
+      }
+    }
+  }
+  if (values.length === 0) return undefined;
+  const minimum = Math.min(...values);
+  const maximum = Math.max(...values);
+  const ratio = maximum === minimum ? 0.5 : (current - minimum) / (maximum - minimum);
+  if (rule.effect.midpointColor !== undefined) {
+    return ratio <= 0.5
+      ? interpolateColor(rule.effect.minimumColor, rule.effect.midpointColor, ratio * 2)
+      : interpolateColor(rule.effect.midpointColor, rule.effect.maximumColor, (ratio - 0.5) * 2);
+  }
+  return interpolateColor(
+    rule.effect.minimumColor,
+    rule.effect.maximumColor,
+    Math.max(0, Math.min(1, ratio)),
+  );
 }
 
 /** Creates an isolated pure conditional-format evaluator. */
@@ -165,7 +358,12 @@ export function createConditionalFormatEvaluator(limits: ConditionalFormatLimits
         if (!contains(rule, input.address) || !matches(rule.condition, input)) continue;
         matched.push(rule.id);
         if (rule.effect.type === 'style') Object.assign(patch, rule.effect.patch);
-        else diagnostics.push({ code: 'UNSUPPORTED_FORMAT_FEATURE', ruleId: rule.id });
+        else {
+          const color = colorScalePatch(rule, input);
+          if (color === undefined)
+            diagnostics.push({ code: 'UNSUPPORTED_FORMAT_FEATURE', ruleId: rule.id });
+          else patch.backgroundColor = color;
+        }
         if (rule.stopIfTrue) break;
       }
       return {

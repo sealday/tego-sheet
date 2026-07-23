@@ -106,4 +106,64 @@ describe('FMT-01 conditional formatting foundation', () => {
       }),
     ).toThrowError(expect.objectContaining({ code: 'CONDITIONAL_RANGE_TOO_LARGE' }));
   });
+
+  it('evaluates referenced formula expressions with synchronous allowlisted functions', () => {
+    const evaluator = createConditionalFormatEvaluator({ maxRules: 10, maxCells: 100 });
+    const result = evaluator.evaluate({
+      address: { sheetId, row: 0, column: 2 },
+      value: { type: 'number', value: 1 },
+      text: '1',
+      baseStyle: {},
+      lookup: ({ row, column }) =>
+        row === 0 && column === 0 ? { type: 'number', value: 12 } : { type: 'number', value: 3 },
+      rules: [
+        {
+          id: 'formula',
+          priority: 1,
+          stopIfTrue: false,
+          ranges: [{ sheetId, start: { row: 0, column: 2 }, end: { row: 0, column: 2 } }],
+          condition: { type: 'formula', source: '=AND(A1>10,B1<5)' },
+          effect: { type: 'style', patch: { bold: true } },
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      matchedRuleIds: ['formula'],
+      stylePatch: { bold: true },
+      diagnostics: [],
+    });
+  });
+
+  it('interpolates deterministic color-scale backgrounds from range values', () => {
+    const evaluator = createConditionalFormatEvaluator({ maxRules: 10, maxCells: 100 });
+    const values = [0, 5, 10];
+    const result = evaluator.evaluate({
+      address: { sheetId, row: 1, column: 0 },
+      value: { type: 'number', value: 5 },
+      text: '5',
+      baseStyle: {},
+      lookup: ({ row }) => ({ type: 'number', value: values[row] ?? 0 }),
+      rules: [
+        {
+          id: 'scale',
+          priority: 1,
+          stopIfTrue: false,
+          ranges: [{ sheetId, start: { row: 0, column: 0 }, end: { row: 2, column: 0 } }],
+          condition: { type: 'not-blank' },
+          effect: {
+            type: 'color-scale',
+            minimumColor: '#000000',
+            maximumColor: '#ffffff',
+          },
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      matchedRuleIds: ['scale'],
+      stylePatch: { backgroundColor: '#808080' },
+      diagnostics: [],
+    });
+  });
 });

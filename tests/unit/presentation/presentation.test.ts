@@ -266,6 +266,73 @@ describe('shared cell presentation', () => {
     expect(document.workbook.sheets[0]?.cells[5]?.cell.styleId).toBeUndefined();
   });
 
+  it('resolves referenced formula thresholds and color scales through shared presentation', () => {
+    const base = documentFixture();
+    const input = {
+      ...base,
+      workbook: {
+        ...base.workbook,
+        sheets: base.workbook.sheets.map((sheet, index) =>
+          index === 0
+            ? {
+                ...sheet,
+                conditionalFormatting: [
+                  {
+                    type: 'cell-is' as const,
+                    range: {
+                      sheetId: 'sheet-1' as never,
+                      start: { row: 3, column: 0 },
+                      end: { row: 3, column: 0 },
+                    },
+                    operator: 'greaterThan' as const,
+                    formula: 'A1/200',
+                    style: { color: '#cc0000', bold: true },
+                  },
+                  {
+                    type: 'color-scale' as const,
+                    range: {
+                      sheetId: 'sheet-1' as never,
+                      start: { row: 0, column: 0 },
+                      end: { row: 3, column: 0 },
+                    },
+                    minimumColor: '#000000',
+                    maximumColor: '#ffffff',
+                  },
+                ],
+              }
+            : sheet,
+        ),
+      },
+    };
+    const parsed = parseSpreadsheetDocument(input);
+    if (!parsed.ok) throw new Error('conditional presentation fixture must parse');
+    const resolver = createPresentationResolver({
+      document: parsed.document,
+      cache: createPresentationCache({ maximumEntries: 10, maximumBytes: 10_000 }),
+      revisions: {
+        document: 1,
+        calculation: 0,
+        condition: 1,
+        style: 1,
+        environment: 1,
+      },
+      environment: {
+        locale: 'en-US',
+        timeZone: 'UTC',
+        dateSystem: 'excel-1900',
+        target: 'screen',
+      },
+    });
+
+    expect(
+      resolver.resolve({ sheetId: 'sheet-1' as never, row: 3, column: 0 }).style,
+    ).toMatchObject({
+      color: '#cc0000',
+      backgroundColor: '#000000',
+      bold: true,
+    });
+  });
+
   it('composes an active filter view as derived shared visibility', () => {
     const { document, cache } = resolverFixture();
     const resolver = createPresentationResolver({

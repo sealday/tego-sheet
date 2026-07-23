@@ -26,6 +26,24 @@ export type ConditionalExpression =
       readonly value2?: number | string;
     }
   | {
+      /** Compares the cell scalar to one or two restricted formula results. */
+      readonly type: 'cell-is-formula';
+      /** Comparison applied to the cell scalar. */
+      readonly operator:
+        | 'equal'
+        | 'notEqual'
+        | 'between'
+        | 'notBetween'
+        | 'greaterThan'
+        | 'greaterThanOrEqual'
+        | 'lessThan'
+        | 'lessThanOrEqual';
+      /** First restricted formula expression. */
+      readonly source: string;
+      /** Optional upper-bound formula expression. */
+      readonly source2?: string;
+    }
+  | {
       /** Matches blank values. */
       readonly type: 'blank';
     }

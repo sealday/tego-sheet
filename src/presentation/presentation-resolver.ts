@@ -350,7 +350,6 @@ function documentConditionalRules(
     }
     const value = conditionalScalar(rule.formula);
     const value2 = rule.formula2 === undefined ? undefined : conditionalScalar(rule.formula2);
-    if (value === undefined) return [];
     const patch: Record<string, JsonValue> = {};
     if (rule.style.color !== undefined) patch.color = rule.style.color;
     if (rule.style.backgroundColor !== undefined) {
@@ -363,12 +362,20 @@ function documentConditionalRules(
         priority: index,
         stopIfTrue: false,
         ranges: [rule.range],
-        condition: {
-          type: 'cell-is',
-          operator: rule.operator,
-          value,
-          ...(value2 === undefined ? {} : { value2 }),
-        },
+        condition:
+          value === undefined
+            ? {
+                type: 'cell-is-formula',
+                operator: rule.operator,
+                source: rule.formula,
+                ...(rule.formula2 === undefined ? {} : { source2: rule.formula2 }),
+              }
+            : {
+                type: 'cell-is',
+                operator: rule.operator,
+                value,
+                ...(value2 === undefined ? {} : { value2 }),
+              },
         effect: { type: 'style', patch },
       },
     ];
@@ -438,6 +445,13 @@ export function createPresentationResolver(
         text: formattedText,
         baseStyle,
         rules: documentConditionalRules(options.document, address),
+        lookup: (target) => {
+          const targetCell = cellAt(options.document, target.sheetId, target.row, target.column);
+          const calculated =
+            options.formulaValues?.get(formulaAddressKey(target)) ??
+            options.formulaProgram?.values.get(formulaAddressKey(target));
+          return targetCell?.input.type === 'formula' ? calculated : inputValue(targetCell);
+        },
       });
       diagnostics.push(
         ...conditional.diagnostics.map(
