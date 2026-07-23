@@ -3,6 +3,7 @@ import type {
   BuiltInCellTypeDefinition,
   KernelRegistration,
 } from '../../../src/extensions/kernel/capabilities';
+import type { Diagnostic } from '../../../src/document/diagnostics';
 import { extensionDiagnostic } from '../../../src/extensions/kernel/manifest';
 import { createAdapterRegistryKernel } from '../../../src/extensions/kernel/registry';
 
@@ -353,6 +354,69 @@ describe('AdapterRegistryKernel compatibility and lifecycle', () => {
     await expect(registry.dispose()).resolves.toEqual([]);
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(registry.list()).toEqual([]);
+  });
+
+  it('installs the shared release before abort listeners can reenter unregister', async () => {
+    const dispose = vi.fn();
+    const registry = createAdapterRegistryKernel({ apiVersion: '1.0', environment: 'browser' });
+    const releaseHandle: { unregister?: () => Promise<readonly Diagnostic[]> } = {};
+    let reentrantRelease: Promise<readonly Diagnostic[]> | undefined;
+    const unregister = await registry.register({
+      ...registration('checkbox'),
+      initialize: ({ signal }) => {
+        signal.addEventListener(
+          'abort',
+          () => {
+            reentrantRelease = releaseHandle.unregister?.();
+          },
+          { once: true },
+        );
+      },
+      dispose,
+    });
+    releaseHandle.unregister = unregister;
+
+    await expect(unregister()).resolves.toEqual([]);
+    await expect(reentrantRelease).resolves.toEqual([]);
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('aggregates failed initialization cleanup once during concurrent global disposal', async () => {
+    let releaseStarted!: () => void;
+    const releaseStartedGate = new Promise<void>((resolve) => {
+      releaseStarted = resolve;
+    });
+    let finishRelease!: () => void;
+    const releaseGate = new Promise<void>((resolve) => {
+      finishRelease = resolve;
+    });
+    const registry = createAdapterRegistryKernel({ apiVersion: '1.0', environment: 'browser' });
+    const registrationPromise = registry.register({
+      ...registration('broken'),
+      initialize: () => {
+        throw new Error('cannot start');
+      },
+      dispose: async () => {
+        releaseStarted();
+        await releaseGate;
+        throw new Error('cleanup failed');
+      },
+    });
+    const registrationResult = registrationPromise.catch((error: unknown) => error);
+
+    await releaseStartedGate;
+    const globalDisposal = registry.dispose();
+    finishRelease();
+
+    await expect(registrationResult).resolves.toMatchObject({
+      code: 'EXTENSION_INITIALIZE_FAILED',
+    });
+    await expect(globalDisposal).resolves.toEqual([
+      expect.objectContaining({
+        code: 'EXTENSION_DISPOSE_FAILED',
+        location: expect.objectContaining({ adapterId: 'broken' }),
+      }),
+    ]);
   });
 
   it('continues cleanup and aggregates multiple disposal failures in stable order', async () => {

@@ -104,8 +104,18 @@ export function createAdapterRegistryKernel(
   const release = (record: RegistrationRecord): Promise<readonly ExtensionDiagnostic[]> => {
     if (record.release !== undefined) return record.release;
 
+    let completeRelease!: (diagnostics: readonly ExtensionDiagnostic[]) => void;
+    const task = new Promise<readonly ExtensionDiagnostic[]>((resolve) => {
+      completeRelease = resolve;
+    });
+    record.release = task;
+    releasing.set(record.key, task);
+    void task.then(() => {
+      if (releasing.get(record.key) === task) releasing.delete(record.key);
+    });
+
     detach(record);
-    const task = (async () => {
+    void (async () => {
       if (record.dispose === undefined) return Object.freeze([]);
       try {
         await record.dispose();
@@ -122,12 +132,7 @@ export function createAdapterRegistryKernel(
         publishDiagnostic(diagnostic);
         return Object.freeze([diagnostic]);
       }
-    })();
-    record.release = task;
-    releasing.set(record.key, task);
-    void task.then(() => {
-      if (releasing.get(record.key) === task) releasing.delete(record.key);
-    });
+    })().then(completeRelease);
     return task;
   };
 
@@ -348,6 +353,7 @@ export function createAdapterRegistryKernel(
       const cleanupKeys = [
         ...new Set([...releasing.keys(), ...activeRecords.map(({ key }) => key)]),
       ].sort(compareAscii);
+      const cleanupKeySet = new Set(cleanupKeys);
       const activeByKey = new Map(activeRecords.map((record) => [record.key, record]));
       disposePromise = (async () => {
         const diagnostics: ExtensionDiagnostic[] = [];
@@ -357,7 +363,10 @@ export function createAdapterRegistryKernel(
           if (cleanup !== undefined) diagnostics.push(...(await cleanup));
         }
         for (const registration of initializing) {
-          diagnostics.push(...(await registration.completion));
+          const completionDiagnostics = await registration.completion;
+          if (!cleanupKeySet.has(registration.key)) {
+            diagnostics.push(...completionDiagnostics);
+          }
         }
         disposeComplete = true;
         return Object.freeze(diagnostics);
