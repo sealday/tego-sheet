@@ -56,6 +56,22 @@ const codesOf = (
   return result.diagnostics.map(({ code }) => code);
 };
 
+function documentWithWorkbookGetter(
+  decodedWorkbook: SpreadsheetDocumentInput['workbook'],
+): SpreadsheetDocumentInput {
+  const fixture = validDocument();
+  const measuredWorkbook = fixture.workbook;
+  let reads = 0;
+  Object.defineProperty(fixture, 'workbook', {
+    enumerable: true,
+    get: () => {
+      reads += 1;
+      return reads < 5 ? measuredWorkbook : decodedWorkbook;
+    },
+  });
+  return fixture;
+}
+
 describe('Workbook 2.0 validation', () => {
   it('rejects unsupported schema versions atomically', () => {
     expect(codesOf({ ...validDocument(), schemaVersion: 3 })).toContain(
@@ -361,5 +377,56 @@ describe('Workbook 2.0 validation', () => {
 
     expect(() => parseSpreadsheetDocument(fixture)).not.toThrow();
     expect(codesOf(fixture)).toContain('DOCUMENT_SCHEMA_INVALID');
+  });
+
+  it('rejects a stateful workbook getter instead of letting it bypass maxSheets', () => {
+    const decodedWorkbook = validDocument().workbook;
+    decodedWorkbook.sheets.push({
+      id: 'sheet-2',
+      name: 'Sheet 2',
+      cells: [],
+      merges: [],
+    });
+
+    expect(
+      codesOf(documentWithWorkbookGetter(decodedWorkbook), { limits: { maxSheets: 1 } }),
+    ).toContain('DOCUMENT_SCHEMA_INVALID');
+  });
+
+  it('rejects a stateful workbook getter instead of letting it bypass maxCells', () => {
+    const decodedWorkbook = validDocument().workbook;
+    decodedWorkbook.sheets[0]!.cells.push(
+      { row: 0, column: 0, cell: { input: { type: 'blank' } } },
+      { row: 1, column: 0, cell: { input: { type: 'blank' } } },
+    );
+
+    expect(
+      codesOf(documentWithWorkbookGetter(decodedWorkbook), { limits: { maxCells: 1 } }),
+    ).toContain('DOCUMENT_SCHEMA_INVALID');
+  });
+
+  it('rejects a stateful workbook getter instead of letting it bypass maxMerges', () => {
+    const decodedWorkbook = validDocument().workbook;
+    decodedWorkbook.sheets[0]!.merges.push(
+      { start: { row: 0, column: 0 }, end: { row: 0, column: 0 } },
+      { start: { row: 1, column: 0 }, end: { row: 1, column: 0 } },
+    );
+
+    expect(
+      codesOf(documentWithWorkbookGetter(decodedWorkbook), { limits: { maxMerges: 1 } }),
+    ).toContain('DOCUMENT_SCHEMA_INVALID');
+  });
+
+  it('rejects a stateful workbook getter instead of letting it bypass maxBytes', () => {
+    const decodedWorkbook = validDocument().workbook;
+    decodedWorkbook.sheets[0]!.cells.push({
+      row: 0,
+      column: 0,
+      cell: { input: { type: 'string', value: 'x'.repeat(10_000) } },
+    });
+
+    expect(
+      codesOf(documentWithWorkbookGetter(decodedWorkbook), { limits: { maxBytes: 1_000 } }),
+    ).toContain('DOCUMENT_SCHEMA_INVALID');
   });
 });

@@ -44,6 +44,26 @@ function pureModuleFiles(): readonly string[] {
     .filter((file) => file.endsWith('.ts'));
 }
 
+it('[ARCH-3] keeps document modules independent of UI and legacy workbook runtimes', () => {
+  const allowedCoreImports = new Set(['../core/types/json', '../../core/types/json']);
+  const documentFiles = pureModuleFiles().filter((file) => file.startsWith('src/document/'));
+
+  for (const file of documentFiles) {
+    const source = readFileSync(resolve(root, file), 'utf8');
+    const imports = ts.preProcessFile(source).importedFiles.map((entry) => entry.fileName);
+    for (const imported of imports) {
+      expect(
+        allowedCoreImports.has(imported) ||
+          !/(?:^|\/)(?:core|react|ui|engine)(?:\/|$)/.test(imported),
+        `${file} imports ${imported}`,
+      ).toBe(true);
+    }
+    expect(source, file).not.toMatch(
+      /\b(?:WorkbookController|parseWorkbook|serializeWorkbook|WorkbookInput|WorkbookData)\b/,
+    );
+  }
+});
+
 it('[ARCH-3] keeps every core, controller, and document module independent of React and the browser', () => {
   expect(pureModuleFiles()).toEqual(expect.arrayContaining(['src/document/parse-document.ts']));
   expect(pureModuleFiles().length).toBeGreaterThan(20);

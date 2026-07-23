@@ -132,54 +132,180 @@ function resolveLimits(
   return limits;
 }
 
-function exceedsObjectByteLimit(input: unknown, maximum: number): boolean {
-  const encoder = new TextEncoder();
-  const active = new WeakSet<object>();
-  let bytes = 0;
-  const consume = (text: string): boolean => {
-    bytes += encoder.encode(text).byteLength;
-    return bytes > maximum;
+class InputCaptureError extends Error {
+  constructor(
+    readonly code: 'DOCUMENT_SCHEMA_INVALID' | 'DOCUMENT_LIMIT_EXCEEDED',
+    readonly path: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+interface InputCaptureContext {
+  readonly active: WeakSet<object>;
+  readonly encoder: TextEncoder;
+  readonly limits: ResolvedDocumentLimits;
+  bytes: number;
+  cells: number;
+  merges: number;
+}
+
+function captureInput(input: unknown, limits: ResolvedDocumentLimits): unknown {
+  const context: InputCaptureContext = {
+    active: new WeakSet(),
+    encoder: new TextEncoder(),
+    limits,
+    bytes: 0,
+    cells: 0,
+    merges: 0,
   };
-  const visit = (value: unknown, inArray: boolean): boolean => {
+
+  const consume = (text: string): void => {
+    context.bytes += context.encoder.encode(text).byteLength;
+    if (context.bytes > context.limits.maxBytes) {
+      throw new InputCaptureError(
+        'DOCUMENT_LIMIT_EXCEEDED',
+        '$',
+        '$ exceeds its configured document limit',
+      );
+    }
+  };
+  const capture = (value: unknown, path: string, inArray: boolean): unknown => {
     if (
       value === null ||
       typeof value === 'string' ||
       typeof value === 'boolean' ||
       typeof value === 'number'
     ) {
-      return consume(JSON.stringify(value) ?? 'null');
+      consume(JSON.stringify(value) ?? 'null');
+      return value;
     }
     if (typeof value !== 'object') {
-      return inArray ? consume('null') : false;
+      if (inArray) consume('null');
+      return value;
     }
-    if (active.has(value)) return false;
-    active.add(value);
+    if (context.active.has(value)) {
+      throw new InputCaptureError(
+        'DOCUMENT_SCHEMA_INVALID',
+        path,
+        `${path} must not contain circular references`,
+      );
+    }
+
+    context.active.add(value);
     try {
+      const descriptors = Object.getOwnPropertyDescriptors(value);
+
       if (Array.isArray(value)) {
-        if (consume('[')) return true;
-        for (let index = 0; index < value.length; index += 1) {
-          if (index > 0 && consume(',')) return true;
-          if (visit(value[index], true)) return true;
+        const length = descriptors.length?.value;
+        if (typeof length !== 'number') {
+          throw new InputCaptureError(
+            'DOCUMENT_SCHEMA_INVALID',
+            path,
+            `${path} must have a valid array length`,
+          );
         }
-        return consume(']');
+        if (path === '$.workbook.sheets' && length > context.limits.maxSheets) {
+          throw new InputCaptureError(
+            'DOCUMENT_LIMIT_EXCEEDED',
+            path,
+            `${path} exceeds its configured document limit`,
+          );
+        }
+        if (/^\$\.workbook\.sheets\[\d+\]\.cells$/.test(path)) {
+          context.cells += length;
+          if (context.cells > context.limits.maxCells) {
+            throw new InputCaptureError(
+              'DOCUMENT_LIMIT_EXCEEDED',
+              '$.workbook.sheets',
+              '$.workbook.sheets exceeds its configured document limit',
+            );
+          }
+        }
+        if (/^\$\.workbook\.sheets\[\d+\]\.merges$/.test(path)) {
+          context.merges += length;
+          if (context.merges > context.limits.maxMerges) {
+            throw new InputCaptureError(
+              'DOCUMENT_LIMIT_EXCEEDED',
+              '$.workbook.sheets',
+              '$.workbook.sheets exceeds its configured document limit',
+            );
+          }
+        }
+
+        consume('[');
+        const output = Array.from<unknown>({ length });
+        for (let index = 0; index < length; index += 1) {
+          if (index > 0) consume(',');
+          const descriptor = descriptors[index];
+          if (descriptor === undefined) {
+            consume('null');
+            continue;
+          }
+          if (!('value' in descriptor)) {
+            throw new InputCaptureError(
+              'DOCUMENT_SCHEMA_INVALID',
+              `${path}[${index}]`,
+              `${path}[${index}] must be a data property`,
+            );
+          }
+          output[index] = capture(descriptor.value, `${path}[${index}]`, true);
+        }
+        consume(']');
+        for (const [key, descriptor] of Object.entries(descriptors)) {
+          if (descriptor.enumerable && !('value' in descriptor)) {
+            throw new InputCaptureError(
+              'DOCUMENT_SCHEMA_INVALID',
+              `${path}.${key}`,
+              `${path}.${key} must be a data property`,
+            );
+          }
+        }
+        return output;
       }
-      if (consume('{')) return true;
+
+      const prototype = Object.getPrototypeOf(value);
+      if (prototype !== Object.prototype && prototype !== null) {
+        throw new InputCaptureError(
+          'DOCUMENT_SCHEMA_INVALID',
+          path,
+          `${path} must be a plain JSON object`,
+        );
+      }
+      consume('{');
       let emitted = 0;
-      for (const key of Object.keys(value)) {
-        const item = (value as Record<string, unknown>)[key];
-        if (item === undefined || typeof item === 'function' || typeof item === 'symbol') {
-          continue;
+      const output = Object.create(null) as Record<string, unknown>;
+      for (const [key, descriptor] of Object.entries(descriptors)) {
+        if (!descriptor.enumerable) continue;
+        if (!('value' in descriptor)) {
+          throw new InputCaptureError(
+            'DOCUMENT_SCHEMA_INVALID',
+            `${path}.${key}`,
+            `${path}.${key} must be a data property`,
+          );
         }
-        if (emitted > 0 && consume(',')) return true;
+        const item = descriptor.value;
+        Object.defineProperty(output, key, {
+          configurable: true,
+          enumerable: true,
+          writable: true,
+          value: capture(item, `${path}.${key}`, false),
+        });
+        if (item === undefined || typeof item === 'function' || typeof item === 'symbol') continue;
+        if (emitted > 0) consume(',');
         emitted += 1;
-        if (consume(JSON.stringify(key)) || consume(':') || visit(item, false)) return true;
+        consume(JSON.stringify(key));
+        consume(':');
       }
-      return consume('}');
+      consume('}');
+      return output;
     } finally {
-      active.delete(value);
+      context.active.delete(value);
     }
   };
-  return visit(input, false);
+
+  return capture(input, '$', false);
 }
 
 function exceedsCollectionLimits(
@@ -885,20 +1011,32 @@ export function parseSpreadsheetDocument(
     }
   }
 
-  let collectionLimitPath: string | undefined;
   try {
-    collectionLimitPath = exceedsCollectionLimits(decodedInput, limits);
-  } catch {
-    addDiagnostic(
-      context,
-      'DOCUMENT_SCHEMA_INVALID',
-      '$',
-      'Input could not be inspected safely',
-      'document',
-      'decode',
-    );
+    decodedInput = deepFreeze(captureInput(decodedInput, limits));
+  } catch (error) {
+    if (error instanceof InputCaptureError) {
+      addDiagnostic(
+        context,
+        error.code,
+        error.path,
+        error.message,
+        'document',
+        error.code === 'DOCUMENT_SCHEMA_INVALID' ? 'decode' : 'validate',
+      );
+    } else {
+      addDiagnostic(
+        context,
+        'DOCUMENT_SCHEMA_INVALID',
+        '$',
+        'Input could not be captured safely',
+        'document',
+        'decode',
+      );
+    }
     return { ok: false, diagnostics: deepFreeze(context.diagnostics) };
   }
+
+  const collectionLimitPath = exceedsCollectionLimits(decodedInput, limits);
   if (collectionLimitPath !== undefined) {
     addDiagnostic(
       context,
@@ -907,30 +1045,6 @@ export function parseSpreadsheetDocument(
       `${collectionLimitPath} exceeds its configured document limit`,
     );
     return { ok: false, diagnostics: deepFreeze(context.diagnostics) };
-  }
-
-  if (typeof input !== 'string') {
-    try {
-      if (exceedsObjectByteLimit(input, limits.maxBytes)) {
-        addDiagnostic(
-          context,
-          'DOCUMENT_LIMIT_EXCEEDED',
-          '$',
-          '$ exceeds its configured document limit',
-        );
-        return { ok: false, diagnostics: deepFreeze(context.diagnostics) };
-      }
-    } catch {
-      addDiagnostic(
-        context,
-        'DOCUMENT_SCHEMA_INVALID',
-        '$',
-        'Input could not be measured safely',
-        'document',
-        'decode',
-      );
-      return { ok: false, diagnostics: deepFreeze(context.diagnostics) };
-    }
   }
 
   let document: SpreadsheetDocument;

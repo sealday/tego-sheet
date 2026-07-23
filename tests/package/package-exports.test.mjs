@@ -46,6 +46,14 @@ test('the built root has only the approved runtime exports and internal subpaths
         code: 'INVALID_COMMAND', message: 'probe', recoverable: false,
       });
       if (!(exception instanceof root.TegoSheetException)) throw new Error('bad exception runtime');
+      const document = root.createSpreadsheetDocument({
+        id: 'packed-document', sheetId: 'packed-sheet',
+      });
+      const serialized = root.serializeSpreadsheetDocument(document);
+      const parsed = root.parseSpreadsheetDocument(serialized);
+      if (!parsed.ok || parsed.document.id !== 'packed-document') {
+        throw new Error('bad Workbook 2.0 runtime');
+      }
     `,
     ],
     { cwd: consumer, stdio: 'pipe' },
