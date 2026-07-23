@@ -92,6 +92,7 @@ it('[ARCH-1] exposes only the approved React and Workbook 2.0 runtime API', () =
   expect(Object.keys(publicApi).sort()).toEqual([
     'TegoSheet',
     'TegoSheetException',
+    'createDocumentController',
     'createSpreadsheetDocument',
     'migrateLegacyWorkbook',
     'parseSpreadsheetDocument',

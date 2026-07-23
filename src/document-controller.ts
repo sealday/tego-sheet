@@ -1,4 +1,4 @@
-import type { WorkbookCommand } from '../core/commands/workbook-command';
+import type { WorkbookCommand } from './core/commands/workbook-command';
 import {
   SpreadsheetDocumentController,
   type CommittedTransactionRecord,
@@ -7,10 +7,10 @@ import {
   type TransactionOptions,
   type TransactionPreview,
   type TransactionResult,
-} from '../core/controller/spreadsheet-document-controller';
-import type { ChangeSource, WorkbookChange } from '../core/types/changes';
-import type { JsonValue } from '../core/types/json';
-import type { SpreadsheetDocument } from './model/document';
+} from './core/controller/spreadsheet-document-controller';
+import type { ChangeSource, WorkbookChange } from './core/types/changes';
+import type { JsonValue } from './core/types/json';
+import type { SpreadsheetDocument } from './document/model/document';
 
 /**
  * Closed set of typed content commands accepted by the public transaction boundary.

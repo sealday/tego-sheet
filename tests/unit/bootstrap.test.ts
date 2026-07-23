@@ -9,6 +9,7 @@ it('imports the library entry without browser globals', async () => {
     'migrateLegacyWorkbook',
     'parseSpreadsheetDocument',
     'serializeSpreadsheetDocument',
+    'createDocumentController',
     'TegoSheet',
   ]);
 });

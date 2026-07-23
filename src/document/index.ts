@@ -1,26 +1,4 @@
 export { createSpreadsheetDocument } from './create-document';
-export { createDocumentController } from './document-controller';
-export type {
-  DocumentChange,
-  DocumentChangedRange,
-  DocumentCommand,
-  DocumentCommandEnvelope,
-  DocumentCommittedTransaction,
-  DocumentController,
-  DocumentControllerEvent,
-  DocumentControllerOptions,
-  DocumentControllerSnapshot,
-  DocumentExecuteOptions,
-  DocumentPatchOperation,
-  DocumentSheetChange,
-  DocumentTransactionDiagnostic,
-  DocumentTransactionEnvelope,
-  DocumentTransactionOptions,
-  DocumentTransactionPermissionContext,
-  DocumentTransactionPermissionGate,
-  DocumentTransactionPreview,
-  DocumentTransactionResult,
-} from './document-controller';
 export { migrateLegacyWorkbook } from './migrate-legacy';
 export { parseSpreadsheetDocument } from './parse-document';
 export { serializeSpreadsheetDocument } from './serialize-document';

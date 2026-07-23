@@ -114,6 +114,10 @@ const manualDocumentation = [
   ['website/docs/concepts/controlled-and-uncontrolled.mdx', ['TegoSheet', 'SpreadsheetDocument']],
   ['website/docs/concepts/workbook-data.md', ['SpreadsheetDocument']],
   ['website/docs/concepts/refs-and-commands.mdx', ['TegoSheetHandle']],
+  [
+    'website/docs/concepts/document-transactions.mdx',
+    ['DocumentController', 'DocumentCommand', 'createDocumentController'],
+  ],
   ['website/docs/concepts/callbacks-and-errors.mdx', ['WorkbookChange', 'TegoSheetException']],
   ['website/docs/guides/custom-chrome.mdx', ['ToolbarRenderProps', 'SheetTabsRenderProps']],
   ['website/docs/guides/locales.mdx', ['LocaleDefinition']],
@@ -549,8 +553,8 @@ describe('documentation site contract', () => {
   });
 
   it('keeps the exact approved hand-written documentation inventory on public APIs', () => {
-    expect(manualDocumentation).toHaveLength(12);
-    expect(new Set(manualDocumentation.map(([path]) => path)).size).toBe(12);
+    expect(manualDocumentation).toHaveLength(13);
+    expect(new Set(manualDocumentation.map(([path]) => path)).size).toBe(13);
 
     const missingPages = manualDocumentation
       .map(([path]) => path)
@@ -598,7 +602,7 @@ describe('documentation site contract', () => {
 
   it('semantically typechecks every Task 4 TypeScript code fence against the public package', () => {
     expect(approvedNonCheckableFences).toEqual(new Set());
-    expect(checkableCodeFences()).toHaveLength(13);
+    expect(checkableCodeFences()).toHaveLength(14);
     expect(typecheckDocumentationFences()).toEqual([]);
   });
 
@@ -628,6 +632,7 @@ describe('documentation site contract', () => {
             'concepts/controlled-and-uncontrolled',
             'concepts/workbook-data',
             'concepts/refs-and-commands',
+            'concepts/document-transactions',
             'concepts/callbacks-and-errors',
           ],
         },

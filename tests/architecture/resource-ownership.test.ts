@@ -675,6 +675,7 @@ it('[ARCH-5] separates browser API implementations from section 6.6 lifetime own
       new Set([
         'src/core/controller/spreadsheet-document-controller.ts',
         'src/core/controller/workbook-controller.ts',
+        'src/document-controller.ts',
         'src/react/adapters/controller-external-store.ts',
         'src/react/hooks/use-canvas-engine.ts',
       ]),
