@@ -77,6 +77,22 @@ describe('SpreadsheetDocumentController transactions', () => {
     expect(controller.historySize).toEqual({ undo: 0, redo: 0 });
   });
 
+  it('prevents permission gates from reentering the mutation boundary', () => {
+    const controller = new SpreadsheetDocumentController(
+      createSpreadsheetDocument({ id: 'document-1', sheetId: 'sheet-1' }),
+    );
+    const outcome = controller.transact(transaction(controller, [command('outer', 0, 'outer')]), {
+      permissionGate: () => {
+        controller.dispatch(command('inner', 1, 'inner').command, 'ref');
+        return true;
+      },
+    });
+
+    expect(outcome).toMatchObject({ status: 'rejected', code: 'COMMAND_NOT_ALLOWED' });
+    expect(controller.getSnapshot().revision).toBe(0);
+    expect(controller.historySize).toEqual({ undo: 0, redo: 0 });
+  });
+
   it('isolates and validates envelopes, IDs, limits, JSON metadata, and gate failures', () => {
     const controller = new SpreadsheetDocumentController(
       createSpreadsheetDocument({ id: 'document-1', sheetId: 'sheet-1' }),
@@ -97,11 +113,22 @@ describe('SpreadsheetDocumentController transactions', () => {
     ).toMatchObject({ status: 'rejected', code: 'COMMAND_SCHEMA_INVALID' });
     expect(
       controller.transact({
+        ...transaction(controller, [command('command-1', 0, 'metadata')]),
+        metadata: 'not-an-object' as never,
+      }),
+    ).toMatchObject({ status: 'rejected', code: 'COMMAND_SCHEMA_INVALID' });
+    expect(
+      controller.transact({
         ...transaction(controller, [command('command-1', 0, 'limited')]),
         commands: Array.from({ length: 1_001 }, (_, index) =>
           command(`command-${index}`, index, 'limited'),
         ),
       }),
+    ).toMatchObject({ status: 'rejected', code: 'TRANSACTION_LIMIT_EXCEEDED' });
+    expect(
+      controller.transact(
+        transaction(controller, [command('oversized', 0, 'x'.repeat(4 * 1_024 * 1_024))]),
+      ),
     ).toMatchObject({ status: 'rejected', code: 'TRANSACTION_LIMIT_EXCEEDED' });
     expect(
       controller.transact(transaction(controller, [command('command-1', 0, 'gate')]), {
@@ -132,6 +159,29 @@ describe('SpreadsheetDocumentController transactions', () => {
     ) as SerializableTransactionEnvelope;
     expect(() => controller.transact(accessor)).not.toThrow();
     expect(controller.transact(accessor)).toMatchObject({
+      status: 'rejected',
+      code: 'COMMAND_SCHEMA_INVALID',
+    });
+    expect(controller.getSnapshot().revision).toBe(0);
+  });
+
+  it('isolates execute envelopes before reading command IDs or payloads', () => {
+    const controller = new SpreadsheetDocumentController(
+      createSpreadsheetDocument({ id: 'document-1', sheetId: 'sheet-1' }),
+    );
+    const accessor = Object.defineProperty(
+      { schemaVersion: 1 as const, command: command('nested', 0, 'value').command },
+      'id',
+      {
+        enumerable: true,
+        get() {
+          throw new Error('command getter');
+        },
+      },
+    ) as SerializableCommandEnvelope;
+
+    expect(() => controller.execute(accessor)).not.toThrow();
+    expect(controller.execute(accessor)).toMatchObject({
       status: 'rejected',
       code: 'COMMAND_SCHEMA_INVALID',
     });

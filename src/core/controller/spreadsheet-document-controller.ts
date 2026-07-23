@@ -130,6 +130,7 @@ export type TransactionPreview =
     };
 
 const MAX_TRANSACTION_COMMANDS = 1_000;
+const MAX_TRANSACTION_BYTES = 4 * 1_024 * 1_024;
 
 function captureJsonValue(value: unknown, seen = new Set<object>()): unknown {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
@@ -204,12 +205,23 @@ function snapshotTransaction(
     transaction.id.length === 0 ||
     !Number.isSafeInteger(transaction.baseRevision) ||
     transaction.baseRevision < 0 ||
-    !Array.isArray(transaction.commands)
+    !Array.isArray(transaction.commands) ||
+    (transaction.metadata !== undefined &&
+      (transaction.metadata === null ||
+        typeof transaction.metadata !== 'object' ||
+        Array.isArray(transaction.metadata)))
   ) {
     return {
       status: 'rejected',
       code: 'COMMAND_SCHEMA_INVALID',
       message: 'Transaction envelope is invalid',
+    };
+  }
+  if (new TextEncoder().encode(JSON.stringify(transaction)).byteLength > MAX_TRANSACTION_BYTES) {
+    return {
+      status: 'rejected',
+      code: 'TRANSACTION_LIMIT_EXCEEDED',
+      message: `Transaction exceeds ${MAX_TRANSACTION_BYTES} encoded bytes`,
     };
   }
   if (transaction.commands.length > MAX_TRANSACTION_COMMANDS) {
@@ -271,6 +283,7 @@ export class SpreadsheetDocumentController {
   private readonly documentHistory = new History<SpreadsheetDocument, null>();
   private readonly legacy: WorkbookController;
   private readonly subscriptions = new SubscriptionStore<SpreadsheetControllerEvent>();
+  private permissionGateActive = false;
 
   constructor(input: SpreadsheetDocument, options: WorkbookControllerOptions = {}) {
     const parsed = parseSpreadsheetDocument(input);
@@ -340,7 +353,7 @@ export class SpreadsheetDocumentController {
     return this.transact(
       {
         schemaVersion: 1,
-        id: `transaction:${command.id}`,
+        id: 'transaction:execute',
         baseRevision: options.baseRevision ?? this.getSnapshot().revision,
         commands: [command],
       },
@@ -462,6 +475,13 @@ export class SpreadsheetDocumentController {
         readonly status: 'committed';
         readonly commit: SpreadsheetControllerCommit<CommandResult<Command>, Command>;
       } {
+    if (this.permissionGateActive) {
+      throw new TegoSheetException({
+        code: 'INVALID_COMMAND',
+        message: 'Permission gates cannot mutate the document controller',
+        recoverable: true,
+      });
+    }
     this.legacy.assertCommand(command);
     const plan = prepareSchemaCommand(this.currentDocument, command, this.legacy.getSheetIds());
     const plannedProjection = projectDocumentToLegacy(plan.document);
@@ -623,6 +643,13 @@ export class SpreadsheetDocumentController {
   ): SerializableTransactionEnvelope | TransactionRejection {
     const transaction = snapshotTransaction(input);
     if ('status' in transaction) return transaction;
+    if (this.permissionGateActive) {
+      return {
+        status: 'rejected',
+        code: 'COMMAND_NOT_ALLOWED',
+        message: 'Permission gate reentrancy is not allowed',
+      };
+    }
     if (
       options.source !== undefined &&
       ![
@@ -649,25 +676,37 @@ export class SpreadsheetDocumentController {
         message: `Expected revision ${transaction.baseRevision}, current revision is ${this.getSnapshot().revision}`,
       };
     }
-    try {
-      if (
-        options.permissionGate?.({
-          transaction,
-          snapshot: this.getSnapshot(),
-        }) === false
-      ) {
+    if (options.permissionGate !== undefined) {
+      if (this.permissionGateActive) {
         return {
           status: 'rejected',
           code: 'COMMAND_NOT_ALLOWED',
-          message: 'Transaction was denied by the permission gate',
+          message: 'Permission gate reentrancy is not allowed',
         };
       }
-    } catch (error) {
-      return {
-        status: 'rejected',
-        code: 'COMMAND_NOT_ALLOWED',
-        message: error instanceof Error ? error.message : 'Transaction permission gate failed',
-      };
+      this.permissionGateActive = true;
+      try {
+        if (
+          options.permissionGate({
+            transaction,
+            snapshot: this.getSnapshot(),
+          }) === false
+        ) {
+          return {
+            status: 'rejected',
+            code: 'COMMAND_NOT_ALLOWED',
+            message: 'Transaction was denied by the permission gate',
+          };
+        }
+      } catch (error) {
+        return {
+          status: 'rejected',
+          code: 'COMMAND_NOT_ALLOWED',
+          message: error instanceof Error ? error.message : 'Transaction permission gate failed',
+        };
+      } finally {
+        this.permissionGateActive = false;
+      }
     }
     return transaction;
   }
