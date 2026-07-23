@@ -37,7 +37,7 @@ test('the packed artifact works for ESM and CommonJS Node consumers', () => {
 test('React stays peer-only and package files are publishable outputs', () => {
   const installedRoot = join(consumer, 'node_modules/tego-sheet');
   const installed = JSON.parse(readFileSync(join(installedRoot, 'package.json'), 'utf8'));
-  assert.deepEqual(installed.dependencies, {});
+  assert.deepEqual(installed.dependencies, { fflate: '0.8.3', pdfkit: '0.19.1' });
   assert.deepEqual(installed.peerDependencies, {
     react: '^19.2.7',
     'react-dom': '^19.2.7',

@@ -166,5 +166,5 @@ export function outputGeneratedDocument(): GeneratedDocument {
       timeZone: 'Asia/Shanghai',
       generatedAt: '2026-07-23T00:00:00.000Z',
     },
-  };
+  } as unknown as GeneratedDocument;
 }

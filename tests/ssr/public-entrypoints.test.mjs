@@ -10,6 +10,7 @@ const publicEntries = [
   'tego-sheet/locales/de',
   'tego-sheet/locales/nl',
   'tego-sheet/locales/zh-cn',
+  'tego-sheet/output/pdf',
 ];
 const browserGlobals = [
   'window',

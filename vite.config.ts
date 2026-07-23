@@ -48,6 +48,7 @@ export default defineConfig({
         'locales/de': resolve(import.meta.dirname, 'src/locales/de.ts'),
         'locales/nl': resolve(import.meta.dirname, 'src/locales/nl.ts'),
         'locales/zh-cn': resolve(import.meta.dirname, 'src/locales/zh-cn.ts'),
+        'output/pdf': resolve(import.meta.dirname, 'src/output/pdf/index.ts'),
       },
       fileName: (format, entryName) => {
         const extension = format === 'es' ? 'js' : 'cjs';

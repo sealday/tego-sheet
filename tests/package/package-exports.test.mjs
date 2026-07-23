@@ -13,6 +13,7 @@ const expectedExports = [
   './locales/de',
   './locales/nl',
   './locales/zh-cn',
+  './output/pdf',
   './package.json',
 ];
 
@@ -126,6 +127,24 @@ test('the built root has only the approved runtime exports and internal subpaths
     assert.notEqual(result.status, 0, `${subpath} unexpectedly resolved`);
     assert.match(result.stderr, /ERR_PACKAGE_PATH_NOT_EXPORTED/);
   }
+});
+
+test('the optional PDF subpath exposes only its adapter contract', () => {
+  execFileSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '--eval',
+      `
+      const pdf = await import('tego-sheet/output/pdf');
+      const expected = ['OutputAdapterError', 'PdfAdapter'];
+      if (JSON.stringify(Object.keys(pdf)) !== JSON.stringify(expected)) {
+        throw new Error('Unexpected PDF exports: ' + Object.keys(pdf).join(','));
+      }
+    `,
+    ],
+    { cwd: consumer, stdio: 'pipe' },
+  );
 });
 
 test('each locale entry exports only its intended dictionary', () => {

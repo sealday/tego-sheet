@@ -8,7 +8,7 @@ const packageRoot = new URL('../../', import.meta.url);
 const require = createRequire(import.meta.url);
 const pkg = require('../../package.json');
 
-test('metadata describes a peer-only React package with explicit exports', () => {
+test('metadata describes React peers and explicit output dependencies and exports', () => {
   assert.equal(pkg.name, 'tego-sheet');
   assert.equal(pkg.version, '0.1.0');
   assert.equal(pkg.type, 'module');
@@ -18,7 +18,7 @@ test('metadata describes a peer-only React package with explicit exports', () =>
     type: 'git',
     url: 'git+https://github.com/sealday/tego-sheet.git',
   });
-  assert.deepEqual(pkg.dependencies, {});
+  assert.deepEqual(pkg.dependencies, { fflate: '0.8.3', pdfkit: '0.19.1' });
   assert.deepEqual(pkg.peerDependencies, { react: '^19.2.7', 'react-dom': '^19.2.7' });
   assert.deepEqual(pkg.files, ['dist', 'docs/migration-from-x-data-spreadsheet.md']);
   assert.deepEqual(pkg.sideEffects, ['**/*.css']);
@@ -29,6 +29,7 @@ test('metadata describes a peer-only React package with explicit exports', () =>
     './locales/de',
     './locales/nl',
     './locales/zh-cn',
+    './output/pdf',
     './package.json',
   ]);
   assert.equal(pkg.scripts['test:ssr'], 'node scripts/test-ssr.mjs');
@@ -99,6 +100,9 @@ test('packed files contain publishable outputs but no workspace source or depend
     'dist/locales/de.js',
     'dist/locales/nl.js',
     'dist/locales/zh-cn.js',
+    'dist/output/pdf.js',
+    'dist/output/pdf.cjs',
+    'dist/output/pdf/index.d.ts',
   ])
     assert.equal(files.includes(required), true, `${required} must be packed`);
   assert.equal(

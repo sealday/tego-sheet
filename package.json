@@ -55,6 +55,11 @@
       "import": "./dist/locales/zh-cn.js",
       "require": "./dist/locales/zh-cn.cjs"
     },
+    "./output/pdf": {
+      "types": "./dist/output/pdf/index.d.ts",
+      "import": "./dist/output/pdf.js",
+      "require": "./dist/output/pdf.cjs"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {

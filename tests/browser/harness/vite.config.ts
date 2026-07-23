@@ -10,11 +10,18 @@ export default defineConfig({
   resolve: {
     alias: [
       {
+        find: 'tego-sheet/output/pdf',
+        replacement: resolve(projectRoot, 'src/output/pdf/index.ts'),
+      },
+      {
         find: 'tego-sheet/styles.css',
         replacement: resolve(projectRoot, 'src/ui/styles/index.less'),
       },
       { find: 'tego-sheet', replacement: resolve(projectRoot, 'src/index.ts') },
     ],
+  },
+  optimizeDeps: {
+    include: ['pdfkit/js/pdfkit.standalone.js'],
   },
   server: {
     host: '127.0.0.1',
