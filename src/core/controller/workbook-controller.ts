@@ -267,6 +267,7 @@ export class WorkbookController {
       this.state,
       this.history.checkpoint(),
       this.revision,
+      this.changeSequence,
       this.checkpointOwner,
     );
     this.checkpoints.add(checkpoint);
@@ -286,6 +287,7 @@ export class WorkbookController {
     this.state = checkpoint.state;
     this.history.restore(checkpoint.history);
     this.revision = checkpoint.revision;
+    this.changeSequence = checkpoint.changeSequence;
   }
 
   replace(input: WorkbookInput, sheetIds?: readonly SheetId[]): void {

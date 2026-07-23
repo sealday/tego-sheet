@@ -44,10 +44,18 @@ export interface SpreadsheetControllerCheckpoint {
   readonly ['document']: SpreadsheetDocument;
 }
 
-function cloneFrozen<T>(value: T): T {
+/** @internal */
+export function cloneFrozenDocumentValue<T>(value: T): T {
   if (value === null || typeof value !== 'object') return value;
-  const output = (Array.isArray(value) ? [] : {}) as Record<string, unknown>;
-  for (const [key, item] of Object.entries(value)) output[key] = cloneFrozen(item);
+  const output = (Array.isArray(value) ? [] : Object.create(null)) as Record<string, unknown>;
+  for (const [key, item] of Object.entries(value)) {
+    Object.defineProperty(output, key, {
+      configurable: false,
+      enumerable: true,
+      value: cloneFrozenDocumentValue(item),
+      writable: false,
+    });
+  }
   return Object.freeze(output) as T;
 }
 
@@ -56,6 +64,7 @@ function cloneFrozen<T>(value: T): T {
  */
 export class SpreadsheetDocumentController {
   private currentDocument: SpreadsheetDocument;
+  private checkpointDocument: SpreadsheetDocument | undefined;
   private readonly legacy: WorkbookController;
   private readonly subscriptions = new SubscriptionStore<SpreadsheetControllerEvent>();
 
@@ -75,7 +84,6 @@ export class SpreadsheetDocumentController {
       ...options,
       sheetIds: this.currentDocument.workbook.sheets.map((sheet) => sheetId(sheet.id)),
     });
-    this.refreshDocument();
   }
 
   get historySize() {
@@ -91,7 +99,7 @@ export class SpreadsheetDocumentController {
   }
 
   getDocument(): SpreadsheetDocument {
-    return cloneFrozen(this.currentDocument);
+    return cloneFrozenDocumentValue(this.currentDocument);
   }
 
   getSheetIds(): readonly SheetId[] {
@@ -109,7 +117,7 @@ export class SpreadsheetDocumentController {
   getSnapshot(): SpreadsheetControllerSnapshot {
     const snapshot = this.legacy.getSnapshot();
     const { value: projection, ...metadata } = snapshot;
-    return cloneFrozen({
+    return cloneFrozenDocumentValue({
       ...metadata,
       ['document']: this.currentDocument,
       projection,
@@ -134,28 +142,43 @@ export class SpreadsheetDocumentController {
         readonly status: 'committed';
         readonly commit: SpreadsheetControllerCommit<CommandResult<Command>, Command>;
       } {
-    const checkpoint = options.beforeNotify === undefined ? undefined : this.checkpoint();
+    const beforeProjection = this.legacy.getValue();
+    let preparedDocument: SpreadsheetDocument | undefined;
+    let preparedCommit: SpreadsheetControllerCommit<CommandResult<Command>, Command> | undefined;
     const outcome = this.legacy.dispatch(command, source, {
       ...options,
-      beforeNotify: undefined,
+      beforeNotify: (legacyCommit) => {
+        const candidate = projectLegacyToDocument(
+          beforeProjection,
+          legacyCommit.value,
+          this.currentDocument,
+          this.legacy.getSheetIds(),
+        );
+        const commit = cloneFrozenDocumentValue({
+          command: legacyCommit.command,
+          change: legacyCommit.change,
+          result: legacyCommit.result,
+          ['document']: candidate,
+        }) as SpreadsheetControllerCommit<CommandResult<Command>, Command>;
+        this.checkpointDocument = candidate;
+        try {
+          options.beforeNotify?.(commit as never);
+          preparedDocument = candidate;
+          preparedCommit = commit;
+        } finally {
+          this.checkpointDocument = undefined;
+        }
+      },
       notify: false,
     });
     if (outcome.status === 'noop') return outcome;
-    this.refreshDocument();
-    const commit = cloneFrozen({
-      command: outcome.commit.command,
-      change: outcome.commit.change,
-      result: outcome.commit.result,
-      ['document']: this.currentDocument,
-    }) as SpreadsheetControllerCommit<CommandResult<Command>, Command>;
-    try {
-      options.beforeNotify?.(commit as never);
-    } catch (error) {
-      if (checkpoint !== undefined) this.restore(checkpoint);
-      throw error;
+    if (preparedDocument === undefined || preparedCommit === undefined) {
+      throw new Error('Spreadsheet document transaction was not prepared');
     }
+    this.currentDocument = preparedDocument;
+    const commit = preparedCommit;
     if (options.notify !== false) {
-      const event = cloneFrozen({
+      const event = cloneFrozenDocumentValue({
         snapshot: this.getSnapshot(),
         commit,
       }) as SpreadsheetControllerEvent;
@@ -175,7 +198,7 @@ export class SpreadsheetDocumentController {
   checkpoint(): SpreadsheetControllerCheckpoint {
     return {
       legacy: this.legacy.checkpoint(),
-      ['document']: this.currentDocument,
+      ['document']: this.checkpointDocument ?? this.currentDocument,
     };
   }
 
@@ -196,11 +219,12 @@ export class SpreadsheetDocumentController {
       });
     }
     const { ['document']: parsedDocument } = parsed;
-    this.currentDocument = parsedDocument;
+    const projection = projectDocumentToLegacy(parsedDocument);
     this.legacy.replace(
-      projectDocumentToLegacy(this.currentDocument),
-      this.currentDocument.workbook.sheets.map((sheet) => sheetId(sheet.id)),
+      projection,
+      parsedDocument.workbook.sheets.map((sheet) => sheetId(sheet.id)),
     );
+    this.currentDocument = parsedDocument;
   }
 
   setReadOnly(readOnly: boolean): void {
@@ -210,13 +234,5 @@ export class SpreadsheetDocumentController {
   dispose(): void {
     this.subscriptions.dispose();
     this.legacy.dispose();
-  }
-
-  private refreshDocument(): void {
-    this.currentDocument = projectLegacyToDocument(
-      this.legacy.getValue(),
-      this.currentDocument,
-      this.legacy.getSheetIds(),
-    );
   }
 }

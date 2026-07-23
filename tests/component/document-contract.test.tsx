@@ -76,3 +76,17 @@ it('removes legacy mutable ingress from public props and handle types', () => {
   expect(legacyProps).toBe(false);
   expect(legacyHandle).toBe(false);
 });
+
+it('makes controlled and uncontrolled document ownership mutually exclusive in props', () => {
+  type AcceptsBoth = {
+    document: SpreadsheetDocument;
+    defaultDocument: SpreadsheetDocument;
+  } extends TegoSheetProps
+    ? true
+    : false;
+  type AcceptsNeither = Record<never, never> extends TegoSheetProps ? true : false;
+  const acceptsBoth: AcceptsBoth = false;
+  const acceptsNeither: AcceptsNeither = false;
+  expect(acceptsBoth).toBe(false);
+  expect(acceptsNeither).toBe(false);
+});

@@ -75,3 +75,60 @@ projection boundary; `migrateLegacyWorkbook()` is the only public legacy ingress
   It is a single bounded adapter, not a second public or independently owned document truth.
 - Existing React test-suite `act(...)` warnings in the read-only Suspense probe remain warnings;
   the suite passes and this task does not change that scheduling test.
+
+## Review-fix pass: preserve schema 2 runtime truth
+
+### RED evidence
+
+- Direct schema 2 fixtures exposed five failures: constructor/dispatch lost custom input and
+  schema-only cell references, validation references leaked across sheets, projection failure
+  left split-brain state, rejected `beforeNotify` consumed a change sequence, and cloning
+  dangerous JSON keys did not have an explicit safe contract.
+- The first integrated component run then exposed nine projection regressions: controlled
+  checkpoints captured the pre-commit document and validation-only commands retained the prior
+  cell reference.
+- The first fresh 96-case browser matrix exposed the same clear-format failure in all six browser
+  projects because an absent operational `styleId` could not remove the previous value during
+  object-spread merging.
+
+### GREEN implementation
+
+- Constructor and replace now preserve the parsed schema 2 document exactly; operation projection
+  is one private boundary and never becomes document truth.
+- Legacy-to-document projection compares the before/after operation boundary and merges only the
+  fields the command changed. Custom input, resource/template references, metadata, settings,
+  resources, templates, and extensions survive unrelated commands.
+- Styles, validation references, editable/printable flags, and cell input are merged as
+  operation-owned fields, so removal is represented correctly instead of reviving an omitted
+  previous property.
+- Validation collection is sheet-local and validation-only commands update references without
+  creating cells on another sheet.
+- Projection and user `beforeNotify` failures roll back legacy state, schema state, revision,
+  history, subscriptions, and change sequencing as one transaction. Controlled reconciliation
+  checkpoints capture the prepared schema document without publishing it early.
+- Replace projects and validates before changing either runtime truth, so a rejected projection
+  has no document-first visibility window.
+- Deep frozen clones use null-prototype records and own-property definitions, preserving dangerous
+  JSON keys without prototype mutation.
+- `TegoSheetProps` is now a compile-time controlled/uncontrolled XOR. Controlled read-only
+  consumers may omit `onDocumentChange`; editable controlled consumers are documented to apply
+  emitted snapshots.
+- Both packaged and website migration guides now use schema 2 props/handle methods and describe
+  persisted `workbook.sheets[].id` identity correctly.
+
+### Final verification
+
+- Focused review regression tests: 12 controller tests and 4 document-contract component tests
+  passed.
+- `npx vitest run --project unit`: 39 files, 627 tests passed.
+- `npx vitest run --project component`: 26 files, 203 tests passed.
+- `npx vitest run --project architecture`: 14 files, 111 tests passed.
+- `npm run typecheck`, `npm run lint`, `npm run format:check`, and `npm run build`: passed.
+- `npm run test:ssr`: public ESM/CJS import probe plus SSR component test passed.
+- `npm run test:package`: 40 tests passed, including packed ESM/CommonJS declarations and clean
+  Vite consumer builds.
+- `npm run test:browser`: fresh six-project matrix passed 93 tests with 3 intentional desktop
+  touch-only skips.
+- The parity manifest's 32 structural checks passed; its retained release-evidence check correctly
+  refused to run against the dirty pre-commit worktree because its revision fingerprint requires a
+  clean repository.

@@ -14,6 +14,7 @@ export interface ControllerCheckpoint {
   readonly state: WorkbookState;
   readonly history: HistoryCheckpoint<WorkbookState, HistoryMetadata>;
   readonly revision: number;
+  readonly changeSequence: number;
   readonly [checkpointOwner]: object;
 }
 
@@ -21,9 +22,10 @@ export function createControllerCheckpoint(
   state: WorkbookState,
   history: HistoryCheckpoint<WorkbookState, HistoryMetadata>,
   revision: number,
+  changeSequence: number,
   owner: object,
 ): ControllerCheckpoint {
-  const checkpoint = { state, history, revision } as ControllerCheckpoint;
+  const checkpoint = { state, history, revision, changeSequence } as ControllerCheckpoint;
   Object.defineProperty(checkpoint, checkpointOwner, {
     configurable: false,
     enumerable: false,

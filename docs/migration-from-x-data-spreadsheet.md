@@ -4,19 +4,21 @@
 
 ## Replace construction and events
 
-The old `new Spreadsheet(element, options)` constructor and `x_spreadsheet(...)` global do not exist. Render `<TegoSheet>` in React and import `tego-sheet/styles.css`. The old `.on(...)` emitter and string event names do not exist either; use typed props such as `onChange`, `onCellEdit`, `onPaste`, `onSelectionChange`, `onActiveSheetChange`, and `onError`.
+The old `new Spreadsheet(element, options)` constructor and `x_spreadsheet(...)` global do not exist. Render `<TegoSheet>` in React and import `tego-sheet/styles.css`. The old `.on(...)` emitter and string event names do not exist either; use typed props such as `onDocumentChange`, `onCellEdit`, `onPaste`, `onSelectionChange`, `onActiveSheetChange`, and `onError`.
 
 ```tsx
-import { TegoSheet, type WorkbookData, type WorkbookInput } from 'tego-sheet';
+import { migrateLegacyWorkbook, TegoSheet, type SpreadsheetDocument } from 'tego-sheet';
 import 'tego-sheet/styles.css';
 
 interface EditorProps {
-  legacyJson: WorkbookInput;
-  saveWorkbook(value: WorkbookData): void;
+  legacyJson: unknown;
+  saveDocument(document: SpreadsheetDocument): void;
 }
 
-export function Editor({ legacyJson, saveWorkbook }: EditorProps) {
-  return <TegoSheet defaultValue={legacyJson} onChange={saveWorkbook} />;
+export function Editor({ legacyJson, saveDocument }: EditorProps) {
+  const migrated = migrateLegacyWorkbook(legacyJson);
+  if (!migrated.ok) return <p>Legacy workbook could not be migrated.</p>;
+  return <TegoSheet defaultDocument={migrated.document} onDocumentChange={saveDocument} />;
 }
 ```
 
@@ -24,25 +26,25 @@ There is no public controller, renderer, `DataProxy`, mutable sheet object, glob
 
 ## Choose one ownership mode
 
-- Uncontrolled: pass `defaultValue`; use `onChange` for persistence and a `TegoSheetHandle` ref for queries or commands.
-- Controlled: pass `value` and accept the next workbook from `onChange`. Keep the current object reference during unrelated parent renders.
+- Uncontrolled: pass `defaultDocument`; use `onDocumentChange` for persistence and a `TegoSheetHandle` ref for queries or commands.
+- Controlled: pass `document` and accept the next document from `onDocumentChange`. Keep the current object reference during unrelated parent renders.
 - Never pass both props or switch modes after mount.
 
-The input and callback payloads remain isolated from internal state. `getValue()` returns compatible sparse workbook JSON. Unknown JSON-compatible extension keys are preserved recursively through unrelated edits, history, and export.
+The input and callback payloads remain isolated from internal state. `getDocument()` returns an isolated schema 2 snapshot. Unknown JSON-compatible extension keys are preserved recursively through unrelated edits, history, and export.
 
 ## Map UI options to React props
 
-| Legacy option or integration | React API                                                                                    |
-| ---------------------------- | -------------------------------------------------------------------------------------------- |
-| `showToolbar: false`         | `toolbar={false}`                                                                            |
-| custom toolbar DOM           | `toolbar={renderer}` with typed `ToolbarRenderProps`                                         |
-| `showBottomBar: false`       | `sheetTabs={false}`                                                                          |
-| custom sheet-tab DOM         | `sheetTabs={renderer}` with typed `SheetTabsRenderProps`                                     |
-| `mode: 'read'`               | `readOnly`                                                                                   |
-| global locale registration   | `locale={definition}` on each component                                                      |
-| imperative load              | controlled `value`, or remount an uncontrolled component with a new `key` and `defaultValue` |
-| imperative data export       | `ref.current.getValue()` or the `onChange` value                                             |
-| resize callbacks             | size the container and call `recalculateLayout()` when needed                                |
+| Legacy option or integration | React API                                                                                          |
+| ---------------------------- | -------------------------------------------------------------------------------------------------- |
+| `showToolbar: false`         | `toolbar={false}`                                                                                  |
+| custom toolbar DOM           | `toolbar={renderer}` with typed `ToolbarRenderProps`                                               |
+| `showBottomBar: false`       | `sheetTabs={false}`                                                                                |
+| custom sheet-tab DOM         | `sheetTabs={renderer}` with typed `SheetTabsRenderProps`                                           |
+| `mode: 'read'`               | `readOnly`                                                                                         |
+| global locale registration   | `locale={definition}` on each component                                                            |
+| imperative load              | controlled `document`, or remount an uncontrolled component with a new `key` and `defaultDocument` |
+| imperative data export       | `ref.current.getDocument()` or the `onDocumentChange` document                                     |
+| resize callbacks             | size the container and call `recalculateLayout()` when needed                                      |
 
 Import bundled dictionaries from their explicit paths:
 
@@ -96,6 +98,9 @@ copied into an extension bag. Current row and column dimensions, hidden/default 
 freeze panes, filters, validation, merges, and editable/printable cell flags are
 persisted in normalized schema 2 fields.
 
-`SheetId` is a runtime-only opaque identity used by callbacks and ref commands. Do not persist it in workbook JSON. A genuine external workbook replacement creates new IDs; edits, renames, history, and controlled acknowledgements retain existing IDs.
+Schema 2 persists stable sheet identity in `workbook.sheets[].id`. Callback and ref-command `SheetId`
+values identify those sheets at runtime; serialize the document field rather than maintaining a
+second identity store. External replacements retain the IDs they supply, while edits, renames,
+history, and controlled acknowledgements preserve existing document IDs.
 
 The package exposes only `tego-sheet`, `tego-sheet/styles.css`, the four locale subpaths, and `tego-sheet/package.json`. Imports from controller, engine, React internals, source, or legacy paths are unsupported and blocked by the export map.

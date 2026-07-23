@@ -43,7 +43,8 @@ export function Editor({ legacyJson, saveDocument }: EditorProps) {
 
 There is no public controller, renderer, mutable sheet object, `DataProxy`, internal emitter, or manual
 destroy method. Choose controlled or uncontrolled ownership at mount and do not switch modes while the
-instance remains mounted. `SheetId` is runtime-only and must not be persisted in workbook JSON.
+instance remains mounted. Schema 2 persists stable identity in `workbook.sheets[].id`; callback and
+ref-command `SheetId` values identify those document sheets at runtime.
 
 For the exact compatibility surface, preserved extension keys, ref command rules, and the five
 intentional correctness differences, read the package's canonical

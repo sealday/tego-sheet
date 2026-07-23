@@ -13,6 +13,8 @@ import type { SheetId } from '../types/coordinates';
 import { migrateLegacyWorkbook } from '../../document/migrate-legacy';
 import type {
   CellInput,
+  Sheet,
+  SheetInput,
   SpreadsheetDocument,
   SpreadsheetDocumentInput,
 } from '../../document/model/document';
@@ -69,9 +71,9 @@ function jsonRecord(value: JsonValue): Record<string, JsonValue> {
 export function projectDocumentToLegacy(document: SpreadsheetDocument): WorkbookData {
   const styles = document.workbook.styles.map((entry) => entry.value as CellStyle);
   const styleIndexes = new Map(document.workbook.styles.map((entry, index) => [entry.id, index]));
-  const validations = new Map<string, ValidationData>();
 
   const sheets = document.workbook.sheets.map((sheet): SheetData => {
+    const validations = new Map<string, ValidationData>();
     const rows: Record<string, unknown> & { len?: number } = {};
     const cols: Record<string, unknown> & { len?: number } = {};
     if (sheet.rowCount !== undefined) rows.len = sheet.rowCount;
@@ -152,6 +154,190 @@ export function projectDocumentToLegacy(document: SpreadsheetDocument): Workbook
   return sheets;
 }
 
+function sameJson(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function legacyRow(sheet: SheetData | undefined, row: number): Record<string, unknown> | undefined {
+  const value = sheet?.rows?.[String(row)];
+  return typeof value === 'object' && value !== null
+    ? (value as unknown as Record<string, unknown>)
+    : undefined;
+}
+
+function legacyColumn(
+  sheet: SheetData | undefined,
+  column: number,
+): Record<string, unknown> | undefined {
+  const value = sheet?.cols?.[String(column)];
+  return typeof value === 'object' && value !== null
+    ? (value as unknown as Record<string, unknown>)
+    : undefined;
+}
+
+function legacyCell(sheet: SheetData | undefined, row: number, column: number): unknown {
+  const cells = legacyRow(sheet, row)?.cells;
+  return typeof cells === 'object' && cells !== null
+    ? (cells as Record<string, unknown>)[String(column)]
+    : undefined;
+}
+
+function legacyCellInput(cell: unknown): unknown {
+  if (typeof cell !== 'object' || cell === null) return cell;
+  const record = cell as Record<string, unknown>;
+  return {
+    ...(record.type === undefined ? {} : { type: record.type }),
+    ...(record.text === undefined ? {} : { text: record.text }),
+    ...(record.value === undefined ? {} : { value: record.value }),
+  };
+}
+
+function rowShape(row: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (row === undefined) return undefined;
+  const { cells: _cells, ...shape } = row;
+  return shape;
+}
+
+function mergeSheet(
+  previous: Sheet | undefined,
+  operational: SheetInput,
+  beforeLegacy: SheetData | undefined,
+  afterLegacy: SheetData | undefined,
+): SpreadsheetDocumentInput['workbook']['sheets'][number] {
+  if (previous === undefined) return operational;
+  const previousCells = new Map(
+    previous.cells.map((item) => [`${item.row}:${item.column}`, item] as const),
+  );
+  const operationalCells = new Map(
+    operational.cells.map((item) => [`${item.row}:${item.column}`, item] as const),
+  );
+  const coordinates = new Set([...previousCells.keys(), ...operationalCells.keys()]);
+  const cells = [...coordinates]
+    .map((key) => {
+      const previousCell = previousCells.get(key);
+      const operationalCell = operationalCells.get(key);
+      const [row, column] = key.split(':').map(Number) as [number, number];
+      const beforeCell = legacyCell(beforeLegacy, row, column);
+      const afterCell = legacyCell(afterLegacy, row, column);
+      if (sameJson(beforeCell, afterCell)) {
+        if (
+          previousCell !== undefined &&
+          operationalCell !== undefined &&
+          previousCell.cell.validationId !== operationalCell.cell.validationId
+        ) {
+          const { validationId: _validationId, ...previousCellData } = previousCell.cell;
+          return {
+            ...previousCell,
+            cell: {
+              ...previousCellData,
+              ...(operationalCell.cell.validationId === undefined
+                ? {}
+                : { validationId: operationalCell.cell.validationId }),
+            },
+          };
+        }
+        return previousCell ?? operationalCell;
+      }
+      if (afterCell === undefined || operationalCell === undefined) return undefined;
+      const previousCellData = previousCell?.cell;
+      return {
+        ...operationalCell,
+        cell: {
+          ...(previousCellData?.resourceId === undefined
+            ? {}
+            : { resourceId: previousCellData.resourceId }),
+          ...(previousCellData?.templateId === undefined
+            ? {}
+            : { templateId: previousCellData.templateId }),
+          ...(previousCellData?.metadata === undefined
+            ? {}
+            : { metadata: previousCellData.metadata }),
+          ...operationalCell.cell,
+          input:
+            previousCellData !== undefined &&
+            sameJson(legacyCellInput(beforeCell), legacyCellInput(afterCell))
+              ? previousCellData.input
+              : operationalCell.cell.input,
+        },
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== undefined);
+
+  const previousRows = new Map(previous.rows.map((row) => [row.index, row]));
+  const operationalRows = new Map((operational.rows ?? []).map((row) => [row.index, row]));
+  const rowIndexes = new Set([...previousRows.keys(), ...operationalRows.keys()]);
+  const rows = [...rowIndexes]
+    .map((index) =>
+      sameJson(rowShape(legacyRow(beforeLegacy, index)), rowShape(legacyRow(afterLegacy, index)))
+        ? (previousRows.get(index) ?? operationalRows.get(index))
+        : operationalRows.get(index),
+    )
+    .filter((row): row is NonNullable<typeof row> => row !== undefined);
+
+  const previousColumns = new Map(previous.columns.map((column) => [column.index, column]));
+  const operationalColumns = new Map(
+    (operational.columns ?? []).map((column) => [column.index, column]),
+  );
+  const columnIndexes = new Set([...previousColumns.keys(), ...operationalColumns.keys()]);
+  const columns = [...columnIndexes]
+    .map((index) =>
+      sameJson(legacyColumn(beforeLegacy, index), legacyColumn(afterLegacy, index))
+        ? (previousColumns.get(index) ?? operationalColumns.get(index))
+        : operationalColumns.get(index),
+    )
+    .filter((column): column is NonNullable<typeof column> => column !== undefined);
+
+  const rowCount = sameJson(beforeLegacy?.rows?.len, afterLegacy?.rows?.len)
+    ? previous.rowCount
+    : operational.rowCount;
+  const columnCount = sameJson(beforeLegacy?.cols?.len, afterLegacy?.cols?.len)
+    ? previous.columnCount
+    : operational.columnCount;
+  const freeze = sameJson(beforeLegacy?.freeze, afterLegacy?.freeze)
+    ? previous.freeze
+    : operational.freeze;
+  const filter = sameJson(beforeLegacy?.autofilter, afterLegacy?.autofilter)
+    ? previous.filter === undefined
+      ? undefined
+      : {
+          ...(previous.filter.range === undefined
+            ? {}
+            : {
+                range: {
+                  start: { ...previous.filter.range.start },
+                  end: { ...previous.filter.range.end },
+                },
+              }),
+          filters: previous.filter.filters.map((item) => ({
+            ...item,
+            values: [...item.values],
+          })),
+          ...(previous.filter.sort === undefined
+            ? {}
+            : {
+                sort: previous.filter.sort === null ? null : { ...previous.filter.sort },
+              }),
+        }
+    : operational.filter;
+  return {
+    ...operational,
+    name: sameJson(beforeLegacy?.name, afterLegacy?.name) ? previous.name : operational.name,
+    cells,
+    merges: sameJson(beforeLegacy?.merges, afterLegacy?.merges)
+      ? previous.merges.map((range) => ({
+          start: { ...range.start },
+          end: { ...range.end },
+        }))
+      : operational.merges,
+    ...(rowCount === undefined ? {} : { rowCount }),
+    ...(columnCount === undefined ? {} : { columnCount }),
+    rows,
+    columns,
+    ...(freeze === undefined ? {} : { freeze }),
+    ...(filter === undefined ? {} : { filter }),
+  } as unknown as SheetInput;
+}
+
 function registryIds(
   previous: readonly { readonly id: string; readonly value: JsonValue }[],
   next: readonly { readonly id: string; readonly value: JsonValue }[],
@@ -212,11 +398,12 @@ function remapSheet(
 
 /** @internal Rebuilds the frozen schema 2 truth after one legacy operation commit. */
 export function projectLegacyToDocument(
-  workbook: WorkbookData,
+  beforeWorkbook: WorkbookData,
+  afterWorkbook: WorkbookData,
   previous: SpreadsheetDocument,
   sheetIds: readonly SheetId[],
 ): SpreadsheetDocument {
-  const migrated = migrateLegacyWorkbook(workbook, {
+  const migrated = migrateLegacyWorkbook(afterWorkbook, {
     ids: {
       documentId: () => previous.id,
       sheetId: (index) => sheetIds[index] ?? `runtime-sheet-${index + 1}`,
@@ -240,11 +427,16 @@ export function projectLegacyToDocument(
     ...migrated.document,
     workbook: {
       ...migrated.document.workbook,
-      sheets: migrated.document.workbook.sheets.map((sheet) =>
-        remapSheet(
-          sheet as unknown as SpreadsheetDocumentInput['workbook']['sheets'][number],
-          styleRegistry.remap,
-          validationRegistry.remap,
+      sheets: migrated.document.workbook.sheets.map((sheet, index) =>
+        mergeSheet(
+          previous.workbook.sheets.find((item) => item.id === sheet.id),
+          remapSheet(
+            sheet as unknown as SpreadsheetDocumentInput['workbook']['sheets'][number],
+            styleRegistry.remap,
+            validationRegistry.remap,
+          ),
+          beforeWorkbook[previous.workbook.sheets.findIndex((item) => item.id === sheet.id)],
+          afterWorkbook[index],
         ),
       ),
       styles: styleRegistry.entries,
@@ -255,7 +447,10 @@ export function projectLegacyToDocument(
     resources: previous.resources,
     extensions: previous.extensions,
   });
-  if (!result.ok)
-    throw new TypeError('Runtime projection produced an invalid spreadsheet document');
+  if (!result.ok) {
+    throw new TypeError(
+      `Runtime projection produced an invalid spreadsheet document: ${JSON.stringify(result.diagnostics)}`,
+    );
+  }
   return result.document;
 }

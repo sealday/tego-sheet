@@ -46,14 +46,7 @@ export interface TegoSheetCallbacks {
  * Choose controlled `document` or uncontrolled `defaultDocument` when mounting. Supplying both, or
  * switching a mounted instance between those ownership modes, throws a `TegoSheetException`.
  */
-export interface TegoSheetProps extends TegoSheetCallbacks {
-  /**
-   * Controlled schema 2 document owned by the parent.
-   * Apply `onDocumentChange` snapshots to this prop to accept user and imperative mutations.
-   */
-  readonly ['document']?: SpreadsheetDocument;
-  /** Schema 2 document read once when mounting an uncontrolled spreadsheet. */
-  readonly defaultDocument?: SpreadsheetDocument;
+interface TegoSheetSharedProps extends TegoSheetCallbacks {
   /** Zero-based worksheet index selected on mount. */
   readonly initialActiveSheetIndex?: number;
   /** Disables workbook mutations while preserving navigation, selection, copy, and printing. */
@@ -71,6 +64,29 @@ export interface TegoSheetProps extends TegoSheetCallbacks {
   /** Inline styles applied to the root spreadsheet element. */
   readonly style?: CSSProperties;
 }
+
+type TegoSheetOwnership =
+  | {
+      /** Controlled schema 2 document owned by the parent. */
+      readonly ['document']: SpreadsheetDocument;
+      readonly defaultDocument?: never;
+    }
+  | {
+      readonly ['document']?: never;
+      /** Schema 2 document read once when mounting an uncontrolled spreadsheet. */
+      readonly defaultDocument: SpreadsheetDocument;
+    };
+
+/**
+ * Props for the `TegoSheet` React component.
+ *
+ * @remarks
+ * The union makes ownership exclusive at compile time. Controlled read-only consumers may omit
+ * `onDocumentChange`; editable controlled consumers should apply its snapshots to `document`.
+ *
+ * @interface
+ */
+export type TegoSheetProps = TegoSheetSharedProps & TegoSheetOwnership;
 
 /**
  * Imperative API exposed through a React ref while `TegoSheet` is mounted.
