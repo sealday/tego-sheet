@@ -9,6 +9,7 @@ import {
 } from '../presentation';
 import { createPrintDisplayList } from '../print';
 import { mountPrintDisplayPages, type PrintWorkbookOptions } from '../ui/print-workbook';
+import { createPresentationValidationResolver } from './adapters/presentation-adapter';
 
 export function activeSheetData(
   snapshot: SpreadsheetControllerSnapshot,
@@ -73,6 +74,7 @@ export function mountActiveSheetPrint(
       maximumEntries: 100_000,
       maximumBytes: 32 * 1024 * 1024,
     }),
+    validation: createPresentationValidationResolver(snapshot),
     revisions: {
       document: snapshot.revision,
       calculation: snapshot.calculation.revision,

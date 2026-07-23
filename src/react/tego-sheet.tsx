@@ -60,6 +60,7 @@ import {
 } from './sheet-chrome-runtime';
 import { AccessibilityGrid } from './accessibility/accessibility-grid';
 import { createPresentationCache, createPresentationResolver } from '../presentation';
+import { createPresentationValidationResolver } from './adapters/presentation-adapter';
 
 function callbacksFromProps(props: TegoSheetProps): TegoSheetCallbacks {
   return {
@@ -998,6 +999,7 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
               props.epoch.snapshot.calculation.values.map(({ address, value }) => [address, value]),
             ),
             cache: accessibilityCache,
+            validation: createPresentationValidationResolver(props.epoch.snapshot),
             revisions: {
               document: props.epoch.snapshot.revision,
               calculation: props.epoch.snapshot.calculation.revision,
@@ -1081,6 +1083,23 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
       data-mode={props.epoch.mode}
       data-grid-visible={props.options?.showGrid === false ? 'false' : 'true'}
       data-context-menu-enabled={props.options?.showContextMenu === false ? 'false' : 'true'}
+      role="grid"
+      aria-rowcount={
+        activeData === null
+          ? undefined
+          : Math.max(
+              selection?.active.row ?? 0,
+              typeof activeData.rows?.len === 'number' ? activeData.rows.len - 1 : 0,
+            ) + 1
+      }
+      aria-colcount={
+        activeData === null
+          ? undefined
+          : Math.max(
+              selection?.active.column ?? 0,
+              typeof activeData.cols?.len === 'number' ? activeData.cols.len - 1 : 0,
+            ) + 1
+      }
       aria-activedescendant={
         selection === null
           ? undefined
@@ -1194,6 +1213,7 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
                   activeCell={selection.active}
                   selection={selection.range}
                   editorOpen={editor !== null}
+                  embedded
                   idPrefix={accessibilityIdPrefix}
                   readOnly={renderRuntime.readOnly || props.epoch.snapshot.readOnly}
                   restoreFocus={false}

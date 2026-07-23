@@ -26,6 +26,7 @@ import {
   type ViewportMetrics,
 } from '../../engine';
 import { createPresentationCache, createPresentationResolver } from '../../presentation';
+import { createPresentationValidationResolver } from './presentation-adapter';
 
 export interface EngineAdapterOptions {
   readonly root: HTMLElement;
@@ -138,6 +139,7 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
         latestSnapshot.calculation.values.map(({ address, value }) => [address, value]),
       ),
       cache: presentationCache,
+      validation: createPresentationValidationResolver(latestSnapshot),
       revisions: {
         document: latestSnapshot.revision,
         calculation: latestSnapshot.calculation.revision,

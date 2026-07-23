@@ -138,6 +138,15 @@ it('mounts the bounded semantic grid beside the Canvas surface', async () => {
     <TegoSheet
       defaultDocument={testDocument([
         {
+          validations: [
+            {
+              refs: ['A1'],
+              mode: 'cell',
+              type: 'list',
+              required: true,
+              value: ['allowed'],
+            },
+          ],
           rows: {
             len: 100_000,
             0: { cells: { 0: { text: 'shared text' } } },
@@ -150,9 +159,15 @@ it('mounts the bounded semantic grid beside the Canvas surface', async () => {
 
   await waitFor(() => expect(rendered.queryByRole('grid')).not.toBeNull());
   expect(rendered.container.querySelector('canvas')).not.toBeNull();
-  const semanticCell = rendered.getByRole('gridcell', { name: 'shared text' });
+  const root = rendered.getByRole('grid');
+  const semanticCell = rendered.getByRole('gridcell', { name: /shared text/u });
   expect(semanticCell.textContent).toBe('shared text');
   expect(semanticCell.getAttribute('aria-readonly')).toBe('false');
+  expect(semanticCell.getAttribute('aria-invalid')).toBe('true');
+  expect(semanticCell.getAttribute('tabindex')).toBe('-1');
+  expect(root.getAttribute('tabindex')).toBe('0');
+  expect(root.getAttribute('aria-activedescendant')).toBe(semanticCell.id);
+  expect(rendered.container.querySelectorAll('[role="gridcell"][tabindex="0"]')).toHaveLength(0);
   expect(rendered.container.querySelectorAll('[role="gridcell"]').length).toBeLessThan(500);
 
   rendered.rerender(
@@ -163,7 +178,7 @@ it('mounts the bounded semantic grid beside the Canvas surface', async () => {
   );
   await waitFor(() =>
     expect(
-      rendered.getByRole('gridcell', { name: 'shared text' }).getAttribute('aria-readonly'),
+      rendered.getByRole('gridcell', { name: /shared text/u }).getAttribute('aria-readonly'),
     ).toBe('true'),
   );
 });

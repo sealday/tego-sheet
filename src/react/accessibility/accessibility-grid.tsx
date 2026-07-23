@@ -27,6 +27,7 @@ export interface AccessibilityGridProps {
   readonly resolvePresentation: (point: CellPoint) => CellPresentation;
   readonly readOnly?: boolean;
   readonly editorOpen?: boolean;
+  readonly embedded?: boolean;
   readonly idPrefix?: string;
   readonly restoreFocus?: boolean;
   readonly onActivate?: (point: CellPoint) => void;
@@ -70,6 +71,7 @@ export function AccessibilityGrid({
   resolvePresentation,
   readOnly = false,
   editorOpen = false,
+  embedded = false,
   idPrefix,
   restoreFocus = true,
   onActivate,
@@ -90,10 +92,10 @@ export function AccessibilityGrid({
 
   return (
     <div
-      role="grid"
-      aria-rowcount={rowCount}
-      aria-colcount={columnCount}
-      aria-multiselectable={selectedCount > 1}
+      role={embedded ? 'presentation' : 'grid'}
+      aria-rowcount={embedded ? undefined : rowCount}
+      aria-colcount={embedded ? undefined : columnCount}
+      aria-multiselectable={embedded ? undefined : selectedCount > 1}
       aria-describedby={selectionDescriptionId}
     >
       <div id={selectionDescriptionId} aria-live="polite" hidden={selectedCount <= 1}>
@@ -126,7 +128,7 @@ export function AccessibilityGrid({
                 aria-selected={selected(point, selection)}
                 key={column}
                 ref={active ? activeReference : undefined}
-                tabIndex={active ? 0 : -1}
+                tabIndex={!embedded && active ? 0 : -1}
                 onClick={() => onActivate?.(point)}
                 onDoubleClick={() => onRequestEdit?.(point)}
               >
