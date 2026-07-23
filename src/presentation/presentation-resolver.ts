@@ -390,6 +390,23 @@ export function createPresentationResolver(
   const conditionalFormatter = createConditionalFormatEvaluator(
     options.conditionalFormattingLimits ?? { maxRules: 10_000, maxCells: 10_000_000 },
   );
+  const conditionalRulesBySheet = new Map(
+    options.document.workbook.sheets.map((sheet) => [
+      sheet.id,
+      documentConditionalRules(options.document, {
+        sheetId: sheet.id,
+        row: 0,
+        column: 0,
+      }),
+    ]),
+  );
+  const conditionalLookup = (target: DocumentCellAddress): FormulaValue | undefined => {
+    const targetCell = cellAt(options.document, target.sheetId, target.row, target.column);
+    const calculated =
+      options.formulaValues?.get(formulaAddressKey(target)) ??
+      options.formulaProgram?.values.get(formulaAddressKey(target));
+    return targetCell?.input.type === 'formula' ? calculated : inputValue(targetCell);
+  };
   const activeViews =
     options.activeFilterViews ??
     [options.activeFilterView].filter((view): view is FilterView => view !== undefined);
@@ -444,14 +461,8 @@ export function createPresentationResolver(
         value,
         text: formattedText,
         baseStyle,
-        rules: documentConditionalRules(options.document, address),
-        lookup: (target) => {
-          const targetCell = cellAt(options.document, target.sheetId, target.row, target.column);
-          const calculated =
-            options.formulaValues?.get(formulaAddressKey(target)) ??
-            options.formulaProgram?.values.get(formulaAddressKey(target));
-          return targetCell?.input.type === 'formula' ? calculated : inputValue(targetCell);
-        },
+        rules: conditionalRulesBySheet.get(address.sheetId) ?? [],
+        lookup: conditionalLookup,
       });
       diagnostics.push(
         ...conditional.diagnostics.map(

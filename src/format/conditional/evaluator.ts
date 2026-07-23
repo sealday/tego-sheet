@@ -32,6 +32,19 @@ export interface ConditionalFormatLimits {
   readonly maxRules: number;
   /** Maximum aggregate target area accepted per evaluation. */
   readonly maxCells: number;
+  /** Maximum characters accepted in one conditional formula. */
+  readonly maxFormulaLength?: number;
+  /** Maximum parsed AST nodes accepted in one conditional formula. */
+  readonly maxAstNodes?: number;
+  /** Maximum recursive evaluation steps allowed per formula match. */
+  readonly maxEvaluationSteps?: number;
+}
+
+interface FormulaRuntime {
+  readonly asts: Map<string, FormulaAst>;
+  readonly maxFormulaLength: number;
+  readonly maxAstNodes: number;
+  readonly maxEvaluationSteps: number;
 }
 
 function contains(rule: ConditionalRule, address: ConditionalEvaluationInput['address']): boolean {
@@ -116,7 +129,15 @@ function truthy(value: ScalarFormulaValue): boolean {
 function evaluateFormulaAst(
   ast: FormulaAst,
   input: ConditionalEvaluationInput,
+  budget: { remaining: number },
 ): ScalarFormulaValue {
+  budget.remaining -= 1;
+  if (budget.remaining < 0) {
+    throw new ConditionalFormatError(
+      'INVALID_CONDITIONAL_EXPRESSION',
+      'Conditional formula exceeded its evaluation budget',
+    );
+  }
   if (ast.kind === 'number' || ast.kind === 'string' || ast.kind === 'boolean') {
     return { type: ast.kind, value: ast.value } as ScalarFormulaValue;
   }
@@ -136,7 +157,7 @@ function evaluateFormulaAst(
     );
   }
   if (ast.kind === 'unary') {
-    const value = numeric(evaluateFormulaAst(ast.operand, input));
+    const value = numeric(evaluateFormulaAst(ast.operand, input, budget));
     return value === undefined
       ? { type: 'error', value: '#VALUE!' }
       : { type: 'number', value: -value };
@@ -150,7 +171,7 @@ function evaluateFormulaAst(
       );
     }
     const value = definition.evaluate(
-      ast.arguments.map((argument) => evaluateFormulaAst(argument, input)),
+      ast.arguments.map((argument) => evaluateFormulaAst(argument, input, budget)),
       {
         locale: 'en-US',
         timeZone: 'UTC',
@@ -166,8 +187,8 @@ function evaluateFormulaAst(
     }
     return value;
   }
-  const left = evaluateFormulaAst(ast.left, input);
-  const right = evaluateFormulaAst(ast.right, input);
+  const left = evaluateFormulaAst(ast.left, input, budget);
+  const right = evaluateFormulaAst(ast.right, input, budget);
   if (left.type === 'error') return left;
   if (right.type === 'error') return right;
   const leftValue = left.type === 'blank' ? '' : left.value;
@@ -211,13 +232,41 @@ function evaluateFormulaAst(
   return Number.isFinite(value) ? { type: 'number', value } : { type: 'error', value: '#NUM!' };
 }
 
-function parseConditionalFormula(source: string): FormulaAst {
+function astNodes(ast: FormulaAst): number {
+  if (ast.kind === 'binary') return 1 + astNodes(ast.left) + astNodes(ast.right);
+  if (ast.kind === 'unary') return 1 + astNodes(ast.operand);
+  if (ast.kind === 'call') {
+    return 1 + ast.arguments.reduce((count, argument) => count + astNodes(argument), 0);
+  }
+  return 1;
+}
+
+function parseConditionalFormula(source: string, runtime: FormulaRuntime): FormulaAst {
+  if (source.length > runtime.maxFormulaLength) {
+    throw new ConditionalFormatError(
+      'INVALID_CONDITIONAL_EXPRESSION',
+      'Conditional formula exceeds its source length limit',
+    );
+  }
+  const cached = runtime.asts.get(source);
+  if (cached !== undefined) return cached;
   const ast = parseFormula(source.startsWith('=') ? source : `=${source}`);
   validateFormula(ast);
+  if (astNodes(ast) > runtime.maxAstNodes) {
+    throw new ConditionalFormatError(
+      'INVALID_CONDITIONAL_EXPRESSION',
+      'Conditional formula exceeds its AST node limit',
+    );
+  }
+  runtime.asts.set(source, ast);
   return ast;
 }
 
-function matches(condition: ConditionalExpression, input: ConditionalEvaluationInput): boolean {
+function matches(
+  condition: ConditionalExpression,
+  input: ConditionalEvaluationInput,
+  runtime: FormulaRuntime,
+): boolean {
   if (condition.type === 'blank') return input.value.type === 'blank';
   if (condition.type === 'not-blank') return input.value.type !== 'blank';
   if (condition.type === 'text-contains') return input.text.includes(condition.text);
@@ -226,11 +275,15 @@ function matches(condition: ConditionalExpression, input: ConditionalEvaluationI
   }
   if (condition.type === 'cell-is-formula') {
     try {
-      const first = evaluateFormulaAst(parseConditionalFormula(condition.source), input);
+      const first = evaluateFormulaAst(parseConditionalFormula(condition.source, runtime), input, {
+        remaining: runtime.maxEvaluationSteps,
+      });
       const second =
         condition.source2 === undefined
           ? undefined
-          : evaluateFormulaAst(parseConditionalFormula(condition.source2), input);
+          : evaluateFormulaAst(parseConditionalFormula(condition.source2, runtime), input, {
+              remaining: runtime.maxEvaluationSteps,
+            });
       if (first.type === 'blank' || first.type === 'error') return false;
       if (second?.type === 'blank' || second?.type === 'error') return false;
       return compare(
@@ -248,8 +301,8 @@ function matches(condition: ConditionalExpression, input: ConditionalEvaluationI
     }
   }
   try {
-    const ast = parseConditionalFormula(condition.source);
-    return truthy(evaluateFormulaAst(ast, input));
+    const ast = parseConditionalFormula(condition.source, runtime);
+    return truthy(evaluateFormulaAst(ast, input, { remaining: runtime.maxEvaluationSteps }));
   } catch (error) {
     if (error instanceof ConditionalFormatError) throw error;
     throw new ConditionalFormatError(
@@ -286,31 +339,44 @@ function interpolateColor(start: string, end: string, ratio: number): string | u
 function colorScalePatch(
   rule: ConditionalRule,
   input: ConditionalEvaluationInput,
+  cache: WeakMap<
+    ConditionalRule,
+    WeakMap<NonNullable<ConditionalEvaluationInput['lookup']>, readonly [number, number]>
+  >,
 ): string | undefined {
   if (rule.effect.type !== 'color-scale') return undefined;
   const current = numeric(
     input.value.type === 'array' ? { type: 'error', value: '#VALUE!' } : input.value,
   );
   if (current === undefined) return undefined;
-  const values: number[] = [];
-  for (const range of rule.ranges) {
-    for (let row = range.start.row; row <= range.end.row; row += 1) {
-      for (let column = range.start.column; column <= range.end.column; column += 1) {
-        const value =
-          row === input.address.row &&
-          column === input.address.column &&
-          range.sheetId === input.address.sheetId
-            ? input.value
-            : input.lookup?.({ sheetId: range.sheetId, row, column });
-        if (value === undefined || value.type === 'array') continue;
-        const number = numeric(value);
-        if (number !== undefined) values.push(number);
+  let bounds = input.lookup === undefined ? undefined : cache.get(rule)?.get(input.lookup);
+  if (bounds === undefined) {
+    const values: number[] = [];
+    for (const range of rule.ranges) {
+      for (let row = range.start.row; row <= range.end.row; row += 1) {
+        for (let column = range.start.column; column <= range.end.column; column += 1) {
+          const value =
+            input.lookup?.({ sheetId: range.sheetId, row, column }) ??
+            (row === input.address.row &&
+            column === input.address.column &&
+            range.sheetId === input.address.sheetId
+              ? input.value
+              : undefined);
+          if (value === undefined || value.type === 'array') continue;
+          const number = numeric(value);
+          if (number !== undefined) values.push(number);
+        }
       }
     }
+    if (values.length === 0) return undefined;
+    bounds = [Math.min(...values), Math.max(...values)];
+    if (input.lookup !== undefined) {
+      const byLookup = cache.get(rule) ?? new WeakMap();
+      byLookup.set(input.lookup, bounds);
+      cache.set(rule, byLookup);
+    }
   }
-  if (values.length === 0) return undefined;
-  const minimum = Math.min(...values);
-  const maximum = Math.max(...values);
+  const [minimum, maximum] = bounds;
   const ratio = maximum === minimum ? 0.5 : (current - minimum) / (maximum - minimum);
   if (rule.effect.midpointColor !== undefined) {
     return ratio <= 0.5
@@ -328,6 +394,16 @@ function colorScalePatch(
 export function createConditionalFormatEvaluator(limits: ConditionalFormatLimits): {
   evaluate(input: ConditionalEvaluationInput): ConditionalEvaluationResult;
 } {
+  const formulaRuntime: FormulaRuntime = {
+    asts: new Map(),
+    maxFormulaLength: limits.maxFormulaLength ?? 4_096,
+    maxAstNodes: limits.maxAstNodes ?? 1_024,
+    maxEvaluationSteps: limits.maxEvaluationSteps ?? 4_096,
+  };
+  const colorScaleCache = new WeakMap<
+    ConditionalRule,
+    WeakMap<NonNullable<ConditionalEvaluationInput['lookup']>, readonly [number, number]>
+  >();
   return {
     evaluate(input) {
       if (
@@ -355,11 +431,12 @@ export function createConditionalFormatEvaluator(limits: ConditionalFormatLimits
       for (const rule of [...input.rules].sort(
         (left, right) => left.priority - right.priority || left.id.localeCompare(right.id),
       )) {
-        if (!contains(rule, input.address) || !matches(rule.condition, input)) continue;
+        if (!contains(rule, input.address) || !matches(rule.condition, input, formulaRuntime))
+          continue;
         matched.push(rule.id);
         if (rule.effect.type === 'style') Object.assign(patch, rule.effect.patch);
         else {
-          const color = colorScalePatch(rule, input);
+          const color = colorScalePatch(rule, input, colorScaleCache);
           if (color === undefined)
             diagnostics.push({ code: 'UNSUPPORTED_FORMAT_FEATURE', ruleId: rule.id });
           else patch.backgroundColor = color;

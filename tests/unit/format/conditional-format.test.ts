@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { DocumentSheetId } from '../../../src/document';
 import { createConditionalFormatEvaluator } from '../../../src/format/conditional';
 
@@ -165,5 +165,65 @@ describe('FMT-01 conditional formatting foundation', () => {
       stylePatch: { backgroundColor: '#808080' },
       diagnostics: [],
     });
+  });
+
+  it('precomputes one color-scale range for repeated cell presentation', () => {
+    const evaluator = createConditionalFormatEvaluator({ maxRules: 10, maxCells: 100 });
+    const lookup = vi.fn(({ row }: { readonly row: number }) => ({
+      type: 'number' as const,
+      value: row,
+    }));
+    const rule = {
+      id: 'scale-cache',
+      priority: 1,
+      stopIfTrue: false,
+      ranges: [{ sheetId, start: { row: 0, column: 0 }, end: { row: 2, column: 0 } }],
+      condition: { type: 'not-blank' as const },
+      effect: {
+        type: 'color-scale' as const,
+        minimumColor: '#000000',
+        maximumColor: '#ffffff',
+      },
+    };
+    for (let row = 0; row < 3; row += 1) {
+      evaluator.evaluate({
+        address: { sheetId, row, column: 0 },
+        value: { type: 'number', value: row },
+        text: String(row),
+        baseStyle: {},
+        lookup,
+        rules: [rule],
+      });
+    }
+
+    expect(lookup).toHaveBeenCalledTimes(3);
+  });
+
+  it('enforces explicit formula source and evaluation budgets', () => {
+    const evaluator = createConditionalFormatEvaluator({
+      maxRules: 10,
+      maxCells: 100,
+      maxFormulaLength: 8,
+      maxAstNodes: 4,
+      maxEvaluationSteps: 4,
+    });
+    expect(() =>
+      evaluator.evaluate({
+        address: { sheetId, row: 0, column: 0 },
+        value: { type: 'number', value: 1 },
+        text: '1',
+        baseStyle: {},
+        rules: [
+          {
+            id: 'budget',
+            priority: 1,
+            stopIfTrue: false,
+            ranges: [{ sheetId, start: { row: 0, column: 0 }, end: { row: 0, column: 0 } }],
+            condition: { type: 'formula', source: '=1+1+1+1+1' },
+            effect: { type: 'style', patch: { bold: true } },
+          },
+        ],
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_CONDITIONAL_EXPRESSION' }));
   });
 });

@@ -267,7 +267,10 @@ function removeConditionalFormat(
   const sheet = input.workbook.sheets[sheetIndex(sheetIds, command.sheet)];
   if (sheet === undefined) return;
   const formats = [...(sheet.conditionalFormatting ?? [])];
-  if (command.index < formats.length) formats.splice(command.index, 1);
+  if (command.index >= formats.length) {
+    throw new RangeError('conditional format index is outside the rule list');
+  }
+  formats.splice(command.index, 1);
   sheet.conditionalFormatting = formats;
 }
 

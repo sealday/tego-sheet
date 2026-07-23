@@ -60,6 +60,9 @@ it('creates, updates, removes, undoes and redoes conditional formats as typed co
   );
   controller.dispatch({ type: 'redo' }, 'ref');
   expect(controller.getDocument().workbook.sheets[0]?.conditionalFormatting).toEqual([]);
+  expect(() =>
+    controller.dispatch({ type: 'remove-conditional-format', sheet, index: 0 }, 'ref'),
+  ).toThrowError('conditional format index is outside the rule list');
 });
 
 it('remaps conditional-format ownership and qualified ranges for controlled replay', () => {
