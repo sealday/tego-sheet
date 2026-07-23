@@ -20,11 +20,11 @@ function freezeJson<T>(value: T): T {
   return value;
 }
 
-function runtimeSheets(data: WorkbookData): readonly RuntimeSheet[] {
+function runtimeSheets(data: WorkbookData, sheetIds?: readonly SheetId[]): readonly RuntimeSheet[] {
   return Object.freeze(
-    data.map((sheet) =>
+    data.map((sheet, index) =>
       Object.freeze({
-        id: createSheetId(),
+        id: sheetIds?.[index] ?? createSheetId(),
         data: freezeJson(sheet),
       }),
     ),
@@ -58,12 +58,17 @@ export class WorkbookState {
   static from(
     input: WorkbookInput,
     defaults: Readonly<WorkbookInitializationDefaults> = {},
+    sheetIds?: readonly SheetId[],
   ): WorkbookState {
-    return new WorkbookState(runtimeSheets(parseWorkbook(input, defaults)), defaults);
+    const data = parseWorkbook(input, defaults);
+    if (sheetIds !== undefined && sheetIds.length !== data.length) {
+      throw new RangeError('Runtime sheet ID count must match workbook sheet count');
+    }
+    return new WorkbookState(runtimeSheets(data, sheetIds), defaults);
   }
 
-  replace(input: WorkbookInput): WorkbookState {
-    return WorkbookState.from(input, this.defaults);
+  replace(input: WorkbookInput, sheetIds?: readonly SheetId[]): WorkbookState {
+    return WorkbookState.from(input, this.defaults, sheetIds);
   }
 
   serialize(): WorkbookData {

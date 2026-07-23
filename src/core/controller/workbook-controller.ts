@@ -24,6 +24,8 @@ export interface WorkbookControllerOptions {
   readonly readOnly?: boolean;
   readonly initialRowCount?: number;
   readonly initialColumnCount?: number;
+  /** @internal Stable IDs supplied by the schema 2 controller projection. */
+  readonly sheetIds?: readonly SheetId[];
 }
 
 export interface DispatchOptions {
@@ -121,7 +123,7 @@ export class WorkbookController {
       rowCount: options.initialRowCount,
       columnCount: options.initialColumnCount,
     });
-    this.state = WorkbookState.from(input, this.initializationDefaults);
+    this.state = WorkbookState.from(input, this.initializationDefaults, options.sheetIds);
     this.readOnly = options.readOnly ?? false;
     this.controllerId = nextControllerId;
     nextControllerId += 1;
@@ -286,9 +288,9 @@ export class WorkbookController {
     this.revision = checkpoint.revision;
   }
 
-  replace(input: WorkbookInput): void {
+  replace(input: WorkbookInput, sheetIds?: readonly SheetId[]): void {
     this.ensureActive();
-    const replacement = this.state.replace(input);
+    const replacement = this.state.replace(input, sheetIds);
     this.state = replacement;
     this.history.clear();
     this.revision += 1;
