@@ -570,14 +570,18 @@ function expandNestedRows(
           : rows.map((row) => (Array.isArray(row) ? row : [row]));
       const rowCopies = matrix.length;
       const columnCopies = Math.max(0, ...matrix.map((row) => row.length));
-      const sourceHeight = node.range.end.row - node.range.start.row + 1;
-      const sourceWidth = node.range.end.column - node.range.start.column + 1;
       const cells: Sheet['cells'][number][] = [];
       const renderedRows: Sheet['rows'][number][] = [];
       const merges: Sheet['merges'][number][] = [];
+      let height = 0;
+      let width = 0;
       for (let rowIndex = 0; rowIndex < rowCopies; rowIndex += 1) {
+        let rowHeight = 0;
+        let rowWidth = 0;
         for (let columnIndex = 0; columnIndex < columnCopies; columnIndex += 1) {
           const itemIndex = rowIndex * columnCopies + columnIndex;
+          const startRow = destinationRow + height;
+          const startColumn = destinationColumn + rowWidth;
           const fragment = renderHorizontalRange(
             node.range,
             node.children,
@@ -589,8 +593,8 @@ function expandNestedRows(
               first: itemIndex === 0,
               last: itemIndex === rowCopies * columnCopies - 1,
             },
-            destinationRow + rowIndex * sourceHeight,
-            destinationColumn + columnIndex * sourceWidth,
+            startRow,
+            startColumn,
           );
           mappings.push({
             bindingId: binding.id,
@@ -598,28 +602,28 @@ function expandNestedRows(
             source: binding.range,
             generated: {
               sheetId: binding.range.sheetId,
-              start: {
-                row: destinationRow + rowIndex * sourceHeight,
-                column: destinationColumn + columnIndex * sourceWidth,
-              },
+              start: { row: startRow, column: startColumn },
               end: {
-                row: destinationRow + rowIndex * sourceHeight + Math.max(0, fragment.height - 1),
-                column:
-                  destinationColumn + columnIndex * sourceWidth + Math.max(0, fragment.width - 1),
+                row: startRow + Math.max(0, fragment.height - 1),
+                column: startColumn + Math.max(0, fragment.width - 1),
               },
             },
           });
           cells.push(...fragment.cells);
           renderedRows.push(...fragment.rows);
           merges.push(...fragment.merges);
+          rowHeight = Math.max(rowHeight, fragment.height);
+          rowWidth += fragment.width;
         }
+        height += rowHeight;
+        width = Math.max(width, rowWidth);
       }
       return {
         cells,
         rows: renderedRows,
         merges,
-        height: rowCopies * sourceHeight,
-        width: columnCopies * sourceWidth,
+        height,
+        width,
       };
     };
 
@@ -661,33 +665,81 @@ function expandNestedRows(
             : rows.map((row) => (Array.isArray(row) ? row : [row]));
         const rowCopies = matrix.length;
         const columnCopies = Math.max(0, ...matrix.map((row) => row.length));
-        const sourceCells = sourceSheet.cells.filter(
+        const childRanges = node.children.map(({ range }) => range);
+        const ownRows = Array.from(
+          { length: node.range.end.row - node.range.start.row + 1 },
+          (_, offset) => node.range.start.row + offset,
+        ).filter(
+          (row) => !childRanges.some((range) => row >= range.start.row && row <= range.end.row),
+        );
+        const ownSourceCells = sourceSheet.cells.filter(
           ({ row, column }) =>
-            row >= node.range.start.row &&
-            row <= node.range.end.row &&
+            ownRows.includes(row) &&
             column >= node.range.start.column &&
             column <= node.range.end.column,
         );
-        const sourceCoordinates = new Set(sourceCells.map(({ row, column }) => `${row}:${column}`));
-        const createdCells = valueBindings.filter(
+        const ownCoordinates = new Set(ownSourceCells.map(({ row, column }) => `${row}:${column}`));
+        const ownCreatedCells = valueBindings.filter(
           ({ target }) =>
             target.sheetId === sourceSheet.id &&
-            target.row >= node.range.start.row &&
-            target.row <= node.range.end.row &&
+            ownRows.includes(target.row) &&
             target.column >= node.range.start.column &&
             target.column <= node.range.end.column &&
-            !sourceCoordinates.has(`${target.row}:${target.column}`),
+            !ownCoordinates.has(`${target.row}:${target.column}`),
         ).length;
-        const cells = (sourceCells.length + createdCells) * rowCopies * columnCopies;
-        const result = {
-          rows: (node.range.end.row - node.range.start.row + 1) * rowCopies,
-          columns: (node.range.end.column - node.range.start.column + 1) * columnCopies,
-          cells,
+        let estimatedRows = 0;
+        let estimatedColumns = 0;
+        let estimatedCells = 0;
+        for (let rowIndex = 0; rowIndex < rowCopies; rowIndex += 1) {
+          let rowHeight = 0;
+          let rowWidth = 0;
+          for (let columnIndex = 0; columnIndex < columnCopies; columnIndex += 1) {
+            const itemIndex = rowIndex * columnCopies + columnIndex;
+            const scope: Scope = {
+              root: data,
+              item: matrix[rowIndex]?.[columnIndex],
+              parent: parentScope.item,
+              index: itemIndex,
+              first: itemIndex === 0,
+              last: itemIndex === rowCopies * columnCopies - 1,
+            };
+            let cellRows = ownRows.length;
+            let cellColumns = node.range.end.column - node.range.start.column + 1;
+            let cellCount = ownSourceCells.length + ownCreatedCells;
+            for (const child of node.children) {
+              const childEstimate = estimateNode(child, scope);
+              cellRows += childEstimate.rows;
+              cellCount += childEstimate.cells;
+              if (axis(child) === 'horizontal' || axis(child) === 'both') {
+                const childWidth = child.range.end.column - child.range.start.column + 1;
+                cellColumns += childEstimate.columns - childWidth;
+              } else {
+                cellColumns = Math.max(cellColumns, childEstimate.columns);
+              }
+              if (childEstimate.exceeded) {
+                return {
+                  rows: estimatedRows + cellRows,
+                  columns: Math.max(estimatedColumns, rowWidth + cellColumns),
+                  cells: estimatedCells + cellCount,
+                  exceeded: true,
+                };
+              }
+            }
+            rowHeight = Math.max(rowHeight, cellRows);
+            rowWidth += cellColumns;
+            estimatedCells += cellCount;
+          }
+          estimatedRows += rowHeight;
+          estimatedColumns = Math.max(estimatedColumns, rowWidth);
+        }
+        return {
+          rows: estimatedRows,
+          columns: estimatedColumns,
+          cells: estimatedCells,
           exceeded:
-            totalRows + (node.range.end.row - node.range.start.row + 1) * rowCopies >
-              limits.maxExpandedRows || totalCells + cells > limits.maxExpandedCells,
+            totalRows + estimatedRows > limits.maxExpandedRows ||
+            totalCells + estimatedCells > limits.maxExpandedCells,
         };
-        return result;
       }
       if (
         (bindingAxis !== 'vertical' && bindingAxis !== 'horizontal') ||

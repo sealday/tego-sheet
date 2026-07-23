@@ -1381,12 +1381,14 @@ describe('TP2 advanced template structures', () => {
           itemIndex,
           generated.start.row,
           generated.start.column,
+          generated.end.row,
+          generated.end.column,
         ]),
     ).toEqual([
-      [0, 1, 1],
-      [1, 1, 2],
-      [2, 2, 1],
-      [3, 2, 2],
+      [0, 1, 1, 1, 1],
+      [1, 1, 2, 1, 2],
+      [2, 2, 1, 2, 1],
+      [3, 2, 2, 2, 2],
     ]);
   });
 
@@ -1438,6 +1440,161 @@ describe('TP2 advanced template structures', () => {
       expect.objectContaining({ code: 'EXPANSION_LIMIT_EXCEEDED' }),
     );
     expect(tick).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['rows', { maxExpandedRows: 3 }],
+    ['columns', { maxExpandedColumns: 1 }],
+  ] as const)('preflights nested two-dimensional %s limits atomically', (_label, limit) => {
+    const { document, template } = source([
+      {
+        id: 'outer-rows',
+        type: 'repeat-rows',
+        range: range(0, 2, 0, 2),
+        source: 'groups',
+        empty: 'remove',
+        pageBreak: 'auto',
+      },
+      {
+        id: 'matrix',
+        type: 'repeat-range',
+        range: range(1, 1, 1, 1),
+        source: 'item.matrix',
+        axis: 'both',
+        empty: 'remove',
+      },
+    ] as never);
+    const compiled = compileSpreadsheetTemplate(document, template.id, options).template!;
+    const expanded = expandAdvancedTemplate(
+      compiled,
+      {
+        groups: [
+          {
+            matrix: [
+              ['A', 'B'],
+              ['C', 'D'],
+            ],
+          },
+        ],
+      },
+      { ...options.limits, ...limit },
+    );
+    expect(expanded.document).toBeUndefined();
+    expect(expanded.structuralMappings).toEqual([]);
+    expect(expanded.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'EXPANSION_LIMIT_EXCEEDED' }),
+    );
+  });
+
+  it('keeps ragged matrices rectangular and applies both empty policies deterministically', () => {
+    const run = (empty: 'remove' | 'keep-template-row', matrix: readonly unknown[]) => {
+      const { document, template } = source([
+        {
+          id: 'outer-rows',
+          type: 'repeat-rows',
+          range: range(0, 2, 0, 2),
+          source: 'groups',
+          empty: 'remove',
+          pageBreak: 'auto',
+        },
+        {
+          id: 'matrix',
+          type: 'repeat-range',
+          range: range(1, 1, 1, 1),
+          source: 'item.matrix',
+          axis: 'both',
+          empty,
+        },
+        {
+          id: 'matrix-value',
+          type: 'value',
+          target: { sheetId: 'sheet-1', row: 1, column: 1 },
+          expression: 'item',
+        },
+      ] as never);
+      const compiled = compileSpreadsheetTemplate(document, template.id, options).template!;
+      return expandAdvancedTemplate(compiled, { groups: [{ matrix }] }, options.limits);
+    };
+
+    const ragged = run('remove', [['A', 'B'], ['C']]);
+    expect(
+      ragged.structuralMappings
+        .filter(({ bindingId }) => bindingId === 'matrix')
+        .map(({ itemIndex }) => itemIndex),
+    ).toEqual([0, 1, 2, 3]);
+    expect(
+      ragged.document?.workbook.sheets[0]?.cells
+        .filter(
+          ({ cell }) => cell.input.type === 'string' && ['A', 'B', 'C'].includes(cell.input.value),
+        )
+        .map(({ cell }) => (cell.input.type === 'string' ? cell.input.value : '')),
+    ).toEqual(['A', 'B', 'C']);
+    expect(
+      run('remove', []).structuralMappings.filter(({ bindingId }) => bindingId === 'matrix'),
+    ).toEqual([]);
+    expect(
+      run('keep-template-row', []).structuralMappings.filter(
+        ({ bindingId }) => bindingId === 'matrix',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('expands nested children inside each two-dimensional item without overlap', () => {
+    const { document, template } = source([
+      {
+        id: 'outer-rows',
+        type: 'repeat-rows',
+        range: range(0, 4, 0, 2),
+        source: 'groups',
+        empty: 'remove',
+        pageBreak: 'auto',
+      },
+      {
+        id: 'matrix',
+        type: 'repeat-range',
+        range: range(1, 3, 0, 2),
+        source: 'item.matrix',
+        axis: 'both',
+        empty: 'remove',
+      },
+      {
+        id: 'matrix-rows',
+        type: 'repeat-rows',
+        range: range(2, 2, 1, 1),
+        source: 'item.values',
+        empty: 'remove',
+        pageBreak: 'auto',
+      },
+      {
+        id: 'matrix-row-value',
+        type: 'value',
+        target: { sheetId: 'sheet-1', row: 2, column: 1 },
+        expression: 'item',
+      },
+    ] as never);
+    const compiled = compileSpreadsheetTemplate(document, template.id, options).template!;
+    const expanded = expandAdvancedTemplate(
+      compiled,
+      { groups: [{ matrix: [[{ values: ['X', 'Y'] }]] }] },
+      options.limits,
+    );
+
+    expect(expanded.diagnostics).toEqual([]);
+    expect(
+      expanded.document?.workbook.sheets[0]?.cells
+        .filter(({ cell }) => cell.input.type === 'string' && ['X', 'Y'].includes(cell.input.value))
+        .map(({ row, column, cell }) => [
+          row,
+          column,
+          cell.input.type === 'string' ? cell.input.value : '',
+        ]),
+    ).toEqual([
+      [2, 1, 'X'],
+      [3, 1, 'Y'],
+    ]);
+    expect(
+      expanded.structuralMappings.find(({ bindingId }) => bindingId === 'matrix')?.generated,
+    ).toEqual(range(1, 4, 0, 2));
   });
 
   it('counts value-created cells before cloning an empty advanced range', () => {
