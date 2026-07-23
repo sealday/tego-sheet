@@ -12,6 +12,7 @@ import type {
 import type { SheetId } from '../types/coordinates';
 import { migrateLegacyWorkbook } from '../../document/migrate-legacy';
 import type {
+  Cell,
   CellInput,
   Sheet,
   SheetInput,
@@ -19,6 +20,8 @@ import type {
   SpreadsheetDocumentInput,
 } from '../../document/model/document';
 import { parseSpreadsheetDocument } from '../../document/parse-document';
+
+type ValidationId = NonNullable<Cell['validationId']>;
 
 function columnName(column: number): string {
   let value = column + 1;
@@ -204,7 +207,7 @@ function mergeSheet(
   beforeLegacy: SheetData | undefined,
   afterLegacy: SheetData | undefined,
   authoritativeInputs: ReadonlySet<string> | undefined,
-  authoritativeValidations: ReadonlySet<string> | undefined,
+  authoritativeValidations: ReadonlyMap<string, ValidationId | null> | undefined,
 ): SpreadsheetDocumentInput['workbook']['sheets'][number] {
   if (previous === undefined) return operational;
   const previousCells = new Map(
@@ -222,7 +225,7 @@ function mergeSheet(
       const beforeCell = legacyCell(beforeLegacy, row, column);
       const afterCell = legacyCell(afterLegacy, row, column);
       if (sameJson(beforeCell, afterCell)) {
-        if (authoritativeValidations?.has(key) === true) return previousCell ?? operationalCell;
+        if (authoritativeValidations?.has(key) === true) return previousCell;
         if (
           previousCell !== undefined &&
           operationalCell !== undefined &&
@@ -245,7 +248,7 @@ function mergeSheet(
       const previousCellData = previousCell?.cell;
       const validationId =
         authoritativeValidations?.has(key) === true
-          ? previousCellData?.validationId
+          ? (authoritativeValidations.get(key) ?? undefined)
           : operationalCell.cell.validationId;
       return {
         ...operationalCell,
@@ -412,7 +415,10 @@ export function projectLegacyToDocument(
   previous: SpreadsheetDocument,
   sheetIds: readonly SheetId[],
   authoritativeInputs: ReadonlyMap<string, ReadonlySet<string>> = new Map(),
-  authoritativeValidations: ReadonlyMap<string, ReadonlySet<string>> = new Map(),
+  authoritativeValidations: ReadonlyMap<
+    string,
+    ReadonlyMap<string, ValidationId | null>
+  > = new Map(),
 ): SpreadsheetDocument {
   const migrated = migrateLegacyWorkbook(afterWorkbook, {
     ids: {

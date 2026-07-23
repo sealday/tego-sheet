@@ -546,6 +546,57 @@ describe('SpreadsheetDocumentController', () => {
     expect(cells.some((item) => item.row === 2 && item.column === 3)).toBe(!cut);
   });
 
+  it('removes target validation when all-mode paste copies an unvalidated cell', () => {
+    const initial = directDocument();
+    const controller = new SpreadsheetDocumentController(initial);
+    const sheet = sheetId('sheet-1');
+    const command = {
+      type: 'paste-internal',
+      source: selection(sheet, 0, 0),
+      target: selection(sheet, 2, 3),
+      mode: 'all',
+      cut: false,
+    } as const;
+
+    controller.dispatch(command, 'context-menu');
+    const pasted = controller.getDocument();
+    expect(
+      pasted.workbook.sheets[0]?.cells.find((item) => item.row === 2 && item.column === 3)?.cell
+        .validationId,
+    ).toBeUndefined();
+
+    controller.undo();
+    expect(controller.getDocument()).toEqual(initial);
+    controller.redo();
+    expect(controller.getDocument()).toEqual(pasted);
+  });
+
+  it('removes a validated cut source without leaving a blank validation-only cell', () => {
+    const initial = directDocument();
+    const controller = new SpreadsheetDocumentController(initial);
+    const sheet = sheetId('sheet-1');
+    const command = {
+      type: 'paste-internal',
+      source: selection(sheet, 2, 3),
+      target: selection(sheet, 8, 8),
+      mode: 'all',
+      cut: true,
+    } as const;
+
+    controller.dispatch(command, 'context-menu');
+    const cut = controller.getDocument();
+    const cells = cut.workbook.sheets[0]!.cells;
+    expect(cells.find((item) => item.row === 2 && item.column === 3)).toBeUndefined();
+    expect(cells.find((item) => item.row === 8 && item.column === 8)?.cell.validationId).toBe(
+      'validation-1',
+    );
+
+    controller.undo();
+    expect(controller.getDocument()).toEqual(initial);
+    controller.redo();
+    expect(controller.getDocument()).toEqual(cut);
+  });
+
   it('autofill preserves the complete rich source cell', () => {
     const controller = new SpreadsheetDocumentController(directDocument());
     const sheet = sheetId('sheet-1');
@@ -565,6 +616,30 @@ describe('SpreadsheetDocumentController', () => {
     expect(
       richCells(controller.getDocument()).find((item) => item.row === 8 && item.column === 3)?.cell,
     ).toEqual(source);
+  });
+
+  it('removes target validation when all-mode autofill uses an unvalidated cell', () => {
+    const initial = directDocument();
+    const controller = new SpreadsheetDocumentController(initial);
+    const sheet = sheetId('sheet-1');
+    const command = {
+      type: 'autofill',
+      source: selection(sheet, 0, 0),
+      target: selection(sheet, 2, 3),
+      mode: 'all',
+    } as const;
+
+    controller.dispatch(command, 'pointer');
+    const filled = controller.getDocument();
+    expect(
+      filled.workbook.sheets[0]?.cells.find((item) => item.row === 2 && item.column === 3)?.cell
+        .validationId,
+    ).toBeUndefined();
+
+    controller.undo();
+    expect(controller.getDocument()).toEqual(initial);
+    controller.redo();
+    expect(controller.getDocument()).toEqual(filled);
   });
 
   it('copies every CellInput variant with complete cell metadata', () => {

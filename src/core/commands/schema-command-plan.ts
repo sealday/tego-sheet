@@ -9,10 +9,12 @@ import type {
 } from '../../document/model/document';
 import { parseSpreadsheetDocument } from '../../document/parse-document';
 
+type ValidationId = NonNullable<Cell['validationId']>;
+
 export interface SchemaCommandPlan {
   readonly document: SpreadsheetDocument;
   readonly authoritativeInputs: ReadonlyMap<string, ReadonlySet<string>>;
-  readonly authoritativeValidations: ReadonlyMap<string, ReadonlySet<string>>;
+  readonly authoritativeValidations: ReadonlyMap<string, ReadonlyMap<string, ValidationId | null>>;
 }
 
 function cellKey(row: number, column: number): string {
@@ -82,7 +84,7 @@ function transformStructure(
     { readonly type: 'insert-row' | 'delete-row' | 'insert-column' | 'delete-column' }
   >,
   sheetIds: readonly SheetId[],
-  authoritativeValidations: Map<string, Set<string>>,
+  authoritativeValidations: Map<string, Map<string, ValidationId | null>>,
 ): void {
   const index = sheetIndex(sheetIds, command.sheet);
   const sheet = input.workbook.sheets[index];
@@ -94,10 +96,10 @@ function transformStructure(
   });
   authoritativeValidations.set(
     sheet.id,
-    new Set(
+    new Map(
       sheet.cells
         .filter((item) => item.cell.validationId !== undefined)
-        .map((item) => cellKey(item.row, item.column)),
+        .map((item) => [cellKey(item.row, item.column), item.cell.validationId as ValidationId]),
     ),
   );
   if (axis === 'row') {
@@ -169,7 +171,7 @@ function transformInternalPaste(
   command: Extract<WorkbookCommand, { readonly type: 'paste-internal' | 'autofill' }>,
   sheetIds: readonly SheetId[],
   authoritativeInputs: Map<string, Set<string>>,
-  authoritativeValidations: Map<string, Set<string>>,
+  authoritativeValidations: Map<string, Map<string, ValidationId | null>>,
 ): void {
   const sourceIndex = sheetIndex(sheetIds, command.source.sheet);
   const targetIndex = sheetIndex(sheetIds, command.target.sheet);
@@ -201,6 +203,9 @@ function transformInternalPaste(
     for (let row = source.start.row; row <= source.end.row; row += 1) {
       for (let column = source.start.column; column <= source.end.column; column += 1) {
         setCell(sourceSheet, row, column, undefined);
+        const validations = authoritativeValidations.get(sourceSheet.id) ?? new Map();
+        validations.set(cellKey(row, column), null);
+        authoritativeValidations.set(sourceSheet.id, validations);
       }
     }
   }
@@ -216,10 +221,10 @@ function transformInternalPaste(
         keys.add(cellKey(row, column));
         authoritativeInputs.set(targetSheet.id, keys);
       }
-      if (sourceCell?.validationId !== undefined && command.mode === 'all') {
-        const keys = authoritativeValidations.get(targetSheet.id) ?? new Set<string>();
-        keys.add(cellKey(row, column));
-        authoritativeValidations.set(targetSheet.id, keys);
+      if (command.mode === 'all') {
+        const validations = authoritativeValidations.get(targetSheet.id) ?? new Map();
+        validations.set(cellKey(row, column), sourceCell?.validationId ?? null);
+        authoritativeValidations.set(targetSheet.id, validations);
       }
     }
   }
@@ -232,7 +237,7 @@ export function prepareSchemaCommand(
 ): SchemaCommandPlan {
   const input = structuredClone(document) as unknown as SpreadsheetDocumentInput;
   const authoritativeInputs = new Map<string, Set<string>>();
-  const authoritativeValidations = new Map<string, Set<string>>();
+  const authoritativeValidations = new Map<string, Map<string, ValidationId | null>>();
   switch (command.type) {
     case 'insert-row':
     case 'delete-row':

@@ -422,7 +422,8 @@ function eagerBrowserGlobalsFromSource(source: string, file: string): readonly s
         (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
         (ts.isVariableDeclaration(parent) && parent.name === node) ||
         (ts.isBindingElement(parent) && (parent.name === node || parent.propertyName === node)) ||
-        (ts.isPropertyAssignment(parent) && parent.name === node)
+        (ts.isPropertyAssignment(parent) && parent.name === node) ||
+        (ts.isPropertySignature(parent) && parent.name === node)
       )
         return;
     }
@@ -586,6 +587,9 @@ it('models eager execution paths without entering lazy or ambient declarations',
     declare function factory(value: typeof navigator): void;
     declare class Ambient {
       [document.createElement('div')]: string;
+    }
+    interface Snapshot {
+      readonly document: Document;
     }
   `,
       'ambient.ts',
