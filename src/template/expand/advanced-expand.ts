@@ -64,14 +64,27 @@ function expandNestedRows(
   readonly breaks: ReadonlyMap<string, readonly number[]>;
 } {
   const byId = new Map(compiled.ir.bindings.map((binding) => [binding.id, binding]));
-  const isMixedVerticalTree = (node: TemplateRegionNode, root = false): boolean => {
+  const isMixedTree = (node: TemplateRegionNode): boolean => {
     const type = byId.get(node.bindingId)?.type;
     return (
-      (root ? type === 'repeat-rows' : type === 'repeat-rows' || type === 'repeat-columns') &&
-      node.children.every((child) => isMixedVerticalTree(child))
+      (type === 'repeat-rows' || type === 'repeat-columns' || type === 'conditional-range') &&
+      node.children.every(isMixedTree)
     );
   };
-  const roots = (compiled.ir.regionTree ?? []).filter((node) => isMixedVerticalTree(node, true));
+  const hasVerticalOrConditionalDescendant = (node: TemplateRegionNode): boolean =>
+    node.children.some(
+      (child) =>
+        byId.get(child.bindingId)?.type !== 'repeat-columns' ||
+        hasVerticalOrConditionalDescendant(child),
+    );
+  const roots = (compiled.ir.regionTree ?? []).filter((node) => {
+    if (!isMixedTree(node)) return false;
+    const type = byId.get(node.bindingId)?.type;
+    return (
+      type === 'repeat-rows' ||
+      (type === 'repeat-columns' && hasVerticalOrConditionalDescendant(node))
+    );
+  });
   if (roots.length === 0) {
     return { document, diagnostics: [], mappings: [], breaks: new Map() };
   }
@@ -189,7 +202,20 @@ function expandNestedRows(
                   destinationStart + height,
                   child.range.start.column,
                 )
-              : renderNode(child, scope, destinationStart + height);
+              : childType === 'conditional-range'
+                ? evaluateTemplateExpression(
+                    (
+                      byId.get(child.bindingId) as Extract<
+                        TemplateIRBinding,
+                        { readonly type: 'conditional-range' }
+                      >
+                    ).when,
+                    scope,
+                    formatters,
+                  )
+                  ? renderRange(child.range, child.children, scope, destinationStart + height)
+                  : { cells: [], rows: [], merges: [], height: 0 }
+                : renderNode(child, scope, destinationStart + height);
           cells.push(...fragment.cells);
           rows.push(...fragment.rows);
           merges.push(...fragment.merges);
@@ -347,6 +373,7 @@ function expandNestedRows(
         const child = sortedChildren[childIndex];
         if (child !== undefined && child.range.start.row === sourceRow) {
           const childType = byId.get(child.bindingId)?.type;
+          const mappingStart = mappings.length;
           const childFragment =
             childType === 'repeat-columns'
               ? renderHorizontalNode(
@@ -355,8 +382,46 @@ function expandNestedRows(
                   destinationRow + height,
                   destinationColumn + (child.range.start.column - range.start.column),
                 )
-              : renderNode(child, scope, destinationRow + height);
+              : childType === 'conditional-range'
+                ? evaluateTemplateExpression(
+                    (
+                      byId.get(child.bindingId) as Extract<
+                        TemplateIRBinding,
+                        { readonly type: 'conditional-range' }
+                      >
+                    ).when,
+                    scope,
+                    formatters,
+                  )
+                  ? renderHorizontalRange(
+                      child.range,
+                      child.children,
+                      scope,
+                      destinationRow + height,
+                      destinationColumn + (child.range.start.column - range.start.column),
+                    )
+                  : { cells: [], rows: [], merges: [], height: 0, width: 0 }
+                : renderNode(child, scope, destinationRow + height);
           const columnDelta = destinationColumn - range.start.column;
+          if (childType !== 'repeat-columns') {
+            for (let index = mappingStart; index < mappings.length; index += 1) {
+              const mapping = mappings[index]!;
+              mappings[index] = {
+                ...mapping,
+                generated: {
+                  ...mapping.generated,
+                  start: {
+                    ...mapping.generated.start,
+                    column: mapping.generated.start.column + columnDelta,
+                  },
+                  end: {
+                    ...mapping.generated.end,
+                    column: mapping.generated.end.column + columnDelta,
+                  },
+                },
+              };
+            }
+          }
           cells.push(
             ...childFragment.cells.map((entry) => ({
               ...entry,
@@ -457,10 +522,27 @@ function expandNestedRows(
       node: TemplateRegionNode,
       parentScope: Scope,
     ): { readonly rows: number; readonly cells: number; readonly exceeded: boolean } => {
-      const binding = byId.get(node.bindingId) as
-        | Extract<TemplateIRBinding, { readonly type: 'repeat-rows' }>
-        | undefined;
-      if (binding === undefined) return { rows: 0, cells: 0, exceeded: false };
+      const binding = byId.get(node.bindingId);
+      if (binding?.type === 'conditional-range') {
+        if (!evaluateTemplateExpression(binding.when, parentScope, formatters)) {
+          return { rows: 0, cells: 0, exceeded: false };
+        }
+        const sourceCells = sourceSheet.cells.filter(
+          ({ row, column }) =>
+            row >= node.range.start.row &&
+            row <= node.range.end.row &&
+            column >= node.range.start.column &&
+            column <= node.range.end.column,
+        ).length;
+        return {
+          rows: node.range.end.row - node.range.start.row + 1,
+          cells: sourceCells,
+          exceeded: totalCells + sourceCells > limits.maxExpandedCells,
+        };
+      }
+      if (binding?.type !== 'repeat-rows' && binding?.type !== 'repeat-columns') {
+        return { rows: 0, cells: 0, exceeded: false };
+      }
       const resolved = evaluateTemplateExpression(binding.source, parentScope, formatters);
       const items = Array.isArray(resolved) ? resolved : [];
       const copies =
@@ -531,7 +613,11 @@ function expandNestedRows(
         breaks: new Map(),
       };
     }
-    const fragment = renderNode(root, { root: data }, root.range.start.row);
+    const rootType = byId.get(root.bindingId)?.type;
+    const fragment =
+      rootType === 'repeat-columns'
+        ? renderHorizontalNode(root, { root: data }, root.range.start.row, root.range.start.column)
+        : renderNode(root, { root: data }, root.range.start.row);
     if (signal?.aborted) {
       return {
         diagnostics: [error('RENDER_ABORTED', 'Template rendering was aborted')],
@@ -540,7 +626,10 @@ function expandNestedRows(
       };
     }
     const sourceHeight = root.range.end.row - root.range.start.row + 1;
-    const delta = fragment.height - sourceHeight;
+    const sourceWidth = root.range.end.column - root.range.start.column + 1;
+    const rowDelta = fragment.height - sourceHeight;
+    const columnDelta =
+      rootType === 'repeat-columns' ? (fragment as HorizontalFragment).width - sourceWidth : 0;
     const replaced = sourceSheet.cells.filter(
       ({ row }) => row >= root.range.start.row && row <= root.range.end.row,
     ).length;
@@ -569,35 +658,76 @@ function expandNestedRows(
     sheets[sheetIndex] = {
       ...sourceSheet,
       cells: [
-        ...sourceSheet.cells.filter(({ row }) => row < root.range.start.row),
+        ...sourceSheet.cells.filter(({ row, column }) =>
+          rootType === 'repeat-columns'
+            ? column < root.range.start.column
+            : row < root.range.start.row,
+        ),
         ...fragment.cells,
         ...sourceSheet.cells
-          .filter(({ row }) => row > root.range.end.row)
-          .map((entry) => ({ ...entry, row: entry.row + delta })),
+          .filter(({ row, column }) =>
+            rootType === 'repeat-columns'
+              ? column > root.range.end.column
+              : row > root.range.end.row,
+          )
+          .map((entry) =>
+            rootType === 'repeat-columns'
+              ? { ...entry, column: entry.column + columnDelta }
+              : { ...entry, row: entry.row + rowDelta },
+          ),
       ].sort((left, right) => left.row - right.row || left.column - right.column),
       rows: [
         ...sourceSheet.rows.filter(({ index }) => index < root.range.start.row),
         ...fragment.rows,
         ...sourceSheet.rows
           .filter(({ index }) => index > root.range.end.row)
-          .map((row) => ({ ...row, index: row.index + delta })),
+          .map((row) => ({ ...row, index: row.index + rowDelta })),
       ],
+      columns:
+        rootType === 'repeat-columns'
+          ? [
+              ...sourceSheet.columns.filter(({ index }) => index < root.range.start.column),
+              ...Array.from(
+                { length: Math.max(0, (fragment as HorizontalFragment).width) },
+                (_, offset) => {
+                  const sourceIndex = root.range.start.column + (offset % sourceWidth);
+                  const column = sourceSheet.columns.find(({ index }) => index === sourceIndex);
+                  return column === undefined
+                    ? undefined
+                    : { ...column, index: root.range.start.column + offset };
+                },
+              ).filter((column): column is Sheet['columns'][number] => column !== undefined),
+              ...sourceSheet.columns
+                .filter(({ index }) => index > root.range.end.column)
+                .map((column) => ({ ...column, index: column.index + columnDelta })),
+            ]
+          : sourceSheet.columns,
       merges: [
         ...sourceSheet.merges
-          .filter(
-            ({ start, end }) => end.row < root.range.start.row || start.row > root.range.end.row,
+          .filter(({ start, end }) =>
+            rootType === 'repeat-columns'
+              ? end.column < root.range.start.column || start.column > root.range.end.column
+              : end.row < root.range.start.row || start.row > root.range.end.row,
           )
           .map((merge) =>
-            merge.start.row > root.range.end.row
+            rootType === 'repeat-columns' && merge.start.column > root.range.end.column
               ? {
-                  start: { ...merge.start, row: merge.start.row + delta },
-                  end: { ...merge.end, row: merge.end.row + delta },
+                  start: { ...merge.start, column: merge.start.column + columnDelta },
+                  end: { ...merge.end, column: merge.end.column + columnDelta },
                 }
-              : merge,
+              : rootType !== 'repeat-columns' && merge.start.row > root.range.end.row
+                ? {
+                    start: { ...merge.start, row: merge.start.row + rowDelta },
+                    end: { ...merge.end, row: merge.end.row + rowDelta },
+                  }
+                : merge,
           ),
         ...fragment.merges,
       ],
-      ...(sourceSheet.rowCount === undefined ? {} : { rowCount: sourceSheet.rowCount + delta }),
+      ...(sourceSheet.rowCount === undefined ? {} : { rowCount: sourceSheet.rowCount + rowDelta }),
+      ...(sourceSheet.columnCount === undefined
+        ? {}
+        : { columnCount: sourceSheet.columnCount + columnDelta }),
     };
   }
   return {
@@ -1079,12 +1209,12 @@ export function expandAdvancedTemplate(
       }
       const materialized = materializeSubtemplate(document, binding, registered, childExpansion);
       if (materialized === undefined) continue;
-      document = materialized;
+      document = materialized.document;
       mappings.push({
         bindingId: binding.id,
         itemIndex: 0,
         source: binding.range,
-        generated: binding.range,
+        generated: materialized.generatedRange,
         ...(binding.objectPolicy === undefined ? {} : { objectPolicy: binding.objectPolicy }),
       });
       continue;

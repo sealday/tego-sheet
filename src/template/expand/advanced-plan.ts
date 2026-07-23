@@ -34,14 +34,33 @@ export interface AllocationEstimate {
 export function createExpansionPlan(compiled: CompiledTemplate): ExpansionPlan {
   const bindingType = new Map(compiled.ir.bindings.map((binding) => [binding.id, binding.type]));
   const horizontalNestedIds = new Set<string>();
-  const rowTreeIds = new Set<string>();
-  const collectRowTree = (node: TemplateRegionNode): void => {
-    rowTreeIds.add(node.bindingId);
-    node.children.forEach(collectRowTree);
+  const mixedTreeIds = new Set<string>();
+  const collectMixedTree = (node: TemplateRegionNode): void => {
+    mixedTreeIds.add(node.bindingId);
+    node.children.forEach(collectMixedTree);
   };
-  (compiled.ir.regionTree ?? [])
-    .filter((node) => bindingType.get(node.bindingId) === 'repeat-rows')
-    .forEach(collectRowTree);
+  const isMixedTree = (node: TemplateRegionNode): boolean => {
+    const type = bindingType.get(node.bindingId);
+    return (
+      (type === 'repeat-rows' || type === 'repeat-columns' || type === 'conditional-range') &&
+      node.children.every(isMixedTree)
+    );
+  };
+  const hasVerticalOrConditionalDescendant = (node: TemplateRegionNode): boolean =>
+    node.children.some(
+      (child) =>
+        bindingType.get(child.bindingId) !== 'repeat-columns' ||
+        hasVerticalOrConditionalDescendant(child),
+    );
+  const mixedRoots = (compiled.ir.regionTree ?? []).filter((node) => {
+    if (!isMixedTree(node)) return false;
+    const type = bindingType.get(node.bindingId);
+    return (
+      type === 'repeat-rows' ||
+      (type === 'repeat-columns' && hasVerticalOrConditionalDescendant(node))
+    );
+  });
+  mixedRoots.forEach(collectMixedTree);
   const collectHorizontal = (node: TemplateRegionNode): boolean => {
     if (
       bindingType.get(node.bindingId) !== 'repeat-columns' ||
@@ -61,7 +80,7 @@ export function createExpansionPlan(compiled: CompiledTemplate): ExpansionPlan {
         binding.type === 'repeat-page' ||
         binding.type === 'repeat-sheet' ||
         binding.type === 'subtemplate') &&
-      !rowTreeIds.has(binding.id) &&
+      !mixedTreeIds.has(binding.id) &&
       !horizontalNestedIds.has(binding.id),
   );
   const tp1Bindings = compiled.ir.bindings.filter(
@@ -70,7 +89,7 @@ export function createExpansionPlan(compiled: CompiledTemplate): ExpansionPlan {
       binding.type === 'repeat-rows' ||
       binding.type === 'conditional-range',
   );
-  const nestedRanges = compiled.ir.bindings.flatMap((binding) =>
+  const structuralRanges = compiled.ir.bindings.flatMap((binding) =>
     binding.type === 'repeat-rows' ||
     binding.type === 'repeat-columns' ||
     binding.type === 'repeat-range' ||
@@ -84,15 +103,16 @@ export function createExpansionPlan(compiled: CompiledTemplate): ExpansionPlan {
     advanced,
     tp1Bindings,
     handledByNested: (binding) =>
-      nestedRanges.some((range) =>
-        'target' in binding
-          ? binding.target.sheetId === range.sheetId &&
+      mixedTreeIds.has(binding.id) ||
+      ('target' in binding &&
+        structuralRanges.some(
+          (range) =>
+            binding.target.sheetId === range.sheetId &&
             binding.target.row >= range.start.row &&
-            binding.target.row <= range.end.row
-          : binding.range.sheetId === range.sheetId &&
-            binding.range.start.row >= range.start.row &&
-            binding.range.end.row <= range.end.row,
-      ),
+            binding.target.row <= range.end.row &&
+            binding.target.column >= range.start.column &&
+            binding.target.column <= range.end.column,
+        )),
   };
 }
 
@@ -119,25 +139,40 @@ export function estimateAllocation(
   let rows = 0;
   let columns = 0;
   const cells = estimates.reduce((count, { binding, items }) => {
-    const source =
-      compiled.sourceDocument.workbook.sheets
-        .find(({ id }) => id === binding.range.sheetId)
-        ?.cells.filter(
-          ({ row, column }) =>
-            row >= binding.range.start.row &&
-            row <= binding.range.end.row &&
-            column >= binding.range.start.column &&
-            column <= binding.range.end.column,
-        ).length ?? 0;
+    const sourceSheet = compiled.sourceDocument.workbook.sheets.find(
+      ({ id }) => id === binding.range.sheetId,
+    );
+    const sourceCells =
+      sourceSheet?.cells.filter(
+        ({ row, column }) =>
+          row >= binding.range.start.row &&
+          row <= binding.range.end.row &&
+          column >= binding.range.start.column &&
+          column <= binding.range.end.column,
+      ) ?? [];
+    const sourceCoordinates = new Set(sourceCells.map(({ row, column }) => `${row}:${column}`));
+    const createdValueCells = compiled.ir.bindings.filter(
+      (candidate) =>
+        candidate.type === 'value' &&
+        candidate.target.sheetId === binding.range.sheetId &&
+        candidate.target.row >= binding.range.start.row &&
+        candidate.target.row <= binding.range.end.row &&
+        candidate.target.column >= binding.range.start.column &&
+        candidate.target.column <= binding.range.end.column &&
+        !sourceCoordinates.has(`${candidate.target.row}:${candidate.target.column}`),
+    ).length;
+    const effectiveSourceCells = sourceCells.length + createdValueCells;
     const matrixRows = items.length;
     const matrixColumns = Math.max(
       0,
       ...items.map((item) => (Array.isArray(item) ? item.length : 1)),
     );
     const multiplier =
-      binding.type === 'repeat-range' && binding.axis === 'both' && items.every(Array.isArray)
-        ? matrixRows * matrixColumns
-        : items.length;
+      binding.type === 'subtemplate'
+        ? 1
+        : binding.type === 'repeat-range' && binding.axis === 'both' && items.every(Array.isArray)
+          ? matrixRows * matrixColumns
+          : items.length;
     const height = binding.range.end.row - binding.range.start.row + 1;
     const width = binding.range.end.column - binding.range.start.column + 1;
     if (
@@ -154,7 +189,11 @@ export function estimateAllocation(
       rows += height * matrixRows;
       columns += width * matrixColumns;
     }
-    return count + source * Math.max(0, multiplier - 1);
+    if (binding.type === 'repeat-sheet') {
+      const sheetCells = sourceSheet?.cells.length ?? 0;
+      return count + sheetCells * multiplier;
+    }
+    return count - sourceCells.length + effectiveSourceCells * multiplier;
   }, sourceCells);
   return { cells, rows, columns };
 }

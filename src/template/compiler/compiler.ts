@@ -60,6 +60,24 @@ function contains(range: DocumentCellRange, row: number, column: number): boolea
   );
 }
 
+function containsRange(outer: DocumentCellRange, inner: DocumentCellRange): boolean {
+  return (
+    outer.sheetId === inner.sheetId &&
+    contains(outer, inner.start.row, inner.start.column) &&
+    contains(outer, inner.end.row, inner.end.column)
+  );
+}
+
+function sameRange(left: DocumentCellRange, right: DocumentCellRange): boolean {
+  return (
+    left.sheetId === right.sheetId &&
+    left.start.row === right.start.row &&
+    left.start.column === right.start.column &&
+    left.end.row === right.end.row &&
+    left.end.column === right.end.column
+  );
+}
+
 function compileBinding(binding: TemplateBinding): TemplateIRBinding {
   if (binding.type === 'value') {
     return immutableClone({
@@ -163,12 +181,18 @@ function validateStructuralBindings(
       const left = structural[leftIndex]!;
       const right = structural[rightIndex]!;
       if (intersects(left.range, right.range)) {
-        const leftContainsRight =
-          contains(left.range, right.range.start.row, right.range.start.column) &&
-          contains(left.range, right.range.end.row, right.range.end.column);
-        const rightContainsLeft =
-          contains(right.range, left.range.start.row, left.range.start.column) &&
-          contains(right.range, left.range.end.row, left.range.end.column);
+        if (advanced && sameRange(left.range, right.range)) {
+          diagnostics.push(
+            diagnostic(
+              'INVALID_NESTING',
+              `Structural bindings ${left.id} and ${right.id} occupy the same region`,
+              right,
+            ),
+          );
+          continue;
+        }
+        const leftContainsRight = containsRange(left.range, right.range);
+        const rightContainsLeft = containsRange(right.range, left.range);
         if (advanced && (leftContainsRight || rightContainsLeft)) continue;
         diagnostics.push(
           diagnostic(
@@ -249,8 +273,8 @@ function buildRegionTree(
       .filter(
         (candidate) =>
           candidate.id !== binding.id &&
-          contains(candidate.range, binding.range.start.row, binding.range.start.column) &&
-          contains(candidate.range, binding.range.end.row, binding.range.end.column),
+          !sameRange(candidate.range, binding.range) &&
+          containsRange(candidate.range, binding.range),
       )
       .sort((left, right) => {
         const leftArea =

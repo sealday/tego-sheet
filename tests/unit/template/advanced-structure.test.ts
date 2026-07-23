@@ -67,6 +67,78 @@ const options: AdvancedCompileOptions = {
 };
 
 describe('TP2 advanced template structures', () => {
+  it('keeps structural containment sheet-local and rejects coincident regions', () => {
+    const first = createSpreadsheetDocument({
+      id: 'sheet-local-regions',
+      sheetId: 'sheet-1',
+      sheetName: 'First',
+    });
+    const secondSheet = {
+      ...first.workbook.sheets[0]!,
+      id: 'sheet-2' as never,
+      name: 'Second',
+    };
+    const sheetLocal = {
+      id: 'sheet-local' as never,
+      name: 'Sheet local',
+      bindings: [
+        {
+          id: 'first',
+          type: 'repeat-rows',
+          range: range(0, 0, 0, 0),
+          source: 'first',
+          empty: 'remove',
+          pageBreak: 'auto',
+        },
+        {
+          id: 'second',
+          type: 'repeat-rows',
+          range: {
+            ...range(0, 0, 0, 0),
+            sheetId: 'sheet-2' as never,
+          },
+          source: 'second',
+          empty: 'remove',
+          pageBreak: 'auto',
+        },
+      ],
+      printProfiles: [],
+    } as unknown as SpreadsheetTemplate;
+    const document = {
+      ...first,
+      workbook: { ...first.workbook, sheets: [first.workbook.sheets[0]!, secondSheet] },
+      templates: [sheetLocal],
+    };
+    const compiled = compileSpreadsheetTemplate(document, sheetLocal.id, options);
+    expect(compiled.hasErrors).toBe(false);
+    expect(compiled.template?.ir.regionTree?.map(({ bindingId }) => bindingId)).toEqual([
+      'first',
+      'second',
+    ]);
+
+    const coincident = {
+      ...sheetLocal,
+      id: 'coincident' as never,
+      bindings: [
+        sheetLocal.bindings[0]!,
+        {
+          ...sheetLocal.bindings[0]!,
+          id: 'same-place',
+          type: 'repeat-columns',
+        },
+      ],
+    } as unknown as SpreadsheetTemplate;
+    const rejected = compileSpreadsheetTemplate(
+      { ...document, templates: [coincident] },
+      coincident.id,
+      options,
+    );
+    expect(rejected.hasErrors).toBe(true);
+    expect(rejected.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'INVALID_NESTING' }),
+    );
+  });
+
   it('builds a deterministic three-level containment tree and preserves parent scope', () => {
     const { document, template } = source([
       {
@@ -267,6 +339,107 @@ describe('TP2 advanced template structures', () => {
         ['7:1', 'B:Z'],
         ['8:2', 'Z:4'],
       ]),
+    );
+  });
+
+  it('executes conditional children and column-to-row mixed nesting in parent scope', () => {
+    const conditionalFixture = source([
+      {
+        id: 'outer',
+        type: 'repeat-rows',
+        range: range(0, 1, 0, 0),
+        source: 'groups',
+        empty: 'remove',
+        pageBreak: 'auto',
+      },
+      {
+        id: 'visible',
+        type: 'conditional-range',
+        range: range(1, 1, 0, 0),
+        when: 'item.visible',
+      },
+      {
+        id: 'name',
+        type: 'value',
+        target: { sheetId: 'sheet-1', row: 0, column: 0 },
+        expression: 'item.name',
+      },
+    ] as never);
+    const conditional = expandAdvancedTemplate(
+      compileSpreadsheetTemplate(
+        conditionalFixture.document,
+        conditionalFixture.template.id,
+        options,
+      ).template!,
+      {
+        groups: [
+          { name: 'A', visible: true },
+          { name: 'B', visible: false },
+        ],
+      },
+      options.limits,
+    );
+    expect(
+      conditional.document?.workbook.sheets[0]?.cells.map(({ row, cell }) => [
+        row,
+        cell.input.type === 'string' ? cell.input.value : cell.input.type,
+      ]),
+    ).toEqual([
+      [0, 'A'],
+      [1, 'formula'],
+      [2, 'B'],
+    ]);
+
+    const mixedFixture = source([
+      {
+        id: 'columns',
+        type: 'repeat-columns',
+        range: range(0, 2, 0, 1),
+        source: 'groups',
+        empty: 'remove',
+      },
+      {
+        id: 'rows',
+        type: 'repeat-rows',
+        range: range(1, 1, 0, 0),
+        source: 'item.rows',
+        empty: 'remove',
+        pageBreak: 'auto',
+      },
+      {
+        id: 'mixed-value',
+        type: 'value',
+        target: { sheetId: 'sheet-1', row: 1, column: 0 },
+        expression: 'parent.name + ":" + item',
+      },
+    ] as never);
+    const mixed = expandAdvancedTemplate(
+      compileSpreadsheetTemplate(mixedFixture.document, mixedFixture.template.id, options)
+        .template!,
+      {
+        groups: [
+          { name: 'A', rows: ['a1', 'a2'] },
+          { name: 'B', rows: ['b1'] },
+        ],
+      },
+      options.limits,
+    );
+    const values = mixed.document?.workbook.sheets[0]?.cells
+      .filter(({ cell }) => cell.input.type === 'string')
+      .map(({ row, column, cell }) => [
+        row,
+        column,
+        cell.input.type === 'string' ? cell.input.value : '',
+      ]);
+    expect(values).toEqual(
+      expect.arrayContaining([
+        [1, 0, 'A:a1'],
+        [2, 0, 'A:a2'],
+        [1, 2, 'B:b1'],
+      ]),
+    );
+    expect(mixed.structuralMappings.filter(({ bindingId }) => bindingId === 'rows')).toHaveLength(
+      3,
     );
   });
 
@@ -530,6 +703,9 @@ describe('TP2 advanced template structures', () => {
         { start: { row: 3, column: 0 }, end: { row: 3, column: 1 } },
       ]),
     );
+    expect(
+      expanded.structuralMappings.find(({ bindingId }) => bindingId === 'child-slot')?.generated,
+    ).toEqual(range(2, 3, 0, 1));
   });
 
   it('expands horizontal, two-dimensional, per-page and per-sheet repeats atomically', () => {
@@ -549,11 +725,11 @@ describe('TP2 advanced template structures', () => {
         axis: 'both',
         empty: 'remove',
       },
-      { id: 'pages', type: 'repeat-page', range: range(0, 1), source: 'pages', empty: 'remove' },
+      { id: 'pages', type: 'repeat-page', range: range(2, 2), source: 'pages', empty: 'remove' },
       {
         id: 'sheets',
         type: 'repeat-sheet',
-        range: range(0, 1),
+        range: range(3, 3),
         source: 'sheets',
         name: 'item.name',
       },
@@ -577,7 +753,7 @@ describe('TP2 advanced template structures', () => {
       'North',
       'South',
     ]);
-    expect(expanded.forcedPageBreaks.get('sheet-1')).toEqual(expect.arrayContaining([2]));
+    expect(expanded.forcedPageBreaks.get('sheet-1')).toEqual(expect.arrayContaining([3]));
     expect(expanded.structuralMappings.length).toBeGreaterThan(0);
   });
 
@@ -638,6 +814,7 @@ describe('TP2 advanced template structures', () => {
         }),
       },
     );
+    expect(result.diagnostics).toEqual([]);
     expect(
       result.document?.workbook.sheets.slice(1).map(({ id, name, cells }) => ({
         id,
@@ -854,6 +1031,46 @@ describe('TP2 advanced template structures', () => {
     expect(expanded.structuralMappings).toEqual([]);
     expect(expanded.forcedPageBreaks.size).toBe(0);
     expect(document.workbook.sheets[0]?.cells).toHaveLength(2);
+    expect(expanded.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'EXPANSION_LIMIT_EXCEEDED' }),
+    );
+  });
+
+  it('counts value-created cells before cloning an empty advanced range', () => {
+    const base = createSpreadsheetDocument({
+      id: 'blank-allocation',
+      sheetId: 'sheet-1',
+      sheetName: 'Blank',
+    });
+    const template = {
+      id: 'blank-allocation-template' as never,
+      name: 'Blank allocation',
+      bindings: [
+        {
+          id: 'copies',
+          type: 'repeat-range',
+          range: range(0, 0, 0, 0),
+          source: 'items',
+          axis: 'vertical',
+          empty: 'remove',
+        },
+        {
+          id: 'created-value',
+          type: 'value',
+          target: { sheetId: 'sheet-1', row: 0, column: 0 },
+          expression: 'item',
+        },
+      ],
+      printProfiles: [],
+    } as unknown as SpreadsheetTemplate;
+    const document = { ...base, templates: [template] };
+    const compiled = compileSpreadsheetTemplate(document, template.id, options).template!;
+    const expanded = expandAdvancedTemplate(
+      compiled,
+      { items: [1, 2, 3, 4, 5] },
+      { ...options.limits, maxExpandedCells: 1 },
+    );
+    expect(expanded.document).toBeUndefined();
     expect(expanded.diagnostics).toContainEqual(
       expect.objectContaining({ code: 'EXPANSION_LIMIT_EXCEEDED' }),
     );

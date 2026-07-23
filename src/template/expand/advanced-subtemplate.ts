@@ -15,10 +15,15 @@ export function materializeSubtemplate(
   binding: Extract<TemplateIRBinding, { readonly type: 'subtemplate' }>,
   registered: SpreadsheetTemplate,
   childExpansion: ExpandedChild,
-): SpreadsheetDocument | undefined {
+):
+  | {
+      readonly document: SpreadsheetDocument;
+      readonly generatedRange: DocumentCellRange;
+    }
+  | undefined {
   if (childExpansion.document === undefined) return undefined;
   const sheetIndex = document.workbook.sheets.findIndex(({ id }) => id === binding.range.sheetId);
-  if (sheetIndex < 0) return document;
+  if (sheetIndex < 0) return { document, generatedRange: binding.range };
   const sheet = document.workbook.sheets[sheetIndex]!;
   const childCoordinates = registered.bindings.flatMap((candidate) =>
     candidate.type === 'value'
@@ -126,27 +131,37 @@ export function materializeSubtemplate(
       },
     }));
   return freeze({
-    ...document,
-    workbook: {
-      ...document.workbook,
-      sheets: document.workbook.sheets.map((candidate, index) =>
-        index === sheetIndex
-          ? {
-              ...candidate,
-              cells,
-              merges: [
-                ...candidate.merges.filter(
-                  ({ start, end }) =>
-                    end.row < binding.range.start.row ||
-                    start.row > binding.range.end.row ||
-                    end.column < binding.range.start.column ||
-                    start.column > binding.range.end.column,
-                ),
-                ...pastedMerges,
-              ],
-            }
-          : candidate,
-      ),
+    document: {
+      ...document,
+      workbook: {
+        ...document.workbook,
+        sheets: document.workbook.sheets.map((candidate, index) =>
+          index === sheetIndex
+            ? {
+                ...candidate,
+                cells,
+                merges: [
+                  ...candidate.merges.filter(
+                    ({ start, end }) =>
+                      end.row < binding.range.start.row ||
+                      start.row > binding.range.end.row ||
+                      end.column < binding.range.start.column ||
+                      start.column > binding.range.end.column,
+                  ),
+                  ...pastedMerges,
+                ],
+              }
+            : candidate,
+        ),
+      },
+    },
+    generatedRange: {
+      sheetId: binding.range.sheetId,
+      start: binding.range.start,
+      end: {
+        row: binding.range.start.row + sourceHeight - 1,
+        column: binding.range.start.column + sourceWidth - 1,
+      },
     },
   });
 }
