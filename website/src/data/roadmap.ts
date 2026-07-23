@@ -55,13 +55,20 @@ export const roadmapPhases = [
   },
 ] as const satisfies readonly RoadmapPhase[];
 
-const item = (
-  id: string,
+const item = <const Id extends string>(
+  id: Id,
   phase: RoadmapPhaseId,
   title: string,
   summary: string,
   designTo: RoadmapItem['designTo'],
-): RoadmapItem => ({ id, phase, title, summary, status: 'planned', designTo });
+): RoadmapItem & { readonly id: Id } => ({
+  id,
+  phase,
+  title,
+  summary,
+  status: 'planned',
+  designTo,
+});
 
 export const roadmapItems = [
   item(
@@ -296,6 +303,8 @@ export const roadmapItems = [
     '/docs/roadmap/host-integrations',
   ),
 ] as const satisfies readonly RoadmapItem[];
+
+export type RoadmapItemId = (typeof roadmapItems)[number]['id'];
 
 export function groupRoadmapItems(): ReadonlyMap<RoadmapPhaseId, readonly RoadmapItem[]> {
   return new Map(
