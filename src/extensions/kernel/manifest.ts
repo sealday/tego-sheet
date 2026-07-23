@@ -116,15 +116,41 @@ export function assertSupportedApiVersion(
 export function validateAndSnapshotManifest(
   manifest: ExtensionManifest,
 ): Readonly<ExtensionManifest> {
-  const candidate = manifest as unknown as Partial<ExtensionManifest>;
-  const environments = Array.isArray(candidate.environments) ? [...candidate.environments] : [];
+  let id: unknown;
+  let apiVersion: unknown;
+  let kind: unknown;
+  let environments: unknown[] = [];
+  try {
+    if ((typeof manifest !== 'object' && typeof manifest !== 'function') || manifest === null) {
+      throw new TypeError('Manifest must be an object');
+    }
+    const candidate = manifest as unknown as Record<string, unknown>;
+    id = candidate.id;
+    apiVersion = candidate.apiVersion;
+    kind = candidate.kind;
+    const sourceEnvironments = candidate.environments;
+    if (!Array.isArray(sourceEnvironments)) throw new TypeError('Environments must be an array');
+    environments = Array.from(sourceEnvironments);
+  } catch (cause) {
+    throw new ExtensionKernelError([
+      extensionDiagnostic(
+        'EXTENSION_MANIFEST_INVALID',
+        'validate',
+        'Extension manifest could not be read safely',
+        undefined,
+        undefined,
+        cause,
+      ),
+    ]);
+  }
+
   const valid =
-    typeof candidate.id === 'string' &&
-    idPattern.test(candidate.id) &&
-    typeof candidate.kind === 'string' &&
-    kindPattern.test(candidate.kind) &&
-    typeof candidate.apiVersion === 'string' &&
-    parseApiVersion(candidate.apiVersion) !== undefined &&
+    typeof id === 'string' &&
+    idPattern.test(id) &&
+    typeof kind === 'string' &&
+    kindPattern.test(kind) &&
+    typeof apiVersion === 'string' &&
+    parseApiVersion(apiVersion) !== undefined &&
     environments.length > 0 &&
     environments.every(
       (environment): environment is KernelEnvironment =>
@@ -138,17 +164,17 @@ export function validateAndSnapshotManifest(
         'EXTENSION_MANIFEST_INVALID',
         'validate',
         'Extension manifest must have a stable lowercase ID, kind, API version, and unique supported environments',
-        typeof candidate.id === 'string' && typeof candidate.kind === 'string'
-          ? { id: candidate.id, kind: candidate.kind as KernelExtensionKind }
+        typeof id === 'string' && typeof kind === 'string'
+          ? { id, kind: kind as KernelExtensionKind }
           : undefined,
       ),
     ]);
   }
 
   return Object.freeze({
-    id: candidate.id!,
-    apiVersion: candidate.apiVersion!,
-    kind: candidate.kind!,
-    environments: Object.freeze(environments),
+    id: id as string,
+    apiVersion: apiVersion as ApiVersion,
+    kind: kind as KernelExtensionKind,
+    environments: Object.freeze(environments as KernelEnvironment[]),
   });
 }

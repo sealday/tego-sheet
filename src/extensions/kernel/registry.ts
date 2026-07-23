@@ -51,10 +51,14 @@ function keyOf(kind: string, id: string): string {
   return `${kind}\u0000${id}`;
 }
 
+function compareAscii(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function compareRecords(left: RegistrationRecord, right: RegistrationRecord): number {
   return (
-    left.manifest.kind.localeCompare(right.manifest.kind) ||
-    left.manifest.id.localeCompare(right.manifest.id)
+    compareAscii(left.manifest.kind, right.manifest.kind) ||
+    compareAscii(left.manifest.id, right.manifest.id)
   );
 }
 
@@ -68,13 +72,18 @@ export function createAdapterRegistryKernel(
 ): AdapterRegistryKernel {
   const records = new Map<string, RegistrationRecord>();
   const pending = new Map<string, PendingRegistration>();
+  const releasing = new Map<string, Promise<readonly ExtensionDiagnostic[]>>();
   let listCache: readonly ExtensionManifest[] | undefined;
   let disposed = false;
   let disposePromise: Promise<readonly Diagnostic[]> | undefined;
   let disposeComplete = false;
 
-  const publishDiagnostic = (diagnostic: ExtensionDiagnostic): void => {
-    options.diagnostics?.(diagnostic);
+  const publishDiagnostic = (diagnostic: Diagnostic): void => {
+    try {
+      options.diagnostics?.(diagnostic);
+    } catch {
+      // Diagnostic observers are telemetry sinks and cannot own kernel control flow.
+    }
   };
 
   const fail = (diagnostic: ExtensionDiagnostic): never => {
@@ -82,13 +91,21 @@ export function createAdapterRegistryKernel(
     throw new ExtensionKernelError([diagnostic]);
   };
 
+  const unpublish = (record: RegistrationRecord): void => {
+    records.delete(record.key);
+    listCache = undefined;
+  };
+
+  const detach = (record: RegistrationRecord): void => {
+    unpublish(record);
+    record.controller.abort();
+  };
+
   const release = (record: RegistrationRecord): Promise<readonly ExtensionDiagnostic[]> => {
     if (record.release !== undefined) return record.release;
 
-    records.delete(record.key);
-    listCache = undefined;
-    record.controller.abort();
-    record.release = (async () => {
+    detach(record);
+    const task = (async () => {
       if (record.dispose === undefined) return Object.freeze([]);
       try {
         await record.dispose();
@@ -106,7 +123,12 @@ export function createAdapterRegistryKernel(
         return Object.freeze([diagnostic]);
       }
     })();
-    return record.release;
+    record.release = task;
+    releasing.set(record.key, task);
+    void task.then(() => {
+      if (releasing.get(record.key) === task) releasing.delete(record.key);
+    });
+    return task;
   };
 
   return {
@@ -137,6 +159,27 @@ export function createAdapterRegistryKernel(
           ),
         );
       }
+      if (releasing.has(key)) {
+        fail(
+          extensionDiagnostic(
+            'EXTENSION_DUPLICATE_ID',
+            'validate',
+            `Extension ${manifest.kind}/${manifest.id} is still being disposed`,
+            manifest,
+          ),
+        );
+      }
+      if (!manifest.environments.includes(options.environment)) {
+        fail(
+          extensionDiagnostic(
+            'EXTENSION_ENVIRONMENT_UNSUPPORTED',
+            'validate',
+            `Extension ${manifest.kind}/${manifest.id} does not support host environment ${options.environment}`,
+            manifest,
+            { environment: options.environment },
+          ),
+        );
+      }
 
       const controller = new AbortController();
       let completePending!: (diagnostics: readonly ExtensionDiagnostic[]) => void;
@@ -156,23 +199,32 @@ export function createAdapterRegistryKernel(
         await registration.initialize?.({
           environment: options.environment,
           signal: controller.signal,
-          diagnostics: options.diagnostics ?? (() => {}),
+          diagnostics: publishDiagnostic,
         });
       } catch (cause) {
         controller.abort();
-        const initializationDiagnostic = extensionDiagnostic(
-          'EXTENSION_INITIALIZE_FAILED',
-          'execute',
-          `Failed to initialize extension ${manifest.kind}/${manifest.id}`,
-          manifest,
-          undefined,
-          cause,
-        );
-        publishDiagnostic(initializationDiagnostic);
+        const primaryDiagnostic = disposed
+          ? extensionDiagnostic(
+              'EXTENSION_REGISTRY_DISPOSED',
+              'validate',
+              `Registry disposal cancelled initialization of ${manifest.kind}/${manifest.id}`,
+              manifest,
+              undefined,
+              cause,
+            )
+          : extensionDiagnostic(
+              'EXTENSION_INITIALIZE_FAILED',
+              'execute',
+              `Failed to initialize extension ${manifest.kind}/${manifest.id}`,
+              manifest,
+              undefined,
+              cause,
+            );
+        publishDiagnostic(primaryDiagnostic);
         const cleanupDiagnostics = await release(record);
         pending.delete(key);
         completePending(cleanupDiagnostics);
-        throw new ExtensionKernelError([initializationDiagnostic, ...cleanupDiagnostics]);
+        throw new ExtensionKernelError([primaryDiagnostic, ...cleanupDiagnostics]);
       }
 
       if (disposed) {
@@ -210,6 +262,17 @@ export function createAdapterRegistryKernel(
       kind: K,
       query: { readonly id?: string; readonly environment: KernelEnvironment },
     ): KernelCapabilities[K] {
+      if (query.environment !== options.environment) {
+        fail(
+          extensionDiagnostic(
+            'EXTENSION_ENVIRONMENT_UNSUPPORTED',
+            'validate',
+            `Registry host ${options.environment} cannot resolve ${query.environment} capabilities`,
+            query.id === undefined ? undefined : manifestForError(kind, query.id),
+            { environment: query.environment, hostEnvironment: options.environment },
+          ),
+        );
+      }
       if (query.id !== undefined) {
         const record = records.get(keyOf(kind, query.id));
         if (record === undefined) {
@@ -274,14 +337,24 @@ export function createAdapterRegistryKernel(
         return disposeComplete ? Promise.resolve(Object.freeze([])) : disposePromise;
       }
       disposed = true;
+      const initializing = [...pending.values()].sort((left, right) =>
+        compareAscii(left.key, right.key),
+      );
+      const activeRecords = [...records.values()].sort(compareRecords);
+      for (const record of activeRecords) unpublish(record);
+      for (const registration of initializing) registration.controller.abort();
+      for (const record of activeRecords) record.controller.abort();
+      const priorReleases = new Map(releasing);
+      const cleanupKeys = [
+        ...new Set([...releasing.keys(), ...activeRecords.map(({ key }) => key)]),
+      ].sort(compareAscii);
+      const activeByKey = new Map(activeRecords.map((record) => [record.key, record]));
       disposePromise = (async () => {
         const diagnostics: ExtensionDiagnostic[] = [];
-        const initializing = [...pending.values()].sort((left, right) =>
-          left.key.localeCompare(right.key),
-        );
-        for (const registration of initializing) registration.controller.abort();
-        for (const record of [...records.values()].sort(compareRecords)) {
-          diagnostics.push(...(await release(record)));
+        for (const key of cleanupKeys) {
+          const record = activeByKey.get(key);
+          const cleanup = record === undefined ? priorReleases.get(key) : release(record);
+          if (cleanup !== undefined) diagnostics.push(...(await cleanup));
         }
         for (const registration of initializing) {
           diagnostics.push(...(await registration.completion));

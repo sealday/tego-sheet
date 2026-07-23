@@ -27,7 +27,7 @@ function validate(value: JsonValue): value is DropdownCellValue {
     keys.every((key) => key === 'value' || key === 'label') &&
     Object.hasOwn(value, 'value') &&
     isScalar(value.value!) &&
-    (value.label === undefined || typeof value.label === 'string')
+    (!('label' in value) || (Object.hasOwn(value, 'label') && typeof value.label === 'string'))
   );
 }
 

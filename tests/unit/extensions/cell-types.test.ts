@@ -12,6 +12,7 @@ describe('checkbox cell type', () => {
     expect(checkboxCellType.validate(true)).toBe(false);
     expect(checkboxCellType.validate({ checked: 1 })).toBe(false);
     expect(checkboxCellType.validate({ checked: true, extra: true })).toBe(false);
+    expect(checkboxCellType.validate(Object.create({ checked: true }) as never)).toBe(false);
   });
 
   it('migrates the legacy boolean and rejects unknown or invalid schemas atomically', () => {
@@ -62,6 +63,11 @@ describe('dropdown cell type', () => {
     expect(dropdownCellType.validate({ value: [] })).toBe(false);
     expect(dropdownCellType.validate({ value: 'a', label: 1 })).toBe(false);
     expect(dropdownCellType.validate({ value: 'a', extra: true })).toBe(false);
+    expect(
+      dropdownCellType.validate(
+        Object.assign(Object.create({ label: 'Inherited' }), { value: 'a' }) as never,
+      ),
+    ).toBe(false);
   });
 
   it('migrates a legacy scalar and rejects arrays and unknown schemas', () => {

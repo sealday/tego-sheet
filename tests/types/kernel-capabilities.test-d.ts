@@ -52,5 +52,18 @@ const invalidRegistration: KernelRegistration<'example-number'> = {
 
 void invalidRegistration;
 
+// @ts-expect-error widened capability unions must still correlate kind and implementation
+const invalidWidenedRegistration: KernelRegistration<'cell-type' | 'example-number'> = {
+  manifest: {
+    id: 'invalid-widened',
+    apiVersion: '1.0',
+    kind: 'cell-type',
+    environments: ['node'],
+  },
+  implementation: { parse: Number },
+};
+
+void invalidWidenedRegistration;
+
 // @ts-expect-error unregistered capability kinds cannot be resolved
 registry.resolve('missing-kind', { environment: 'browser' });

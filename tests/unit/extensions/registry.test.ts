@@ -3,6 +3,7 @@ import type {
   BuiltInCellTypeDefinition,
   KernelRegistration,
 } from '../../../src/extensions/kernel/capabilities';
+import { extensionDiagnostic } from '../../../src/extensions/kernel/manifest';
 import { createAdapterRegistryKernel } from '../../../src/extensions/kernel/registry';
 
 function definition(id: string): BuiltInCellTypeDefinition<string> {
@@ -90,16 +91,12 @@ describe('AdapterRegistryKernel resolution', () => {
     }
   });
 
-  it('uses the only environment-compatible default and reports zero candidates', async () => {
+  it('uses the only registered default and reports zero candidates', async () => {
     const registry = createAdapterRegistryKernel({ apiVersion: '1.0', environment: 'browser' });
     const browser = registration('browser', { environments: ['browser'] });
     await registry.register(browser);
-    await registry.register(registration('worker', { environments: ['worker'] }));
 
     expect(registry.resolve('cell-type', { environment: 'browser' })).toBe(browser.implementation);
-    expect(() => registry.resolve('cell-type', { environment: 'node' })).toThrowError(
-      expect.objectContaining({ code: 'EXTENSION_ENVIRONMENT_UNSUPPORTED' }),
-    );
 
     const empty = createAdapterRegistryKernel({ apiVersion: '1.0', environment: 'node' });
     expect(() => empty.resolve('cell-type', { environment: 'node' })).toThrowError(
@@ -120,6 +117,21 @@ describe('AdapterRegistryKernel resolution', () => {
     expect(Object.isFrozen(listed)).toBe(true);
     expect(Object.isFrozen(listed[0])).toBe(true);
   });
+
+  it('uses an ASCII comparator without consulting locale-sensitive collation', async () => {
+    const registry = createAdapterRegistryKernel({ apiVersion: '1.0', environment: 'browser' });
+    await registry.register(registration('zeta'));
+    await registry.register(registration('alpha'));
+    const localeCompare = vi.spyOn(String.prototype, 'localeCompare').mockImplementation(() => {
+      throw new Error('locale collation must not participate');
+    });
+
+    try {
+      expect(registry.list().map(({ id }) => id)).toEqual(['alpha', 'zeta']);
+    } finally {
+      localeCompare.mockRestore();
+    }
+  });
 });
 
 describe('AdapterRegistryKernel compatibility and lifecycle', () => {
@@ -135,6 +147,143 @@ describe('AdapterRegistryKernel compatibility and lifecycle', () => {
         },
       }),
     ).rejects.toMatchObject({ code: 'EXTENSION_MANIFEST_INVALID' });
+  });
+
+  it.each([null, 1])(
+    'normalizes null and primitive manifest input to EXTENSION_MANIFEST_INVALID',
+    async (manifest) => {
+      const registry = createAdapterRegistryKernel({ apiVersion: '1.0', environment: 'browser' });
+
+      await expect(
+        registry.register({
+          manifest,
+          implementation: definition('checkbox'),
+        } as never),
+      ).rejects.toMatchObject({ code: 'EXTENSION_MANIFEST_INVALID' });
+    },
+  );
+
+  it('normalizes a throwing manifest accessor to EXTENSION_MANIFEST_INVALID', async () => {
+    const manifest = Object.defineProperty({}, 'id', {
+      get() {
+        throw new Error('hostile accessor');
+      },
+    });
+    const registry = createAdapterRegistryKernel({ apiVersion: '1.0', environment: 'browser' });
+
+    await expect(
+      registry.register({
+        manifest,
+        implementation: definition('checkbox'),
+      } as never),
+    ).rejects.toMatchObject({ code: 'EXTENSION_MANIFEST_INVALID' });
+  });
+
+  it('reads each manifest field once and publishes the captured snapshot', async () => {
+    const reads = { id: 0, apiVersion: 0, kind: 0, environments: 0 };
+    const values = {
+      get id() {
+        reads.id += 1;
+        return reads.id === 1 ? 'checkbox' : 'changed';
+      },
+      get apiVersion() {
+        reads.apiVersion += 1;
+        return '1.0' as const;
+      },
+      get kind() {
+        reads.kind += 1;
+        return 'cell-type' as const;
+      },
+      get environments() {
+        reads.environments += 1;
+        return ['browser'] as const;
+      },
+    };
+    const registry = createAdapterRegistryKernel({ apiVersion: '1.0', environment: 'browser' });
+
+    await registry.register({ manifest: values, implementation: definition('checkbox') });
+
+    expect(reads).toEqual({ id: 1, apiVersion: 1, kind: 1, environments: 1 });
+    expect(registry.list()).toEqual([
+      {
+        id: 'checkbox',
+        apiVersion: '1.0',
+        kind: 'cell-type',
+        environments: ['browser'],
+      },
+    ]);
+  });
+
+  it('isolates a throwing diagnostics observer from initialization compensation', async () => {
+    const dispose = vi.fn();
+    const registry = createAdapterRegistryKernel({
+      apiVersion: '1.0',
+      environment: 'browser',
+      diagnostics: () => {
+        throw new Error('observer failed');
+      },
+    });
+
+    await expect(
+      registry.register({
+        ...registration('broken'),
+        initialize: () => {
+          throw new Error('initialize failed');
+        },
+        dispose,
+      }),
+    ).rejects.toMatchObject({ code: 'EXTENSION_INITIALIZE_FAILED' });
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives extensions a safe diagnostic publisher and preserves multi-error cleanup', async () => {
+    const observer = vi.fn(() => {
+      throw new Error('observer failed');
+    });
+    const registry = createAdapterRegistryKernel({
+      apiVersion: '1.0',
+      environment: 'browser',
+      diagnostics: observer,
+    });
+    for (const id of ['alpha', 'zeta']) {
+      await registry.register({
+        ...registration(id),
+        initialize: ({ diagnostics }) => {
+          diagnostics(
+            extensionDiagnostic('EXTENSION_INITIALIZE_FAILED', 'execute', 'test diagnostic', {
+              id,
+              kind: 'cell-type',
+            }),
+          );
+        },
+        dispose: () => {
+          throw new Error(`${id} failed`);
+        },
+      });
+    }
+
+    const diagnostics = await registry.dispose();
+
+    expect(observer).toHaveBeenCalledTimes(4);
+    expect(diagnostics.map(({ location }) => location?.adapterId)).toEqual(['alpha', 'zeta']);
+  });
+
+  it('rejects registrations and queries outside the registry host environment', async () => {
+    const initialize = vi.fn();
+    const registry = createAdapterRegistryKernel({ apiVersion: '1.0', environment: 'browser' });
+
+    await expect(
+      registry.register({
+        ...registration('worker', { environments: ['worker'] }),
+        initialize,
+      }),
+    ).rejects.toMatchObject({ code: 'EXTENSION_ENVIRONMENT_UNSUPPORTED' });
+    expect(initialize).not.toHaveBeenCalled();
+
+    await registry.register(registration('shared', { environments: ['browser', 'worker'] }));
+    expect(() =>
+      registry.resolve('cell-type', { id: 'shared', environment: 'worker' }),
+    ).toThrowError(expect.objectContaining({ code: 'EXTENSION_ENVIRONMENT_UNSUPPORTED' }));
   });
 
   it.each([
@@ -229,6 +378,59 @@ describe('AdapterRegistryKernel compatibility and lifecycle', () => {
     await expect(registry.dispose()).resolves.toEqual([]);
   });
 
+  it('atomically unpublishes and aborts every registration before awaiting cleanup', async () => {
+    const registry = createAdapterRegistryKernel({ apiVersion: '1.0', environment: 'browser' });
+    const signals = new Map<string, AbortSignal>();
+    const visibleDuringAbort: number[] = [];
+    const events: string[] = [];
+    for (const id of ['zeta', 'alpha']) {
+      await registry.register({
+        ...registration(id),
+        initialize: ({ signal }) => {
+          signals.set(id, signal);
+          signal.addEventListener('abort', () => visibleDuringAbort.push(registry.list().length), {
+            once: true,
+          });
+        },
+        dispose: () => {
+          expect(registry.list()).toEqual([]);
+          expect([...signals.values()].every(({ aborted }) => aborted)).toBe(true);
+          events.push(id);
+        },
+      });
+    }
+
+    await registry.dispose();
+
+    expect(events).toEqual(['alpha', 'zeta']);
+    expect(visibleDuringAbort).toEqual([0, 0]);
+  });
+
+  it('waits for a concurrent unregister that already owns the release', async () => {
+    let finishRelease!: () => void;
+    const releaseGate = new Promise<void>((resolve) => {
+      finishRelease = resolve;
+    });
+    const registry = createAdapterRegistryKernel({ apiVersion: '1.0', environment: 'browser' });
+    const unregister = await registry.register({
+      ...registration('checkbox'),
+      dispose: () => releaseGate,
+    });
+    const unregisterPromise = unregister();
+    let globalSettled = false;
+    const globalPromise = registry.dispose().then((diagnostics) => {
+      globalSettled = true;
+      return diagnostics;
+    });
+    await Promise.resolve();
+
+    expect(globalSettled).toBe(false);
+
+    finishRelease();
+    await expect(unregisterPromise).resolves.toEqual([]);
+    await expect(globalPromise).resolves.toEqual([]);
+  });
+
   it('aborts the context before disposing a registration', async () => {
     let signal: AbortSignal | undefined;
     const registry = createAdapterRegistryKernel({ apiVersion: '1.0', environment: 'browser' });
@@ -280,5 +482,36 @@ describe('AdapterRegistryKernel compatibility and lifecycle', () => {
     });
     await expect(disposalPromise).resolves.toEqual([]);
     expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports registry disposal instead of initialization failure for abort-aware initialization', async () => {
+    const observed: string[] = [];
+    let signal: AbortSignal | undefined;
+    const registry = createAdapterRegistryKernel({
+      apiVersion: '1.0',
+      environment: 'browser',
+      diagnostics: ({ code }) => observed.push(code),
+    });
+    const registrationPromise = registry.register({
+      ...registration('abort-aware'),
+      initialize: (context) =>
+        new Promise<void>((_resolve, reject) => {
+          signal = context.signal;
+          context.signal.addEventListener(
+            'abort',
+            () => reject(new DOMException('Aborted', 'AbortError')),
+            { once: true },
+          );
+        }),
+    });
+    await vi.waitFor(() => expect(signal).toBeDefined());
+
+    const disposalPromise = registry.dispose();
+
+    await expect(registrationPromise).rejects.toMatchObject({
+      code: 'EXTENSION_REGISTRY_DISPOSED',
+    });
+    await expect(disposalPromise).resolves.toEqual([]);
+    expect(observed).toEqual(['EXTENSION_REGISTRY_DISPOSED']);
   });
 });

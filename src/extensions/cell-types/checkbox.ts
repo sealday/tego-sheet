@@ -16,8 +16,9 @@ function validate(value: JsonValue): value is CheckboxCellValue {
   const keys = Object.keys(value);
   return (
     keys.every((key) => key === 'checked' || key === 'label') &&
+    Object.hasOwn(value, 'checked') &&
     typeof value.checked === 'boolean' &&
-    (value.label === undefined || typeof value.label === 'string')
+    (!('label' in value) || (Object.hasOwn(value, 'label') && typeof value.label === 'string'))
   );
 }
 

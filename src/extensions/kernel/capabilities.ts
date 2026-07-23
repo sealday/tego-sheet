@@ -49,9 +49,11 @@ export interface KernelContext {
 }
 
 /** One typed implementation and its lifecycle hooks. */
-export interface KernelRegistration<K extends KernelExtensionKind> {
-  readonly manifest: ExtensionManifest & { readonly kind: K };
-  readonly implementation: KernelCapabilities[K];
-  readonly initialize?: (context: KernelContext) => void | Promise<void>;
-  readonly dispose?: () => void | Promise<void>;
-}
+export type KernelRegistration<K extends KernelExtensionKind = KernelExtensionKind> = {
+  [CapabilityKind in K]: {
+    readonly manifest: ExtensionManifest & { readonly kind: CapabilityKind };
+    readonly implementation: KernelCapabilities[CapabilityKind];
+    readonly initialize?: (context: KernelContext) => void | Promise<void>;
+    readonly dispose?: () => void | Promise<void>;
+  };
+}[K];
