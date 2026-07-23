@@ -3,6 +3,7 @@ import type {
   Diagnostic,
   DocumentCellAddress,
   DocumentSheetId,
+  FilterView,
   JsonValue,
   SpreadsheetDocument,
 } from '../document';
@@ -23,6 +24,7 @@ import type {
   ResolvedStyle,
 } from './cell-presentation';
 import type { PresentationCache } from './presentation-cache';
+import { applyFilterView } from '../views';
 
 const DEFAULT_STYLE: ResolvedStyle = Object.freeze({
   color: '#0a0a0a',
@@ -60,6 +62,8 @@ export interface PresentationRevisions {
   readonly style: number;
   /** Locale, time-zone, font, or target environment revision. */
   readonly environment: number;
+  /** Optional session filter-view revision. */
+  readonly view?: number;
 }
 
 /** Inputs required to create a deterministic presentation resolver. */
@@ -76,6 +80,8 @@ export interface PresentationResolverOptions {
   readonly revisions: PresentationRevisions;
   /** Explicitly budgeted presentation cache. */
   readonly cache: PresentationCache;
+  /** Optional document or session view composed as derived row visibility. */
+  readonly activeFilterView?: FilterView;
   /** Optional validation-state resolver. */
   readonly validation?: (address: DocumentCellAddress) => PresentationValidation;
   /** Optional derived conditional-style resolver shared by every presentation target. */
@@ -277,6 +283,7 @@ function addressKey(
   address: DocumentCellAddress,
   revisions: PresentationRevisions,
   environment: PresentationEnvironment,
+  activeViewId?: string,
 ): string {
   return JSON.stringify([
     address.sheetId,
@@ -287,6 +294,8 @@ function addressKey(
     revisions.condition,
     revisions.style,
     revisions.environment,
+    revisions.view ?? 0,
+    activeViewId ?? '',
     environment.locale,
     environment.timeZone,
     environment.dateSystem,
@@ -372,9 +381,42 @@ export function createPresentationResolver(
   const conditionalFormatter = createConditionalFormatEvaluator(
     options.conditionalFormattingLimits ?? { maxRules: 10_000, maxCells: 10_000_000 },
   );
+  const filterViewHiddenRows = (() => {
+    const view = options.activeFilterView;
+    if (view === undefined) return new Set<number>();
+    const rows: FormulaValue[][] = [];
+    for (let row = view.range.start.row; row <= view.range.end.row; row += 1) {
+      const values: FormulaValue[] = [];
+      for (let column = view.range.start.column; column <= view.range.end.column; column += 1) {
+        const cell = cellAt(options.document, view.range.sheetId, row, column);
+        const formulaValue =
+          options.formulaValues?.get(
+            formulaAddressKey({ sheetId: view.range.sheetId, row, column }),
+          ) ??
+          options.formulaProgram?.values.get(
+            formulaAddressKey({ sheetId: view.range.sheetId, row, column }),
+          );
+        values.push(
+          cell?.input.type === 'formula' ? (formulaValue ?? inputValue(cell)) : inputValue(cell),
+        );
+      }
+      rows.push(values);
+    }
+    return applyFilterView({
+      view,
+      rows,
+      locale: options.environment.locale,
+      limits: { maxRows: Math.max(1, view.range.end.row - view.range.start.row + 1) },
+    }).hiddenRows;
+  })();
   const resolver: PresentationResolver = {
     resolve(address: DocumentCellAddress) {
-      const key = addressKey(address, options.revisions, options.environment);
+      const key = addressKey(
+        address,
+        options.revisions,
+        options.environment,
+        options.activeFilterView?.id,
+      );
       const cached = options.cache.get(key);
       if (cached !== undefined) return cached;
       const sheet = options.document.workbook.sheets.find(({ id }) => id === address.sheetId);
@@ -433,7 +475,9 @@ export function createPresentationResolver(
       const annotations = options.annotations?.(address) ?? [];
       const hidden =
         sheet.rows.some((row) => row.index === address.row && row.hidden === true) ||
-        sheet.columns.some((column) => column.index === address.column && column.hidden === true);
+        sheet.columns.some((column) => column.index === address.column && column.hidden === true) ||
+        (options.activeFilterView?.range.sheetId === address.sheetId &&
+          filterViewHiddenRows.has(address.row));
       const description = validation.status === 'valid' ? undefined : validation.message;
       const presentation = freezePresentation({
         address,

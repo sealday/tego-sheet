@@ -51,6 +51,7 @@ function matches(
 /** Derives hidden rows from a view without changing the source rows or document. */
 export function applyFilterView(input: ApplyFilterViewInput): {
   readonly hiddenRows: ReadonlySet<number>;
+  readonly rowOrder: readonly number[];
 } {
   if (input.rows.length > input.limits.maxRows) {
     throw new RangeError('Filter view exceeds the configured row limit');
@@ -73,5 +74,29 @@ export function applyFilterView(input: ApplyFilterViewInput): {
       hiddenRows.add(row);
     }
   }
-  return { hiddenRows };
+  const collator = new Intl.Collator(input.locale, { numeric: true, sensitivity: 'base' });
+  const compare = (
+    left: string | number | boolean | undefined,
+    right: string | number | boolean | undefined,
+  ): number => {
+    if (left === right) return 0;
+    if (left === undefined) return 1;
+    if (right === undefined) return -1;
+    if (typeof left === 'number' && typeof right === 'number') return left - right;
+    return collator.compare(String(left), String(right));
+  };
+  const rowOrder = Array.from(
+    { length: Math.max(0, lastDataRow - firstDataRow + 1) },
+    (_, index) => firstDataRow + index,
+  ).sort((leftRow, rightRow) => {
+    for (const sort of input.view.sorts) {
+      const columnIndex = sort.column - input.view.range.start.column;
+      const left = scalar(input.rows[leftRow - input.view.range.start.row]?.[columnIndex]);
+      const right = scalar(input.rows[rightRow - input.view.range.start.row]?.[columnIndex]);
+      const result = compare(left, right);
+      if (result !== 0) return sort.direction === 'ascending' ? result : -result;
+    }
+    return leftRow - rightRow;
+  });
+  return { hiddenRows, rowOrder };
 }

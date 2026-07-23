@@ -266,6 +266,47 @@ describe('shared cell presentation', () => {
     expect(document.workbook.sheets[0]?.cells[5]?.cell.styleId).toBeUndefined();
   });
 
+  it('composes an active filter view as derived shared visibility', () => {
+    const { document, cache } = resolverFixture();
+    const resolver = createPresentationResolver({
+      document,
+      cache,
+      revisions: {
+        document: 1,
+        calculation: 0,
+        condition: 0,
+        style: 1,
+        environment: 1,
+        view: 1,
+      },
+      environment: {
+        locale: 'en-US',
+        timeZone: 'UTC',
+        dateSystem: 'excel-1900',
+        target: 'screen',
+      },
+      activeFilterView: {
+        id: 'large-values',
+        name: 'Large values',
+        range: {
+          sheetId: 'sheet-1' as never,
+          start: { row: 0, column: 0 },
+          end: { row: 3, column: 0 },
+        },
+        sorts: [],
+        filters: [{ column: 0, operator: 'greaterThan', value: 20 }],
+        visibility: 'session',
+      },
+    });
+
+    expect(resolver.resolve({ sheetId: 'sheet-1' as never, row: 3, column: 0 }).visibility).toEqual(
+      { hidden: true, printable: true },
+    );
+    expect(resolver.resolve({ sheetId: 'sheet-1' as never, row: 0, column: 0 }).visibility).toEqual(
+      { hidden: false, printable: true },
+    );
+  });
+
   it('composes built-in checkbox and dropdown semantics from the F5 definitions', () => {
     const { resolver } = resolverFixture();
 
