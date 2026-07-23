@@ -897,8 +897,8 @@ export async function renderSpreadsheetTemplate(
       worksheets: expansion.document.workbook.sheets.map((sheet) =>
         freeze({
           sheetId: sheet.id,
-          visibility: 'visible' as const,
-          conditionalFormatting: freeze([]),
+          visibility: sheet.visibility ?? 'visible',
+          conditionalFormatting: freeze([...(sheet.conditionalFormatting ?? [])]),
         }),
       ),
       print: {

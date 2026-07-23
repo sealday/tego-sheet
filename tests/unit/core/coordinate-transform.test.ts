@@ -46,6 +46,20 @@ function sheet(): SheetInput {
       ],
       sort: { column: 2, direction: 'asc' },
     },
+    visibility: 'hidden',
+    conditionalFormatting: [
+      {
+        type: 'cell-is',
+        range: {
+          sheetId: 'sheet-1' as never,
+          start: { row: 1, column: 0 },
+          end: { row: 5, column: 4 },
+        },
+        operator: 'greaterThan',
+        formula: 'Data!A3',
+        style: { bold: true },
+      },
+    ],
   };
 }
 
@@ -116,6 +130,17 @@ describe('CoordinateTransform', () => {
       start: { row: 0, column: 0 },
       end: { row: 7, column: 4 },
     });
+    expect(next.visibility).toBe('hidden');
+    expect(next.conditionalFormatting).toEqual([
+      expect.objectContaining({
+        range: {
+          sheetId: 'sheet-1',
+          start: { row: 1, column: 0 },
+          end: { row: 7, column: 4 },
+        },
+        formula: 'Data!A5',
+      }),
+    ]);
   });
 
   it('uses one delete transform to drop covered points and shrink every surviving range', () => {
@@ -136,6 +161,16 @@ describe('CoordinateTransform', () => {
       filters: [{ column: 1, operator: 'in', values: ['kept'] }],
       sort: null,
     });
+    expect(next.conditionalFormatting).toEqual([
+      expect.objectContaining({
+        range: {
+          sheetId: 'sheet-1',
+          start: { row: 1, column: 0 },
+          end: { row: 5, column: 2 },
+        },
+        formula: 'Data!A3',
+      }),
+    ]);
   });
 
   it('does not materialize absent optional filter fields during a column transform', () => {
@@ -177,6 +212,11 @@ describe('CoordinateTransform', () => {
           {
             ...sheet(),
             name: 'Data 2026',
+            conditionalFormatting: (() => {
+              const format = sheet().conditionalFormatting![0]!;
+              if (format.type !== 'cell-is') throw new Error('expected cell-is fixture');
+              return [{ ...format, formula: "'Data 2026'!A3" }];
+            })(),
             cells: [
               {
                 row: 0,
@@ -256,6 +296,14 @@ describe('CoordinateTransform', () => {
         start: { row: 1, column: 0 },
         end: { row: 6, column: 2 },
       },
+    });
+    expect(next.workbook.sheets[0]?.conditionalFormatting?.[0]).toMatchObject({
+      range: {
+        sheetId: 'sheet-1',
+        start: { row: 1, column: 0 },
+        end: { row: 7, column: 4 },
+      },
+      formula: "'Data 2026'!A5",
     });
 
     const parsed = parseSpreadsheetDocument(input);

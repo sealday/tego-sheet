@@ -4,6 +4,10 @@ import type {
   DocumentCellAddress,
   DocumentCellRange,
   DocumentSheetId,
+  ConditionalCellRule,
+  ConditionalColorScale,
+  ConditionalFormat,
+  ConditionalStyle,
   SpreadsheetDocument,
   StoredSpreadsheetTemplate,
   TemplateId,
@@ -498,57 +502,16 @@ export interface GeneratedCalculatedCell {
 }
 
 /** Typed two- or three-color conditional formatting for one generated range. */
-export interface GeneratedConditionalColorScale {
-  /** Stable conditional-format discriminator. */
-  readonly type: 'color-scale';
-  /** Generated workbook range receiving the rule. */
-  readonly range: DocumentCellRange;
-  /** Minimum-value ARGB or RGB color. */
-  readonly minimumColor: string;
-  /** Optional 50th-percentile ARGB or RGB color. */
-  readonly midpointColor?: string;
-  /** Maximum-value ARGB or RGB color. */
-  readonly maximumColor: string;
-}
+export type GeneratedConditionalColorScale = ConditionalColorScale;
 
 /** Differential style used by a generated cell-is conditional rule. */
-export interface GeneratedConditionalStyle {
-  /** Optional text ARGB or RGB color. */
-  readonly color?: string;
-  /** Optional fill ARGB or RGB color. */
-  readonly backgroundColor?: string;
-  /** Optional bold emphasis. */
-  readonly bold?: boolean;
-}
+export type GeneratedConditionalStyle = ConditionalStyle;
 
 /** Typed formula-backed cell comparison for one generated range. */
-export interface GeneratedConditionalCellRule {
-  /** Stable conditional-format discriminator. */
-  readonly type: 'cell-is';
-  /** Generated workbook range receiving the rule. */
-  readonly range: DocumentCellRange;
-  /** Allowlisted OOXML comparison operator. */
-  readonly operator:
-    | 'between'
-    | 'notBetween'
-    | 'equal'
-    | 'notEqual'
-    | 'greaterThan'
-    | 'lessThan'
-    | 'greaterThanOrEqual'
-    | 'lessThanOrEqual';
-  /** First Excel-compatible formula without a leading equals sign. */
-  readonly formula: string;
-  /** Required second formula for between/notBetween. */
-  readonly formula2?: string;
-  /** Differential style applied when the rule matches. */
-  readonly style: GeneratedConditionalStyle;
-}
+export type GeneratedConditionalCellRule = ConditionalCellRule;
 
 /** Typed conditional formatting retained for XLSX output. */
-export type GeneratedConditionalFormat =
-  | GeneratedConditionalColorScale
-  | GeneratedConditionalCellRule;
+export type GeneratedConditionalFormat = ConditionalFormat;
 
 /** Semantic worksheet output settings retained for XLSX translation. */
 export interface GeneratedWorksheet {

@@ -119,6 +119,57 @@ describe('Workbook 2.0 parsing and serialization', () => {
     });
   });
 
+  it('round-trips worksheet visibility and typed conditional formatting canonically', () => {
+    const first = documentWithInputs([]);
+    Object.assign(first.workbook.sheets[0]!, {
+      visibility: 'very-hidden',
+      conditionalFormatting: [
+        {
+          type: 'cell-is',
+          range: {
+            sheetId: 'sheet-stable',
+            start: { row: 2, column: 1 },
+            end: { row: 4, column: 3 },
+          },
+          operator: 'between',
+          formula: 'A1',
+          formula2: '10',
+          style: { bold: true, backgroundColor: '#ffee00', color: '112233' },
+        },
+        {
+          type: 'color-scale',
+          range: {
+            sheetId: 'sheet-stable',
+            start: { row: 0, column: 0 },
+            end: { row: 1, column: 1 },
+          },
+          minimumColor: '#ff0000',
+          midpointColor: '00ff00',
+          maximumColor: '0000ff',
+        },
+      ],
+    });
+    first.workbook.sheets.push({
+      id: 'sheet-visible',
+      name: 'Visible',
+      cells: [],
+      merges: [],
+      visibility: 'visible',
+      conditionalFormatting: [],
+    });
+    const encoded = serializeSpreadsheetDocument(parseOk(first));
+    const reparsed = parseOk(encoded);
+
+    expect(serializeSpreadsheetDocument(reparsed)).toBe(encoded);
+    expect(reparsed.workbook.sheets[0]).toMatchObject({
+      visibility: 'very-hidden',
+      conditionalFormatting: [
+        expect.objectContaining({ type: 'cell-is', formula: 'A1', formula2: '10' }),
+        expect.objectContaining({ type: 'color-scale' }),
+      ],
+    });
+  });
+
   it.each(['excel-1900', 'excel-1904'] as const)(
     'preserves Excel date serial numbers with the explicit %s date system',
     (dateSystem) => {
@@ -146,7 +197,14 @@ describe('Workbook 2.0 parsing and serialization', () => {
       id: 'new-document',
       workbook: {
         settings: { dateSystem: 'excel-1904' },
-        sheets: [{ id: 'first-sheet', name: 'Sheet 1' }],
+        sheets: [
+          {
+            id: 'first-sheet',
+            name: 'Sheet 1',
+            visibility: 'visible',
+            conditionalFormatting: [],
+          },
+        ],
       },
     });
     expect(Object.isFrozen(document)).toBe(true);

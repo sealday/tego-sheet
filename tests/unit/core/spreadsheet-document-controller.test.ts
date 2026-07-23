@@ -22,6 +22,20 @@ function directDocument(overrides: Partial<SpreadsheetDocumentInput> = {}): Spre
         {
           id: 'sheet-1',
           name: 'Direct',
+          visibility: 'visible',
+          conditionalFormatting: [
+            {
+              type: 'cell-is',
+              range: {
+                sheetId: 'sheet-1' as never,
+                start: { row: 0, column: 0 },
+                end: { row: 4, column: 4 },
+              },
+              operator: 'greaterThan',
+              formula: 'A1',
+              style: { bold: true },
+            },
+          ],
           rowCount: 20,
           columnCount: 10,
           rows: [{ index: 4, height: 41, hidden: true }],
@@ -403,6 +417,28 @@ describe('SpreadsheetDocumentController', () => {
       row: 2,
       column: 3,
       cell: { input: { type: 'string', value: 'kept' } },
+    });
+  });
+
+  it('renames qualified conditional formulas with their referenced worksheet', () => {
+    const initial = structuredClone(directDocument()) as unknown as SpreadsheetDocumentInput;
+    const format = initial.workbook.sheets[0]!.conditionalFormatting![0]!;
+    if (format.type !== 'cell-is') throw new Error('expected cell-is fixture');
+    initial.workbook.sheets[0]!.conditionalFormatting![0] = {
+      ...format,
+      formula: 'Direct!A1',
+    };
+    const parsed = parseSpreadsheetDocument(initial);
+    if (!parsed.ok) throw new Error('conditional rename fixture must be valid');
+    const controller = new SpreadsheetDocumentController(parsed.document);
+
+    controller.dispatch(
+      { type: 'rename-sheet', sheet: sheetId('sheet-1'), name: 'Renamed Sheet' },
+      'ref',
+    );
+
+    expect(controller.getDocument().workbook.sheets[0]?.conditionalFormatting[0]).toMatchObject({
+      formula: "'Renamed Sheet'!A1",
     });
   });
 

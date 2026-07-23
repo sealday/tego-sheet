@@ -153,6 +153,60 @@ export interface SheetFilter {
   } | null;
 }
 
+/** Workbook-tab visibility persisted independently of any output adapter. */
+export type WorksheetVisibility = 'visible' | 'hidden' | 'very-hidden';
+
+/** Differential style supported by persistent cell-is conditional rules. */
+export interface ConditionalStyle {
+  /** Optional text ARGB or RGB color. */
+  readonly color?: string;
+  /** Optional fill ARGB or RGB color. */
+  readonly backgroundColor?: string;
+  /** Optional bold emphasis. */
+  readonly bold?: boolean;
+}
+
+/** Persistent two- or three-color scale over one worksheet range. */
+export interface ConditionalColorScale {
+  /** Stable color-scale discriminator. */
+  readonly type: 'color-scale';
+  /** Qualified worksheet range receiving the rule. */
+  readonly range: DocumentCellRange;
+  /** Minimum-value ARGB or RGB color. */
+  readonly minimumColor: string;
+  /** Optional 50th-percentile ARGB or RGB color. */
+  readonly midpointColor?: string;
+  /** Maximum-value ARGB or RGB color. */
+  readonly maximumColor: string;
+}
+
+/** Persistent formula-backed cell comparison over one worksheet range. */
+export interface ConditionalCellRule {
+  /** Stable cell-comparison discriminator. */
+  readonly type: 'cell-is';
+  /** Qualified worksheet range receiving the rule. */
+  readonly range: DocumentCellRange;
+  /** Allowlisted spreadsheet comparison operator. */
+  readonly operator:
+    | 'between'
+    | 'notBetween'
+    | 'equal'
+    | 'notEqual'
+    | 'greaterThan'
+    | 'lessThan'
+    | 'greaterThanOrEqual'
+    | 'lessThanOrEqual';
+  /** First formula in the restricted safe subset, without a leading equals sign. */
+  readonly formula: string;
+  /** Required second formula for between and notBetween. */
+  readonly formula2?: string;
+  /** Differential style applied when the comparison matches. */
+  readonly style: ConditionalStyle;
+}
+
+/** Ordered persistent conditional-format rule. */
+export type ConditionalFormat = ConditionalColorScale | ConditionalCellRule;
+
 /** Ordered worksheet with sparse cells and normalized merges. */
 export interface Sheet {
   /** Stable opaque sheet identifier. */
@@ -175,6 +229,10 @@ export interface Sheet {
   readonly freeze?: CellPoint;
   /** Optional normalized filter and sort state. */
   readonly filter?: SheetFilter;
+  /** Workbook-tab visibility retained by semantic output adapters. */
+  readonly visibility: WorksheetVisibility;
+  /** Ordered typed conditional-format rules owned by this worksheet. */
+  readonly conditionalFormatting: readonly ConditionalFormat[];
 }
 
 /** One stable-ID entry in a JSON-valued registry. */
@@ -309,6 +367,8 @@ export interface SheetInput {
     filters: { column: number; operator: 'all' | 'in'; values: string[] }[];
     sort?: { column: number; direction: 'asc' | 'desc' } | null;
   };
+  visibility?: WorksheetVisibility;
+  conditionalFormatting?: ConditionalFormat[];
 }
 
 export interface SpreadsheetDocumentInput {

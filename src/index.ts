@@ -119,6 +119,10 @@ export type {
   BindingId,
   Cell,
   CellInput,
+  ConditionalCellRule,
+  ConditionalColorScale,
+  ConditionalFormat,
+  ConditionalStyle,
   CreateDocumentOptions,
   Diagnostic,
   DiagnosticDomain,
@@ -162,6 +166,7 @@ export type {
   ValidationRegistry,
   Workbook,
   WorkbookSettings,
+  WorksheetVisibility,
 } from './document';
 /** A zero-based Workbook 2.0 cell coordinate. */
 export type { CellPoint as DocumentCellPoint } from './document';

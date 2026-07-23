@@ -159,6 +159,144 @@ describe('Workbook 2.0 validation', () => {
     expect(codesOf(fixture)).toContain('INVALID_RANGE');
   });
 
+  it.each([
+    {
+      label: 'visibility',
+      mutate: (sheet: Record<string, unknown>) => {
+        sheet.visibility = 'collapsed';
+      },
+    },
+    {
+      label: 'conditional range sheet',
+      mutate: (sheet: Record<string, unknown>) => {
+        sheet.conditionalFormatting = [
+          {
+            type: 'color-scale',
+            range: {
+              sheetId: 'missing-sheet',
+              start: { row: 0, column: 0 },
+              end: { row: 1, column: 1 },
+            },
+            minimumColor: 'ff0000',
+            maximumColor: '00ff00',
+          },
+        ];
+      },
+    },
+    {
+      label: 'conditional range order',
+      mutate: (sheet: Record<string, unknown>) => {
+        sheet.conditionalFormatting = [
+          {
+            type: 'color-scale',
+            range: {
+              sheetId: 'sheet-1',
+              start: { row: 2, column: 0 },
+              end: { row: 1, column: 1 },
+            },
+            minimumColor: 'ff0000',
+            maximumColor: '00ff00',
+          },
+        ];
+      },
+    },
+    {
+      label: 'conditional operator',
+      mutate: (sheet: Record<string, unknown>) => {
+        sheet.conditionalFormatting = [
+          {
+            type: 'cell-is',
+            range: {
+              sheetId: 'sheet-1',
+              start: { row: 0, column: 0 },
+              end: { row: 1, column: 1 },
+            },
+            operator: 'exec',
+            formula: '1',
+            style: {},
+          },
+        ];
+      },
+    },
+    {
+      label: 'conditional formula',
+      mutate: (sheet: Record<string, unknown>) => {
+        sheet.conditionalFormatting = [
+          {
+            type: 'cell-is',
+            range: {
+              sheetId: 'sheet-1',
+              start: { row: 0, column: 0 },
+              end: { row: 1, column: 1 },
+            },
+            operator: 'between',
+            formula: '=A1',
+            style: {},
+          },
+        ];
+      },
+    },
+    {
+      label: 'conditional formula function',
+      mutate: (sheet: Record<string, unknown>) => {
+        sheet.conditionalFormatting = [
+          {
+            type: 'cell-is',
+            range: {
+              sheetId: 'sheet-1',
+              start: { row: 0, column: 0 },
+              end: { row: 1, column: 1 },
+            },
+            operator: 'equal',
+            formula: 'HYPERLINK(A1)',
+            style: {},
+          },
+        ];
+      },
+    },
+    {
+      label: 'conditional formula sheet',
+      mutate: (sheet: Record<string, unknown>) => {
+        sheet.conditionalFormatting = [
+          {
+            type: 'cell-is',
+            range: {
+              sheetId: 'sheet-1',
+              start: { row: 0, column: 0 },
+              end: { row: 1, column: 1 },
+            },
+            operator: 'equal',
+            formula: 'Missing!A1',
+            style: {},
+          },
+        ];
+      },
+    },
+    {
+      label: 'conditional style',
+      mutate: (sheet: Record<string, unknown>) => {
+        sheet.conditionalFormatting = [
+          {
+            type: 'cell-is',
+            range: {
+              sheetId: 'sheet-1',
+              start: { row: 0, column: 0 },
+              end: { row: 1, column: 1 },
+            },
+            operator: 'equal',
+            formula: '1',
+            style: { italic: true },
+          },
+        ];
+      },
+    },
+  ])('rejects invalid worksheet $label semantics atomically', ({ mutate }) => {
+    const fixture = validDocument();
+    mutate(fixture.workbook.sheets[0]! as unknown as Record<string, unknown>);
+
+    expect(codesOf(fixture)).toContain('DOCUMENT_SCHEMA_INVALID');
+  });
+
   it('reports overlapping merges', () => {
     const fixture = validDocument();
     fixture.workbook.sheets[0]!.merges.push(

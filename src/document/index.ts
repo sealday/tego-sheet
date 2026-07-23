@@ -14,6 +14,10 @@ export type {
   Cell,
   CellInput,
   CellPoint,
+  ConditionalCellRule,
+  ConditionalColorScale,
+  ConditionalFormat,
+  ConditionalStyle,
   CreateDocumentOptions,
   DocumentCellAddress,
   DocumentCellRange,
@@ -38,6 +42,7 @@ export type {
   ValidationRegistry,
   Workbook,
   WorkbookSettings,
+  WorksheetVisibility,
 } from './model/document';
 export type {
   BindingId,

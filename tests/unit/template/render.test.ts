@@ -13,6 +13,20 @@ const source = {
       {
         id: 'sheet-1',
         name: 'Invoice',
+        visibility: 'hidden',
+        conditionalFormatting: [
+          {
+            type: 'cell-is',
+            range: {
+              sheetId: 'sheet-1',
+              start: { row: 1, column: 0 },
+              end: { row: 1, column: 1 },
+            },
+            operator: 'greaterThan',
+            formula: 'A2',
+            style: { bold: true },
+          },
+        ],
         cells: [
           { row: 0, column: 0, cell: { input: { type: 'string', value: 'Name' } } },
           { row: 1, column: 0, cell: { input: { type: 'string', value: 'item' } } },
@@ -176,8 +190,18 @@ describe('template render pipeline', () => {
     expect(result.document?.worksheets).toEqual([
       {
         sheetId: 'sheet-1',
-        visibility: 'visible',
-        conditionalFormatting: [],
+        visibility: 'hidden',
+        conditionalFormatting: [
+          expect.objectContaining({
+            type: 'cell-is',
+            range: {
+              sheetId: 'sheet-1',
+              start: { row: 1, column: 0 },
+              end: { row: 1, column: 1 },
+            },
+            formula: 'A2',
+          }),
+        ],
       },
     ]);
     expect(result.document?.calculatedCells).toEqual(

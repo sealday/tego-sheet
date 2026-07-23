@@ -63,6 +63,8 @@ describe('legacy WorkbookInput migration', () => {
     const sheet = document.workbook.sheets[0]!;
 
     expect(sheet).toMatchObject({
+      visibility: 'visible',
+      conditionalFormatting: [],
       rowCount: 10001,
       columnCount: 53,
       freeze: { row: 2, column: 2 },

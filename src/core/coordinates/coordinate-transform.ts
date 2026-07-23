@@ -1,5 +1,6 @@
 import type {
   CellPoint,
+  ConditionalFormat,
   SheetInput,
   SheetRange,
   SpreadsheetDocumentInput,
@@ -340,6 +341,27 @@ export function transformSheetCoordinates(
                       })(),
               }),
         };
+  const conditionalFormatting = (sheet.conditionalFormatting ?? []).flatMap<ConditionalFormat>(
+    (format) => {
+      const range = transform.range(format.range);
+      if (range === null) return [];
+      if (format.type === 'color-scale') {
+        return [{ ...format, range: { ...format.range, ...range } }];
+      }
+      const transformConditionalFormula = (formula: string): string =>
+        transform.formula(`=${formula}`, context).slice(1);
+      return [
+        {
+          ...format,
+          range: { ...format.range, ...range },
+          formula: transformConditionalFormula(format.formula),
+          ...(format.formula2 === undefined
+            ? {}
+            : { formula2: transformConditionalFormula(format.formula2) }),
+        },
+      ];
+    },
+  );
   return {
     ...sheet,
     ...(transform.axis === 'row' && sheet.rowCount !== undefined
@@ -375,6 +397,7 @@ export function transformSheetCoordinates(
         }),
     ...(freeze === undefined ? {} : { freeze }),
     ...(filter === undefined ? {} : { filter }),
+    conditionalFormatting,
   };
 }
 
@@ -389,6 +412,17 @@ function transformFormulaCells(
       ...item,
       cell: transformCellFormula(item.cell, transform, context),
     })),
+    conditionalFormatting: (sheet.conditionalFormatting ?? []).map((format) =>
+      format.type === 'color-scale'
+        ? format
+        : {
+            ...format,
+            formula: transform.formula(`=${format.formula}`, context).slice(1),
+            ...(format.formula2 === undefined
+              ? {}
+              : { formula2: transform.formula(`=${format.formula2}`, context).slice(1) }),
+          },
+    ),
   };
 }
 

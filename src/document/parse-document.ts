@@ -9,6 +9,8 @@ import type {
   Cell,
   CellInput,
   CellPoint,
+  ConditionalFormat,
+  ConditionalStyle,
   ExtensionStore,
   ResourceMetadata,
   Sheet,
@@ -21,6 +23,7 @@ import type {
   StoredSpreadsheetTemplate,
 } from './model/document';
 import type { TemplateBinding, TemplatePrintProfile } from '../template/model';
+import { BUILTIN_FORMULA_COMPATIBILITY, parseFormula, type FormulaAst } from '../formula';
 import type {
   DocumentId,
   DocumentSheetId,
@@ -831,6 +834,197 @@ function filterAt(value: unknown, path: string, context: ParseContext): SheetFil
   };
 }
 
+const CONDITIONAL_OPERATORS = new Set([
+  'between',
+  'notBetween',
+  'equal',
+  'notEqual',
+  'greaterThan',
+  'lessThan',
+  'greaterThanOrEqual',
+  'lessThanOrEqual',
+]);
+const CONDITIONAL_STYLE_KEYS = new Set(['color', 'backgroundColor', 'bold']);
+const CONDITIONAL_COLOR = /^#?(?:[\da-f]{6}|[\da-f]{8})$/iu;
+const CONDITIONAL_FORMULA_FUNCTIONS = new Set(
+  BUILTIN_FORMULA_COMPATIBILITY.map(({ name }) => name),
+);
+
+function hasOnlySupportedFormulaFunctions(ast: FormulaAst): boolean {
+  if (ast.kind === 'call') {
+    return (
+      CONDITIONAL_FORMULA_FUNCTIONS.has(ast.name) &&
+      ast.arguments.every(hasOnlySupportedFormulaFunctions)
+    );
+  }
+  if (ast.kind === 'unary') return hasOnlySupportedFormulaFunctions(ast.operand);
+  if (ast.kind === 'binary') {
+    return (
+      hasOnlySupportedFormulaFunctions(ast.left) && hasOnlySupportedFormulaFunctions(ast.right)
+    );
+  }
+  return true;
+}
+
+function conditionalColorAt(value: unknown, path: string, context: ParseContext): string {
+  const color = stringAt(value, path, context);
+  if (!CONDITIONAL_COLOR.test(color)) {
+    addDiagnostic(
+      context,
+      'DOCUMENT_SCHEMA_INVALID',
+      path,
+      `${path} must be a six- or eight-digit RGB color`,
+    );
+  }
+  return color;
+}
+
+function conditionalStyleAt(value: unknown, path: string, context: ParseContext): ConditionalStyle {
+  const source = recordAt(value, path, context);
+  for (const key of Object.keys(source ?? {})) {
+    if (!CONDITIONAL_STYLE_KEYS.has(key)) {
+      addDiagnostic(
+        context,
+        'DOCUMENT_SCHEMA_INVALID',
+        `${path}.${key}`,
+        `${path}.${key} is not a supported conditional style field`,
+      );
+    }
+  }
+  return {
+    ...(source?.color === undefined
+      ? {}
+      : { color: conditionalColorAt(source.color, `${path}.color`, context) }),
+    ...(source?.backgroundColor === undefined
+      ? {}
+      : {
+          backgroundColor: conditionalColorAt(
+            source.backgroundColor,
+            `${path}.backgroundColor`,
+            context,
+          ),
+        }),
+    ...(source?.bold === undefined
+      ? {}
+      : { bold: booleanAt(source.bold, `${path}.bold`, context) }),
+  };
+}
+
+function conditionalFormulaAt(value: unknown, path: string, context: ParseContext): string {
+  const formula = stringAt(value, path, context);
+  if (formula.length === 0 || formula.startsWith('=')) {
+    addDiagnostic(
+      context,
+      'DOCUMENT_SCHEMA_INVALID',
+      path,
+      `${path} must be a non-empty formula without a leading equals sign`,
+    );
+    return formula;
+  }
+  try {
+    if (!hasOnlySupportedFormulaFunctions(parseFormula(`=${formula}`))) {
+      throw new TypeError('Unsupported conditional formula function');
+    }
+  } catch {
+    addDiagnostic(
+      context,
+      'DOCUMENT_SCHEMA_INVALID',
+      path,
+      `${path} must use valid restricted formula syntax`,
+    );
+  }
+  return formula;
+}
+
+function conditionalFormattingAt(
+  value: unknown,
+  path: string,
+  context: ParseContext,
+): ConditionalFormat[] {
+  if (value === undefined) return [];
+  return arrayAt(value, path, context).map((entry, index): ConditionalFormat => {
+    const entryPath = `${path}[${index}]`;
+    const source = recordAt(entry, entryPath, context);
+    const range = rangeAt(source?.range, `${entryPath}.range`, context);
+    const rangeRecord = recordAt(source?.range, `${entryPath}.range`, context);
+    const qualifiedRange = {
+      sheetId: stringAt(
+        rangeRecord?.sheetId,
+        `${entryPath}.range.sheetId`,
+        context,
+      ) as DocumentSheetId,
+      ...range,
+    };
+    if (!isNormalized(range)) {
+      addDiagnostic(
+        context,
+        'DOCUMENT_SCHEMA_INVALID',
+        `${entryPath}.range`,
+        'Conditional formatting range must be normalized',
+      );
+    }
+    if (source?.type === 'color-scale') {
+      return {
+        type: 'color-scale',
+        range: qualifiedRange,
+        minimumColor: conditionalColorAt(source.minimumColor, `${entryPath}.minimumColor`, context),
+        ...(source.midpointColor === undefined
+          ? {}
+          : {
+              midpointColor: conditionalColorAt(
+                source.midpointColor,
+                `${entryPath}.midpointColor`,
+                context,
+              ),
+            }),
+        maximumColor: conditionalColorAt(source.maximumColor, `${entryPath}.maximumColor`, context),
+      };
+    }
+    if (source?.type !== 'cell-is') {
+      addDiagnostic(
+        context,
+        'DOCUMENT_SCHEMA_INVALID',
+        `${entryPath}.type`,
+        `${entryPath}.type must be color-scale or cell-is`,
+      );
+    }
+    const operator =
+      typeof source?.operator === 'string' && CONDITIONAL_OPERATORS.has(source.operator)
+        ? source.operator
+        : 'equal';
+    if (source?.operator !== operator) {
+      addDiagnostic(
+        context,
+        'DOCUMENT_SCHEMA_INVALID',
+        `${entryPath}.operator`,
+        `${entryPath}.operator is not supported`,
+      );
+    }
+    const formula = conditionalFormulaAt(source?.formula, `${entryPath}.formula`, context);
+    const formula2 =
+      source?.formula2 === undefined
+        ? undefined
+        : conditionalFormulaAt(source.formula2, `${entryPath}.formula2`, context);
+    const needsSecond = operator === 'between' || operator === 'notBetween';
+    if ((needsSecond && formula2 === undefined) || (!needsSecond && formula2 !== undefined)) {
+      addDiagnostic(
+        context,
+        'DOCUMENT_SCHEMA_INVALID',
+        `${entryPath}.formula2`,
+        `${entryPath}.formula2 does not match the conditional operator`,
+      );
+    }
+    return {
+      type: 'cell-is',
+      range: qualifiedRange,
+      operator: operator as Extract<ConditionalFormat, { readonly type: 'cell-is' }>['operator'],
+      formula,
+      ...(formula2 === undefined ? {} : { formula2 }),
+      style: conditionalStyleAt(source?.style, `${entryPath}.style`, context),
+    };
+  });
+}
+
 function sheetAt(value: unknown, path: string, context: ParseContext): Sheet {
   const record = recordAt(value, path, context);
   const merges = arrayAt(record?.merges, `${path}.merges`, context).map((merge, index) =>
@@ -850,6 +1044,26 @@ function sheetAt(value: unknown, path: string, context: ParseContext): Sheet {
   const freeze =
     record?.freeze === undefined ? undefined : pointAt(record.freeze, `${path}.freeze`, context);
   const filter = filterAt(record?.filter, `${path}.filter`, context);
+  const visibility =
+    record?.visibility === undefined ||
+    record.visibility === 'visible' ||
+    record.visibility === 'hidden' ||
+    record.visibility === 'very-hidden'
+      ? (record?.visibility ?? 'visible')
+      : 'visible';
+  if (record?.visibility !== undefined && record.visibility !== visibility) {
+    addDiagnostic(
+      context,
+      'DOCUMENT_SCHEMA_INVALID',
+      `${path}.visibility`,
+      `${path}.visibility must be visible, hidden, or very-hidden`,
+    );
+  }
+  const conditionalFormatting = conditionalFormattingAt(
+    record?.conditionalFormatting,
+    `${path}.conditionalFormatting`,
+    context,
+  );
 
   for (const [index, merge] of merges.entries()) {
     if (!isNormalized(merge)) {
@@ -890,6 +1104,8 @@ function sheetAt(value: unknown, path: string, context: ParseContext): Sheet {
     columns,
     ...(freeze === undefined ? {} : { freeze }),
     ...(filter === undefined ? {} : { filter }),
+    visibility,
+    conditionalFormatting,
   };
 }
 
@@ -960,6 +1176,23 @@ function rangesOverlap(left: SheetRange, right: SheetRange): boolean {
   );
 }
 
+function formulaSheetTokens(ast: FormulaAst): readonly string[] {
+  if (ast.kind === 'reference') {
+    return ast.reference.sheetToken === undefined ? [] : [ast.reference.sheetToken];
+  }
+  if (ast.kind === 'range') {
+    return [ast.start.sheetToken, ast.end.sheetToken].filter(
+      (token): token is string => token !== undefined,
+    );
+  }
+  if (ast.kind === 'unary') return formulaSheetTokens(ast.operand);
+  if (ast.kind === 'binary') {
+    return [...formulaSheetTokens(ast.left), ...formulaSheetTokens(ast.right)];
+  }
+  if (ast.kind === 'call') return ast.arguments.flatMap(formulaSheetTokens);
+  return [];
+}
+
 function validateReferences(document: SpreadsheetDocument, context: ParseContext): void {
   const sheetIds = new Set(document.workbook.sheets.map(({ id }) => id));
   const styleIds = new Set(document.workbook.styles.map(({ id }) => id));
@@ -968,6 +1201,44 @@ function validateReferences(document: SpreadsheetDocument, context: ParseContext
   const templateIds = new Set(document.templates.map(({ id }) => id));
 
   document.workbook.sheets.forEach((sheet, sheetIndex) => {
+    sheet.conditionalFormatting.forEach((format, formatIndex) => {
+      const base = `$.workbook.sheets[${sheetIndex}].conditionalFormatting[${formatIndex}]`;
+      if (format.range.sheetId !== sheet.id || !sheetIds.has(format.range.sheetId)) {
+        addDiagnostic(
+          context,
+          'DOCUMENT_SCHEMA_INVALID',
+          `${base}.range.sheetId`,
+          'Conditional formatting range must reference its owning sheet',
+        );
+      }
+      if (format.type === 'cell-is') {
+        for (const [field, source] of [
+          ['formula', format.formula],
+          ...(format.formula2 === undefined ? [] : ([['formula2', format.formula2]] as const)),
+        ] as const) {
+          try {
+            const tokens = formulaSheetTokens(parseFormula(`=${source}`));
+            if (
+              tokens.some(
+                (token) =>
+                  document.workbook.sheets.filter(
+                    ({ name }) => name.toLowerCase() === token.toLowerCase(),
+                  ).length !== 1,
+              )
+            ) {
+              addDiagnostic(
+                context,
+                'DOCUMENT_SCHEMA_INVALID',
+                `${base}.${field}`,
+                'Conditional formula references an unknown or ambiguous sheet',
+              );
+            }
+          } catch {
+            // Syntax is diagnosed while decoding the rule.
+          }
+        }
+      }
+    });
     sheet.cells.forEach(({ cell }, cellIndex) => {
       const base = `$.workbook.sheets[${sheetIndex}].cells[${cellIndex}].cell`;
       const references: readonly [string | undefined, ReadonlySet<string>, string][] = [
@@ -1016,6 +1287,18 @@ function validateReferences(document: SpreadsheetDocument, context: ParseContext
       }
     });
   });
+
+  if (
+    document.workbook.sheets.length > 0 &&
+    !document.workbook.sheets.some(({ visibility }) => visibility === 'visible')
+  ) {
+    addDiagnostic(
+      context,
+      'DOCUMENT_SCHEMA_INVALID',
+      '$.workbook.sheets',
+      'At least one worksheet must be visible',
+    );
+  }
 
   document.templates.forEach((template, index) => {
     const templateRanges = [

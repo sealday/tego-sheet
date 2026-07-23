@@ -92,6 +92,7 @@ function transformSheetRename(
   const renamedSheet = input.workbook.sheets[sheetIndex(sheetIds, command.sheet)];
   if (renamedSheet === undefined || renamedSheet.name === command.name) return;
   const previousName = renamedSheet.name;
+  renamedSheet.name = command.name;
   for (const sheet of input.workbook.sheets) {
     const formulaKeys = new Set<string>();
     for (const item of sheet.cells) {
@@ -108,6 +109,24 @@ function transformSheetRename(
       item.cell = { ...item.cell, input: { ...item.cell.input, source } };
       formulaKeys.add(cellKey(item.row, item.column));
     }
+    sheet.conditionalFormatting = (sheet.conditionalFormatting ?? []).map((format) => {
+      if (format.type === 'color-scale') return format;
+      const rename = (formula: string): string => {
+        const source = `=${formula}`;
+        try {
+          return renderFormula(
+            renameFormulaSheet(parseFormula(source), previousName, command.name),
+          ).slice(1);
+        } catch {
+          return renameLegacySheetQualifiers(source, previousName, command.name).slice(1);
+        }
+      };
+      return {
+        ...format,
+        formula: rename(format.formula),
+        ...(format.formula2 === undefined ? {} : { formula2: rename(format.formula2) }),
+      };
+    });
     if (formulaKeys.size > 0) authoritativeInputs.set(sheet.id, formulaKeys);
   }
 }
