@@ -173,6 +173,13 @@ describe('template render pipeline', () => {
       result.document?.print.pages.length ?? 0,
     );
     expect(result.document?.print.profile).toEqual(template.printProfiles[0]);
+    expect(result.document?.worksheets).toEqual([
+      {
+        sheetId: 'sheet-1',
+        visibility: 'visible',
+        conditionalFormatting: [],
+      },
+    ]);
     expect(result.document?.calculatedCells).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

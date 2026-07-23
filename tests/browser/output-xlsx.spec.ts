@@ -24,6 +24,13 @@ test('@parity:output.export-download XLSX output runs deterministically in the b
         settings: { dateSystem: 'excel-1900' },
       },
       calculatedCells: [],
+      worksheets: [
+        {
+          sheetId: 'sheet',
+          visibility: 'visible',
+          conditionalFormatting: [],
+        },
+      ],
       print: {
         pages: [],
         displayList: { diagnostics: [], pages: [] },

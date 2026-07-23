@@ -74,6 +74,13 @@ export function outputGeneratedDocument(): GeneratedDocument {
         value: { type: 'number', value: 3 },
       },
     ],
+    worksheets: [
+      {
+        sheetId: 'sheet-1',
+        visibility: 'visible',
+        conditionalFormatting: [],
+      },
+    ],
     print: {
       pages: [
         {

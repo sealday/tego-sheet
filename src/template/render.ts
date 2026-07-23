@@ -894,6 +894,13 @@ export async function renderSpreadsheetTemplate(
     const document: GeneratedDocument = freeze({
       workbook: expansion.document.workbook,
       calculatedCells,
+      worksheets: expansion.document.workbook.sheets.map((sheet) =>
+        freeze({
+          sheetId: sheet.id,
+          visibility: 'visible' as const,
+          conditionalFormatting: freeze([]),
+        }),
+      ),
       print: {
         pages: pagination.pages.map((page) => ({
           id: page.id,

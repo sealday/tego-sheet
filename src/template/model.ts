@@ -497,12 +497,38 @@ export interface GeneratedCalculatedCell {
   readonly value: FormulaValue;
 }
 
+/** Typed two- or three-color conditional formatting for one generated range. */
+export interface GeneratedConditionalColorScale {
+  /** Stable conditional-format discriminator. */
+  readonly type: 'color-scale';
+  /** Generated workbook range receiving the rule. */
+  readonly range: DocumentCellRange;
+  /** Minimum-value ARGB or RGB color. */
+  readonly minimumColor: string;
+  /** Optional 50th-percentile ARGB or RGB color. */
+  readonly midpointColor?: string;
+  /** Maximum-value ARGB or RGB color. */
+  readonly maximumColor: string;
+}
+
+/** Semantic worksheet output settings retained for XLSX translation. */
+export interface GeneratedWorksheet {
+  /** Stable generated worksheet identity. */
+  readonly sheetId: DocumentSheetId;
+  /** Workbook-tab visibility. */
+  readonly visibility: 'visible' | 'hidden' | 'very-hidden';
+  /** Ordered typed conditional-format rules. */
+  readonly conditionalFormatting: readonly GeneratedConditionalColorScale[];
+}
+
 /** Atomic render artifact consumed by every TP1 output surface. */
 export interface GeneratedDocument {
   /** Expanded and recalculated semantic workbook. */
   readonly workbook: SpreadsheetDocument['workbook'];
   /** Canonically ordered calculated values for generated sparse cells. */
   readonly calculatedCells: readonly GeneratedCalculatedCell[];
+  /** Ordered semantic worksheet output settings. */
+  readonly worksheets: readonly GeneratedWorksheet[];
   /** Shared immutable print pages and commands. */
   readonly print: PrintDocument;
   /** Session-owned, content-addressed resolved resource store. */

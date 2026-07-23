@@ -1,7 +1,7 @@
 import { strToU8, zipSync } from 'fflate';
 import type { Cell, JsonValue, Sheet, SheetRange, SpreadsheetDocument } from '../../document';
 import type { FormulaValue } from '../../formula';
-import type { GeneratedDocument, TemplatePrintProfile } from '../../template';
+import type { GeneratedDocument, GeneratedWorksheet, TemplatePrintProfile } from '../../template';
 import { outputError, throwIfAborted } from '../output-error';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -122,6 +122,71 @@ function quotedSheetName(name: string): string {
   return `'${name.replaceAll("'", "''")}'`;
 }
 
+function worksheetSettings(document: GeneratedDocument): ReadonlyMap<string, GeneratedWorksheet> {
+  const settings = new Map<string, GeneratedWorksheet>();
+  for (const worksheet of document.worksheets) {
+    if (settings.has(worksheet.sheetId)) {
+      throw outputError(
+        'XLSX_UNSUPPORTED_FEATURE',
+        `Worksheet settings for ${worksheet.sheetId} are duplicated`,
+      );
+    }
+    settings.set(worksheet.sheetId, worksheet);
+  }
+  if (
+    settings.size !== document.workbook.sheets.length ||
+    document.workbook.sheets.some((sheet) => !settings.has(sheet.id)) ||
+    !document.workbook.sheets.some((sheet) => settings.get(sheet.id)?.visibility === 'visible')
+  ) {
+    throw outputError(
+      'XLSX_UNSUPPORTED_FEATURE',
+      'XLSX requires exactly one setting per sheet and at least one visible sheet',
+    );
+  }
+  return settings;
+}
+
+function xlsxColor(value: string): string {
+  const normalized = value.startsWith('#') ? value.slice(1) : value;
+  if (!/^(?:[\da-f]{6}|[\da-f]{8})$/iu.test(normalized)) {
+    throw outputError('XLSX_UNSUPPORTED_FEATURE', `Conditional color ${value} is invalid`);
+  }
+  return normalized.length === 6 ? `FF${normalized.toUpperCase()}` : normalized.toUpperCase();
+}
+
+function conditionalFormattingXml(sheet: Sheet, worksheet: GeneratedWorksheet): string {
+  return worksheet.conditionalFormatting
+    .map((format, index) => {
+      if (
+        format.range.sheetId !== sheet.id ||
+        format.range.start.row < 0 ||
+        format.range.start.column < 0 ||
+        format.range.end.row < format.range.start.row ||
+        format.range.end.column < format.range.start.column
+      ) {
+        throw outputError('XLSX_UNSUPPORTED_FEATURE', 'Conditional formatting range is invalid', {
+          location: { sheetId: sheet.id },
+        });
+      }
+      const values =
+        '<cfvo type="min"/>' +
+        (format.midpointColor === undefined ? '' : '<cfvo type="percentile" val="50"/>') +
+        '<cfvo type="max"/>';
+      const colors =
+        `<color rgb="${xlsxColor(format.minimumColor)}"/>` +
+        (format.midpointColor === undefined
+          ? ''
+          : `<color rgb="${xlsxColor(format.midpointColor)}"/>`) +
+        `<color rgb="${xlsxColor(format.maximumColor)}"/>`;
+      return (
+        `<conditionalFormatting sqref="${absoluteRange({ start: format.range.start, end: format.range.end }).replaceAll('$', '')}">` +
+        `<cfRule type="colorScale" priority="${index + 1}"><colorScale>${values}${colors}</colorScale></cfRule>` +
+        '</conditionalFormatting>'
+      );
+    })
+    .join('');
+}
+
 function validateSheetNames(sheets: readonly Sheet[]): void {
   const names = new Set<string>();
   for (const sheet of sheets) {
@@ -215,6 +280,32 @@ function sourceStringBytes(document: GeneratedDocument): number {
     }
   }
   return total;
+}
+
+function conservativeUncompressedBytes(document: GeneratedDocument, stringBytes: number): number {
+  const workbook = document.workbook;
+  const cells = workbook.sheets.reduce((sum, sheet) => sum + sheet.cells.length, 0);
+  const rows = workbook.sheets.reduce((sum, sheet) => sum + sheet.rows.length, 0);
+  const columns = workbook.sheets.reduce((sum, sheet) => sum + sheet.columns.length, 0);
+  const merges = workbook.sheets.reduce((sum, sheet) => sum + sheet.merges.length, 0);
+  const conditionalFormats = document.worksheets.reduce(
+    (sum, worksheet) => sum + worksheet.conditionalFormatting.length,
+    0,
+  );
+  return (
+    64 * 1024 +
+    stringBytes * 6 +
+    document.resources.totalBytes +
+    workbook.sheets.length * 8 * 1024 +
+    cells * 256 +
+    rows * 128 +
+    columns * 128 +
+    merges * 128 +
+    workbook.styles.length * 2 * 1024 +
+    workbook.validations.length * 1024 +
+    document.objects.length * 2 * 1024 +
+    conditionalFormats * 1024
+  );
 }
 
 function cellXml(
@@ -585,6 +676,7 @@ function worksheetXml(
   calculated: ReadonlyMap<string, FormulaValue>,
   options: XlsxOutputOptions,
   profile: TemplatePrintProfile | undefined,
+  worksheet: GeneratedWorksheet,
   hasDrawing: boolean,
 ): string {
   const rows = new Map<
@@ -645,7 +737,7 @@ function worksheetXml(
     `<dimension ref="${absoluteRange(sheetRange(sheet)).replaceAll('$', '')}"/>` +
     `<sheetViews><sheetView workbookViewId="0"${profile?.showGridlines === false ? ' showGridLines="0"' : ''}${profile?.showHeadings === false ? ' showRowColHeaders="0"' : ''}/></sheetViews>` +
     `<sheetFormatPr defaultRowHeight="15"/>${columns}<sheetData>${rowXml}</sheetData>${merges}` +
-    `${validationXml(sheet, workbook)}${pageXml(profile, sheet)}${hasDrawing ? '<drawing r:id="rId1"/>' : ''}</worksheet>`
+    `${validationXml(sheet, workbook)}${conditionalFormattingXml(sheet, worksheet)}${pageXml(profile, sheet)}${hasDrawing ? '<drawing r:id="rId1"/>' : ''}</worksheet>`
   );
 }
 
@@ -735,6 +827,7 @@ function packageParts(
   const style = styleXml(workbook);
   const calculated = calculatedValueMap(document);
   const profile = document.print.profile;
+  const worksheetById = worksheetSettings(document);
   const drawings = workbook.sheets.map((sheet, index) => drawingPart(sheet, index, document));
   const parts = new Map<string, Uint8Array>();
   const add = (path: string, value: string | Uint8Array): void => {
@@ -749,7 +842,18 @@ function packageParts(
     'xl/workbook.xml',
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
       '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
-      `<workbookPr date1904="${workbook.settings.dateSystem === 'excel-1904' ? 1 : 0}"/><bookViews><workbookView/></bookViews><sheets>${workbook.sheets.map((sheet, index) => `<sheet name="${xml(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join('')}</sheets>${workbookDefinedNames(workbook, profile)}<calcPr calcId="0" fullCalcOnLoad="1"/></workbook>`,
+      `<workbookPr date1904="${workbook.settings.dateSystem === 'excel-1904' ? 1 : 0}"/><bookViews><workbookView/></bookViews><sheets>${workbook.sheets
+        .map((sheet, index) => {
+          const visibility = worksheetById.get(sheet.id)!.visibility;
+          const state =
+            visibility === 'visible'
+              ? ''
+              : ` state="${visibility === 'very-hidden' ? 'veryHidden' : 'hidden'}"`;
+          return `<sheet name="${xml(sheet.name)}" sheetId="${index + 1}"${state} r:id="rId${index + 1}"/>`;
+        })
+        .join(
+          '',
+        )}</sheets>${workbookDefinedNames(workbook, profile)}<calcPr calcId="0" fullCalcOnLoad="1"/></workbook>`,
   );
   add(
     'xl/_rels/workbook.xml.rels',
@@ -769,6 +873,7 @@ function packageParts(
         calculated,
         options,
         profile,
+        worksheetById.get(sheet.id)!,
         drawing !== undefined,
       ),
     );
@@ -801,13 +906,16 @@ export class XlsxAdapter {
     const workbook = document.workbook;
     const cells = workbook.sheets.reduce((sum, sheet) => sum + sheet.cells.length, 0);
     const stringBytes = sourceStringBytes(document);
+    const estimatedUncompressedBytes = conservativeUncompressedBytes(document, stringBytes);
     if (
       workbook.sheets.length > this.#limits.maxSheets ||
       cells > this.#limits.maxCells ||
       workbook.styles.length > this.#limits.maxStyles ||
       document.objects.length > this.#limits.maxImages ||
       stringBytes > this.#limits.maxStringBytes ||
-      document.resources.totalBytes > this.#limits.maxResourceBytes
+      document.resources.totalBytes > this.#limits.maxResourceBytes ||
+      !Number.isSafeInteger(estimatedUncompressedBytes) ||
+      estimatedUncompressedBytes > this.#limits.maxUncompressedBytes
     ) {
       throw outputError('XLSX_PACKAGE_LIMIT_EXCEEDED', 'XLSX semantic limits were exceeded');
     }

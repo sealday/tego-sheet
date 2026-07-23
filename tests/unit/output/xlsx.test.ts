@@ -148,6 +148,64 @@ describe('XlsxAdapter', () => {
     );
   });
 
+  it('serializes typed conditional formatting and worksheet visibility', async () => {
+    const fixture = outputGeneratedDocument();
+    const secondSheet = {
+      ...fixture.workbook.sheets[0]!,
+      id: 'sheet-2',
+      name: 'Archive',
+      cells: [],
+      merges: [],
+    };
+    const xml = await parts(
+      await new XlsxAdapter().render(
+        {
+          ...fixture,
+          workbook: {
+            ...fixture.workbook,
+            sheets: [...fixture.workbook.sheets, secondSheet],
+          },
+          worksheets: [
+            {
+              sheetId: 'sheet-1',
+              visibility: 'visible',
+              conditionalFormatting: [
+                {
+                  type: 'color-scale',
+                  range: {
+                    sheetId: 'sheet-1',
+                    start: { row: 1, column: 0 },
+                    end: { row: 2, column: 1 },
+                  },
+                  minimumColor: '#ff0000',
+                  midpointColor: '#ffff00',
+                  maximumColor: '#00ff00',
+                },
+              ],
+            },
+            {
+              sheetId: 'sheet-2',
+              visibility: 'very-hidden',
+              conditionalFormatting: [],
+            },
+          ],
+        } as never,
+        { formulaMode: 'values-only', compatibility: 'excel' },
+      ),
+    );
+
+    expect(xml['xl/workbook.xml']).toContain(
+      '<sheet name="Archive" sheetId="2" state="veryHidden" r:id="rId2"/>',
+    );
+    expect(xml['xl/worksheets/sheet1.xml']).toContain('<conditionalFormatting sqref="A2:B3">');
+    expect(xml['xl/worksheets/sheet1.xml']).toContain(
+      '<cfvo type="min"/><cfvo type="percentile" val="50"/><cfvo type="max"/>',
+    );
+    expect(xml['xl/worksheets/sheet1.xml']).toContain(
+      '<color rgb="FFFF0000"/><color rgb="FFFFFF00"/><color rgb="FF00FF00"/>',
+    );
+  });
+
   it('escapes XML and emits only internal image relationships', async () => {
     const fixture = outputGeneratedDocument();
     const image = {
