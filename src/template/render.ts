@@ -269,11 +269,37 @@ function paper(profile: TemplatePrintProfile): { readonly width: number; readonl
     : { width: definition.height, height: definition.width };
 }
 
+interface ViewProjection {
+  readonly hiddenRows: ReadonlySet<number>;
+  readonly rowOrder: readonly number[];
+  readonly startRow: number;
+  readonly endRow: number;
+}
+
+function projectedTargetRows(
+  range: DocumentCellRange,
+  projection: ViewProjection | undefined,
+): readonly number[] {
+  const rows = Array.from(
+    { length: range.end.row - range.start.row + 1 },
+    (_, index) => range.start.row + index,
+  );
+  if (projection === undefined) return rows;
+  return [
+    ...rows.filter((row) => row < projection.startRow),
+    ...projection.rowOrder.filter(
+      (row) => row >= range.start.row && row <= range.end.row && !projection.hiddenRows.has(row),
+    ),
+    ...rows.filter((row) => row > projection.endRow),
+  ];
+}
+
 function paginationTargets(
   resolved: readonly ResolvedTarget[],
   profile: TemplatePrintProfile,
   insertions: ReadonlyMap<string, readonly RowInsertion[]>,
   structuralMappings: readonly StructuralMapping[] = [],
+  viewProjections: ReadonlyMap<string, ViewProjection> = new Map(),
 ): readonly PaginationTarget[] {
   return resolved.map(({ id, sheet, range }) => {
     const repeatedRows =
@@ -286,8 +312,8 @@ function paginationTargets(
         : profileRangeForSheet(profile.repeatColumns, sheet.id, insertions, structuralMappings);
     return {
       id,
-      rows: Array.from({ length: range.end.row - range.start.row + 1 }, (_, index) =>
-        rowHeight(sheet, range.start.row + index),
+      rows: projectedTargetRows(range, viewProjections.get(sheet.id)).map((row) =>
+        rowHeight(sheet, row),
       ),
       columns: Array.from({ length: range.end.column - range.start.column + 1 }, (_, index) =>
         columnWidth(sheet, range.start.column + index),
@@ -388,29 +414,21 @@ function displayPages(
   structuralMappings: readonly StructuralMapping[],
   resourceBindings: readonly TemplateResourceBinding[],
   resources: ResolvedResourceStore,
-  viewProjections: ReadonlyMap<
-    string,
-    { readonly hiddenRows: ReadonlySet<number>; readonly rowOrder: readonly number[] }
-  >,
+  viewProjections: ReadonlyMap<string, ViewProjection>,
   data: unknown,
   date: Date,
 ): readonly PrintDisplayPageInput[] {
   return pages.map((page) => {
     const target = resolved.find(({ id }) => id === page.targetId)!;
-    const startRow = target.range.start.row + page.rowStart;
-    const endRow = target.range.start.row + page.rowEnd;
     const startColumn = target.range.start.column + page.columnStart;
     const endColumn = target.range.start.column + page.columnEnd;
     const viewProjection = viewProjections.get(target.sheet.id);
-    const rowPosition = new Map(viewProjection?.rowOrder.map((row, index) => [row, index]) ?? []);
-    const bodyRows = Array.from({ length: endRow - startRow + 1 }, (_, index) => startRow + index)
-      .filter((row) => !viewProjection?.hiddenRows.has(row))
-      .sort((left, right) => {
-        const leftPosition = rowPosition.get(left);
-        const rightPosition = rowPosition.get(right);
-        if (leftPosition === undefined || rightPosition === undefined) return left - right;
-        return leftPosition - rightPosition;
-      });
+    const bodyRows = projectedTargetRows(target.range, viewProjection).slice(
+      page.rowStart,
+      page.rowEnd + 1,
+    );
+    const startRow = bodyRows.length === 0 ? target.range.start.row : Math.min(...bodyRows);
+    const endRow = bodyRows.length === 0 ? target.range.start.row : Math.max(...bodyRows);
     const bodyColumns = Array.from(
       { length: endColumn - startColumn + 1 },
       (_, index) => startColumn + index,
@@ -891,13 +909,17 @@ export async function renderSpreadsheetTemplate(
     const viewProjections = new Map(
       activeFilterViews.map((view) => [
         view.range.sheetId,
-        applyDocumentFilterView({
-          document: expansion.document!,
-          formulaValues: calculation.values,
-          view,
-          locale: environment.locale,
-          limits: { maxRows: limits.maxExpandedRows },
-        }),
+        {
+          ...applyDocumentFilterView({
+            document: expansion.document!,
+            formulaValues: calculation.values,
+            view,
+            locale: environment.locale,
+            limits: { maxRows: limits.maxExpandedRows },
+          }),
+          startRow: view.range.start.row + 1,
+          endRow: view.range.end.row,
+        },
       ]),
     );
     const resolvedTargets = targets(
@@ -914,6 +936,7 @@ export async function renderSpreadsheetTemplate(
         profile,
         expansion.insertedRows,
         expansion.structuralMappings,
+        viewProjections,
       ),
       paper: pageSize,
       margins: {

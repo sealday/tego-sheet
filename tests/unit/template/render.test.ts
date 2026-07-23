@@ -176,6 +176,82 @@ describe('template render pipeline', () => {
     expect(result.document?.workbook.sheets[0]).not.toHaveProperty('activeViewId');
   });
 
+  it('paginates a filtered and sorted view in global projected row order', async () => {
+    const viewSource = {
+      ...source,
+      workbook: {
+        ...source.workbook,
+        sheets: [
+          {
+            ...source.workbook.sheets[0]!,
+            cells: ['header', '1', '2', '3', '4'].map((value, row) => ({
+              row,
+              column: 0,
+              cell: { input: { type: 'string' as const, value } },
+            })),
+            rows: [],
+            filterViews: [
+              {
+                id: 'descending',
+                name: 'Descending',
+                range: {
+                  sheetId: 'sheet-1',
+                  start: { row: 0, column: 0 },
+                  end: { row: 4, column: 0 },
+                },
+                sorts: [{ column: 0, direction: 'descending' }],
+                filters: [{ column: 0, operator: 'greaterThanOrEqual', value: '2' }],
+                visibility: 'document',
+              },
+            ],
+          },
+        ],
+      },
+    } as unknown as SpreadsheetDocument;
+    const viewTemplate: SpreadsheetTemplate = {
+      ...template,
+      bindings: [],
+      printProfiles: [
+        {
+          ...template.printProfiles[0]!,
+          targets: [
+            {
+              type: 'range',
+              range: {
+                sheetId: 'sheet-1' as never,
+                start: { row: 0, column: 0 },
+                end: { row: 4, column: 0 },
+              },
+            },
+          ],
+          page: {
+            ...template.printProfiles[0]!.page,
+            paper: { type: 'custom', width: 240, height: 60 },
+          },
+        },
+      ],
+    };
+    const compiled = compileSpreadsheetTemplate(viewSource, viewTemplate).template!;
+    const result = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: {},
+        profileId: 'profile-1',
+        missingValue: 'error',
+        activeFilterViews: [{ sheetId: 'sheet-1' as never, viewId: 'descending' }],
+      },
+      environment,
+    );
+    const texts =
+      result.document?.print.displayList.pages.flatMap((page) =>
+        page.commands.flatMap((command) => (command.kind === 'text' ? [command.text] : [])),
+      ) ?? [];
+
+    expect(texts).toEqual(['header', '4', '3', '2']);
+    expect(result.document?.print.pages).toHaveLength(2);
+  });
+
   it('renders persistent floating text objects through the shared display list', async () => {
     const objectSource = {
       ...source,
