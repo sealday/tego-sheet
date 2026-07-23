@@ -123,7 +123,16 @@ const manualDocumentation = [
   ['website/docs/guides/locales.mdx', ['LocaleDefinition']],
   ['website/docs/guides/validation-and-filtering.md', ['ValidationData', 'AutoFilterData']],
   ['website/docs/guides/frozen-panes-and-layout.md', ['SheetData', 'SheetOptions']],
-  ['website/docs/guides/printing.md', ['TegoSheetHandle']],
+  [
+    'website/docs/guides/printing.md',
+    [
+      'SpreadsheetTemplate',
+      'GeneratedDocument',
+      'compileSpreadsheetTemplate',
+      'renderSpreadsheetTemplate',
+      'IsolatedBrowserPrintAdapter',
+    ],
+  ],
   [
     'website/docs/migration/from-x-data-spreadsheet.md',
     ['TegoSheet', 'SpreadsheetDocument', 'migrateLegacyWorkbook'],
