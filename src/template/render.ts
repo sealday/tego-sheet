@@ -282,6 +282,7 @@ export async function renderSpreadsheetTemplate(
       request.data,
       environment.formatters ?? {},
       limits,
+      request.signal,
     );
   } catch (cause) {
     if (!(cause instanceof TemplateExpressionError)) throw cause;
@@ -332,6 +333,8 @@ export async function renderSpreadsheetTemplate(
         })),
     ),
     maxPages: limits.maxPages,
+    signal: request.signal,
+    deadline: start + limits.maxLayoutTimeMs,
   });
   if (Date.now() - start > limits.maxLayoutTimeMs || isAborted(request.signal)) {
     return isAborted(request.signal)

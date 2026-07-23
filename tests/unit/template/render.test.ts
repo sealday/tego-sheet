@@ -213,6 +213,119 @@ describe('template render pipeline', () => {
     ]);
   });
 
+  it('materializes repeat bindings on blank cells and applies the declared formatter', async () => {
+    const repeatTemplate: SpreadsheetTemplate = {
+      ...template,
+      bindings: [
+        {
+          id: 'lines' as never,
+          type: 'repeat-rows',
+          range: {
+            sheetId: 'sheet-1' as never,
+            start: { row: 1, column: 0 },
+            end: { row: 1, column: 2 },
+          },
+          source: 'items',
+          empty: 'remove',
+          pageBreak: 'auto',
+        },
+        {
+          id: 'item-name' as never,
+          type: 'value',
+          target: { sheetId: 'sheet-1' as never, row: 1, column: 2 },
+          expression: 'item.name',
+          formatter: 'upper',
+        },
+      ],
+    };
+    const compiled = compileSpreadsheetTemplate(source, repeatTemplate).template!;
+    const result = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: { items: [{ name: 'alpha' }, { name: 'beta' }] },
+        profileId: 'profile-1',
+        missingValue: 'error',
+      },
+      {
+        ...environment,
+        formatters: { upper: (value) => String(value).toUpperCase() },
+      },
+    );
+    expect(result.diagnostics.filter(({ severity }) => severity === 'error')).toEqual([]);
+    expect(result.document?.workbook.sheets[0]?.cells).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          row: 1,
+          column: 2,
+          cell: { input: { type: 'string', value: 'ALPHA' } },
+        }),
+        expect.objectContaining({
+          row: 2,
+          column: 2,
+          cell: { input: { type: 'string', value: 'BETA' } },
+        }),
+      ]),
+    );
+  });
+
+  it('reports missing repeat values and enforces the cell budget before expansion', async () => {
+    const repeatTemplate: SpreadsheetTemplate = {
+      ...template,
+      bindings: [
+        {
+          id: 'lines' as never,
+          type: 'repeat-rows',
+          range: {
+            sheetId: 'sheet-1' as never,
+            start: { row: 1, column: 0 },
+            end: { row: 1, column: 2 },
+          },
+          source: 'items',
+          empty: 'remove',
+          pageBreak: 'auto',
+        },
+        {
+          id: 'item-name' as never,
+          type: 'value',
+          target: { sheetId: 'sheet-1' as never, row: 1, column: 2 },
+          expression: 'item.name',
+        },
+      ],
+    };
+    const compiled = compileSpreadsheetTemplate(source, repeatTemplate).template!;
+    const missing = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: { items: [{}] },
+        profileId: 'profile-1',
+        missingValue: 'error',
+      },
+      environment,
+    );
+    expect(missing.document).toBeUndefined();
+    expect(missing.diagnostics).toEqual([
+      expect.objectContaining({ code: 'MISSING_DATA', location: { bindingId: 'item-name' } }),
+    ]);
+
+    const limited = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: { items: Array.from({ length: 100 }, () => ({ name: 'x' })) },
+        profileId: 'profile-1',
+        missingValue: 'error',
+        limits: { maxExpandedCells: 5 },
+      },
+      environment,
+    );
+    expect(limited.document).toBeUndefined();
+    expect(limited.diagnostics).toEqual([
+      expect.objectContaining({ code: 'EXPANSION_LIMIT_EXCEEDED' }),
+    ]);
+  });
+
   it('returns an atomic diagnostic when a formatter is not registered', async () => {
     const formatterTemplate: SpreadsheetTemplate = {
       ...template,

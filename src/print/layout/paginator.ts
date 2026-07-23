@@ -24,6 +24,8 @@ export interface PaginationInput {
   readonly scale: PrintScale;
   readonly manualBreaks: readonly PaginationBreak[];
   readonly maxPages: number;
+  readonly signal?: AbortSignal;
+  readonly deadline?: number;
 }
 
 export interface PaginationPage {
@@ -52,6 +54,10 @@ function diagnostic(code: string, message: string): Diagnostic {
   });
 }
 
+function aborted(input: PaginationInput): boolean {
+  return input.signal?.aborted === true;
+}
+
 function scaleFor(input: PaginationInput, target: PaginationTarget): number {
   const availableWidth = input.paper.width - input.margins.left - input.margins.right;
   const availableHeight = input.paper.height - input.margins.top - input.margins.bottom;
@@ -77,7 +83,16 @@ export function paginateTemplateTargets(input: PaginationInput): PaginationResul
   }
   const diagnostics: Diagnostic[] = [];
   const pages: PaginationPage[] = [];
+  let terminalDiagnostic: Diagnostic | undefined;
   for (const target of input.targets) {
+    if (aborted(input)) {
+      terminalDiagnostic = diagnostic('RENDER_ABORTED', 'Template rendering was aborted');
+      break;
+    }
+    if (input.deadline !== undefined && Date.now() > input.deadline) {
+      terminalDiagnostic = diagnostic('LAYOUT_TIME_EXCEEDED', 'Template layout exceeded its limit');
+      break;
+    }
     const scale = scaleFor(input, target);
     const breaks = new Set(
       input.manualBreaks
@@ -88,7 +103,14 @@ export function paginateTemplateTargets(input: PaginationInput): PaginationResul
     let height = 0;
     let pageWithinTarget = 0;
     const emit = (end: number): void => {
-      if (end < start) return;
+      if (end < start || terminalDiagnostic !== undefined) return;
+      if (pages.length >= input.maxPages) {
+        terminalDiagnostic = diagnostic(
+          'PAGE_LIMIT_EXCEEDED',
+          `Pagination exceeds ${input.maxPages} pages`,
+        );
+        return;
+      }
       pages.push(
         Object.freeze({
           id: `${target.id}:${pageWithinTarget++}`,
@@ -103,6 +125,17 @@ export function paginateTemplateTargets(input: PaginationInput): PaginationResul
       );
     };
     for (let row = 0; row < target.rows.length; row += 1) {
+      if (aborted(input)) {
+        terminalDiagnostic = diagnostic('RENDER_ABORTED', 'Template rendering was aborted');
+        break;
+      }
+      if (input.deadline !== undefined && Date.now() > input.deadline) {
+        terminalDiagnostic = diagnostic(
+          'LAYOUT_TIME_EXCEEDED',
+          'Template layout exceeded its limit',
+        );
+        break;
+      }
       const rowHeight = target.rows[row]! * scale;
       if (rowHeight > availableHeight) {
         emit(row - 1);
@@ -121,13 +154,12 @@ export function paginateTemplateTargets(input: PaginationInput): PaginationResul
       height += rowHeight;
     }
     emit(target.rows.length - 1);
+    if (terminalDiagnostic !== undefined) break;
   }
-  if (pages.length > input.maxPages) {
+  if (terminalDiagnostic !== undefined) {
     return Object.freeze({
       pages: Object.freeze([]),
-      diagnostics: Object.freeze([
-        diagnostic('PAGE_LIMIT_EXCEEDED', `Pagination exceeds ${input.maxPages} pages`),
-      ]),
+      diagnostics: Object.freeze([terminalDiagnostic]),
     });
   }
   return Object.freeze({

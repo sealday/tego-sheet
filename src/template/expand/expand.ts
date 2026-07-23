@@ -6,7 +6,11 @@ import type {
   SpreadsheetDocument,
 } from '../../document';
 import { parseFormula, renderFormula, translateFormula } from '../../formula';
-import { evaluateTemplateExpression, type TemplateFormatterRegistry } from '../expression';
+import {
+  evaluateTemplateExpression,
+  TemplateExpressionError,
+  type TemplateFormatterRegistry,
+} from '../expression';
 import type { RenderLimits, SpreadsheetTemplate, TemplateIRBinding } from '../model';
 
 export interface ExpansionResult {
@@ -35,6 +39,26 @@ function cellInput(value: unknown): Cell['input'] {
   if (typeof value === 'number' && Number.isFinite(value)) return { type: 'number', value };
   if (typeof value === 'boolean') return { type: 'boolean', value };
   return { type: 'string', value: JSON.stringify(value) };
+}
+
+function formatBindingValue(
+  value: unknown,
+  formatter: string | undefined,
+  formatters: TemplateFormatterRegistry,
+): unknown {
+  if (formatter === undefined) return value;
+  if (!Object.prototype.hasOwnProperty.call(formatters, formatter)) {
+    throw new TemplateExpressionError('UNKNOWN_FORMATTER', `Unknown formatter: ${formatter}`);
+  }
+  const callable = formatters[formatter];
+  if (typeof callable !== 'function') {
+    throw new TemplateExpressionError('UNKNOWN_FORMATTER', `Unknown formatter: ${formatter}`);
+  }
+  try {
+    return callable(value);
+  } catch {
+    throw new TemplateExpressionError('FORMATTER_FAILED', `Formatter ${formatter} failed`);
+  }
 }
 
 function translatedCell(cell: Cell, rowDelta: number): Cell {
@@ -92,47 +116,77 @@ function expandRepeat(
   data: unknown,
   formatters: TemplateFormatterRegistry,
   valueBindings: readonly Extract<TemplateIRBinding, { readonly type: 'value' }>[],
+  diagnostics: Diagnostic[],
+  signal?: AbortSignal,
 ): Sheet {
   const height = binding.range.end.row - binding.range.start.row + 1;
   const copies = items.length === 0 && binding.empty === 'keep-template-row' ? [undefined] : items;
   if (copies.length === 0) return removeRange(sheet, binding.range);
   const delta = height * (copies.length - 1);
-  const sourceCells = sheet.cells.filter(
+  const existingSourceCells = sheet.cells.filter(
     ({ row }) => row >= binding.range.start.row && row <= binding.range.end.row,
   );
+  const sourceCells = [...existingSourceCells];
+  for (const valueBinding of valueBindings) {
+    if (
+      !sourceCells.some(
+        ({ row, column }) =>
+          row === valueBinding.target.row && column === valueBinding.target.column,
+      )
+    ) {
+      sourceCells.push({
+        row: valueBinding.target.row,
+        column: valueBinding.target.column,
+        cell: { input: { type: 'blank' } },
+      });
+    }
+  }
   const before = sheet.cells.filter(({ row }) => row < binding.range.start.row);
   const after = sheet.cells
     .filter(({ row }) => row > binding.range.end.row)
     .map((entry) => ({ ...entry, row: entry.row + delta }));
-  const repeated = copies.flatMap((item, itemIndex) => {
+  const repeated: Sheet['cells'][number][] = [];
+  for (let itemIndex = 0; itemIndex < copies.length; itemIndex += 1) {
+    if (signal?.aborted === true) break;
+    const item = copies[itemIndex];
     const rowDelta = itemIndex * height;
-    return sourceCells.map((entry) => {
+    for (const entry of sourceCells) {
       const row = entry.row + rowDelta;
       const valueBinding = valueBindings.find(
         ({ target }) => target.row === entry.row && target.column === entry.column,
       );
-      const cell =
-        valueBinding === undefined
-          ? translatedCell(entry.cell, rowDelta)
-          : {
-              ...entry.cell,
-              input: cellInput(
-                evaluateTemplateExpression(
-                  valueBinding.expression,
-                  {
-                    root: data,
-                    item,
-                    index: itemIndex,
-                    first: itemIndex === 0,
-                    last: itemIndex === copies.length - 1,
-                  },
-                  formatters,
-                ),
-              ),
-            };
-      return { ...entry, row, cell };
-    });
-  });
+      let cell = translatedCell(entry.cell, rowDelta);
+      if (valueBinding !== undefined) {
+        let value = evaluateTemplateExpression(
+          valueBinding.expression,
+          {
+            root: data,
+            item,
+            index: itemIndex,
+            first: itemIndex === 0,
+            last: itemIndex === copies.length - 1,
+          },
+          formatters,
+        );
+        if (value === undefined) {
+          diagnostics.push({
+            code: 'MISSING_DATA',
+            severity: 'error',
+            domain: 'template',
+            stage: 'resolve',
+            message: `Binding ${valueBinding.id} resolved to a missing value`,
+            location: { bindingId: valueBinding.id },
+          });
+          value = null;
+        }
+        cell = {
+          ...entry.cell,
+          input: cellInput(formatBindingValue(value, valueBinding.formatter, formatters)),
+        };
+      }
+      repeated.push({ ...entry, row, cell });
+    }
+  }
   const sourceRows = sheet.rows.filter(
     ({ index }) => index >= binding.range.start.row && index <= binding.range.end.row,
   );
@@ -174,6 +228,7 @@ export function expandTemplate(
   data: unknown,
   formatters: TemplateFormatterRegistry,
   limits: RenderLimits,
+  signal?: AbortSignal,
 ): ExpansionResult {
   const diagnostics: Diagnostic[] = [];
   const insertions = new Map<string, RowInsertion[]>();
@@ -186,6 +241,20 @@ export function expandTemplate(
     )
     .sort((left, right) => right.range.start.row - left.range.start.row);
   for (const binding of repeats) {
+    if (signal?.aborted === true) {
+      return freeze({
+        diagnostics: [
+          {
+            code: 'RENDER_ABORTED',
+            severity: 'error',
+            domain: 'template',
+            stage: 'expand',
+            message: 'Template rendering was aborted',
+          },
+        ],
+        insertedRows: insertions,
+      });
+    }
     const value = evaluateTemplateExpression(binding.source, { root: data }, formatters);
     const items = Array.isArray(value) ? value : [];
     const height = binding.range.end.row - binding.range.start.row + 1;
@@ -215,6 +284,39 @@ export function expandTemplate(
         candidate.target.row >= binding.range.start.row &&
         candidate.target.row <= binding.range.end.row,
     );
+    const sourceCellCount =
+      sheets[sheetIndex]!.cells.filter(
+        ({ row }) => row >= binding.range.start.row && row <= binding.range.end.row,
+      ).length +
+      valueBindings.filter(
+        ({ target }) =>
+          !sheets[sheetIndex]!.cells.some(
+            ({ row, column }) => row === target.row && column === target.column,
+          ),
+      ).length;
+    const existingCellCount = sheets.reduce(
+      (count, candidate) => count + candidate.cells.length,
+      0,
+    );
+    const replacedCellCount = sheets[sheetIndex]!.cells.filter(
+      ({ row }) => row >= binding.range.start.row && row <= binding.range.end.row,
+    ).length;
+    const projectedCellCount = existingCellCount - replacedCellCount + sourceCellCount * copies;
+    if (projectedCellCount > limits.maxExpandedCells) {
+      return freeze({
+        diagnostics: [
+          {
+            code: 'EXPANSION_LIMIT_EXCEEDED',
+            severity: 'error',
+            domain: 'template',
+            stage: 'expand',
+            message: `Expanded cells exceed ${limits.maxExpandedCells}`,
+            location: { bindingId: binding.id },
+          },
+        ],
+        insertedRows: insertions,
+      });
+    }
     sheets[sheetIndex] = expandRepeat(
       sheets[sheetIndex]!,
       binding,
@@ -222,6 +324,8 @@ export function expandTemplate(
       data,
       formatters,
       valueBindings,
+      diagnostics,
+      signal,
     );
     const delta = height * (copies - 1);
     const list = insertions.get(binding.range.sheetId) ?? [];
@@ -229,6 +333,20 @@ export function expandTemplate(
     insertions.set(binding.range.sheetId, list);
   }
   for (const binding of bindings) {
+    if (signal?.aborted === true) {
+      return freeze({
+        diagnostics: [
+          {
+            code: 'RENDER_ABORTED',
+            severity: 'error',
+            domain: 'template',
+            stage: 'expand',
+            message: 'Template rendering was aborted',
+          },
+        ],
+        insertedRows: insertions,
+      });
+    }
     if (binding.type !== 'conditional-range') continue;
     if (evaluateTemplateExpression(binding.when, { root: data }, formatters)) continue;
     const sheetIndex = sheets.findIndex(({ id }) => id === binding.range.sheetId);
@@ -269,6 +387,7 @@ export function expandTemplate(
       });
       value = null;
     }
+    value = formatBindingValue(value, binding.formatter, formatters);
     const existing = sheet.cells.find(
       (entry) => entry.row === row && entry.column === binding.target.column,
     );
@@ -277,6 +396,25 @@ export function expandTemplate(
       column: binding.target.column,
       cell: { ...existing?.cell, input: cellInput(value) },
     };
+    if (
+      existing === undefined &&
+      sheets.reduce((count, candidate) => count + candidate.cells.length, 0) + 1 >
+        limits.maxExpandedCells
+    ) {
+      return freeze({
+        diagnostics: [
+          {
+            code: 'EXPANSION_LIMIT_EXCEEDED',
+            severity: 'error',
+            domain: 'template',
+            stage: 'expand',
+            message: `Expanded cells exceed ${limits.maxExpandedCells}`,
+            location: { bindingId: binding.id },
+          },
+        ],
+        insertedRows: insertions,
+      });
+    }
     sheets[sheetIndex] = {
       ...sheet,
       cells: [
