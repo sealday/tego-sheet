@@ -9,9 +9,7 @@ import type {
   Cell,
   CellInput,
   CellPoint,
-  DocumentCellRange,
   ExtensionStore,
-  PrintProfile,
   ResourceMetadata,
   Sheet,
   SheetColumn,
@@ -22,6 +20,7 @@ import type {
   SpreadsheetDocument,
   StoredSpreadsheetTemplate,
 } from './model/document';
+import type { TemplateBinding, TemplatePrintProfile } from '../template/model';
 import type {
   DocumentId,
   DocumentSheetId,
@@ -894,61 +893,29 @@ function sheetAt(value: unknown, path: string, context: ParseContext): Sheet {
   };
 }
 
-function printProfileAt(value: unknown, path: string, context: ParseContext): PrintProfile {
-  const record = recordAt(value, path, context);
-  const margins = recordAt(record?.margins, `${path}.margins`, context);
-  const orientation =
-    record?.orientation === 'portrait' || record?.orientation === 'landscape'
-      ? record.orientation
-      : 'portrait';
-  if (record?.orientation !== orientation) {
-    addDiagnostic(
-      context,
-      'DOCUMENT_SCHEMA_INVALID',
-      `${path}.orientation`,
-      `${path}.orientation must be portrait or landscape`,
-      'document',
-      'decode',
-    );
-  }
-  return {
-    paperSize: stringAt(record?.paperSize, `${path}.paperSize`, context),
-    orientation,
-    margins: {
-      top: finiteAt(margins?.top, `${path}.margins.top`, context),
-      right: finiteAt(margins?.right, `${path}.margins.right`, context),
-      bottom: finiteAt(margins?.bottom, `${path}.margins.bottom`, context),
-      left: finiteAt(margins?.left, `${path}.margins.left`, context),
-    },
-    ...(record?.scale === undefined
-      ? {}
-      : { scale: finiteAt(record.scale, `${path}.scale`, context) }),
-  };
-}
-
 function templateAt(
   value: unknown,
   path: string,
   context: ParseContext,
 ): StoredSpreadsheetTemplate {
   const record = recordAt(value, path, context);
-  let range: DocumentCellRange | undefined;
-  if (record?.range !== undefined) {
-    const rangeRecord = recordAt(record.range, `${path}.range`, context);
-    range = {
-      sheetId: stringAt(rangeRecord?.sheetId, `${path}.range.sheetId`, context) as DocumentSheetId,
-      ...rangeAt(record.range, `${path}.range`, context),
-    };
-    if (!isNormalized(range)) {
-      addDiagnostic(context, 'INVALID_RANGE', `${path}.range`, 'Template range must be normalized');
-    }
-  }
+  const bindings = arrayAt(record?.bindings, `${path}.bindings`, context).map(
+    (binding, index) =>
+      canonicalJson(
+        jsonAt(binding, `${path}.bindings[${index}]`, context),
+      ) as unknown as TemplateBinding,
+  );
+  const printProfiles = arrayAt(record?.printProfiles, `${path}.printProfiles`, context).map(
+    (profile, index) =>
+      canonicalJson(
+        jsonAt(profile, `${path}.printProfiles[${index}]`, context),
+      ) as unknown as TemplatePrintProfile,
+  );
   return {
     id: stringAt(record?.id, `${path}.id`, context) as TemplateId,
     name: stringAt(record?.name, `${path}.name`, context),
-    sheetId: stringAt(record?.sheetId, `${path}.sheetId`, context) as DocumentSheetId,
-    ...(range === undefined ? {} : { range }),
-    printProfile: printProfileAt(record?.printProfile, `${path}.printProfile`, context),
+    bindings,
+    printProfiles,
   };
 }
 
@@ -1051,23 +1018,44 @@ function validateReferences(document: SpreadsheetDocument, context: ParseContext
   });
 
   document.templates.forEach((template, index) => {
-    if (!sheetIds.has(template.sheetId)) {
-      addDiagnostic(
-        context,
-        'DANGLING_REFERENCE',
-        `$.templates[${index}].sheetId`,
-        'Referenced sheet does not exist',
-      );
-    }
-    if (
-      template.range !== undefined &&
-      (template.range.sheetId !== template.sheetId || !sheetIds.has(template.range.sheetId))
-    ) {
+    const templateRanges = [
+      ...template.bindings.flatMap((binding) => (binding.type === 'value' ? [] : [binding.range])),
+      ...template.printProfiles.flatMap((profile) => [
+        ...profile.targets.flatMap((target) =>
+          target.type === 'sheet' ? [] : target.type === 'range' ? [target.range] : target.ranges,
+        ),
+        ...(profile.repeatRows === undefined ? [] : [profile.repeatRows]),
+        ...(profile.repeatColumns === undefined ? [] : [profile.repeatColumns]),
+      ]),
+    ];
+    if (templateRanges.some((range) => !isNormalized(range))) {
       addDiagnostic(
         context,
         'INVALID_RANGE',
-        `$.templates[${index}].range`,
-        'Template range must refer to its template sheet',
+        `$.templates[${index}]`,
+        'Template ranges must be normalized',
+      );
+    }
+    const referencedSheetIds = [
+      ...template.bindings.flatMap((binding) =>
+        binding.type === 'value' ? [binding.target.sheetId] : [binding.range.sheetId],
+      ),
+      ...template.printProfiles.flatMap((profile) =>
+        profile.targets.flatMap((target) =>
+          target.type === 'sheet'
+            ? [target.sheetId]
+            : target.type === 'range'
+              ? [target.range.sheetId]
+              : target.ranges.map(({ sheetId }) => sheetId),
+        ),
+      ),
+    ];
+    if (referencedSheetIds.some((sheetId) => !sheetIds.has(sheetId))) {
+      addDiagnostic(
+        context,
+        'DANGLING_REFERENCE',
+        `$.templates[${index}]`,
+        'Template references a sheet which does not exist',
       );
     }
   });

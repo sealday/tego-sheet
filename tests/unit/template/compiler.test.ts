@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SpreadsheetDocument } from '../../../src/document';
 import { compileSpreadsheetTemplate } from '../../../src/template/compiler';
+import { hashSpreadsheetDocument } from '../../../src/template/hash';
 import type { SpreadsheetTemplate } from '../../../src/template/model';
 
 const document = {
@@ -52,6 +53,94 @@ function template(overrides: Partial<SpreadsheetTemplate> = {}): SpreadsheetTemp
 }
 
 describe('template compiler', () => {
+  it('resolves the canonical persisted template by ID and hashes template/profile changes', () => {
+    const sourceTemplate = template();
+    const persisted = { ...document, templates: [sourceTemplate] } as SpreadsheetDocument;
+    const compiled = compileSpreadsheetTemplate(persisted, sourceTemplate.id);
+    expect(compiled.hasErrors).toBe(false);
+    expect(compiled.template?.sourceDocumentHash).toBe(hashSpreadsheetDocument(persisted));
+
+    const changed = {
+      ...persisted,
+      templates: [
+        {
+          ...sourceTemplate,
+          printProfiles: [{ ...sourceTemplate.printProfiles[0]!, showGridlines: false }],
+        },
+      ],
+    } as SpreadsheetDocument;
+    expect(hashSpreadsheetDocument(changed)).not.toBe(compiled.template?.sourceDocumentHash);
+  });
+
+  it('isolates the compiled snapshot without freezing caller-owned inputs', () => {
+    const sourceTemplate = template();
+    const persisted = { ...document, templates: [sourceTemplate] } as SpreadsheetDocument;
+    const result = compileSpreadsheetTemplate(persisted, sourceTemplate.id);
+    expect(result.hasErrors).toBe(false);
+    expect(Object.isFrozen(persisted)).toBe(false);
+    expect(Object.isFrozen(sourceTemplate)).toBe(false);
+    expect(result.template?.sourceDocument).not.toBe(persisted);
+    expect(result.template?.ir.template).not.toBe(sourceTemplate);
+  });
+
+  it('aggregates invalid IDs, binding ranges, breaks, paper and scale geometry', () => {
+    const invalid = template({
+      bindings: [
+        {
+          id: 'duplicate' as never,
+          type: 'value',
+          target: { sheetId: 'missing' as never, row: 0, column: 0 },
+          expression: 'value',
+        },
+        {
+          id: 'duplicate' as never,
+          type: 'repeat-rows',
+          range: {
+            sheetId: 'sheet-1' as never,
+            start: { row: 3, column: 1 },
+            end: { row: 1, column: 0 },
+          },
+          source: 'items',
+          empty: 'remove',
+          pageBreak: 'auto',
+        },
+      ],
+      printProfiles: [
+        {
+          ...template().printProfiles[0]!,
+          id: 'duplicate-profile',
+          page: {
+            ...template().printProfiles[0]!.page,
+            paper: { type: 'custom', width: 0, height: Number.NaN },
+            scale: { type: 'fit-width', pages: 0 },
+          },
+          manualBreaks: [{ sheetId: 'missing' as never, beforeRow: -1 }],
+          repeatRows: {
+            sheetId: 'sheet-1' as never,
+            start: { row: 2, column: 0 },
+            end: { row: 1, column: 0 },
+          },
+        },
+        { ...template().printProfiles[0]!, id: 'duplicate-profile' },
+      ],
+    });
+    const persisted = { ...document, templates: [invalid] } as SpreadsheetDocument;
+    const result = compileSpreadsheetTemplate(persisted, invalid.id);
+    expect(result.hasErrors).toBe(true);
+    expect(result.diagnostics.map(({ code }) => code)).toEqual(
+      expect.arrayContaining([
+        'DUPLICATE_BINDING_ID',
+        'DUPLICATE_PRINT_PROFILE_ID',
+        'INVALID_BINDING_TARGET',
+        'INVALID_BINDING_RANGE',
+        'INVALID_PAGE_BREAK',
+        'INVALID_PAGE_GEOMETRY',
+        'INVALID_PRINT_SCALE',
+        'INVALID_REPEAT_TITLE_RANGE',
+      ]),
+    );
+  });
+
   it('compiles metadata bindings into immutable IR and hashes the complete source', () => {
     const result = compileSpreadsheetTemplate(document, template());
     expect(result.hasErrors).toBe(false);

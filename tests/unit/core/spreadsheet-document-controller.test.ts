@@ -105,17 +105,19 @@ function directDocument(overrides: Partial<SpreadsheetDocumentInput> = {}): Spre
       {
         id: 'template-1',
         name: 'Template',
-        sheetId: 'sheet-1',
-        range: {
-          sheetId: 'sheet-1',
-          start: { row: 2, column: 3 },
-          end: { row: 5, column: 6 },
-        },
-        printProfile: {
-          paperSize: 'A4',
-          orientation: 'portrait',
-          margins: { top: 1, right: 1, bottom: 1, left: 1 },
-        },
+        bindings: [
+          {
+            id: 'conditional-1' as never,
+            type: 'conditional-range',
+            range: {
+              sheetId: 'sheet-1' as never,
+              start: { row: 2, column: 3 },
+              end: { row: 5, column: 6 },
+            },
+            when: 'visible',
+          },
+        ],
+        printProfiles: [],
       },
     ],
     resources: {
@@ -589,7 +591,10 @@ describe('SpreadsheetDocumentController', () => {
         ? document.workbook.sheets[0]?.rows
         : document.workbook.sheets[0]?.columns;
       expect(layout?.map((item) => item.index)).toEqual(layoutIndex === null ? [] : [layoutIndex]);
-      expect(document.templates[0]?.range).toEqual(templateRange);
+      expect(document.templates[0]?.bindings[0]).toMatchObject({
+        type: 'conditional-range',
+        range: templateRange,
+      });
     },
   );
 

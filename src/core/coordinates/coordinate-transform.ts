@@ -5,6 +5,7 @@ import type {
   SpreadsheetDocumentInput,
 } from '../../document/model/document';
 import { parseFormula, renderFormula, transformFormulaCoordinates } from '../../formula';
+import type { PrintTarget, TemplateBinding } from '../../template/model';
 import { parseA1Reference, renderA1Reference } from './a1';
 
 export type CoordinateAxis = 'row' | 'column';
@@ -415,18 +416,62 @@ export function transformDocumentCoordinates(
         }),
   );
   output.templates = output.templates.map((template) => {
-    if (template.sheetId !== targetSheetId || template.range === undefined) return template;
-    const range = transform.range(template.range);
-    if (range === null) {
-      const { range: _range, ...withoutRange } = template;
-      return withoutRange;
-    }
+    const transformDocumentRange = <
+      T extends { readonly sheetId: string; readonly start: CellPoint; readonly end: CellPoint },
+    >(
+      range: T,
+    ): T | null => {
+      if (range.sheetId !== targetSheetId) return range;
+      const next = transform.range(range);
+      return next === null ? null : ({ ...range, ...next } as T);
+    };
     return {
       ...template,
-      range: {
-        sheetId: template.range.sheetId,
-        ...range,
-      },
+      bindings: template.bindings.reduce<TemplateBinding[]>((bindings, binding) => {
+        if (binding.type === 'value') {
+          if (binding.target.sheetId !== targetSheetId) {
+            bindings.push(binding);
+            return bindings;
+          }
+          const target = transform.point(binding.target);
+          if (target !== null)
+            bindings.push({ ...binding, target: { ...binding.target, ...target } });
+          return bindings;
+        }
+        const range = transformDocumentRange(binding.range);
+        if (range !== null) bindings.push({ ...binding, range });
+        return bindings;
+      }, []),
+      printProfiles: template.printProfiles.map((profile) => ({
+        ...profile,
+        targets: profile.targets.reduce<PrintTarget[]>((targets, target) => {
+          if (target.type === 'sheet') {
+            targets.push(target);
+            return targets;
+          }
+          if (target.type === 'range') {
+            const range = transformDocumentRange(target.range);
+            if (range !== null) targets.push({ ...target, range });
+            return targets;
+          }
+          const ranges = target.ranges
+            .map(transformDocumentRange)
+            .filter((range) => range !== null);
+          if (ranges.length > 0) targets.push({ ...target, ranges });
+          return targets;
+        }, []),
+        ...(profile.repeatRows === undefined
+          ? {}
+          : { repeatRows: transformDocumentRange(profile.repeatRows) ?? undefined }),
+        ...(profile.repeatColumns === undefined
+          ? {}
+          : { repeatColumns: transformDocumentRange(profile.repeatColumns) ?? undefined }),
+        manualBreaks: profile.manualBreaks.flatMap((pageBreak) => {
+          if (pageBreak.sheetId !== targetSheetId) return [pageBreak];
+          const point = transform.point({ row: pageBreak.beforeRow, column: 0 });
+          return point === null ? [] : [{ ...pageBreak, beforeRow: point.row }];
+        }),
+      })),
     };
   });
   return output;

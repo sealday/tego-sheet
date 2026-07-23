@@ -234,18 +234,21 @@ export interface PrintProfile {
   readonly scale?: number;
 }
 
-/** Reusable document template targeting a sheet and optional range. */
+/**
+ * Reusable TP1 template persisted inside the source document.
+ *
+ * Binding and print-profile definitions live in the template compiler module,
+ * while this document-owned interface is the canonical persistence boundary.
+ */
 export interface StoredSpreadsheetTemplate {
   /** Stable opaque template identifier. */
   readonly id: TemplateId;
   /** User-visible template name. */
   readonly name: string;
-  /** Stable identifier of the target sheet. */
-  readonly sheetId: DocumentSheetId;
-  /** Optional target range on the same sheet. */
-  readonly range?: DocumentCellRange;
-  /** Persistent print profile. */
-  readonly printProfile: PrintProfile;
+  /** Explicit binding metadata compiled without scanning cell text. */
+  readonly bindings: readonly import('../../template/model').TemplateBinding[];
+  /** Named deterministic print profiles. */
+  readonly printProfiles: readonly import('../../template/model').TemplatePrintProfile[];
 }
 
 /** Metadata describing a resource without fetching it. */
@@ -323,18 +326,8 @@ export interface SpreadsheetDocumentInput {
   templates: {
     id: string;
     name: string;
-    sheetId: string;
-    range?: {
-      sheetId: string;
-      start: CellPoint;
-      end: CellPoint;
-    };
-    printProfile: {
-      paperSize: string;
-      orientation: 'portrait' | 'landscape';
-      margins: { top: number; right: number; bottom: number; left: number };
-      scale?: number;
-    };
+    bindings: import('../../template/model').TemplateBinding[];
+    printProfiles: import('../../template/model').TemplatePrintProfile[];
   }[];
   resources: {
     items: {

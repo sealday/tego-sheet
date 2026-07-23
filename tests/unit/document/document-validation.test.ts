@@ -26,17 +26,30 @@ const validDocument = (): SpreadsheetDocumentInput => ({
     {
       id: 'template-1',
       name: 'Print template',
-      sheetId: 'sheet-1',
-      range: {
-        sheetId: 'sheet-1',
-        start: { row: 0, column: 0 },
-        end: { row: 2, column: 2 },
-      },
-      printProfile: {
-        paperSize: 'A4',
-        orientation: 'portrait',
-        margins: { top: 1, right: 1, bottom: 1, left: 1 },
-      },
+      bindings: [
+        {
+          id: 'binding-1' as never,
+          type: 'value',
+          target: { sheetId: 'sheet-1' as never, row: 0, column: 0 },
+          expression: 'value',
+        },
+      ],
+      printProfiles: [
+        {
+          id: 'profile-1',
+          name: 'A4',
+          targets: [{ type: 'sheet', sheetId: 'sheet-1' as never }],
+          page: {
+            paper: { type: 'A4' },
+            orientation: 'portrait',
+            margins: { top: 1, right: 1, bottom: 1, left: 1 },
+            scale: { type: 'fixed', value: 1 },
+          },
+          manualBreaks: [],
+          showGridlines: true,
+          showHeadings: false,
+        },
+      ],
     },
   ],
   resources: {
@@ -117,17 +130,30 @@ describe('Workbook 2.0 validation', () => {
         templateId: 'missing-template',
       },
     });
-    fixture.templates[0]!.sheetId = 'missing-sheet';
+    fixture.templates[0]!.bindings[0] = {
+      id: 'binding-1' as never,
+      type: 'value',
+      target: { sheetId: 'missing-sheet' as never, row: 0, column: 0 },
+      expression: 'value',
+    };
 
     expect(codesOf(fixture).filter((code) => code === 'DANGLING_REFERENCE')).toHaveLength(5);
   });
 
   it('reports invalid and cross-sheet ranges', () => {
     const fixture = validDocument();
-    fixture.templates[0]!.range = {
-      sheetId: 'sheet-2',
-      start: { row: 3, column: 0 },
-      end: { row: 1, column: 2 },
+    fixture.templates[0]!.printProfiles[0] = {
+      ...fixture.templates[0]!.printProfiles[0]!,
+      targets: [
+        {
+          type: 'range',
+          range: {
+            sheetId: 'sheet-2' as never,
+            start: { row: 3, column: 0 },
+            end: { row: 1, column: 2 },
+          },
+        },
+      ],
     };
 
     expect(codesOf(fixture)).toContain('INVALID_RANGE');

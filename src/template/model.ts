@@ -5,6 +5,7 @@ import type {
   DocumentCellRange,
   DocumentSheetId,
   SpreadsheetDocument,
+  StoredSpreadsheetTemplate,
   TemplateId,
 } from '../document';
 import type { FontMetrics } from '../presentation';
@@ -176,17 +177,8 @@ export interface TemplatePrintProfile {
   readonly showHeadings: boolean;
 }
 
-/** Full TP1 template model shared by the headless SDK and React editor. */
-export interface SpreadsheetTemplate {
-  /** Stable template identity. */
-  readonly id: TemplateId;
-  /** User-visible template name. */
-  readonly name: string;
-  /** Explicit bindings compiled without scanning cell text. */
-  readonly bindings: readonly TemplateBinding[];
-  /** Available print profiles. */
-  readonly printProfiles: readonly TemplatePrintProfile[];
-}
+/** Full TP1 template model persisted in `SpreadsheetDocument.templates`. */
+export type SpreadsheetTemplate = StoredSpreadsheetTemplate;
 
 /** Binding IR with every expression parsed into safe nodes. */
 export type TemplateIRBinding =

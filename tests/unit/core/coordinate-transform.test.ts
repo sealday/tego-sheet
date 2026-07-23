@@ -216,17 +216,19 @@ describe('CoordinateTransform', () => {
         {
           id: 'template-1',
           name: 'Print',
-          sheetId: 'sheet-1',
-          range: {
-            sheetId: 'sheet-1',
-            start: { row: 1, column: 0 },
-            end: { row: 4, column: 2 },
-          },
-          printProfile: {
-            paperSize: 'A4',
-            orientation: 'portrait',
-            margins: { top: 1, right: 1, bottom: 1, left: 1 },
-          },
+          bindings: [
+            {
+              id: 'conditional-1' as never,
+              type: 'conditional-range',
+              range: {
+                sheetId: 'sheet-1' as never,
+                start: { row: 1, column: 0 },
+                end: { row: 4, column: 2 },
+              },
+              when: 'visible',
+            },
+          ],
+          printProfiles: [],
         },
       ],
       resources: { items: [] },
@@ -247,10 +249,13 @@ describe('CoordinateTransform', () => {
       type: 'formula',
       source: `='Data 2026'!A5:B6+Other!A3`,
     });
-    expect(next.templates[0]?.range).toEqual({
-      sheetId: 'sheet-1',
-      start: { row: 1, column: 0 },
-      end: { row: 6, column: 2 },
+    expect(next.templates[0]?.bindings[0]).toMatchObject({
+      type: 'conditional-range',
+      range: {
+        sheetId: 'sheet-1',
+        start: { row: 1, column: 0 },
+        end: { row: 6, column: 2 },
+      },
     });
 
     const parsed = parseSpreadsheetDocument(input);
@@ -267,6 +272,6 @@ describe('CoordinateTransform', () => {
     expect(committed.workbook.sheets[1]?.cells[0]?.cell.input).toEqual(
       next.workbook.sheets[1]?.cells[0]?.cell.input,
     );
-    expect(committed.templates[0]?.range).toEqual(next.templates[0]?.range);
+    expect(committed.templates[0]?.bindings).toEqual(next.templates[0]?.bindings);
   });
 });

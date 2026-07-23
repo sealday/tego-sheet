@@ -243,22 +243,14 @@ describe('Workbook 2.0 parsing and serialization', () => {
       {
         id: 'template-z',
         name: 'First template',
-        sheetId: 'sheet-stable',
-        printProfile: {
-          paperSize: 'A4',
-          orientation: 'portrait',
-          margins: { top: 0, right: 0, bottom: 0, left: 0 },
-        },
+        bindings: [],
+        printProfiles: [],
       },
       {
         id: 'template-a',
         name: 'Second template',
-        sheetId: 'sheet-stable',
-        printProfile: {
-          paperSize: 'A4',
-          orientation: 'portrait',
-          margins: { top: 0, right: 0, bottom: 0, left: 0 },
-        },
+        bindings: [],
+        printProfiles: [],
       },
     ];
 

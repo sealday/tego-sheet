@@ -13,17 +13,22 @@ import type {
 /** Version of the serialized template IR contract. */
 export const TEMPLATE_COMPILER_VERSION = '1.0.0';
 
-function immutable<T>(value: T): T {
-  if (Array.isArray(value)) return Object.freeze(value.map(immutable)) as T;
+function immutableClone<T>(value: T): T {
+  if (Array.isArray(value)) return Object.freeze(value.map(immutableClone)) as T;
   if (value !== null && typeof value === 'object') {
-    for (const child of Object.values(value as Record<string, unknown>)) immutable(child);
-    return Object.freeze(value);
+    const clone = Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, child]) => [
+        key,
+        immutableClone(child),
+      ]),
+    );
+    return Object.freeze(clone) as T;
   }
   return value;
 }
 
 function diagnostic(code: string, message: string, binding?: TemplateBinding): Diagnostic {
-  return immutable({
+  return immutableClone({
     code,
     severity: 'error',
     domain: 'template',
@@ -54,15 +59,77 @@ function contains(range: DocumentCellRange, row: number, column: number): boolea
 
 function compileBinding(binding: TemplateBinding): TemplateIRBinding {
   if (binding.type === 'value') {
-    return immutable({
+    return immutableClone({
       ...binding,
       expression: compileTemplateExpression(binding.expression),
     });
   }
   if (binding.type === 'repeat-rows') {
-    return immutable({ ...binding, source: compileTemplateExpression(binding.source) });
+    return immutableClone({ ...binding, source: compileTemplateExpression(binding.source) });
   }
-  return immutable({ ...binding, when: compileTemplateExpression(binding.when) });
+  return immutableClone({ ...binding, when: compileTemplateExpression(binding.when) });
+}
+
+function normalized(range: DocumentCellRange): boolean {
+  return (
+    Number.isInteger(range.start.row) &&
+    Number.isInteger(range.start.column) &&
+    Number.isInteger(range.end.row) &&
+    Number.isInteger(range.end.column) &&
+    range.start.row >= 0 &&
+    range.start.column >= 0 &&
+    range.end.row >= range.start.row &&
+    range.end.column >= range.start.column
+  );
+}
+
+function duplicateIds(
+  values: readonly { readonly id: string }[],
+  code: string,
+  label: string,
+  diagnostics: Diagnostic[],
+): void {
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (seen.has(value.id)) {
+      diagnostics.push(diagnostic(code, `Duplicate ${label} ID ${value.id}`));
+    }
+    seen.add(value.id);
+  }
+}
+
+function validateBindings(
+  document: SpreadsheetDocument,
+  bindings: readonly TemplateBinding[],
+  diagnostics: Diagnostic[],
+): void {
+  const sheetIds = new Set(document.workbook.sheets.map(({ id }) => id));
+  duplicateIds(bindings, 'DUPLICATE_BINDING_ID', 'binding', diagnostics);
+  for (const binding of bindings) {
+    if (binding.type === 'value') {
+      if (
+        !sheetIds.has(binding.target.sheetId) ||
+        !Number.isInteger(binding.target.row) ||
+        !Number.isInteger(binding.target.column) ||
+        binding.target.row < 0 ||
+        binding.target.column < 0
+      ) {
+        diagnostics.push(
+          diagnostic(
+            'INVALID_BINDING_TARGET',
+            `Binding ${binding.id} has an invalid target`,
+            binding,
+          ),
+        );
+      }
+      continue;
+    }
+    if (!sheetIds.has(binding.range.sheetId) || !normalized(binding.range)) {
+      diagnostics.push(
+        diagnostic('INVALID_BINDING_RANGE', `Binding ${binding.id} has an invalid range`, binding),
+      );
+    }
+  }
 }
 
 function validateStructuralBindings(
@@ -121,6 +188,7 @@ function validateProfiles(
   diagnostics: Diagnostic[],
 ): void {
   const sheetIds = new Set(document.workbook.sheets.map(({ id }) => id));
+  duplicateIds(profiles, 'DUPLICATE_PRINT_PROFILE_ID', 'print profile', diagnostics);
   for (const profile of profiles) {
     if (profile.targets.length === 0) {
       diagnostics.push(diagnostic('INVALID_PRINT_TARGET', `Profile ${profile.id} has no target`));
@@ -137,24 +205,96 @@ function validateProfiles(
       }
     }
     const { margins } = profile.page;
+    if (Object.values(margins).some((value) => !Number.isFinite(value) || value < 0)) {
+      diagnostics.push(
+        diagnostic('INVALID_PAGE_GEOMETRY', `Profile ${profile.id} has invalid margins`),
+      );
+    }
     if (
-      Object.values(margins).some((value) => !Number.isFinite(value) || value < 0) ||
-      (profile.page.scale.type === 'fixed' &&
-        (!Number.isFinite(profile.page.scale.value) || profile.page.scale.value <= 0))
+      profile.page.paper.type === 'custom' &&
+      (!Number.isFinite(profile.page.paper.width) ||
+        profile.page.paper.width <= 0 ||
+        !Number.isFinite(profile.page.paper.height) ||
+        profile.page.paper.height <= 0)
     ) {
       diagnostics.push(
-        diagnostic('INVALID_PRINT_TARGET', `Profile ${profile.id} has invalid page geometry`),
+        diagnostic('INVALID_PAGE_GEOMETRY', `Profile ${profile.id} has invalid paper geometry`),
       );
+    }
+    if (
+      (profile.page.scale.type === 'fixed' &&
+        (!Number.isFinite(profile.page.scale.value) || profile.page.scale.value <= 0)) ||
+      (profile.page.scale.type === 'fit-width' &&
+        (!Number.isInteger(profile.page.scale.pages) || profile.page.scale.pages <= 0))
+    ) {
+      diagnostics.push(
+        diagnostic('INVALID_PRINT_SCALE', `Profile ${profile.id} has an invalid scale`),
+      );
+    }
+    for (const range of [profile.repeatRows, profile.repeatColumns]) {
+      if (range !== undefined && (!sheetIds.has(range.sheetId) || !normalized(range))) {
+        diagnostics.push(
+          diagnostic(
+            'INVALID_REPEAT_TITLE_RANGE',
+            `Profile ${profile.id} has an invalid repeat title range`,
+          ),
+        );
+      }
+    }
+    for (const pageBreak of profile.manualBreaks) {
+      if (
+        !sheetIds.has(pageBreak.sheetId) ||
+        !Number.isInteger(pageBreak.beforeRow) ||
+        pageBreak.beforeRow < 0
+      ) {
+        diagnostics.push(
+          diagnostic('INVALID_PAGE_BREAK', `Profile ${profile.id} has an invalid page break`),
+        );
+      }
+    }
+    for (const range of rangesFromProfile(profile)) {
+      if (!normalized(range)) {
+        diagnostics.push(
+          diagnostic('INVALID_PRINT_TARGET', `Profile ${profile.id} has an invalid target range`),
+        );
+      }
     }
   }
 }
 
-/** Compiles explicit binding metadata into immutable, DOM-free template IR. */
+function resolveTemplate(
+  document: SpreadsheetDocument,
+  templateOrId: SpreadsheetTemplate | SpreadsheetTemplate['id'],
+  diagnostics: Diagnostic[],
+): { readonly document: SpreadsheetDocument; readonly template?: SpreadsheetTemplate } {
+  if (typeof templateOrId !== 'string') {
+    const existing = document.templates.find(({ id }) => id === templateOrId.id);
+    return existing === undefined
+      ? {
+          document: { ...document, templates: [...document.templates, templateOrId] },
+          template: templateOrId,
+        }
+      : { document, template: existing };
+  }
+  const template = document.templates.find(({ id }) => id === templateOrId);
+  if (template === undefined) {
+    diagnostics.push(diagnostic('TEMPLATE_NOT_FOUND', `Template ${templateOrId} does not exist`));
+  }
+  return { document, ...(template === undefined ? {} : { template }) };
+}
+
+/** Compiles one persisted template into immutable, DOM-free template IR. */
 export function compileSpreadsheetTemplate(
   document: SpreadsheetDocument,
-  template: SpreadsheetTemplate,
+  templateOrId: SpreadsheetTemplate | SpreadsheetTemplate['id'],
 ): CompilationResult {
   const diagnostics: Diagnostic[] = [];
+  const resolved = resolveTemplate(document, templateOrId, diagnostics);
+  const template = resolved.template;
+  if (template === undefined) {
+    const frozenDiagnostics = immutableClone(diagnostics);
+    return immutableClone({ diagnostics: frozenDiagnostics, hasErrors: true });
+  }
   const bindings: TemplateIRBinding[] = [];
   for (const binding of template.bindings) {
     try {
@@ -165,23 +305,26 @@ export function compileSpreadsheetTemplate(
       diagnostics.push(diagnostic('INVALID_EXPRESSION', message, binding));
     }
   }
-  validateStructuralBindings(document, template.bindings, diagnostics);
-  validateProfiles(document, template.printProfiles, diagnostics);
-  const frozenDiagnostics = immutable(diagnostics);
+  validateBindings(resolved.document, template.bindings, diagnostics);
+  validateStructuralBindings(resolved.document, template.bindings, diagnostics);
+  validateProfiles(resolved.document, template.printProfiles, diagnostics);
+  const frozenDiagnostics = immutableClone(diagnostics);
   if (diagnostics.some(({ severity }) => severity === 'error')) {
-    return immutable({ diagnostics: frozenDiagnostics, hasErrors: true });
+    return immutableClone({ diagnostics: frozenDiagnostics, hasErrors: true });
   }
-  const compiled: CompiledTemplate = immutable({
+  const sourceDocument = immutableClone(resolved.document);
+  const sourceTemplate = sourceDocument.templates.find(({ id }) => id === template.id)!;
+  const compiled: CompiledTemplate = immutableClone({
     templateId: template.id,
-    sourceDocumentHash: hashSpreadsheetDocument(document),
-    sourceDocument: document,
+    sourceDocumentHash: hashSpreadsheetDocument(sourceDocument),
+    sourceDocument,
     ir: {
-      template,
+      template: sourceTemplate,
       bindings,
-      profiles: template.printProfiles,
+      profiles: sourceTemplate.printProfiles,
     },
     diagnostics: frozenDiagnostics,
     compilerVersion: TEMPLATE_COMPILER_VERSION,
   });
-  return immutable({ template: compiled, diagnostics: frozenDiagnostics, hasErrors: false });
+  return immutableClone({ template: compiled, diagnostics: frozenDiagnostics, hasErrors: false });
 }
