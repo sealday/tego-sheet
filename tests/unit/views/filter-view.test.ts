@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import type { DocumentSheetId } from '../../../src/document';
 import { applyFilterView, createFilterViewSession } from '../../../src/views';
 
 describe('VIEW-01 derived filter views', () => {
+  const sheetId = 'sheet-1' as DocumentSheetId;
   const rows = [
     [
       { type: 'string' as const, value: 'name' },
@@ -27,7 +29,7 @@ describe('VIEW-01 derived filter views', () => {
         id: 'high-value',
         name: 'High value',
         range: {
-          sheetId: 'sheet-1',
+          sheetId,
           start: { row: 0, column: 0 },
           end: { row: 3, column: 1 },
         },
@@ -50,7 +52,7 @@ describe('VIEW-01 derived filter views', () => {
       id: 'personal',
       name: 'Personal',
       range: {
-        sheetId: 'sheet-1',
+        sheetId,
         start: { row: 0, column: 0 },
         end: { row: 3, column: 1 },
       },
