@@ -153,6 +153,13 @@ describe('XlsxAdapter', () => {
     const secondSheet = {
       ...fixture.workbook.sheets[0]!,
       id: 'sheet-2',
+      name: 'Hidden',
+      cells: [],
+      merges: [],
+    };
+    const thirdSheet = {
+      ...fixture.workbook.sheets[0]!,
+      id: 'sheet-3',
       name: 'Archive',
       cells: [],
       merges: [],
@@ -163,7 +170,7 @@ describe('XlsxAdapter', () => {
           ...fixture,
           workbook: {
             ...fixture.workbook,
-            sheets: [...fixture.workbook.sheets, secondSheet],
+            sheets: [...fixture.workbook.sheets, secondSheet, thirdSheet],
           },
           worksheets: [
             {
@@ -181,10 +188,30 @@ describe('XlsxAdapter', () => {
                   midpointColor: '#ffff00',
                   maximumColor: '#00ff00',
                 },
+                {
+                  type: 'cell-is',
+                  range: {
+                    sheetId: 'sheet-1',
+                    start: { row: 1, column: 0 },
+                    end: { row: 2, column: 1 },
+                  },
+                  operator: 'lessThan',
+                  formula: 'A2<5&N("x")',
+                  style: {
+                    color: '#ffffff',
+                    backgroundColor: '#ff0000',
+                    bold: true,
+                  },
+                },
               ],
             },
             {
               sheetId: 'sheet-2',
+              visibility: 'hidden',
+              conditionalFormatting: [],
+            },
+            {
+              sheetId: 'sheet-3',
               visibility: 'very-hidden',
               conditionalFormatting: [],
             },
@@ -195,7 +222,10 @@ describe('XlsxAdapter', () => {
     );
 
     expect(xml['xl/workbook.xml']).toContain(
-      '<sheet name="Archive" sheetId="2" state="veryHidden" r:id="rId2"/>',
+      '<sheet name="Hidden" sheetId="2" state="hidden" r:id="rId2"/>',
+    );
+    expect(xml['xl/workbook.xml']).toContain(
+      '<sheet name="Archive" sheetId="3" state="veryHidden" r:id="rId3"/>',
     );
     expect(xml['xl/worksheets/sheet1.xml']).toContain('<conditionalFormatting sqref="A2:B3">');
     expect(xml['xl/worksheets/sheet1.xml']).toContain(
@@ -204,6 +234,57 @@ describe('XlsxAdapter', () => {
     expect(xml['xl/worksheets/sheet1.xml']).toContain(
       '<color rgb="FFFF0000"/><color rgb="FFFFFF00"/><color rgb="FF00FF00"/>',
     );
+    expect(xml['xl/worksheets/sheet1.xml']).toContain(
+      '<cfRule type="cellIs" dxfId="0" priority="2" operator="lessThan"><formula>A2&lt;5&amp;N(&quot;x&quot;)</formula></cfRule>',
+    );
+    expect(xml['xl/styles.xml']).toContain(
+      '<dxfs count="1"><dxf><font><b/><color rgb="FFFFFFFF"/></font><fill><patternFill patternType="solid"><fgColor rgb="FFFF0000"/>',
+    );
+  });
+
+  it('rejects an all-hidden workbook and mismatched cell-is formulas', async () => {
+    const fixture = outputGeneratedDocument();
+    const options = {
+      formulaMode: 'values-only' as const,
+      compatibility: 'excel' as const,
+    };
+
+    await expect(
+      new XlsxAdapter().render(
+        {
+          ...fixture,
+          worksheets: [{ ...fixture.worksheets[0]!, visibility: 'hidden' }],
+        },
+        options,
+      ),
+    ).rejects.toMatchObject({ code: 'XLSX_UNSUPPORTED_FEATURE' });
+
+    await expect(
+      new XlsxAdapter().render(
+        {
+          ...fixture,
+          worksheets: [
+            {
+              ...fixture.worksheets[0]!,
+              conditionalFormatting: [
+                {
+                  type: 'cell-is',
+                  range: {
+                    sheetId: 'sheet-1',
+                    start: { row: 0, column: 0 },
+                    end: { row: 0, column: 0 },
+                  },
+                  operator: 'between',
+                  formula: '1',
+                  style: {},
+                },
+              ],
+            },
+          ],
+        } as never,
+        options,
+      ),
+    ).rejects.toMatchObject({ code: 'XLSX_UNSUPPORTED_FEATURE' });
   });
 
   it('escapes XML and emits only internal image relationships', async () => {

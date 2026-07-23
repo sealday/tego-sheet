@@ -1,7 +1,12 @@
 import { strToU8, zipSync } from 'fflate';
 import type { Cell, JsonValue, Sheet, SheetRange, SpreadsheetDocument } from '../../document';
 import type { FormulaValue } from '../../formula';
-import type { GeneratedDocument, GeneratedWorksheet, TemplatePrintProfile } from '../../template';
+import type {
+  GeneratedConditionalCellRule,
+  GeneratedDocument,
+  GeneratedWorksheet,
+  TemplatePrintProfile,
+} from '../../template';
 import { outputError, throwIfAborted } from '../output-error';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -154,7 +159,48 @@ function xlsxColor(value: string): string {
   return normalized.length === 6 ? `FF${normalized.toUpperCase()}` : normalized.toUpperCase();
 }
 
-function conditionalFormattingXml(sheet: Sheet, worksheet: GeneratedWorksheet): string {
+function conditionalRules(document: GeneratedDocument): readonly GeneratedConditionalCellRule[] {
+  const worksheetById = new Map(
+    document.worksheets.map((worksheet) => [worksheet.sheetId, worksheet]),
+  );
+  return document.workbook.sheets.flatMap(
+    (sheet) =>
+      worksheetById
+        .get(sheet.id)
+        ?.conditionalFormatting.filter(
+          (format): format is GeneratedConditionalCellRule => format.type === 'cell-is',
+        ) ?? [],
+  );
+}
+
+function differentialStyles(document: GeneratedDocument): {
+  readonly xml: string;
+  readonly indices: ReadonlyMap<GeneratedConditionalCellRule, number>;
+} {
+  const rules = conditionalRules(document);
+  const indices = new Map(rules.map((rule, index) => [rule, index]));
+  const styles = rules.map(({ style }) => {
+    const font =
+      style.color === undefined && style.bold !== true
+        ? ''
+        : `<font>${style.bold === true ? '<b/>' : ''}${style.color === undefined ? '' : `<color rgb="${xlsxColor(style.color)}"/>`}</font>`;
+    const fill =
+      style.backgroundColor === undefined
+        ? ''
+        : `<fill><patternFill patternType="solid"><fgColor rgb="${xlsxColor(style.backgroundColor)}"/><bgColor indexed="64"/></patternFill></fill>`;
+    return `<dxf>${font}${fill}</dxf>`;
+  });
+  return {
+    indices,
+    xml: `<dxfs count="${styles.length}">${styles.join('')}</dxfs>`,
+  };
+}
+
+function conditionalFormattingXml(
+  sheet: Sheet,
+  worksheet: GeneratedWorksheet,
+  dxfIndices: ReadonlyMap<GeneratedConditionalCellRule, number>,
+): string {
   return worksheet.conditionalFormatting
     .map((format, index) => {
       if (
@@ -167,6 +213,34 @@ function conditionalFormattingXml(sheet: Sheet, worksheet: GeneratedWorksheet): 
         throw outputError('XLSX_UNSUPPORTED_FEATURE', 'Conditional formatting range is invalid', {
           location: { sheetId: sheet.id },
         });
+      }
+      if (format.type === 'cell-is') {
+        const needsSecond = format.operator === 'between' || format.operator === 'notBetween';
+        if (
+          format.formula.length === 0 ||
+          (needsSecond && (format.formula2 === undefined || format.formula2.length === 0)) ||
+          (!needsSecond && format.formula2 !== undefined)
+        ) {
+          throw outputError(
+            'XLSX_UNSUPPORTED_FEATURE',
+            'Conditional cell rule formulas do not match its operator',
+            { location: { sheetId: sheet.id } },
+          );
+        }
+        const dxfId = dxfIndices.get(format);
+        if (dxfId === undefined) {
+          throw outputError(
+            'XLSX_UNSUPPORTED_FEATURE',
+            'Conditional differential style is not registered',
+          );
+        }
+        return (
+          `<conditionalFormatting sqref="${absoluteRange({ start: format.range.start, end: format.range.end }).replaceAll('$', '')}">` +
+          `<cfRule type="cellIs" dxfId="${dxfId}" priority="${index + 1}" operator="${format.operator}">` +
+          `<formula>${xml(format.formula)}</formula>` +
+          (format.formula2 === undefined ? '' : `<formula>${xml(format.formula2)}</formula>`) +
+          '</cfRule></conditionalFormatting>'
+        );
       }
       const values =
         '<cfvo type="min"/>' +
@@ -376,7 +450,10 @@ function cellXml(
   return `<c r="${reference}"${cachedType}${styleAttribute}><f>${xml(formula)}</f><v>${scalarValue(cached)}</v></c>`;
 }
 
-function styleXml(workbook: Workbook): {
+function styleXml(
+  workbook: Workbook,
+  differential: ReturnType<typeof differentialStyles>,
+): {
   readonly xml: string;
   readonly indices: ReadonlyMap<string, number>;
 } {
@@ -493,7 +570,7 @@ function styleXml(workbook: Workbook): {
       `<fills count="${fills.length + 2}"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>${fills.join('')}</fills>` +
       `<borders count="${borders.length + 1}"><border><left/><right/><top/><bottom/><diagonal/></border>${borders.join('')}</borders>` +
       `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${xfs.length + 1}"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>${xfs.join('')}</cellXfs>` +
-      '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>',
+      `<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>${differential.xml}</styleSheet>`,
   };
 }
 
@@ -677,6 +754,7 @@ function worksheetXml(
   options: XlsxOutputOptions,
   profile: TemplatePrintProfile | undefined,
   worksheet: GeneratedWorksheet,
+  dxfIndices: ReadonlyMap<GeneratedConditionalCellRule, number>,
   hasDrawing: boolean,
 ): string {
   const rows = new Map<
@@ -737,7 +815,7 @@ function worksheetXml(
     `<dimension ref="${absoluteRange(sheetRange(sheet)).replaceAll('$', '')}"/>` +
     `<sheetViews><sheetView workbookViewId="0"${profile?.showGridlines === false ? ' showGridLines="0"' : ''}${profile?.showHeadings === false ? ' showRowColHeaders="0"' : ''}/></sheetViews>` +
     `<sheetFormatPr defaultRowHeight="15"/>${columns}<sheetData>${rowXml}</sheetData>${merges}` +
-    `${validationXml(sheet, workbook)}${conditionalFormattingXml(sheet, worksheet)}${pageXml(profile, sheet)}${hasDrawing ? '<drawing r:id="rId1"/>' : ''}</worksheet>`
+    `${validationXml(sheet, workbook)}${conditionalFormattingXml(sheet, worksheet, dxfIndices)}${pageXml(profile, sheet)}${hasDrawing ? '<drawing r:id="rId1"/>' : ''}</worksheet>`
   );
 }
 
@@ -824,7 +902,8 @@ function packageParts(
       }
     }
   }
-  const style = styleXml(workbook);
+  const differential = differentialStyles(document);
+  const style = styleXml(workbook, differential);
   const calculated = calculatedValueMap(document);
   const profile = document.print.profile;
   const worksheetById = worksheetSettings(document);
@@ -874,6 +953,7 @@ function packageParts(
         options,
         profile,
         worksheetById.get(sheet.id)!,
+        differential.indices,
         drawing !== undefined,
       ),
     );

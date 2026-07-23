@@ -511,6 +511,45 @@ export interface GeneratedConditionalColorScale {
   readonly maximumColor: string;
 }
 
+/** Differential style used by a generated cell-is conditional rule. */
+export interface GeneratedConditionalStyle {
+  /** Optional text ARGB or RGB color. */
+  readonly color?: string;
+  /** Optional fill ARGB or RGB color. */
+  readonly backgroundColor?: string;
+  /** Optional bold emphasis. */
+  readonly bold?: boolean;
+}
+
+/** Typed formula-backed cell comparison for one generated range. */
+export interface GeneratedConditionalCellRule {
+  /** Stable conditional-format discriminator. */
+  readonly type: 'cell-is';
+  /** Generated workbook range receiving the rule. */
+  readonly range: DocumentCellRange;
+  /** Allowlisted OOXML comparison operator. */
+  readonly operator:
+    | 'between'
+    | 'notBetween'
+    | 'equal'
+    | 'notEqual'
+    | 'greaterThan'
+    | 'lessThan'
+    | 'greaterThanOrEqual'
+    | 'lessThanOrEqual';
+  /** First Excel-compatible formula without a leading equals sign. */
+  readonly formula: string;
+  /** Required second formula for between/notBetween. */
+  readonly formula2?: string;
+  /** Differential style applied when the rule matches. */
+  readonly style: GeneratedConditionalStyle;
+}
+
+/** Typed conditional formatting retained for XLSX output. */
+export type GeneratedConditionalFormat =
+  | GeneratedConditionalColorScale
+  | GeneratedConditionalCellRule;
+
 /** Semantic worksheet output settings retained for XLSX translation. */
 export interface GeneratedWorksheet {
   /** Stable generated worksheet identity. */
@@ -518,7 +557,7 @@ export interface GeneratedWorksheet {
   /** Workbook-tab visibility. */
   readonly visibility: 'visible' | 'hidden' | 'very-hidden';
   /** Ordered typed conditional-format rules. */
-  readonly conditionalFormatting: readonly GeneratedConditionalColorScale[];
+  readonly conditionalFormatting: readonly GeneratedConditionalFormat[];
 }
 
 /** Atomic render artifact consumed by every TP1 output surface. */
