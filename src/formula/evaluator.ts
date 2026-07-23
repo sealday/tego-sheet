@@ -24,6 +24,8 @@ export interface CalculationEnvironment {
   readonly tick: number;
   /** Version expected for the supplied function registry. */
   readonly functionRegistryVersion: string;
+  /** Whether volatile functions may use the explicitly supplied clock and time zone. */
+  readonly resolveVolatile?: boolean;
 }
 
 /** One cell whose input or structure changed. */
@@ -53,6 +55,7 @@ interface FormulaProgramState {
   values: Map<string, FormulaValue>;
   diagnostics: Map<string, readonly FormulaDiagnostic[]>;
   lastTick?: number;
+  lastFunctionRegistryVersion?: string;
   initialized: boolean;
 }
 
@@ -334,6 +337,9 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
         values: new Map(storedProgram.values),
         diagnostics: new Map(storedProgram.diagnostics),
         ...(storedProgram.lastTick === undefined ? {} : { lastTick: storedProgram.lastTick }),
+        ...(storedProgram.lastFunctionRegistryVersion === undefined
+          ? {}
+          : { lastFunctionRegistryVersion: storedProgram.lastFunctionRegistryVersion }),
         initialized: storedProgram.initialized,
       };
       const changedKeys = changes.map(formulaAddressKey);
@@ -378,6 +384,9 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
       if (!program.initialized) dirty = new Set(program.formulas.keys());
       else {
         dirty = new Set(previouslyAffected);
+        if (program.lastFunctionRegistryVersion !== environment.functionRegistryVersion) {
+          for (const address of program.formulas.keys()) dirty.add(address);
+        }
         if (graphChanged) {
           for (const address of transitiveDependents(program.graph, changedKeys))
             dirty.add(address);
@@ -390,7 +399,17 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
         }
       }
       for (const [address, diagnostics] of program.diagnostics) {
-        const retained = diagnostics.filter(({ code }) => code !== 'FORMULA_CIRCULAR_REFERENCE');
+        const retained = diagnostics.filter(
+          ({ code }) =>
+            code !== 'FORMULA_CIRCULAR_REFERENCE' &&
+            (!dirty.has(address) ||
+              ![
+                'FORMULA_UNKNOWN_FUNCTION',
+                'FORMULA_EVALUATION_LIMIT_EXCEEDED',
+                'VOLATILE_FORMULA_NOT_RESOLVED',
+                'ASYNC_FORMULA_NOT_RESOLVED',
+              ].includes(code)),
+        );
         if (retained.length === 0) program.diagnostics.delete(address);
         else if (retained.length !== diagnostics.length) program.diagnostics.set(address, retained);
       }
@@ -520,6 +539,19 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
         ) {
           return { type: 'error', value: '#VALUE!' };
         }
+        if (definition.volatility === 'volatile' && environment.resolveVolatile === false) {
+          const address = [...evaluating].at(-1);
+          if (address !== undefined) {
+            program.diagnostics.set(address, [
+              {
+                code: 'VOLATILE_FORMULA_NOT_RESOLVED',
+                message: `Volatile formula function ${ast.name} requires an explicit clock and time zone`,
+                span: ast.span,
+              },
+            ]);
+          }
+          return { type: 'error', value: '#N/A' };
+        }
         if (definition.mode === 'async') {
           const address = [...evaluating].at(-1);
           if (address !== undefined) {
@@ -580,6 +612,7 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
       for (const address of [...dirty].sort()) resolveAddress(address);
       program.initialized = true;
       program.lastTick = environment.tick;
+      program.lastFunctionRegistryVersion = environment.functionRegistryVersion;
       storedProgram.formulas = program.formulas;
       storedProgram.graph = program.graph;
       storedProgram.inputs = program.inputs;
@@ -587,6 +620,7 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
       storedProgram.diagnostics = program.diagnostics;
       storedProgram.initialized = program.initialized;
       storedProgram.lastTick = program.lastTick;
+      storedProgram.lastFunctionRegistryVersion = program.lastFunctionRegistryVersion;
       return {
         values: new Map(values),
         evaluatedAddresses: Object.freeze([...new Set(evaluated)]),

@@ -6,6 +6,7 @@ import {
 } from '../../../src/document';
 import { sheetId } from '../../../src/core';
 import { getCellData } from '../../../src/core/model/cells';
+import { createFormulaFunctionRegistry } from '../../../src/formula';
 import {
   SpreadsheetDocumentController,
   type SerializableCommandEnvelope,
@@ -169,6 +170,16 @@ function createLegacySyntaxFormulaDocument() {
   return parsed.document;
 }
 
+function createNowFormulaDocument() {
+  const input = structuredClone(createFormulaDocument());
+  const formula = input.workbook.sheets[0]?.cells[1]?.cell.input;
+  if (formula?.type !== 'formula') throw new TypeError('Expected formula fixture');
+  (formula as { source: string }).source = '=NOW()';
+  const parsed = parseSpreadsheetDocument(input);
+  if (!parsed.ok) throw new TypeError('Expected NOW formula document to parse');
+  return parsed.document;
+}
+
 function projectedValue(
   controller: SpreadsheetDocumentController,
   row: number,
@@ -288,6 +299,50 @@ describe('SpreadsheetDocumentController transactions', () => {
     const controller = new SpreadsheetDocumentController(createBlankFormulaDocument());
 
     expect(projectedValue(controller, 0, 0)).toBeNull();
+  });
+
+  it('uses the host calculation clock and time zone for volatile formulas', () => {
+    const controller = new SpreadsheetDocumentController(createNowFormulaDocument(), {
+      calculation: {
+        clock: { now: () => 86_400_000 },
+        timeZone: 'UTC',
+      },
+    });
+
+    expect(projectedValue(controller, 0, 1)).toBe(25_570);
+  });
+
+  it('does not resolve volatile formulas from implicit host time', () => {
+    const controller = new SpreadsheetDocumentController(createNowFormulaDocument());
+
+    expect(projectedValue(controller, 0, 1)).toBe('#N/A');
+  });
+
+  it('calculates with host functions bridged into the runtime registry', () => {
+    const functions = createFormulaFunctionRegistry();
+    functions.register({
+      name: 'DOUBLE',
+      parameters: { minimum: 1, maximum: 1 },
+      returns: 'number',
+      volatility: 'stable',
+      mode: 'sync',
+      evaluate: ([value]) => ({
+        type: 'number',
+        value: value?.type === 'number' ? value.value * 2 : 0,
+      }),
+    });
+    const input = structuredClone(createFormulaDocument());
+    const formula = input.workbook.sheets[0]?.cells[1]?.cell.input;
+    if (formula?.type !== 'formula') throw new TypeError('Expected formula fixture');
+    (formula as { source: string }).source = '=DOUBLE(4)';
+    const parsed = parseSpreadsheetDocument(input);
+    if (!parsed.ok) throw new TypeError('Expected custom formula document to parse');
+
+    const controller = new SpreadsheetDocumentController(parsed.document, {
+      calculation: { functions },
+    });
+
+    expect(projectedValue(controller, 0, 1)).toBe(8);
   });
 
   it('commits multiple commands as one revision, event, and undo item', () => {

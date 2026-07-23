@@ -170,6 +170,7 @@ export interface FormulaDiagnostic {
     | 'FORMULA_CIRCULAR_REFERENCE'
     | 'FORMULA_REFERENCE_INVALID'
     | 'FORMULA_EVALUATION_LIMIT_EXCEEDED'
+    | 'VOLATILE_FORMULA_NOT_RESOLVED'
     | 'ASYNC_FORMULA_NOT_RESOLVED';
   /** Human-readable diagnostic detail. */
   readonly message: string;

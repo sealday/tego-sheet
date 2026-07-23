@@ -3,8 +3,10 @@ import { projectDocumentToLegacy, projectLegacyToDocument } from './runtime-proj
 import type { CellInput, SpreadsheetDocument } from '../../document/model/document';
 import {
   createFormulaEngine,
+  createFormulaFunctionRegistry,
   type CalculationEnvironment,
   type FormulaEngine,
+  type FormulaFunctionRegistry,
   type FormulaProgram,
   type FormulaValue,
 } from '../../formula';
@@ -178,16 +180,35 @@ const MAX_TRANSACTION_BYTES = 4 * 1_024 * 1_024;
 function calculationEnvironment(
   document: SpreadsheetDocument,
   revision: number,
-  registryVersion: string,
+  options: SpreadsheetCalculationOptions,
 ): CalculationEnvironment {
   return {
-    locale: document.workbook.settings.localeHint ?? 'en-US',
-    timeZone: 'UTC',
+    locale: options.locale ?? document.workbook.settings.localeHint ?? 'en-US',
+    timeZone: options.timeZone ?? 'UTC',
     dateSystem: document.workbook.settings.dateSystem,
-    clock: { now: () => 0 },
+    clock: options.clock ?? { now: () => 0 },
     tick: revision,
-    functionRegistryVersion: registryVersion,
+    functionRegistryVersion: options.functions.version,
+    resolveVolatile: options.resolveVolatile,
   };
+}
+
+/** Host-controlled deterministic inputs used by the schema 2 calculation runtime. */
+export interface SpreadsheetCalculationOptions {
+  /** Locale override; the document locale hint remains the fallback. */
+  readonly locale?: string;
+  /** IANA time zone used by date functions. */
+  readonly timeZone?: string;
+  /** Explicit clock sampled once per recalculation. */
+  readonly clock?: CalculationEnvironment['clock'];
+  /** Formula registry, including any functions bridged from the F5 kernel. */
+  readonly functions: FormulaFunctionRegistry;
+  /** @internal Whether both volatile inputs were explicitly supplied by the host. */
+  readonly resolveVolatile: boolean;
+}
+
+export interface SpreadsheetDocumentControllerOptions extends WorkbookControllerOptions {
+  readonly calculation?: Partial<SpreadsheetCalculationOptions>;
 }
 
 function captureJsonValue(value: unknown, seen = new Set<object>()): unknown {
@@ -378,6 +399,7 @@ export class SpreadsheetDocumentController {
   private checkpointDocument: SpreadsheetDocument | undefined;
   private readonly documentHistory = new History<DocumentPatch, null>();
   private readonly formulaEngine: FormulaEngine;
+  private readonly calculationOptions: SpreadsheetCalculationOptions;
   private formulaProgram: FormulaProgram;
   private formulaValues: ReadonlyMap<string, FormulaValue>;
   private readonly legacy: WorkbookController;
@@ -387,7 +409,7 @@ export class SpreadsheetDocumentController {
   private checkpointOwner: object = Object.freeze({});
   private checkpoints = new WeakSet<SpreadsheetControllerCheckpoint>();
 
-  constructor(input: SpreadsheetDocument, options: WorkbookControllerOptions = {}) {
+  constructor(input: SpreadsheetDocument, options: SpreadsheetDocumentControllerOptions = {}) {
     const parsed = parseSpreadsheetDocument(input);
     if (!parsed.ok) {
       throw new TegoSheetException({
@@ -399,12 +421,21 @@ export class SpreadsheetDocumentController {
     }
     const { ['document']: parsedDocument } = parsed;
     this.currentDocument = parsedDocument;
-    this.formulaEngine = createFormulaEngine();
+    const functions = options.calculation?.functions ?? createFormulaFunctionRegistry();
+    this.calculationOptions = {
+      functions,
+      locale: options.calculation?.locale,
+      timeZone: options.calculation?.timeZone ?? 'UTC',
+      clock: options.calculation?.clock ?? { now: () => 0 },
+      resolveVolatile:
+        options.calculation?.clock !== undefined && options.calculation.timeZone !== undefined,
+    };
+    this.formulaEngine = createFormulaEngine({ functions });
     this.formulaProgram = this.formulaEngine.compile(this.currentDocument);
     this.formulaValues = this.formulaEngine.recalculate(
       this.formulaProgram,
       [],
-      calculationEnvironment(this.currentDocument, 0, 'builtin-1'),
+      calculationEnvironment(this.currentDocument, 0, this.calculationOptions),
     ).values;
     this.legacy = new WorkbookController(
       projectDocumentToLegacy(this.currentDocument, this.formulaValues),
@@ -762,7 +793,7 @@ export class SpreadsheetDocumentController {
       const formulaValues = this.formulaEngine.recalculate(
         formulaProgram,
         [],
-        calculationEnvironment(document, this.getSnapshot().revision, 'builtin-1'),
+        calculationEnvironment(document, this.getSnapshot().revision, this.calculationOptions),
       ).values;
       this.formulaProgram = formulaProgram;
       this.formulaValues = formulaValues;
@@ -797,7 +828,7 @@ export class SpreadsheetDocumentController {
     this.formulaValues = this.formulaEngine.recalculate(
       this.formulaProgram,
       dependencies,
-      calculationEnvironment(document, this.getSnapshot().revision, 'builtin-1'),
+      calculationEnvironment(document, this.getSnapshot().revision, this.calculationOptions),
     ).values;
   }
 
@@ -851,7 +882,11 @@ export class SpreadsheetDocumentController {
       const formulaValues = this.formulaEngine.recalculate(
         formulaProgram,
         [],
-        calculationEnvironment(checkpointDocument, checkpoint.legacy.revision, 'builtin-1'),
+        calculationEnvironment(
+          checkpointDocument,
+          checkpoint.legacy.revision,
+          this.calculationOptions,
+        ),
       ).values;
       this.legacy.restore(checkpoint.legacy);
       this.documentHistory.restore(checkpoint.documentHistory);
@@ -884,7 +919,7 @@ export class SpreadsheetDocumentController {
     const formulaValues = this.formulaEngine.recalculate(
       formulaProgram,
       [],
-      calculationEnvironment(parsedDocument, this.getSnapshot().revision, 'builtin-1'),
+      calculationEnvironment(parsedDocument, this.getSnapshot().revision, this.calculationOptions),
     ).values;
     const projection = projectDocumentToLegacy(parsedDocument, formulaValues);
     this.legacy.replace(

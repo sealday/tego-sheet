@@ -11,6 +11,7 @@ import {
 import type { ChangeSource, WorkbookChange } from './core/types/changes';
 import type { JsonValue } from './core/types/json';
 import type { SpreadsheetDocument } from './document/model/document';
+import type { CalculationEnvironment, FormulaFunctionRegistry } from './formula';
 
 /**
  * Closed set of typed content commands accepted by the public transaction boundary.
@@ -239,6 +240,17 @@ export interface DocumentControllerOptions {
   readonly initialRowCount?: number;
   /** Initial projected column count used by the editing engine. */
   readonly initialColumnCount?: number;
+  /** Deterministic formula inputs and optional F5-bridged function registry. */
+  readonly calculation?: {
+    /** Locale override; the document locale hint remains the fallback. */
+    readonly locale?: string;
+    /** IANA time zone used by date functions. */
+    readonly timeZone?: string;
+    /** Explicit clock sampled once per recalculation. */
+    readonly clock?: CalculationEnvironment['clock'];
+    /** Formula registry, including functions copied from the F5 kernel. */
+    readonly functions?: FormulaFunctionRegistry;
+  };
 }
 
 /** Stable public command and transaction facade for one Workbook 2.0 document. */

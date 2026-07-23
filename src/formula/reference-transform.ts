@@ -222,7 +222,9 @@ function renameReferenceSheet(
   previousName: string,
   nextName: string,
 ): FormulaReference {
-  return reference.sheetToken === previousName ? { ...reference, sheetToken: nextName } : reference;
+  return reference.sheetToken?.toLowerCase() === previousName.toLowerCase()
+    ? { ...reference, sheetToken: nextName }
+    : reference;
 }
 
 /** Rewrites explicit sheet display tokens after a stable sheet is renamed. */

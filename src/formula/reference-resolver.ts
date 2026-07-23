@@ -16,10 +16,23 @@ function resolveReference(
   currentSheetId: string,
   diagnostics: FormulaDiagnostic[],
 ): FormulaReference {
-  const sheet =
-    reference.sheetToken === undefined
-      ? document.workbook.sheets.find(({ id }) => id === currentSheetId)
-      : document.workbook.sheets.find(({ name }) => name === reference.sheetToken);
+  let sheet;
+  if (reference.sheetToken === undefined) {
+    sheet = document.workbook.sheets.find(({ id }) => id === currentSheetId);
+  } else {
+    const exact = document.workbook.sheets.find(({ name }) => name === reference.sheetToken);
+    const normalized = document.workbook.sheets.filter(
+      ({ name }) => name.toLowerCase() === reference.sheetToken?.toLowerCase(),
+    );
+    sheet = exact ?? (normalized.length === 1 ? normalized[0] : undefined);
+    if (exact === undefined && normalized.length > 1) {
+      diagnostics.push({
+        code: 'FORMULA_REFERENCE_INVALID',
+        message: `Ambiguous sheet ${reference.sheetToken}`,
+      });
+      return reference;
+    }
+  }
   if (sheet === undefined) {
     diagnostics.push({
       code: 'FORMULA_REFERENCE_INVALID',

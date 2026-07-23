@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createFormulaEngine } from '../../../src/formula/evaluator';
 import type { CalculationEnvironment } from '../../../src/formula/evaluator';
+import { createFormulaFunctionRegistry } from '../../../src/formula/function-registry';
 import { formulaDocument } from './helpers';
 
 const environment: CalculationEnvironment = {
@@ -248,6 +249,49 @@ describe('formula dependency graph', () => {
     expect(first.values.get('sheet-1!A1')).toEqual(unchanged.values.get('sheet-1!A1'));
     expect(unchanged.evaluatedAddresses).toEqual([]);
     expect(next.evaluatedAddresses).toEqual(['sheet-1!A1']);
+  });
+
+  it('invalidates stable formula caches when the function registry version changes', () => {
+    const document = formulaDocument([
+      {
+        id: 'sheet-1',
+        name: 'Sheet1',
+        cells: [{ row: 0, column: 0, input: { type: 'formula', source: '=LATE(4)' } }],
+      },
+    ]);
+    const functions = createFormulaFunctionRegistry();
+    const engine = createFormulaEngine({ functions });
+    const program = engine.compile(document);
+    const first = engine.recalculate(program, [], {
+      ...environment,
+      functionRegistryVersion: functions.version,
+    });
+    expect(first.values.get('sheet-1!A1')).toEqual({ type: 'error', value: '#NAME?' });
+
+    const unregister = functions.register({
+      name: 'LATE',
+      parameters: { minimum: 1, maximum: 1 },
+      returns: 'number',
+      volatility: 'stable',
+      mode: 'sync',
+      evaluate: ([value]) => ({
+        type: 'number',
+        value: value?.type === 'number' ? value.value * 2 : 0,
+      }),
+    });
+    const registered = engine.recalculate(program, [], {
+      ...environment,
+      functionRegistryVersion: functions.version,
+    });
+    expect(registered.values.get('sheet-1!A1')).toEqual({ type: 'number', value: 8 });
+    expect(registered.diagnostics.get('sheet-1!A1')).toBeUndefined();
+
+    unregister();
+    const removed = engine.recalculate(program, [], {
+      ...environment,
+      functionRegistryVersion: functions.version,
+    });
+    expect(removed.values.get('sheet-1!A1')).toEqual({ type: 'error', value: '#NAME?' });
   });
 
   it('isolates program ownership and validates the declared registry version', () => {

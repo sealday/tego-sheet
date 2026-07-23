@@ -36,6 +36,21 @@ describe('typed formula parser', () => {
     expect(JSON.stringify(resolved.ast)).toContain('"sheetId":"data-id"');
   });
 
+  it('resolves sheet display tokens case-insensitively', () => {
+    const document = formulaDocument([
+      { id: 'input-id', name: 'Inputs', cells: [] },
+      { id: 'result-id', name: 'Results', cells: [] },
+    ]);
+
+    const resolved = resolveFormulaReferences(parseFormula('=inputs!A1'), document, 'result-id');
+
+    expect(resolved.diagnostics).toEqual([]);
+    expect(resolved.ast).toMatchObject({
+      kind: 'reference',
+      reference: { sheetId: 'input-id' },
+    });
+  });
+
   it('rejects malformed formulas with a stable parse diagnostic', () => {
     expect(() => parseFormula('=SUM(A1,')).toThrow(
       expect.objectContaining({ code: 'FORMULA_PARSE_ERROR' }),

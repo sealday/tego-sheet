@@ -155,7 +155,7 @@ function renameLegacySheetQualifiers(
       }
       if (source[cursor] === "'" && source[cursor + 1] === '!') {
         output +=
-          sheetName === previousName
+          sheetName.toLowerCase() === previousName.toLowerCase()
             ? renderSheetQualifier(nextName)
             : source.slice(index, cursor + 2);
         index = cursor + 2;
@@ -166,7 +166,10 @@ function renameLegacySheetQualifiers(
       const qualifier = /^[A-Z_][A-Z0-9_.]*!/iu.exec(source.slice(index));
       if (qualifier !== null) {
         const sheetName = qualifier[0].slice(0, -1);
-        output += sheetName === previousName ? renderSheetQualifier(nextName) : qualifier[0];
+        output +=
+          sheetName.toLowerCase() === previousName.toLowerCase()
+            ? renderSheetQualifier(nextName)
+            : qualifier[0];
         index += qualifier[0].length;
         continue;
       }
