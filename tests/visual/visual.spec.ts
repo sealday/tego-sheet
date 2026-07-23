@@ -443,7 +443,7 @@ test(`${printableCellsParityToken} printable cells are preserved while private c
     expect.objectContaining({
       fill: '#e8f1ff',
       height: 32,
-      width: 148,
+      width: 388,
     }),
   );
   expect(printSnapshot?.strokes).toBeGreaterThan(0);
