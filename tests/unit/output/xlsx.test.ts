@@ -575,10 +575,15 @@ describe('XlsxAdapter', () => {
 
     for (const value of [
       { color: '#not-a-color' },
+      { color: 123456 },
       { backgroundColor: '#12345' },
+      { backgroundColor: 123456 },
       { fontSize: Number.NaN },
       { fontSize: 0 },
       { border: { left: ['thin', '#invalid'] } },
+      { border: 42 },
+      { border: { left: [42, '#112233'] } },
+      { border: { left: ['thin', 123456] } },
     ]) {
       await expect(
         new XlsxAdapter().render(

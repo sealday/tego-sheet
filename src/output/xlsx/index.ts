@@ -608,6 +608,14 @@ function styleXml(
         details: { styleId: entry.id, fields: unsupported },
       });
     }
+    for (const key of ['color', 'backgroundColor'] as const) {
+      if (style[key] !== undefined && typeof style[key] !== 'string') {
+        throw outputError(
+          'XLSX_UNSUPPORTED_FEATURE',
+          `Style ${entry.id} has an invalid ${key} value`,
+        );
+      }
+    }
     for (const key of ['bold', 'italic', 'underline', 'strike', 'wrap'] as const) {
       if (style[key] !== undefined && typeof style[key] !== 'boolean') {
         throw outputError(
@@ -635,22 +643,43 @@ function styleXml(
     }
     const name = typeof style.fontFamily === 'string' ? style.fontFamily : 'Arial';
     const size = typeof style.fontSize === 'number' ? style.fontSize : 10;
-    const color = style.color === undefined ? 'FF000000' : xlsxColor(String(style.color));
+    const color = style.color === undefined ? 'FF000000' : xlsxColor(style.color as string);
     return `<font>${style.bold === true ? '<b/>' : ''}${style.italic === true ? '<i/>' : ''}${style.underline === true ? '<u/>' : ''}${style.strike === true ? '<strike/>' : ''}<sz val="${size}"/><color rgb="${color.length === 6 ? `FF${color}` : color}"/><name val="${xml(name)}"/></font>`;
   });
   const fills = workbook.styles.map((entry) => {
     const style = asRecord(entry.value)!;
     const color =
-      style.backgroundColor === undefined ? 'FFFFFFFF' : xlsxColor(String(style.backgroundColor));
+      style.backgroundColor === undefined ? 'FFFFFFFF' : xlsxColor(style.backgroundColor as string);
     return `<fill><patternFill patternType="solid"><fgColor rgb="${color}"/><bgColor indexed="64"/></patternFill></fill>`;
   });
   const borders = workbook.styles.map((entry) => {
     const style = asRecord(entry.value)!;
     const border = style.border === undefined ? undefined : asRecord(style.border);
+    if (style.border !== undefined && border === undefined) {
+      throw outputError('XLSX_UNSUPPORTED_FEATURE', `Style ${entry.id} has an invalid border`);
+    }
+    const borderSides = new Set(['left', 'right', 'top', 'bottom']);
+    if (Object.keys(border ?? {}).some((key) => !borderSides.has(key))) {
+      throw outputError(
+        'XLSX_UNSUPPORTED_FEATURE',
+        `Style ${entry.id} has unsupported border fields`,
+      );
+    }
     const side = (name: string): string => {
       const value = border?.[name];
-      if (!Array.isArray(value)) return `<${name}/>`;
-      const lineStyle = typeof value[0] === 'string' ? value[0] : 'thin';
+      if (value === undefined) return `<${name}/>`;
+      if (
+        !Array.isArray(value) ||
+        value.length !== 2 ||
+        typeof value[0] !== 'string' ||
+        typeof value[1] !== 'string'
+      ) {
+        throw outputError(
+          'XLSX_UNSUPPORTED_FEATURE',
+          `Style ${entry.id} has an invalid ${name} border`,
+        );
+      }
+      const lineStyle = value[0];
       const borderStyles = new Set([
         'hair',
         'dotted',
@@ -671,7 +700,7 @@ function styleXml(
           details: { styleId: entry.id, side: name, lineStyle },
         });
       }
-      const color = value[1] === undefined ? 'FF000000' : xlsxColor(String(value[1]));
+      const color = xlsxColor(value[1]);
       return `<${name} style="${xml(lineStyle)}"><color rgb="${color}"/></${name}>`;
     };
     return `<border>${side('left')}${side('right')}${side('top')}${side('bottom')}<diagonal/></border>`;
