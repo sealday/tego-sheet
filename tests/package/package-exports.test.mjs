@@ -33,13 +33,26 @@ test('the built root has only the approved runtime exports and internal subpaths
       `
       const root = await import('tego-sheet');
       const expected = [
+        'BUILTIN_FORMULA_COMPATIBILITY',
+        'BUILTIN_NUMBER_FORMAT_COMPATIBILITY',
+        'FormulaSyntaxError',
+        'NumberFormatSyntaxError',
         'TegoSheet',
         'TegoSheetException',
         'createDocumentController',
+        'createFormulaEngine',
+        'createFormulaFunctionRegistry',
+        'createNumberFormatter',
         'createSpreadsheetDocument',
         'migrateLegacyWorkbook',
+        'parseFormula',
+        'parseNumberFormat',
         'parseSpreadsheetDocument',
+        'renderFormula',
+        'renderNumberFormatToken',
+        'resolveFormulaReferences',
         'serializeSpreadsheetDocument',
+        'translateFormula',
       ];
       if (JSON.stringify(Object.keys(root)) !== JSON.stringify(expected)) {
         throw new Error('Unexpected root exports: ' + Object.keys(root).join(','));

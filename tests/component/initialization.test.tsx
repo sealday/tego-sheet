@@ -628,7 +628,7 @@ it('makes a failed connection inert when rollback cleanup also throws', () => {
   controller.dispose();
 });
 
-it('notifies every current listener before rethrowing the first listener error', () => {
+it('notifies every current listener and reports the first listener error after commit', () => {
   const controller = new SpreadsheetDocumentController(testDocument([{}]));
   const store = createControllerExternalStore(controller);
   const sheet = controller.getSheetIds()[0]!;
@@ -644,16 +644,18 @@ it('notifies every current listener before rethrowing the first listener error',
   second.mockClear();
   shouldThrow = true;
 
-  expect(() =>
-    controller.dispatch(
-      {
-        type: 'set-cell-text',
-        address: { sheet, row: 0, column: 0 },
-        text: 'committed despite notification error',
-      },
-      'ref',
-    ),
-  ).toThrow(firstError);
+  const result = controller.dispatch(
+    {
+      type: 'set-cell-text',
+      address: { sheet, row: 0, column: 0 },
+      text: 'committed despite notification error',
+    },
+    'ref',
+  );
+  expect(result).toMatchObject({
+    status: 'committed',
+    commit: { notificationError: firstError.message },
+  });
   expect(first).toHaveBeenCalledOnce();
   expect(second).toHaveBeenCalledOnce();
   expect(controller.getCellText({ sheet, row: 0, column: 0 })).toBe(

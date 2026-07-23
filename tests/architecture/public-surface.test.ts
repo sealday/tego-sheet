@@ -90,13 +90,26 @@ function trackedFiles(): readonly string[] {
 
 it('[ARCH-1] exposes only the approved React and Workbook 2.0 runtime API', () => {
   expect(Object.keys(publicApi).sort()).toEqual([
+    'BUILTIN_FORMULA_COMPATIBILITY',
+    'BUILTIN_NUMBER_FORMAT_COMPATIBILITY',
+    'FormulaSyntaxError',
+    'NumberFormatSyntaxError',
     'TegoSheet',
     'TegoSheetException',
     'createDocumentController',
+    'createFormulaEngine',
+    'createFormulaFunctionRegistry',
+    'createNumberFormatter',
     'createSpreadsheetDocument',
     'migrateLegacyWorkbook',
+    'parseFormula',
+    'parseNumberFormat',
     'parseSpreadsheetDocument',
+    'renderFormula',
+    'renderNumberFormatToken',
+    'resolveFormulaReferences',
     'serializeSpreadsheetDocument',
+    'translateFormula',
   ]);
 
   const source = readFileSync(resolve(root, 'src/index.ts'), 'utf8');

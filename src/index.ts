@@ -165,6 +165,57 @@ export type {
 } from './document';
 /** A zero-based Workbook 2.0 cell coordinate. */
 export type { CellPoint as DocumentCellPoint } from './document';
+export {
+  BUILTIN_FORMULA_COMPATIBILITY,
+  FormulaSyntaxError,
+  createFormulaEngine,
+  createFormulaFunctionRegistry,
+  parseFormula,
+  renderFormula,
+  resolveFormulaReferences,
+  translateFormula,
+} from './formula';
+export type {
+  CalculationEnvironment,
+  CalculationResult,
+  DependencyChange,
+  FormulaAddress,
+  FormulaAst,
+  FormulaDependencyGraph,
+  FormulaDiagnostic,
+  FormulaEngine,
+  FormulaEngineOptions,
+  FormulaError,
+  FormulaFunctionCompatibility,
+  FormulaFunctionContext,
+  FormulaFunctionDefinition,
+  FormulaFunctionRegistry,
+  FormulaNodeBase,
+  FormulaProgram,
+  FormulaReference,
+  FormulaTranslation,
+  FormulaValue,
+  ReferenceResolutionResult,
+  ScalarFormulaValue,
+  SourceSpan,
+} from './formula';
+export {
+  BUILTIN_NUMBER_FORMAT_COMPATIBILITY,
+  NumberFormatSyntaxError,
+  createNumberFormatter,
+  parseNumberFormat,
+  renderNumberFormatToken,
+} from './format';
+export type {
+  FormatContext,
+  NumberFormatAst,
+  NumberFormatCompatibility,
+  NumberFormatCondition,
+  NumberFormatConditionOperator,
+  NumberFormatter,
+  NumberFormatSection,
+  NumberFormatToken,
+} from './format';
 export { TegoSheet } from './react/tego-sheet';
 export type {
   SheetTabsRenderer,
