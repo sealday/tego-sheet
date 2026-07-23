@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('Image output emits inert SVG and a structurally valid PNG at the requested pixels', async ({
+test('@parity:output.export-download Image output emits inert SVG and a structurally valid PNG at the requested pixels', async ({
   page,
 }) => {
   await page.goto('/');
@@ -147,8 +147,11 @@ test('Image output emits inert SVG and a structurally valid PNG at the requested
   });
 });
 
-test('PNG output rasterizes inside a module Worker', async ({ browserName, page }) => {
-  test.skip(browserName !== 'chromium', 'One Worker engine is the compatibility requirement');
+test('@parity:output.export-download PNG output rasterizes inside a module Worker', async ({
+  browserName,
+  page,
+}) => {
+  if (browserName !== 'chromium') return;
   await page.goto('/');
   const result = await page.evaluate(async () => {
     const moduleUrl = new URL('/@id/tego-sheet/output/image', window.location.href).href;

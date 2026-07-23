@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 
-test('PDF output runs in the browser main thread and a module Worker', async ({ page }) => {
+test('@parity:output.export-download PDF output runs in the browser main thread and a module Worker', async ({
+  page,
+}) => {
   await page.goto('/');
   const result = await page.evaluate(async () => {
     const moduleId = '/@id/tego-sheet/output/pdf';

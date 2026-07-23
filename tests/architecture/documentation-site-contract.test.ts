@@ -30,6 +30,9 @@ const publishedPackagePaths = new Set([
   'tego-sheet/locales/zh-cn',
   'tego-sheet/locales/de',
   'tego-sheet/locales/nl',
+  'tego-sheet/output/pdf',
+  'tego-sheet/output/xlsx',
+  'tego-sheet/output/image',
 ]);
 
 const publishedStylesDeclaration = 'website/src/types/tego-sheet-styles.d.ts';

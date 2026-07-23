@@ -116,6 +116,7 @@ const expectedPublicExports = [
   'FormulaSyntaxError',
   'FormulaTranslation',
   'FormulaValue',
+  'GeneratedCalculatedCell',
   'GeneratedDocument',
   'GeneratedDocumentForBrowserPrint',
   'GeneratedPrintPage',

@@ -665,6 +665,7 @@ it('[ARCH-5] separates browser API implementations from section 6.6 lifetime own
       new Set([
         'src/engine/interaction/resource-registry.ts',
         'src/output/browser-print-adapter.ts',
+        'src/output/pdf/index.ts',
         'src/react/adapters/interaction-adapter.ts',
         'src/template/render.ts',
         'src/template/resources/resource-pipeline.ts',
@@ -690,7 +691,7 @@ it('[ARCH-5] separates browser API implementations from section 6.6 lifetime own
         'src/react/hooks/use-canvas-engine.ts',
       ]),
     ],
-    ['overlay', new Set(['src/output/browser-print-adapter.ts'])],
+    ['overlay', new Set(['src/output/browser-print-adapter.ts', 'src/output/image/index.ts'])],
     ['portal', new Set()],
   ]);
   for (const [primitive, allowed] of implementationSites) {
@@ -704,7 +705,7 @@ it('[ARCH-5] separates browser API implementations from section 6.6 lifetime own
     ['animation-frame', new Set(['src/engine/canvas/render-scheduler.ts'])],
     ['timer', new Set(['src/engine/interaction/interaction-manager.ts'])],
     ['subscription', new Set(['src/react/hooks/use-canvas-engine.ts'])],
-    ['overlay', new Set(['src/output/browser-print-adapter.ts'])],
+    ['overlay', new Set(['src/output/browser-print-adapter.ts', 'src/output/image/index.ts'])],
     ['portal', new Set()],
   ]);
   for (const [primitive, allowed] of ownership) {

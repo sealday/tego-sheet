@@ -11,7 +11,10 @@
       "tego-sheet/locales/en": ["../dist/locales/en.d.ts"],
       "tego-sheet/locales/zh-cn": ["../dist/locales/zh-cn.d.ts"],
       "tego-sheet/locales/de": ["../dist/locales/de.d.ts"],
-      "tego-sheet/locales/nl": ["../dist/locales/nl.d.ts"]
+      "tego-sheet/locales/nl": ["../dist/locales/nl.d.ts"],
+      "tego-sheet/output/pdf": ["../dist/output/pdf/index.d.ts"],
+      "tego-sheet/output/xlsx": ["../dist/output/xlsx/index.d.ts"],
+      "tego-sheet/output/image": ["../dist/output/image/index.d.ts"]
     },
     "strict": true
   },

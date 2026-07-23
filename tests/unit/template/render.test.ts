@@ -172,6 +172,15 @@ describe('template render pipeline', () => {
     expect(result.document?.print.displayList.pages).toHaveLength(
       result.document?.print.pages.length ?? 0,
     );
+    expect(result.document?.print.profile).toEqual(template.printProfiles[0]);
+    expect(result.document?.calculatedCells).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          address: { sheetId: 'sheet-1', row: 2, column: 1 },
+          value: { type: 'string', value: 'item' },
+        }),
+      ]),
+    );
   });
 
   it('supports abort and expansion limits atomically', async () => {
