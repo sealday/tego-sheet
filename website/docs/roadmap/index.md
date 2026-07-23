@@ -12,10 +12,6 @@
 
 | Phase | Capability                                                   | Status  | Design                                                  |
 | ----- | ------------------------------------------------------------ | ------- | ------------------------------------------------------- |
-| 1     | Sheet, selection and range print targets                     | planned | [Template printing](template-printing.md)               |
-| 1     | Safe scalar bindings, repeat rows and conditional ranges     | planned | [Template printing](template-printing.md)               |
-| 1     | Deterministic pagination and print profiles                  | planned | [Template printing](template-printing.md)               |
-| 1     | Page preview and isolated browser printing                   | planned | [Template printing](template-printing.md)               |
 | 2     | Nested, horizontal, range and page repeats                   | planned | [Template printing](template-printing.md)               |
 | 2     | Image, font, QR code and async resource pipeline             | planned | [Template printing](template-printing.md)               |
 | 2     | PDF Blob output                                              | planned | [Template printing](template-printing.md)               |

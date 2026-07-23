@@ -99,7 +99,7 @@ interface RenderLimits {
 
 ## TP1. Template Print MVP
 
-**Status:** planned
+**Status:** shipped
 **Delivery:** Phase 1
 
 ### 产品目标与场景

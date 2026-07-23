@@ -124,6 +124,7 @@ export const allRoadmapItems = [
     'Sheet, selection and range print targets',
     'Print a chosen sheet or region without editor chrome.',
     '/docs/roadmap/template-printing',
+    'shipped',
   ),
   item(
     'template-bindings',
@@ -131,6 +132,7 @@ export const allRoadmapItems = [
     'Safe scalar bindings, repeat rows and conditional ranges',
     'Bind business data through a constrained template DSL.',
     '/docs/roadmap/template-printing',
+    'shipped',
   ),
   item(
     'pagination',
@@ -138,6 +140,7 @@ export const allRoadmapItems = [
     'Deterministic pagination and print profiles',
     'Make paper, margins, scaling, titles and page breaks explicit.',
     '/docs/roadmap/template-printing',
+    'shipped',
   ),
   item(
     'print-preview',
@@ -145,6 +148,7 @@ export const allRoadmapItems = [
     'Page preview and isolated browser printing',
     'Preview the exact pages rendered inside an isolated print document.',
     '/docs/roadmap/template-printing',
+    'shipped',
   ),
   item(
     'advanced-repeats',

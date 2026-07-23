@@ -29,12 +29,20 @@ it('maps every roadmap item to acceptance evidence without duplicate ids', () =>
     'formula-format-core',
     'render-semantics',
     'extension-kernel',
+    'print-targets',
+    'template-bindings',
+    'pagination',
+    'print-preview',
   ]);
   expect(getRoadmapDeliveryState('workbook-2')).toBe('shipped');
   expect(getRoadmapDeliveryState('transactions')).toBe('shipped');
   expect(getRoadmapDeliveryState('formula-format-core')).toBe('shipped');
   expect(getRoadmapDeliveryState('render-semantics')).toBe('shipped');
   expect(getRoadmapDeliveryState('extension-kernel')).toBe('shipped');
+  expect(getRoadmapDeliveryState('print-targets')).toBe('shipped');
+  expect(getRoadmapDeliveryState('template-bindings')).toBe('shipped');
+  expect(getRoadmapDeliveryState('pagination')).toBe('shipped');
+  expect(getRoadmapDeliveryState('print-preview')).toBe('shipped');
 });
 
 it('keeps canonical ids when an item moves out of the planned projection', () => {
@@ -52,6 +60,10 @@ it('keeps canonical ids when an item moves out of the planned projection', () =>
     'formula-format-core',
     'render-semantics',
     'extension-kernel',
+    'print-targets',
+    'template-bindings',
+    'pagination',
+    'print-preview',
   ]);
 });
 
