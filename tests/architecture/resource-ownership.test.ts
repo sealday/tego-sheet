@@ -677,6 +677,7 @@ it('[ARCH-5] separates browser API implementations from section 6.6 lifetime own
       'timer',
       new Set([
         'src/output/browser-print-adapter.ts',
+        'src/output/pdf/index.ts',
         'src/react/adapters/interaction-adapter.ts',
         'src/template/resources/resource-pipeline.ts',
       ]),
