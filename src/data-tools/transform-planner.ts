@@ -8,17 +8,27 @@ import type {
 import type { DocumentCellRange } from '../document';
 import type { SheetId } from '../core';
 
+/** Literal find-and-replace request over one document range. */
 export interface FindReplaceTransform {
+  /** Transform discriminator. */
   readonly type: 'find-replace';
+  /** Inclusive target range. */
   readonly range: DocumentCellRange;
+  /** Literal substring to find. */
   readonly find: string;
+  /** Replacement text. */
   readonly replacement: string;
+  /** Explicit matching policy. */
   readonly match: 'literal';
 }
 
+/** Immutable dry-run result bound to one document revision. */
 export interface DataTransformPreview {
+  /** Opaque identifier used to commit this plan. */
   readonly planId: string;
+  /** Document revision used to build the plan. */
   readonly baseRevision: number;
+  /** Bounded preview of changed cells. */
   readonly sampleChanges: readonly {
     readonly row: number;
     readonly column: number;
@@ -27,10 +37,13 @@ export interface DataTransformPreview {
   }[];
 }
 
+/** Commit result including planner-specific stale and missing failures. */
 export type DataTransformCommitResult =
   | DocumentTransactionResult
   | {
+      /** Indicates the plan cannot be committed. */
       readonly status: 'rejected';
+      /** Stable planner rejection category. */
       readonly code: 'TRANSFORM_PLAN_MISSING' | 'TRANSFORM_PLAN_STALE';
     };
 

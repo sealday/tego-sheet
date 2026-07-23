@@ -12,3 +12,14 @@ export type {
   NumberFormatToken,
 } from './number-format-parser';
 export { NumberFormatSyntaxError, parseNumberFormat } from './number-format-parser';
+export { ConditionalFormatError, createConditionalFormatEvaluator } from './conditional';
+export type {
+  ConditionalEffect,
+  ConditionalEvaluationInput,
+  ConditionalEvaluationResult,
+  ConditionalExpression,
+  ConditionalFormatLimits,
+  ConditionalRule,
+  ConditionalRuleId,
+  ConditionalStylePatch,
+} from './conditional';

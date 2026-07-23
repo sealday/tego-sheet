@@ -13,7 +13,9 @@ import type {
 
 /** Stable conditional-format failure. */
 export class ConditionalFormatError extends Error {
+  /** Creates a stable conditional-format error. */
   constructor(
+    /** Machine-readable failure category. */
     readonly code: 'INVALID_CONDITIONAL_EXPRESSION' | 'CONDITIONAL_RANGE_TOO_LARGE',
     message: string,
   ) {
@@ -24,7 +26,9 @@ export class ConditionalFormatError extends Error {
 
 /** Resource limits enforced before conditional evaluation. */
 export interface ConditionalFormatLimits {
+  /** Maximum rules accepted per evaluation. */
   readonly maxRules: number;
+  /** Maximum aggregate target area accepted per evaluation. */
   readonly maxCells: number;
 }
 

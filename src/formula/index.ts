@@ -50,3 +50,11 @@ export {
   transformFormulaCoordinates,
   translateFormula,
 } from './reference-transform';
+export { bindAdvancedFormula, createFormulaNameRegistry, planFormulaSpill } from './advanced';
+export type {
+  AdvancedFormulaBindingContext,
+  FormulaNameDefinition,
+  FormulaNameRegistry,
+  FormulaSpillError,
+  FormulaSpillPlan,
+} from './advanced';

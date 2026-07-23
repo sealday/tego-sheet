@@ -1,10 +1,15 @@
 import type { FormulaValue } from '../formula';
 import type { FilterView, FilterViewPredicate } from './model';
 
+/** Immutable inputs used to derive view visibility. */
 export interface ApplyFilterViewInput {
+  /** View definition to evaluate. */
   readonly view: FilterView;
+  /** Source rows beginning at the view range start. */
   readonly rows: readonly (readonly FormulaValue[])[];
+  /** Explicit comparison locale. */
   readonly locale: string;
+  /** Evaluation resource limits. */
   readonly limits: { readonly maxRows: number };
 }
 

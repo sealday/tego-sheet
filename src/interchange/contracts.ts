@@ -1,59 +1,97 @@
 import type { Diagnostic } from '../document';
 import type { SpreadsheetDocument } from '../document';
 
+/** Supported spreadsheet interchange container or text formats. */
 export type InterchangeFormat = 'csv' | 'tsv' | 'xlsx' | 'ods';
 
+/** Resource limits enforced before and during workbook interchange. */
 export interface InterchangeLimits {
+  /** Maximum compressed package bytes. */
   readonly maxPackageBytes?: number;
+  /** Maximum aggregate uncompressed archive bytes. */
   readonly maxUncompressedBytes?: number;
+  /** Maximum archive entries. */
   readonly maxEntries?: number;
+  /** Maximum delimited-text bytes. */
   readonly maxTextBytes?: number;
+  /** Maximum bytes in one XML part. */
   readonly maxXmlBytes?: number;
+  /** Maximum bytes in one delimited field. */
   readonly maxFieldBytes?: number;
+  /** Maximum worksheet rows. */
   readonly maxRows?: number;
+  /** Maximum worksheet columns. */
   readonly maxColumns?: number;
+  /** Maximum non-empty cells. */
   readonly maxCells?: number;
+  /** Maximum emitted text bytes. */
   readonly maxOutputBytes?: number;
 }
 
+/** Per-read cancellation options. */
 export interface InterchangeReadOptions {
+  /** Cancels parsing before an atomic result is returned. */
   readonly signal?: AbortSignal;
 }
 
+/** Deterministic CSV and TSV writer options. */
 export interface DelimitedWriteOptions {
+  /** Field delimiter override. */
   readonly delimiter?: ',' | '\t';
+  /** Output line ending. */
   readonly lineEnding?: '\n' | '\r\n';
+  /** Prefixes spreadsheet-formula-like text to prevent injection. */
   readonly formulaInjectionProtection?: boolean;
+  /** Cancels serialization. */
   readonly signal?: AbortSignal;
+  /** Per-write output byte limit. */
   readonly maxOutputBytes?: number;
 }
 
+/** Evidence that parsing performed no active or external execution. */
 export interface InterchangeSecurityReport {
+  /** Always false because readers never execute active content. */
   readonly activeContentExecuted: false;
+  /** Always false because readers never fetch external resources. */
   readonly externalResourcesFetched: false;
+  /** Recoverable security warnings. */
   readonly warnings: readonly string[];
+  /** Recognized features that were not imported. */
   readonly unsupportedFeatures: readonly string[];
 }
 
+/** Immutable all-or-nothing workbook import result. */
 export interface WorkbookImportResult {
+  /** Detected or configured source format. */
   readonly format: InterchangeFormat;
+  /** Fully parsed immutable document. */
   readonly document: SpreadsheetDocument;
+  /** Structured import diagnostics. */
   readonly diagnostics: readonly Diagnostic[];
+  /** Security and degradation report. */
   readonly security: InterchangeSecurityReport;
 }
 
+/** Byte, blob, or text input accepted by workbook readers. */
 export type InterchangeInput = Uint8Array | ArrayBuffer | Blob | string;
 
+/** Atomic bounded workbook reader. */
 export interface WorkbookReader {
+  /** Format handled by this reader. */
   readonly format: InterchangeFormat;
+  /** Reads one complete immutable document or rejects without partial output. */
   read(input: InterchangeInput, options?: InterchangeReadOptions): Promise<WorkbookImportResult>;
 }
 
+/** Bounded delimited-text workbook writer. */
 export interface WorkbookWriter {
+  /** Format emitted by this writer. */
   readonly format: 'csv' | 'tsv';
+  /** Serializes a document to a blob. */
   write(document: SpreadsheetDocument, options?: DelimitedWriteOptions): Promise<Blob>;
 }
 
+/** Stable workbook interchange failure categories. */
 export type InterchangeErrorCode =
   | 'ABORTED'
   | 'ACTIVE_CONTENT_REJECTED'
@@ -72,11 +110,16 @@ export type InterchangeErrorCode =
   | 'XML_ENTITY_REJECTED'
   | 'XML_LIMIT_EXCEEDED';
 
+/** Error thrown when interchange input violates syntax, safety, or resource limits. */
 export class InterchangeError extends Error {
+  /** Stable error class name. */
   readonly name = 'InterchangeError';
+  /** Security report retained on rejected input. */
   readonly security = securityReport();
 
+  /** Creates a stable interchange error. */
   constructor(
+    /** Machine-readable failure category. */
     readonly code: InterchangeErrorCode,
     message: string,
     options?: { readonly cause?: unknown },

@@ -2,6 +2,7 @@ import type { ValidationRequest, ValidationResult } from './model';
 
 /** Restricted context supplied to a host validation resolver. */
 export interface ValidationResolverContext {
+  /** Cancellation signal owned by the validation engine. */
   readonly signal: AbortSignal;
 }
 
@@ -12,7 +13,9 @@ export type ValidationResolver = (
 
 /** Isolated resolver registry. */
 export interface ValidationResolverRegistry {
+  /** Registers a resolver and returns its disposer. */
   register(id: string, resolver: ValidationResolver): () => void;
+  /** Resolves a previously registered resolver. */
   resolve(id: string): ValidationResolver | undefined;
 }
 
@@ -35,8 +38,11 @@ export function createValidationResolverRegistry(): ValidationResolverRegistry {
   };
 }
 
+/** Optional resolver capabilities and resource limits for validation. */
 export interface ValidationEngineOptions {
+  /** Optional host resolver registry. */
   readonly resolvers?: ValidationResolverRegistry;
+  /** Resource limits for dynamic validation sources. */
   readonly limits?: {
     readonly maxListItems?: number;
     readonly resolverTimeoutMs?: number;

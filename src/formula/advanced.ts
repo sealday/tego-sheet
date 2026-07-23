@@ -1,17 +1,23 @@
 import type { DocumentCellAddress, DocumentCellRange } from '../document';
-import type { FormulaValue } from './ast';
+import type { FormulaValue, ScalarFormulaValue } from './ast';
 
 /** Stable named-range definition. */
 export interface FormulaNameDefinition {
+  /** Stable identifier retained across renames. */
   readonly id: string;
+  /** Case-insensitive formula name. */
   readonly name: string;
+  /** Workbook-wide or sheet-local visibility. */
   readonly scope: 'workbook' | { readonly sheetId: string };
+  /** Range referenced by the name. */
   readonly refersTo: DocumentCellRange;
 }
 
 /** Isolated named-range registry. */
 export interface FormulaNameRegistry {
+  /** Registers one definition and returns its disposer. */
   register(definition: FormulaNameDefinition): () => void;
+  /** Resolves a visible definition by name. */
   resolve(name: string, currentSheetId: string): FormulaNameDefinition | undefined;
 }
 
@@ -41,9 +47,13 @@ export function createFormulaNameRegistry(): FormulaNameRegistry {
   };
 }
 
+/** Stable identifiers available while binding an advanced formula. */
 export interface AdvancedFormulaBindingContext {
+  /** Sheet used to resolve local names. */
   readonly currentSheetId: string;
+  /** Registered workbook and sheet names. */
   readonly names: FormulaNameRegistry;
+  /** Structured tables available to the formula. */
   readonly tables: readonly {
     readonly id: string;
     readonly name: string;
@@ -139,14 +149,29 @@ function addressKey(address: DocumentCellAddress): string {
   return `${address.sheetId}!${columnName(address.column)}${address.row + 1}`;
 }
 
+/** Atomic projection plan for one array formula result. */
+/** Stable blocked dynamic-array value. */
+export interface FormulaSpillError {
+  /** Formula error discriminator. */
+  readonly type: 'error';
+  /** Stable blocked-spill error value. */
+  readonly value: '#SPILL!';
+}
+
+/** Atomic projection plan for one array formula result. */
 export type FormulaSpillPlan =
   | {
+      /** Indicates every target cell is available. */
       readonly status: 'ready';
-      readonly cells: ReadonlyMap<string, Exclude<FormulaValue, { readonly type: 'array' }>>;
+      /** Qualified cell keys mapped to scalar results. */
+      readonly cells: ReadonlyMap<string, ScalarFormulaValue>;
     }
   | {
+      /** Indicates the spill cannot be projected. */
       readonly status: 'blocked';
-      readonly value: { readonly type: 'error'; readonly value: '#SPILL!' };
+      /** Stable spreadsheet error exposed at the anchor. */
+      readonly value: FormulaSpillError;
+      /** First occupied or invalid target cell. */
       readonly blocker: DocumentCellAddress;
     };
 
@@ -166,7 +191,7 @@ export function planFormulaSpill(input: {
       blocker: input.anchor,
     };
   }
-  const cells = new Map<string, Exclude<FormulaValue, { readonly type: 'array' }>>();
+  const cells = new Map<string, ScalarFormulaValue>();
   for (const [rowOffset, row] of input.value.rows.entries()) {
     for (const [columnOffset, value] of row.entries()) {
       const address = {

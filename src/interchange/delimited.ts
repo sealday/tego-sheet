@@ -239,18 +239,22 @@ function createDelimitedWriter(
   });
 }
 
+/** Creates an isolated bounded CSV reader. */
 export function createCsvReader(limits?: InterchangeLimits): WorkbookReader {
   return createDelimitedReader('csv', ',', limits);
 }
 
+/** Creates an isolated bounded TSV reader. */
 export function createTsvReader(limits?: InterchangeLimits): WorkbookReader {
   return createDelimitedReader('tsv', '\t', limits);
 }
 
+/** Creates an isolated bounded CSV writer. */
 export function createCsvWriter(limits?: InterchangeLimits): WorkbookWriter {
   return createDelimitedWriter('csv', ',', limits);
 }
 
+/** Creates an isolated bounded TSV writer. */
 export function createTsvWriter(limits?: InterchangeLimits): WorkbookWriter {
   return createDelimitedWriter('tsv', '\t', limits);
 }

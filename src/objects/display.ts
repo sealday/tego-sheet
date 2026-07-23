@@ -4,7 +4,9 @@ import { resolveObjectAnchor } from './anchors';
 
 /** Stable object-to-output conversion failure. */
 export class SheetObjectError extends Error {
+  /** Creates a stable object rendering error. */
   constructor(
+    /** Machine-readable object failure category. */
     readonly code: 'OBJECT_RESOURCE_MISSING',
     message: string,
   ) {
@@ -13,10 +15,13 @@ export class SheetObjectError extends Error {
   }
 }
 
+/** Explicit resources and geometry used for object rendering. */
 export interface ObjectDisplayContext {
+  /** Already-resolved document resources keyed by stable ID. */
   readonly resources: Readonly<
     Record<string, Uint8Array | { readonly bytes: Uint8Array; readonly mimeType?: string }>
   >;
+  /** Worksheet geometry used to resolve anchors. */
   readonly geometry: ObjectGeometry;
 }
 

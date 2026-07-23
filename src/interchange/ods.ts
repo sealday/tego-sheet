@@ -131,6 +131,7 @@ function parseOdsSheet(
   return { name, cells };
 }
 
+/** Creates an atomic ODS reader with ZIP and XML resource limits. */
 export function createOdsReader(configuredLimits: InterchangeLimits = {}): WorkbookReader {
   const limits = resolveLimits(configuredLimits);
   return Object.freeze({

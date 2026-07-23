@@ -163,6 +163,7 @@ function parseWorksheet(
   return { name, cells };
 }
 
+/** Creates an atomic XLSX reader with ZIP and XML resource limits. */
 export function createXlsxReader(configuredLimits: InterchangeLimits = {}): WorkbookReader {
   const limits = resolveLimits(configuredLimits);
   return Object.freeze({

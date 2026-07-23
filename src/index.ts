@@ -173,14 +173,18 @@ export type { CellPoint as DocumentCellPoint } from './document';
 export {
   BUILTIN_FORMULA_COMPATIBILITY,
   FormulaSyntaxError,
+  bindAdvancedFormula,
   createFormulaEngine,
   createFormulaFunctionRegistry,
+  createFormulaNameRegistry,
   parseFormula,
+  planFormulaSpill,
   renderFormula,
   resolveFormulaReferences,
   translateFormula,
 } from './formula';
 export type {
+  AdvancedFormulaBindingContext,
   CalculationEnvironment,
   CalculationResult,
   DependencyChange,
@@ -195,9 +199,13 @@ export type {
   FormulaFunctionContext,
   FormulaFunctionDefinition,
   FormulaFunctionRegistry,
+  FormulaNameDefinition,
+  FormulaNameRegistry,
   FormulaNodeBase,
   FormulaProgram,
   FormulaReference,
+  FormulaSpillError,
+  FormulaSpillPlan,
   FormulaTranslation,
   FormulaValue,
   ReferenceResolutionResult,
@@ -206,12 +214,22 @@ export type {
 } from './formula';
 export {
   BUILTIN_NUMBER_FORMAT_COMPATIBILITY,
+  ConditionalFormatError,
   NumberFormatSyntaxError,
+  createConditionalFormatEvaluator,
   createNumberFormatter,
   parseNumberFormat,
   renderNumberFormatToken,
 } from './format';
 export type {
+  ConditionalEffect,
+  ConditionalEvaluationInput,
+  ConditionalEvaluationResult,
+  ConditionalExpression,
+  ConditionalFormatLimits,
+  ConditionalRule,
+  ConditionalRuleId,
+  ConditionalStylePatch,
   FormatContext,
   NumberFormatAst,
   NumberFormatCompatibility,
@@ -221,6 +239,66 @@ export type {
   NumberFormatSection,
   NumberFormatToken,
 } from './format';
+export { createValidationEngine, createValidationResolverRegistry } from './validation';
+export type {
+  ValidationEngineOptions,
+  ValidationListSource,
+  ValidationRequest as AdvancedValidationRequest,
+  ValidationResolver,
+  ValidationResolverContext,
+  ValidationResolverRegistry,
+  ValidationResult as AdvancedValidationResult,
+  ValidationRule as AdvancedValidationRule,
+} from './validation';
+export { applyFilterView, createFilterViewSession } from './views';
+export type {
+  ApplyFilterViewInput,
+  FilterView,
+  FilterViewPredicate,
+  FilterViewSession,
+} from './views';
+export { createDataTransformPlanner } from './data-tools';
+export type {
+  DataTransformCommitResult,
+  DataTransformPreview,
+  FindReplaceTransform,
+} from './data-tools';
+export {
+  createCsvReader,
+  createCsvWriter,
+  createOdsReader,
+  createTsvReader,
+  createTsvWriter,
+  createXlsxReader,
+  InterchangeError,
+} from './interchange';
+export type {
+  DelimitedWriteOptions,
+  InterchangeErrorCode,
+  InterchangeFormat,
+  InterchangeInput,
+  InterchangeLimits,
+  InterchangeReadOptions,
+  InterchangeSecurityReport,
+  WorkbookImportResult,
+  WorkbookReader,
+  WorkbookWriter,
+} from './interchange';
+export {
+  objectToDisplayCommands,
+  resolveObjectAnchor,
+  SheetObjectError,
+  transformObjectAnchor,
+} from './objects';
+export type {
+  ObjectAnchor,
+  ObjectBase,
+  ObjectCoordinateTransform,
+  ObjectDisplayContext,
+  ObjectGeometry,
+  ObjectOffset,
+  SheetObject,
+} from './objects';
 export {
   createFontMetrics,
   createPresentationCache,
