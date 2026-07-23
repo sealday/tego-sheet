@@ -701,7 +701,7 @@ function validations(
       );
     if (
       source.value !== undefined &&
-      ((source.operator === 'in' && !Array.isArray(source.value)) ||
+      ((source.operator === 'in' && source.type !== 'list' && !Array.isArray(source.value)) ||
         ((source.operator === 'be' || source.operator === 'nbe') &&
           (!Array.isArray(source.value) || source.value.length !== 2)) ||
         (source.type === 'list' &&
@@ -721,6 +721,9 @@ function validations(
     );
     if (source.type === 'list' && typeof source.value === 'string') {
       fields.value = source.value.split(',');
+    }
+    if (source.type === 'list' && source.operator === 'in') {
+      delete fields.operator;
     }
     const normalized = json(fields, entryPath, context);
     if (normalized === undefined) return;
