@@ -203,6 +203,8 @@ function mergeSheet(
   operational: SheetInput,
   beforeLegacy: SheetData | undefined,
   afterLegacy: SheetData | undefined,
+  authoritativeInputs: ReadonlySet<string> | undefined,
+  authoritativeValidations: ReadonlySet<string> | undefined,
 ): SpreadsheetDocumentInput['workbook']['sheets'][number] {
   if (previous === undefined) return operational;
   const previousCells = new Map(
@@ -220,6 +222,7 @@ function mergeSheet(
       const beforeCell = legacyCell(beforeLegacy, row, column);
       const afterCell = legacyCell(afterLegacy, row, column);
       if (sameJson(beforeCell, afterCell)) {
+        if (authoritativeValidations?.has(key) === true) return previousCell ?? operationalCell;
         if (
           previousCell !== undefined &&
           operationalCell !== undefined &&
@@ -240,6 +243,10 @@ function mergeSheet(
       }
       if (afterCell === undefined || operationalCell === undefined) return undefined;
       const previousCellData = previousCell?.cell;
+      const validationId =
+        authoritativeValidations?.has(key) === true
+          ? previousCellData?.validationId
+          : operationalCell.cell.validationId;
       return {
         ...operationalCell,
         cell: {
@@ -253,9 +260,11 @@ function mergeSheet(
             ? {}
             : { metadata: previousCellData.metadata }),
           ...operationalCell.cell,
+          ...(validationId === undefined ? {} : { validationId }),
           input:
             previousCellData !== undefined &&
-            sameJson(legacyCellInput(beforeCell), legacyCellInput(afterCell))
+            (authoritativeInputs?.has(key) === true ||
+              sameJson(legacyCellInput(beforeCell), legacyCellInput(afterCell)))
               ? previousCellData.input
               : operationalCell.cell.input,
         },
@@ -402,6 +411,8 @@ export function projectLegacyToDocument(
   afterWorkbook: WorkbookData,
   previous: SpreadsheetDocument,
   sheetIds: readonly SheetId[],
+  authoritativeInputs: ReadonlyMap<string, ReadonlySet<string>> = new Map(),
+  authoritativeValidations: ReadonlyMap<string, ReadonlySet<string>> = new Map(),
 ): SpreadsheetDocument {
   const migrated = migrateLegacyWorkbook(afterWorkbook, {
     ids: {
@@ -437,6 +448,8 @@ export function projectLegacyToDocument(
           ),
           beforeWorkbook[previous.workbook.sheets.findIndex((item) => item.id === sheet.id)],
           afterWorkbook[index],
+          authoritativeInputs.get(sheet.id),
+          authoritativeValidations.get(sheet.id),
         ),
       ),
       styles: styleRegistry.entries,

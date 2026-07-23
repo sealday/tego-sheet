@@ -132,3 +132,55 @@ projection boundary; `migrateLegacyWorkbook()` is the only public legacy ingress
 - The parity manifest's 32 structural checks passed; its retained release-evidence check correctly
   refused to run against the dirty pre-commit worktree because its revision fingerprint requires a
   clean repository.
+
+## Re-review fix: command-aware rich-cell transforms
+
+### RED evidence
+
+- The expanded direct schema 2 controller suite started with 9 failures out of 22 tests:
+  insert/delete row, insert/delete column, copy, cut, autofill, edit then undo/redo, and clear then
+  undo all lost custom input or schema-only references.
+- The structural failures proved that same-coordinate before/after merging could not infer moved
+  provenance. Clipboard and history failures proved that legacy snapshots cannot reconstruct
+  schema-only state after it has been discarded.
+- The first component integration run exposed one additional resource-safety failure: schema
+  planning expanded an oversized clipboard range before the legacy validation guard.
+- The first architecture run rejected an operation import from the controller directory, proving
+  the command planner belonged in the command layer rather than weakening the controller boundary.
+
+### GREEN implementation
+
+- Added a command-layer schema plan that transforms complete sparse cells by command intent before
+  the legacy transaction:
+  - insert/delete row and column shift or remove exact cell, row, column, validation, and template
+    range coordinates;
+  - internal copy/cut and autofill snapshot source cells and tile provenance onto exact targets;
+  - custom input and validation provenance are tracked independently, so formula autofill still
+    accepts its operationally shifted formula while custom payloads and validation IDs remain
+    lossless.
+- The planner covers all five `CellInput` variants and runs only after the same command validation
+  used by the operation controller. Oversized or unsupported operations therefore reject before
+  allocating provenance or committing legacy state.
+- `SpreadsheetDocumentController` now owns a complete schema 2 history alongside legacy history.
+  Normal commits record full before/after documents; undo and redo restore those exact snapshots.
+  Schema history participates in controller checkpoint, restore, replacement, controlled replay,
+  and `beforeNotify` rollback.
+- The remaining legacy projection overlays operation-owned style, editability, layout, filter,
+  merge, and formula/text results onto the command-planned schema document; it no longer guesses
+  moved rich cells by equal coordinates.
+
+### Final re-review verification
+
+- Direct schema 2 controller tests: 25/25 passed, covering four structural commands, before/inside/
+  after rich cells, row/column layout, validation IDs, template ranges, stable duplicate sorting,
+  copy/cut, every `CellInput` variant, autofill, clear-style, clear/undo, edit/undo/redo, and
+  structural undo/redo.
+- `npx vitest run --project unit`: 39 files, 640 tests passed.
+- `npx vitest run --project component`: 26 files, 203 tests passed.
+- `npx vitest run --project architecture`: 14 files, 111 tests passed.
+- `npm run format:check`, `npm run lint`, `npm run typecheck`, and `npm run build`: passed.
+- `npm run test:ssr`: public ESM/CommonJS import probe and SSR component test passed.
+- `npm run test:package`: 40 tests passed, including the tracked-source demo build and clean packed
+  consumers.
+- `npm run test:browser`: fresh six-project matrix passed 93 tests with 3 intentional desktop
+  touch-only skips.

@@ -190,6 +190,12 @@ export class WorkbookController {
     return this.subscriptions.subscribe(subscriber);
   }
 
+  /** @internal Validates a command before an outer controller prepares transaction provenance. */
+  assertCommand(command: WorkbookCommand): void {
+    this.ensureMutable();
+    validateCommand(this.state, this.isolateCommand(command));
+  }
+
   dispatch<Command extends WorkbookCommand>(
     command: Command,
     source: ChangeSource,

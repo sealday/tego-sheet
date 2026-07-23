@@ -27,6 +27,21 @@ function directDocument(overrides: Partial<SpreadsheetDocumentInput> = {}): Spre
           columns: [{ index: 3, width: 123, hidden: true }],
           cells: [
             {
+              row: 0,
+              column: 0,
+              cell: {
+                input: {
+                  type: 'custom',
+                  cellType: 'acme.widget',
+                  schemaVersion: 7,
+                  value: { payload: 'before' },
+                },
+                resourceId: 'resource-1',
+                templateId: 'template-1',
+                metadata: { position: 'before' },
+              },
+            },
+            {
               row: 2,
               column: 3,
               cell: {
@@ -39,9 +54,25 @@ function directDocument(overrides: Partial<SpreadsheetDocumentInput> = {}): Spre
                 resourceId: 'resource-1',
                 templateId: 'template-1',
                 styleId: 'style-1',
+                validationId: 'validation-1',
                 metadata: { untouched: true },
                 editable: true,
                 printable: false,
+              },
+            },
+            {
+              row: 5,
+              column: 6,
+              cell: {
+                input: {
+                  type: 'custom',
+                  cellType: 'acme.widget',
+                  schemaVersion: 7,
+                  value: { payload: 'after' },
+                },
+                resourceId: 'resource-1',
+                templateId: 'template-1',
+                metadata: { position: 'after' },
               },
             },
           ],
@@ -55,7 +86,18 @@ function directDocument(overrides: Partial<SpreadsheetDocumentInput> = {}): Spre
         },
       ],
       styles: [{ id: 'style-1', value: { color: '#123456' } }],
-      validations: [],
+      validations: [
+        {
+          id: 'validation-1',
+          value: {
+            mode: 'cell',
+            type: 'number',
+            required: false,
+            operator: 'gte',
+            value: '0',
+          },
+        },
+      ],
       settings: { dateSystem: 'excel-1904', localeHint: 'en-GB' },
     },
     templates: [
@@ -63,6 +105,11 @@ function directDocument(overrides: Partial<SpreadsheetDocumentInput> = {}): Spre
         id: 'template-1',
         name: 'Template',
         sheetId: 'sheet-1',
+        range: {
+          sheetId: 'sheet-1',
+          start: { row: 2, column: 3 },
+          end: { row: 5, column: 6 },
+        },
         printProfile: {
           paperSize: 'A4',
           orientation: 'portrait',
@@ -85,6 +132,76 @@ function directDocument(overrides: Partial<SpreadsheetDocumentInput> = {}): Spre
   const parsed = parseSpreadsheetDocument(input);
   if (!parsed.ok) throw new Error('Direct schema 2 fixture must be valid');
   return parsed.document;
+}
+
+function documentWithEveryInput(): SpreadsheetDocument {
+  const inputs: SpreadsheetDocument['workbook']['sheets'][number]['cells'][number]['cell']['input'][] =
+    [
+      { type: 'string', value: 'plain' },
+      { type: 'number', value: 7 },
+      { type: 'boolean', value: true },
+      { type: 'formula', source: '=A1' },
+      {
+        type: 'custom',
+        cellType: 'acme.all-inputs',
+        schemaVersion: 1,
+        value: { nested: true },
+      },
+    ];
+  const parsed = parseSpreadsheetDocument({
+    schemaVersion: 2,
+    id: 'all-inputs',
+    workbook: {
+      sheets: [
+        {
+          id: 'sheet-1',
+          name: 'Inputs',
+          cells: inputs.map((input, column) => ({
+            row: 0,
+            column,
+            cell: { input, metadata: { inputType: input.type } },
+          })),
+          merges: [],
+        },
+      ],
+      styles: [],
+      validations: [],
+      settings: { dateSystem: 'excel-1900' },
+    },
+    templates: [],
+    resources: { items: [] },
+    extensions: {},
+  });
+  if (!parsed.ok) throw new Error('All-input fixture must be valid');
+  return parsed.document;
+}
+
+function selection(
+  sheet: ReturnType<typeof sheetId>,
+  row: number,
+  column: number,
+  endRow = row,
+  endColumn = column,
+) {
+  return {
+    sheet,
+    active: { row, column },
+    range: {
+      start: { row, column },
+      end: { row: endRow, column: endColumn },
+    },
+  } as const;
+}
+
+function richCells(document: SpreadsheetDocument) {
+  return document.workbook.sheets[0]!.cells.filter(
+    ({ cell }) =>
+      cell.resourceId !== undefined || cell.templateId !== undefined || cell.metadata !== undefined,
+  ).map(({ row, column, cell }) => ({
+    row,
+    column,
+    cell,
+  }));
 }
 
 describe('SpreadsheetDocumentController', () => {
@@ -285,7 +402,9 @@ describe('SpreadsheetDocumentController', () => {
       'toolbar',
     );
 
-    const cell = controller.getDocument().workbook.sheets[0]?.cells[0]?.cell;
+    const cell = controller
+      .getDocument()
+      .workbook.sheets[0]?.cells.find((item) => item.row === 2 && item.column === 3)?.cell;
     expect(cell?.styleId).toBeUndefined();
     expect(cell?.input).toEqual({
       type: 'custom',
@@ -294,6 +413,258 @@ describe('SpreadsheetDocumentController', () => {
       value: { payload: 'kept' },
     });
     expect(cell?.metadata).toEqual({ untouched: true });
+  });
+
+  it.each([
+    {
+      command: { type: 'insert-row', sheet: sheetId('sheet-1'), index: 2, count: 2 } as const,
+      coordinates: [
+        [0, 0],
+        [4, 3],
+        [7, 6],
+      ],
+      layoutIndex: 6,
+      templateRange: {
+        sheetId: 'sheet-1',
+        start: { row: 4, column: 3 },
+        end: { row: 7, column: 6 },
+      },
+    },
+    {
+      command: { type: 'delete-row', sheet: sheetId('sheet-1'), index: 1, count: 2 } as const,
+      coordinates: [
+        [0, 0],
+        [3, 6],
+      ],
+      layoutIndex: 2,
+      templateRange: {
+        sheetId: 'sheet-1',
+        start: { row: 1, column: 3 },
+        end: { row: 3, column: 6 },
+      },
+    },
+    {
+      command: { type: 'insert-column', sheet: sheetId('sheet-1'), index: 3, count: 2 } as const,
+      coordinates: [
+        [0, 0],
+        [2, 5],
+        [5, 8],
+      ],
+      layoutIndex: 5,
+      templateRange: {
+        sheetId: 'sheet-1',
+        start: { row: 2, column: 5 },
+        end: { row: 5, column: 8 },
+      },
+    },
+    {
+      command: { type: 'delete-column', sheet: sheetId('sheet-1'), index: 3, count: 1 } as const,
+      coordinates: [
+        [0, 0],
+        [5, 5],
+      ],
+      layoutIndex: null,
+      templateRange: {
+        sheetId: 'sheet-1',
+        start: { row: 2, column: 3 },
+        end: { row: 5, column: 5 },
+      },
+    },
+  ])(
+    'transforms complete rich cells for $command.type',
+    ({ command, coordinates, layoutIndex, templateRange }) => {
+      const controller = new SpreadsheetDocumentController(directDocument());
+      controller.dispatch(command, 'context-menu');
+
+      const document = controller.getDocument();
+      const cells = richCells(document);
+      expect(cells.map((cell) => [cell.row, cell.column])).toEqual(coordinates);
+      for (const item of cells) {
+        expect(item.cell.input.type).toBe('custom');
+        expect(item.cell.resourceId).toBe('resource-1');
+        expect(item.cell.templateId).toBe('template-1');
+        expect(item.cell.metadata).toBeDefined();
+      }
+      const middle = cells.find(
+        (item) => JSON.stringify(item.cell.metadata) === '{"untouched":true}',
+      );
+      if (middle !== undefined) expect(middle.cell.validationId).toBe('validation-1');
+      const layout = command.type.endsWith('row')
+        ? document.workbook.sheets[0]?.rows
+        : document.workbook.sheets[0]?.columns;
+      expect(layout?.map((item) => item.index)).toEqual(layoutIndex === null ? [] : [layoutIndex]);
+      expect(document.templates[0]?.range).toEqual(templateRange);
+    },
+  );
+
+  it('restores and reapplies rich structural transforms through history', () => {
+    const initial = directDocument();
+    const controller = new SpreadsheetDocumentController(initial);
+    const command = { type: 'insert-row', sheet: sheetId('sheet-1'), index: 2, count: 2 } as const;
+    controller.dispatch(command, 'context-menu');
+    const inserted = controller.getDocument();
+
+    controller.undo();
+    expect(controller.getDocument()).toEqual(initial);
+    controller.redo();
+    expect(controller.getDocument()).toEqual(inserted);
+  });
+
+  it('keeps duplicate-valued rich cells distinct when sorting', () => {
+    const initial = directDocument();
+    const controller = new SpreadsheetDocumentController(initial);
+    controller.dispatch(
+      { type: 'sort', sheet: sheetId('sheet-1'), column: 0, order: 'asc' },
+      'toolbar',
+    );
+
+    expect(richCells(controller.getDocument())).toEqual(richCells(initial));
+  });
+
+  it.each([
+    { cut: false, label: 'copy' },
+    { cut: true, label: 'cut' },
+  ])('$label preserves the complete rich source cell', ({ cut }) => {
+    const controller = new SpreadsheetDocumentController(directDocument());
+    const sheet = sheetId('sheet-1');
+    const source = richCells(controller.getDocument()).find(
+      (item) => item.row === 2 && item.column === 3,
+    )!.cell;
+    controller.dispatch(
+      {
+        type: 'paste-internal',
+        source: selection(sheet, 2, 3),
+        target: selection(sheet, 8, 8),
+        mode: 'all',
+        cut,
+      },
+      'context-menu',
+    );
+
+    const cells = richCells(controller.getDocument());
+    expect(cells.find((item) => item.row === 8 && item.column === 8)?.cell).toEqual(source);
+    expect(cells.some((item) => item.row === 2 && item.column === 3)).toBe(!cut);
+  });
+
+  it('autofill preserves the complete rich source cell', () => {
+    const controller = new SpreadsheetDocumentController(directDocument());
+    const sheet = sheetId('sheet-1');
+    const source = richCells(controller.getDocument()).find(
+      (item) => item.row === 2 && item.column === 3,
+    )!.cell;
+    controller.dispatch(
+      {
+        type: 'autofill',
+        source: selection(sheet, 2, 3),
+        target: selection(sheet, 8, 3),
+        mode: 'all',
+      },
+      'pointer',
+    );
+
+    expect(
+      richCells(controller.getDocument()).find((item) => item.row === 8 && item.column === 3)?.cell,
+    ).toEqual(source);
+  });
+
+  it('copies every CellInput variant with complete cell metadata', () => {
+    const controller = new SpreadsheetDocumentController(documentWithEveryInput());
+    const sheet = sheetId('sheet-1');
+    const sources = [...controller.getDocument().workbook.sheets[0]!.cells];
+    for (let column = 0; column < sources.length; column += 1) {
+      controller.dispatch(
+        {
+          type: 'paste-internal',
+          source: selection(sheet, 0, column),
+          target: selection(sheet, 1, column),
+          mode: 'all',
+          cut: false,
+        },
+        'context-menu',
+      );
+    }
+    const cells = controller.getDocument().workbook.sheets[0]!.cells;
+    for (let column = 0; column < sources.length; column += 1) {
+      expect(cells.find((item) => item.row === 1 && item.column === column)?.cell).toEqual(
+        sources[column]?.cell,
+      );
+    }
+  });
+
+  it('autofills every CellInput variant while preserving complete cell metadata', () => {
+    const controller = new SpreadsheetDocumentController(documentWithEveryInput());
+    const sheet = sheetId('sheet-1');
+    for (let column = 0; column < 5; column += 1) {
+      controller.dispatch(
+        {
+          type: 'autofill',
+          source: selection(sheet, 0, column),
+          target: selection(sheet, 1, column),
+          mode: 'all',
+        },
+        'pointer',
+      );
+    }
+    const cells = controller.getDocument().workbook.sheets[0]!.cells;
+    const expectedInputs = [
+      { type: 'string', value: 'plain' },
+      { type: 'number', value: 7 },
+      { type: 'boolean', value: true },
+      { type: 'formula', source: '=A2' },
+      {
+        type: 'custom',
+        cellType: 'acme.all-inputs',
+        schemaVersion: 1,
+        value: { nested: true },
+      },
+    ];
+    for (let column = 0; column < expectedInputs.length; column += 1) {
+      expect(cells.find((item) => item.row === 1 && item.column === column)?.cell).toEqual({
+        input: expectedInputs[column],
+        metadata: { inputType: expectedInputs[column]?.type },
+      });
+    }
+  });
+
+  it('restores custom input and references through edit undo redo', () => {
+    const controller = new SpreadsheetDocumentController(directDocument());
+    const address = { sheet: sheetId('sheet-1'), row: 2, column: 3 };
+    const original = richCells(controller.getDocument()).find(
+      (item) => item.row === 2 && item.column === 3,
+    )!.cell;
+
+    controller.dispatch({ type: 'set-cell-text', address, text: 'edited' }, 'ref');
+    controller.undo();
+    expect(
+      richCells(controller.getDocument()).find((item) => item.row === 2 && item.column === 3)?.cell,
+    ).toEqual(original);
+
+    controller.redo();
+    expect(
+      richCells(controller.getDocument()).find((item) => item.row === 2 && item.column === 3)?.cell,
+    ).toMatchObject({
+      input: { type: 'string', value: 'edited' },
+      resourceId: 'resource-1',
+      templateId: 'template-1',
+      metadata: { untouched: true },
+    });
+  });
+
+  it('restores a cleared rich cell through undo', () => {
+    const controller = new SpreadsheetDocumentController(directDocument());
+    const sheet = sheetId('sheet-1');
+    const original = richCells(controller.getDocument()).find(
+      (item) => item.row === 2 && item.column === 3,
+    )!.cell;
+    controller.dispatch(
+      { type: 'clear-contents', selection: selection(sheet, 2, 3) },
+      'context-menu',
+    );
+    controller.undo();
+
+    expect(
+      richCells(controller.getDocument()).find((item) => item.row === 2 && item.column === 3)?.cell,
+    ).toEqual(original);
   });
 
   it('rolls back document, projection, revision, history, sequencing, and notifications atomically', () => {

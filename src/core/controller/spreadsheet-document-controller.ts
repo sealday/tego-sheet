@@ -13,6 +13,8 @@ import {
   type WorkbookControllerOptions,
 } from './workbook-controller';
 import { SubscriptionStore } from './subscription-store';
+import { History, type HistoryCheckpoint } from './history';
+import { prepareSchemaCommand } from '../commands/schema-command-plan';
 
 export interface SpreadsheetControllerCommit<
   Result = void,
@@ -41,6 +43,7 @@ export interface SpreadsheetDispatchOptions extends Omit<DispatchOptions, 'befor
 
 export interface SpreadsheetControllerCheckpoint {
   readonly legacy: ReturnType<WorkbookController['checkpoint']>;
+  readonly documentHistory: HistoryCheckpoint<SpreadsheetDocument, null>;
   readonly ['document']: SpreadsheetDocument;
 }
 
@@ -65,6 +68,7 @@ export function cloneFrozenDocumentValue<T>(value: T): T {
 export class SpreadsheetDocumentController {
   private currentDocument: SpreadsheetDocument;
   private checkpointDocument: SpreadsheetDocument | undefined;
+  private readonly documentHistory = new History<SpreadsheetDocument, null>();
   private readonly legacy: WorkbookController;
   private readonly subscriptions = new SubscriptionStore<SpreadsheetControllerEvent>();
 
@@ -87,15 +91,15 @@ export class SpreadsheetDocumentController {
   }
 
   get historySize() {
-    return this.legacy.historySize;
+    return this.documentHistory.size;
   }
 
   get canUndo(): boolean {
-    return this.legacy.canUndo;
+    return this.documentHistory.canUndo;
   }
 
   get canRedo(): boolean {
-    return this.legacy.canRedo;
+    return this.documentHistory.canRedo;
   }
 
   getDocument(): SpreadsheetDocument {
@@ -142,35 +146,62 @@ export class SpreadsheetDocumentController {
         readonly status: 'committed';
         readonly commit: SpreadsheetControllerCommit<CommandResult<Command>, Command>;
       } {
-    const beforeProjection = this.legacy.getValue();
+    this.legacy.assertCommand(command);
+    const plan = prepareSchemaCommand(this.currentDocument, command, this.legacy.getSheetIds());
+    const beforeProjection = projectDocumentToLegacy(plan.document);
+    const historyCheckpoint = this.documentHistory.checkpoint();
     let preparedDocument: SpreadsheetDocument | undefined;
     let preparedCommit: SpreadsheetControllerCommit<CommandResult<Command>, Command> | undefined;
-    const outcome = this.legacy.dispatch(command, source, {
-      ...options,
-      beforeNotify: (legacyCommit) => {
-        const candidate = projectLegacyToDocument(
-          beforeProjection,
-          legacyCommit.value,
-          this.currentDocument,
-          this.legacy.getSheetIds(),
-        );
-        const commit = cloneFrozenDocumentValue({
-          command: legacyCommit.command,
-          change: legacyCommit.change,
-          result: legacyCommit.result,
-          ['document']: candidate,
-        }) as SpreadsheetControllerCommit<CommandResult<Command>, Command>;
-        this.checkpointDocument = candidate;
-        try {
-          options.beforeNotify?.(commit as never);
-          preparedDocument = candidate;
-          preparedCommit = commit;
-        } finally {
-          this.checkpointDocument = undefined;
-        }
-      },
-      notify: false,
-    });
+    let outcome: ReturnType<WorkbookController['dispatch']>;
+    try {
+      outcome = this.legacy.dispatch(command, source, {
+        ...options,
+        beforeNotify: (legacyCommit) => {
+          let candidate: SpreadsheetDocument;
+          if (command.type === 'undo') {
+            const entry = this.documentHistory.undo();
+            if (entry === null) throw new Error('Schema history is not aligned for undo');
+            candidate = entry.before;
+          } else if (command.type === 'redo') {
+            const entry = this.documentHistory.redo();
+            if (entry === null) throw new Error('Schema history is not aligned for redo');
+            candidate = entry.after;
+          } else {
+            candidate = projectLegacyToDocument(
+              beforeProjection,
+              legacyCommit.value,
+              plan.document,
+              this.legacy.getSheetIds(),
+              plan.authoritativeInputs,
+              plan.authoritativeValidations,
+            );
+            this.documentHistory.record({
+              before: this.currentDocument,
+              after: candidate,
+              metadata: null,
+            });
+          }
+          const commit = cloneFrozenDocumentValue({
+            command: legacyCommit.command,
+            change: legacyCommit.change,
+            result: legacyCommit.result,
+            ['document']: candidate,
+          }) as SpreadsheetControllerCommit<CommandResult<Command>, Command>;
+          this.checkpointDocument = candidate;
+          try {
+            options.beforeNotify?.(commit as never);
+            preparedDocument = candidate;
+            preparedCommit = commit;
+          } finally {
+            this.checkpointDocument = undefined;
+          }
+        },
+        notify: false,
+      });
+    } catch (error) {
+      this.documentHistory.restore(historyCheckpoint);
+      throw error;
+    }
     if (outcome.status === 'noop') return outcome;
     if (preparedDocument === undefined || preparedCommit === undefined) {
       throw new Error('Spreadsheet document transaction was not prepared');
@@ -198,12 +229,14 @@ export class SpreadsheetDocumentController {
   checkpoint(): SpreadsheetControllerCheckpoint {
     return {
       legacy: this.legacy.checkpoint(),
+      documentHistory: this.documentHistory.checkpoint(),
       ['document']: this.checkpointDocument ?? this.currentDocument,
     };
   }
 
   restore(checkpoint: SpreadsheetControllerCheckpoint): void {
     this.legacy.restore(checkpoint.legacy);
+    this.documentHistory.restore(checkpoint.documentHistory);
     const { ['document']: checkpointDocument } = checkpoint;
     this.currentDocument = checkpointDocument;
   }
@@ -225,6 +258,7 @@ export class SpreadsheetDocumentController {
       parsedDocument.workbook.sheets.map((sheet) => sheetId(sheet.id)),
     );
     this.currentDocument = parsedDocument;
+    this.documentHistory.clear();
   }
 
   setReadOnly(readOnly: boolean): void {
