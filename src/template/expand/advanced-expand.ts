@@ -6,8 +6,17 @@ import type {
   SpreadsheetDocument,
 } from '../../document';
 import { parseFormula, renderFormula, translateFormula } from '../../formula';
-import { evaluateTemplateExpression, type TemplateFormatterRegistry } from '../expression';
-import type { CompiledTemplate, RenderLimits, TemplateIRBinding } from '../model';
+import {
+  compileTemplateExpression,
+  evaluateTemplateExpression,
+  type TemplateFormatterRegistry,
+} from '../expression';
+import type {
+  CompiledTemplate,
+  RenderLimits,
+  TemplateIRBinding,
+  TemplateRegionNode,
+} from '../model';
 import { expandTemplate } from './expand';
 
 export interface StructuralMapping {
@@ -232,6 +241,266 @@ function safeSheetName(value: unknown, fallback: string): string {
   return sanitized || fallback;
 }
 
+function bindingByType(
+  compiled: CompiledTemplate,
+  bindingId: string,
+): TemplateIRBinding['type'] | undefined {
+  return compiled.ir.bindings.find(({ id }) => id === bindingId)?.type;
+}
+
+function valueInput(value: unknown): Cell['input'] {
+  if (value === undefined || value === null) return { type: 'blank' };
+  if (typeof value === 'string') return { type: 'string', value };
+  if (typeof value === 'number' && Number.isFinite(value)) return { type: 'number', value };
+  if (typeof value === 'boolean') return { type: 'boolean', value };
+  return { type: 'string', value: JSON.stringify(value) };
+}
+
+function expandNestedRows(
+  document: SpreadsheetDocument,
+  compiled: CompiledTemplate,
+  data: unknown,
+  formatters: TemplateFormatterRegistry,
+  limits: RenderLimits,
+  signal?: AbortSignal,
+): {
+  readonly document?: SpreadsheetDocument;
+  readonly diagnostics: readonly Diagnostic[];
+  readonly mappings: readonly StructuralMapping[];
+  readonly breaks: ReadonlyMap<string, readonly number[]>;
+} {
+  const byId = new Map(compiled.ir.bindings.map((binding) => [binding.id, binding]));
+  const isVerticalTree = (node: TemplateRegionNode): boolean =>
+    byId.get(node.bindingId)?.type === 'repeat-rows' && node.children.every(isVerticalTree);
+  const roots = (compiled.ir.regionTree ?? []).filter(isVerticalTree);
+  if (roots.length === 0) {
+    return { document, diagnostics: [], mappings: [], breaks: new Map() };
+  }
+  const valueBindings = compiled.ir.bindings.filter(
+    (binding): binding is Extract<TemplateIRBinding, { readonly type: 'value' }> =>
+      binding.type === 'value',
+  );
+  const diagnostics: Diagnostic[] = [];
+  const mappings: StructuralMapping[] = [];
+  const breaks = new Map<string, number[]>();
+  const sheets = [...document.workbook.sheets];
+  let totalCells = sheets.reduce((count, sheet) => count + sheet.cells.length, 0);
+  let totalRows = 0;
+
+  for (const root of [...roots].sort(
+    (left, right) => right.range.start.row - left.range.start.row,
+  )) {
+    const sheetIndex = sheets.findIndex(({ id }) => id === root.range.sheetId);
+    if (sheetIndex < 0) continue;
+    const sourceSheet = sheets[sheetIndex]!;
+
+    interface Fragment {
+      readonly cells: Sheet['cells'][number][];
+      readonly rows: Sheet['rows'][number][];
+      readonly height: number;
+    }
+
+    const renderNode = (
+      node: TemplateRegionNode,
+      parentScope: Scope,
+      destinationStart: number,
+    ): Fragment => {
+      const binding = byId.get(node.bindingId) as
+        | Extract<TemplateIRBinding, { readonly type: 'repeat-rows' }>
+        | undefined;
+      if (binding === undefined) return { cells: [], rows: [], height: 0 };
+      const resolved = evaluateTemplateExpression(binding.source, parentScope, formatters);
+      const items = Array.isArray(resolved) ? resolved : [];
+      const copies =
+        items.length === 0 && binding.empty === 'keep-template-row' ? [undefined] : items;
+      const cells: Sheet['cells'][number][] = [];
+      const rows: Sheet['rows'][number][] = [];
+      let height = 0;
+      for (const [index, item] of copies.entries()) {
+        if (signal?.aborted) return { cells: [], rows: [], height: 0 };
+        const fragment = renderRange(
+          node.range,
+          node.children,
+          {
+            root: data,
+            item,
+            parent: parentScope.item,
+            index,
+            first: index === 0,
+            last: index === copies.length - 1,
+          },
+          destinationStart + height,
+        );
+        mappings.push({
+          bindingId: binding.id,
+          itemIndex: index,
+          source: binding.range,
+          generated: {
+            sheetId: binding.range.sheetId,
+            start: { ...binding.range.start, row: destinationStart + height },
+            end: {
+              ...binding.range.end,
+              row: destinationStart + height + Math.max(0, fragment.height - 1),
+            },
+          },
+        });
+        if (binding.pageBreak === 'before-each-item' && index > 0) {
+          const values = breaks.get(binding.range.sheetId) ?? [];
+          values.push(destinationStart + height);
+          breaks.set(binding.range.sheetId, values);
+        }
+        cells.push(...fragment.cells);
+        rows.push(...fragment.rows);
+        height += fragment.height;
+      }
+      return { cells, rows, height };
+    };
+
+    const renderRange = (
+      range: DocumentCellRange,
+      children: readonly TemplateRegionNode[],
+      scope: Scope,
+      destinationStart: number,
+    ): Fragment => {
+      const cells: Sheet['cells'][number][] = [];
+      const rows: Sheet['rows'][number][] = [];
+      const sortedChildren = [...children].sort(
+        (left, right) => left.range.start.row - right.range.start.row,
+      );
+      let childIndex = 0;
+      let sourceRow = range.start.row;
+      let height = 0;
+      while (sourceRow <= range.end.row) {
+        const child = sortedChildren[childIndex];
+        if (child !== undefined && child.range.start.row === sourceRow) {
+          const fragment = renderNode(child, scope, destinationStart + height);
+          cells.push(...fragment.cells);
+          rows.push(...fragment.rows);
+          height += fragment.height;
+          sourceRow = child.range.end.row + 1;
+          childIndex += 1;
+          continue;
+        }
+        const generatedRow = destinationStart + height;
+        const rowDelta = generatedRow - sourceRow;
+        const sourceCells = sourceSheet.cells.filter(({ row }) => row === sourceRow);
+        const targets = valueBindings.filter(
+          ({ target }) => target.sheetId === sourceSheet.id && target.row === sourceRow,
+        );
+        for (const entry of sourceCells) {
+          const valueBinding = targets.find(({ target }) => target.column === entry.column);
+          let cell = translatedCell(entry.cell, rowDelta, 0);
+          if (valueBinding !== undefined) {
+            let value = evaluateTemplateExpression(valueBinding.expression, scope, formatters);
+            if (value === undefined) {
+              diagnostics.push(
+                error(
+                  'MISSING_DATA',
+                  `Binding ${valueBinding.id} resolved to a missing value`,
+                  valueBinding.id,
+                ),
+              );
+              value = null;
+            }
+            cell = { ...cell, input: valueInput(value) };
+          }
+          cells.push({ ...entry, row: generatedRow, cell });
+        }
+        for (const valueBinding of targets.filter(
+          ({ target }) => !sourceCells.some(({ column }) => column === target.column),
+        )) {
+          cells.push({
+            row: generatedRow,
+            column: valueBinding.target.column,
+            cell: {
+              input: valueInput(
+                evaluateTemplateExpression(valueBinding.expression, scope, formatters),
+              ),
+            },
+          });
+        }
+        const row = sourceSheet.rows.find(({ index }) => index === sourceRow);
+        if (row !== undefined) rows.push({ ...row, index: generatedRow });
+        sourceRow += 1;
+        height += 1;
+      }
+      return { cells, rows, height };
+    };
+
+    const fragment = renderNode(root, { root: data }, root.range.start.row);
+    if (signal?.aborted) {
+      return {
+        diagnostics: [error('RENDER_ABORTED', 'Template rendering was aborted')],
+        mappings: [],
+        breaks: new Map(),
+      };
+    }
+    const sourceHeight = root.range.end.row - root.range.start.row + 1;
+    const delta = fragment.height - sourceHeight;
+    const replaced = sourceSheet.cells.filter(
+      ({ row }) => row >= root.range.start.row && row <= root.range.end.row,
+    ).length;
+    totalCells += fragment.cells.length - replaced;
+    totalRows += fragment.height;
+    if (
+      totalCells > limits.maxExpandedCells ||
+      totalRows > limits.maxExpandedRows ||
+      diagnostics.some(({ severity }) => severity === 'error')
+    ) {
+      return {
+        diagnostics:
+          diagnostics.length > 0
+            ? diagnostics
+            : [
+                error(
+                  'EXPANSION_LIMIT_EXCEEDED',
+                  'Nested expansion exceeds configured limits',
+                  root.bindingId,
+                ),
+              ],
+        mappings: [],
+        breaks: new Map(),
+      };
+    }
+    sheets[sheetIndex] = {
+      ...sourceSheet,
+      cells: [
+        ...sourceSheet.cells.filter(({ row }) => row < root.range.start.row),
+        ...fragment.cells,
+        ...sourceSheet.cells
+          .filter(({ row }) => row > root.range.end.row)
+          .map((entry) => ({ ...entry, row: entry.row + delta })),
+      ].sort((left, right) => left.row - right.row || left.column - right.column),
+      rows: [
+        ...sourceSheet.rows.filter(({ index }) => index < root.range.start.row),
+        ...fragment.rows,
+        ...sourceSheet.rows
+          .filter(({ index }) => index > root.range.end.row)
+          .map((row) => ({ ...row, index: row.index + delta })),
+      ],
+      merges: sourceSheet.merges
+        .filter(
+          ({ start, end }) => end.row < root.range.start.row || start.row > root.range.end.row,
+        )
+        .map((merge) =>
+          merge.start.row > root.range.end.row
+            ? {
+                start: { ...merge.start, row: merge.start.row + delta },
+                end: { ...merge.end, row: merge.end.row + delta },
+              }
+            : merge,
+        ),
+      ...(sourceSheet.rowCount === undefined ? {} : { rowCount: sourceSheet.rowCount + delta }),
+    };
+  }
+  return {
+    document: freeze({ ...document, workbook: { ...document.workbook, sheets } }),
+    diagnostics,
+    mappings,
+    breaks,
+  };
+}
+
 /** Expands TP2 structural bindings without publishing a partial document on failure. */
 export function expandAdvancedTemplate(
   compiled: CompiledTemplate,
@@ -273,10 +542,23 @@ export function expandAdvancedTemplate(
       binding.type === 'repeat-rows' ||
       binding.type === 'conditional-range',
   );
+  const nestedRanges = (compiled.ir.regionTree ?? [])
+    .filter((node) => bindingByType(compiled, node.bindingId) === 'repeat-rows')
+    .map(({ range }) => range);
+  const handledByNested = (binding: TemplateIRBinding): boolean =>
+    nestedRanges.some((range) =>
+      'target' in binding
+        ? binding.target.sheetId === range.sheetId &&
+          binding.target.row >= range.start.row &&
+          binding.target.row <= range.end.row
+        : binding.range.sheetId === range.sheetId &&
+          binding.range.start.row >= range.start.row &&
+          binding.range.end.row <= range.end.row,
+    );
   const base = expandTemplate(
     compiled.sourceDocument,
     compiled.ir.template,
-    tp1Bindings,
+    tp1Bindings.filter((binding) => !handledByNested(binding)),
     data,
     formatters,
     limits,
@@ -285,6 +567,14 @@ export function expandAdvancedTemplate(
   if (base.document === undefined) {
     return freeze({
       diagnostics: base.diagnostics,
+      structuralMappings: [],
+      forcedPageBreaks: new Map(),
+    });
+  }
+  const nested = expandNestedRows(base.document, compiled, data, formatters, limits, signal);
+  if (nested.document === undefined) {
+    return freeze({
+      diagnostics: nested.diagnostics,
       structuralMappings: [],
       forcedPageBreaks: new Map(),
     });
@@ -315,7 +605,7 @@ export function expandAdvancedTemplate(
     return count + source * Math.max(0, multiplier - 1);
   }, sourceCells);
   const generatedSheets =
-    base.document.workbook.sheets.length +
+    nested.document.workbook.sheets.length +
     estimates
       .filter(({ binding }) => binding.type === 'repeat-sheet')
       .reduce((sum, { items }) => sum + items.length, 0);
@@ -331,9 +621,11 @@ export function expandAdvancedTemplate(
       forcedPageBreaks: new Map(),
     });
   }
-  let document = base.document;
-  const mappings: StructuralMapping[] = [];
-  const forcedPageBreaks = new Map<string, number[]>();
+  let document = nested.document;
+  const mappings: StructuralMapping[] = [...nested.mappings];
+  const forcedPageBreaks = new Map(
+    [...nested.breaks].map(([sheetId, values]) => [sheetId, [...values]]),
+  );
   const generatedNames = new Set(document.workbook.sheets.map(({ name }) => name));
   const generatedIds = new Set(document.workbook.sheets.map(({ id }) => id));
   for (const { binding, items } of estimates.sort(
@@ -409,6 +701,64 @@ export function expandAdvancedTemplate(
           ],
           structuralMappings: [],
           forcedPageBreaks: new Map(),
+        });
+      }
+      const sheetIndex = document.workbook.sheets.findIndex(
+        ({ id }) => id === binding.range.sheetId,
+      );
+      const context = evaluateTemplateExpression(binding.source, { root: data }, formatters);
+      if (sheetIndex >= 0) {
+        const sheet = document.workbook.sheets[sheetIndex]!;
+        const childValues = registered.bindings.filter(
+          (
+            candidate,
+          ): candidate is Extract<
+            (typeof registered.bindings)[number],
+            { readonly type: 'value' }
+          > => candidate.type === 'value',
+        );
+        const minimumRow = Math.min(
+          ...childValues.map(({ target }) => target.row),
+          binding.range.start.row,
+        );
+        const minimumColumn = Math.min(
+          ...childValues.map(({ target }) => target.column),
+          binding.range.start.column,
+        );
+        let cells = [...sheet.cells];
+        for (const child of childValues) {
+          const row = binding.range.start.row + child.target.row - minimumRow;
+          const column = binding.range.start.column + child.target.column - minimumColumn;
+          const value = evaluateTemplateExpression(
+            compileTemplateExpression(child.expression),
+            { root: data, item: context },
+            formatters,
+          );
+          const existing = cells.find((entry) => entry.row === row && entry.column === column);
+          cells = [
+            ...cells.filter((entry) => entry.row !== row || entry.column !== column),
+            {
+              row,
+              column,
+              cell: { ...existing?.cell, input: valueInput(value) },
+            },
+          ];
+        }
+        document = freeze({
+          ...document,
+          workbook: {
+            ...document.workbook,
+            sheets: document.workbook.sheets.map((candidate, index) =>
+              index === sheetIndex
+                ? {
+                    ...candidate,
+                    cells: cells.sort(
+                      (left, right) => left.row - right.row || left.column - right.column,
+                    ),
+                  }
+                : candidate,
+            ),
+          },
         });
       }
       mappings.push({

@@ -181,19 +181,24 @@ function validateStructuralBindings(
     }
   }
   for (const binding of structural) {
-    if (
-      'objects' in binding &&
-      binding.objects !== undefined &&
-      binding.objects.length > 0 &&
-      binding.objectPolicy === undefined
-    ) {
-      diagnostics.push(
-        diagnostic(
-          'OBJECT_REPEAT_POLICY_REQUIRED',
-          `Binding ${binding.id} intersects floating objects but has no copy policy`,
-          binding,
-        ),
-      );
+    if ('objects' in binding && binding.objects !== undefined && binding.objects.length > 0) {
+      if (binding.objectPolicy === undefined) {
+        diagnostics.push(
+          diagnostic(
+            'OBJECT_REPEAT_POLICY_REQUIRED',
+            `Binding ${binding.id} intersects floating objects but has no copy policy`,
+            binding,
+          ),
+        );
+      } else if (binding.objectPolicy === 'forbidden') {
+        diagnostics.push(
+          diagnostic(
+            'OBJECT_REPEAT_FORBIDDEN',
+            `Binding ${binding.id} forbids repeating intersecting objects`,
+            binding,
+          ),
+        );
+      }
     }
     if (
       binding.type !== 'repeat-rows' &&

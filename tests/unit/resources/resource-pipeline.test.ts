@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   createResourceResolverRegistry,
+  createResolvedResourceCache,
   resolveTemplateResources,
   type ResourceRef,
   type ResourceResolver,
@@ -109,6 +110,34 @@ describe('TP3 resource pipeline', () => {
     );
   });
 
+  it('bounds resolvers that ignore cancellation with a stable timeout', async () => {
+    const result = await resolveTemplateResources(
+      [{ id: 'hung', type: 'binary', resolverId: 'hung', key: 'hung' }],
+      {
+        registry: createResourceResolverRegistry([
+          resolver('hung', async () => new Promise(() => {})),
+        ]),
+        signal: new AbortController().signal,
+        purpose: 'preview',
+        limits: {
+          maxResources: 1,
+          maxResourceBytes: 10,
+          maxTotalResourceBytes: 10,
+          maxResolveConcurrency: 1,
+          maxPixels: 1,
+          maxSvgNodes: 1,
+          maxFonts: 1,
+          maxResolveTimeMs: 5,
+          maxDecompressedBytes: 10,
+        },
+      },
+    );
+    expect(result.store).toBeUndefined();
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'RESOURCE_TIMEOUT' }),
+    );
+  });
+
   it('waits for fonts, creates deterministic QR vectors, and disposes on cancellation', async () => {
     const dispose = vi.fn();
     const waitUntilReady = vi.fn(async () => {});
@@ -159,5 +188,37 @@ describe('TP3 resource pipeline', () => {
     const aborted = await pending;
     expect(aborted.store).toBeUndefined();
     expect(aborted.diagnostics).toContainEqual(expect.objectContaining({ code: 'RENDER_ABORTED' }));
+  });
+
+  it('keeps concurrent sessions isolated and evicts cache entries by LRU byte budget', async () => {
+    let generation = 0;
+    const registry = createResourceResolverRegistry([
+      resolver('session', async () => ({
+        bytes: bytes(1, ++generation),
+        mimeType: 'application/octet-stream',
+      })),
+    ]);
+    const [left, right] = await Promise.all([
+      resolveTemplateResources(
+        [{ id: 'value', type: 'binary', resolverId: 'session', key: 'value' }],
+        { registry, signal: new AbortController().signal, purpose: 'preview' },
+      ),
+      resolveTemplateResources(
+        [{ id: 'value', type: 'binary', resolverId: 'session', key: 'value' }],
+        { registry, signal: new AbortController().signal, purpose: 'preview' },
+      ),
+    ]);
+    expect(left.store).not.toBe(right.store);
+    expect(left.store?.byReference.value).not.toBe(right.store?.byReference.value);
+
+    const releaseFirst = vi.fn();
+    const cache = createResolvedResourceCache(3);
+    const first = left.store!.byReference.value!;
+    const second = right.store!.byReference.value!;
+    await cache.put(first, releaseFirst);
+    expect(cache.get(first.contentHash)).toBe(first);
+    await cache.put({ ...second, bytes: bytes(1, 2, 3, 4) });
+    expect(releaseFirst).toHaveBeenCalledOnce();
+    expect(cache.byteLength).toBe(0);
   });
 });

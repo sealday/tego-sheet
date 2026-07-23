@@ -11,6 +11,7 @@ export {
   createBlobResourceResolver,
   createDataUrlResourceResolver,
   createResourceResolverRegistry,
+  createResolvedResourceCache,
   resolveTemplateResources,
 } from './resources';
 export type {
@@ -23,6 +24,7 @@ export type {
 export type { AdvancedExpansionResult, StructuralMapping } from './expand';
 export type {
   ResolvedResource,
+  ResolvedResourceCache,
   ResolvedResourceStore,
   ResolveContext,
   ResourceLimits,

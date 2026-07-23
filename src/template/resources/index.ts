@@ -2,10 +2,12 @@ export {
   createBlobResourceResolver,
   createDataUrlResourceResolver,
   createResourceResolverRegistry,
+  createResolvedResourceCache,
   resolveTemplateResources,
 } from './resource-pipeline';
 export type {
   ResolvedResource,
+  ResolvedResourceCache,
   ResolvedResourceStore,
   ResolveContext,
   ResourceLimits,

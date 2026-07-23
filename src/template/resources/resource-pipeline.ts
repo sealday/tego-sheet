@@ -102,6 +102,13 @@ export interface ResourceResolutionResult {
   readonly diagnostics: readonly Diagnostic[];
 }
 
+export interface ResolvedResourceCache {
+  get(contentHash: string): ResolvedResource | undefined;
+  put(resource: ResolvedResource, release?: () => void | Promise<void>): Promise<void>;
+  clear(): Promise<void>;
+  readonly byteLength: number;
+}
+
 const DEFAULT_LIMITS: ResourceLimits = Object.freeze({
   maxResources: 256,
   maxResourceBytes: 16 * 1024 * 1024,
@@ -113,6 +120,67 @@ const DEFAULT_LIMITS: ResourceLimits = Object.freeze({
   maxResolveTimeMs: 15_000,
   maxDecompressedBytes: 64 * 1024 * 1024,
 });
+
+/** Creates an explicit byte-budgeted LRU cache for host-managed cross-session reuse. */
+export function createResolvedResourceCache(maximumBytes: number): ResolvedResourceCache {
+  if (!Number.isFinite(maximumBytes) || maximumBytes <= 0) {
+    throw new TypeError('Resource cache byte budget must be positive');
+  }
+  const entries = new Map<
+    string,
+    { readonly resource: ResolvedResource; readonly release?: () => void | Promise<void> }
+  >();
+  let bytes = 0;
+  const evict = async (): Promise<void> => {
+    while (bytes > maximumBytes && entries.size > 0) {
+      const oldest = entries.entries().next().value as
+        | [
+            string,
+            {
+              readonly resource: ResolvedResource;
+              readonly release?: () => void | Promise<void>;
+            },
+          ]
+        | undefined;
+      if (oldest === undefined) return;
+      entries.delete(oldest[0]);
+      bytes -= oldest[1].resource.bytes.byteLength;
+      await oldest[1].release?.();
+    }
+  };
+  return {
+    get(contentHash) {
+      const entry = entries.get(contentHash);
+      if (entry === undefined) return undefined;
+      entries.delete(contentHash);
+      entries.set(contentHash, entry);
+      return entry.resource;
+    },
+    async put(resource, release) {
+      const previous = entries.get(resource.contentHash);
+      if (previous !== undefined) {
+        entries.delete(resource.contentHash);
+        bytes -= previous.resource.bytes.byteLength;
+        await previous.release?.();
+      }
+      entries.set(resource.contentHash, {
+        resource,
+        ...(release === undefined ? {} : { release }),
+      });
+      bytes += resource.bytes.byteLength;
+      await evict();
+    },
+    async clear() {
+      const releases = [...entries.values()].map(({ release }) => release?.());
+      entries.clear();
+      bytes = 0;
+      await Promise.allSettled(releases);
+    },
+    get byteLength() {
+      return bytes;
+    },
+  };
+}
 
 function freeze<T>(value: T): T {
   if (Array.isArray(value)) return Object.freeze(value.map(freeze)) as T;
@@ -243,6 +311,35 @@ function makeQr(
   return { bytes: new TextEncoder().encode(ref.key), mimeType: 'image/x-tego-qr', vector };
 }
 
+async function controlled<T>(
+  task: Promise<T>,
+  signal: AbortSignal,
+  remainingMs: number,
+): Promise<T> {
+  if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let removeAbort = (): void => {};
+  try {
+    return await Promise.race([
+      task,
+      new Promise<T>((_resolve, reject) => {
+        const onAbort = (): void => reject(new DOMException('Aborted', 'AbortError'));
+        signal.addEventListener('abort', onAbort, { once: true });
+        removeAbort = () => signal.removeEventListener('abort', onAbort);
+      }),
+      new Promise<T>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new DOMException('Timed out', 'TimeoutError')),
+          Math.max(1, remainingMs),
+        );
+      }),
+    ]);
+  } finally {
+    removeAbort();
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
+
 /** Creates a deterministic, explicit resolver registry. No network resolver is installed implicitly. */
 export function createResourceResolverRegistry(
   resolvers: readonly ResourceResolver[],
@@ -355,15 +452,25 @@ export async function resolveTemplateResources(
             );
             return;
           }
-          raw = await resolver.resolve(ref, {
-            signal: sessionController.signal,
-            limits,
-            requestedPurpose: options.purpose,
-          });
+          raw = await controlled(
+            resolver.resolve(ref, {
+              signal: sessionController.signal,
+              limits,
+              requestedPurpose: options.purpose,
+            }),
+            sessionController.signal,
+            limits.maxResolveTimeMs - (Date.now() - started),
+          );
         }
-      } catch {
+      } catch (cause) {
         if (options.signal.aborted) return;
-        fail('RESOURCE_FETCH_FAILED', `Resolver ${ref.resolverId} failed`, ref);
+        fail(
+          cause instanceof DOMException && cause.name === 'TimeoutError'
+            ? 'RESOURCE_TIMEOUT'
+            : 'RESOURCE_FETCH_FAILED',
+          `Resolver ${ref.resolverId} failed`,
+          ref,
+        );
         return;
       }
       if (raw.dispose !== undefined) disposers.add(raw.dispose);
@@ -408,10 +515,10 @@ export async function resolveTemplateResources(
           let width = raw.width;
           let height = raw.height;
           if (ref.type === 'image' && options.decodeImage !== undefined) {
-            const image = await options.decodeImage(
-              raw.bytes,
-              raw.mimeType,
+            const image = await controlled(
+              options.decodeImage(raw.bytes, raw.mimeType, sessionController.signal),
               sessionController.signal,
+              limits.maxResolveTimeMs - (Date.now() - started),
             );
             width = image.width;
             height = image.height;
@@ -428,7 +535,12 @@ export async function resolveTemplateResources(
           ) {
             throw new Error('PIXEL_LIMIT');
           }
-          if (raw.font !== undefined) await raw.font.waitUntilReady(sessionController.signal);
+          if (raw.font !== undefined)
+            await controlled(
+              raw.font.waitUntilReady(sessionController.signal),
+              sessionController.signal,
+              limits.maxResolveTimeMs - (Date.now() - started),
+            );
           return freeze({
             contentHash: hash,
             mimeType: raw.mimeType,

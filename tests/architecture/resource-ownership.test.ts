@@ -666,13 +666,19 @@ it('[ARCH-5] separates browser API implementations from section 6.6 lifetime own
         'src/engine/interaction/resource-registry.ts',
         'src/output/browser-print-adapter.ts',
         'src/react/adapters/interaction-adapter.ts',
+        'src/template/render.ts',
+        'src/template/resources/resource-pipeline.ts',
       ]),
     ],
     ['observer', new Set(['src/react/adapters/interaction-adapter.ts'])],
     ['animation-frame', new Set(['src/engine/canvas/render-scheduler.ts'])],
     [
       'timer',
-      new Set(['src/output/browser-print-adapter.ts', 'src/react/adapters/interaction-adapter.ts']),
+      new Set([
+        'src/output/browser-print-adapter.ts',
+        'src/react/adapters/interaction-adapter.ts',
+        'src/template/resources/resource-pipeline.ts',
+      ]),
     ],
     [
       'subscription',

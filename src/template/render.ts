@@ -21,8 +21,18 @@ import {
   type PaginationPage,
   type PaginationTarget,
 } from '../print/layout';
-import { expandTemplate, type RowInsertion } from './expand';
+import {
+  expandAdvancedTemplate,
+  expandTemplate,
+  type RowInsertion,
+  type StructuralMapping,
+} from './expand';
 import { TemplateExpressionError } from './expression';
+import {
+  createResourceResolverRegistry,
+  resolveTemplateResources,
+  type ResolvedResourceStore,
+} from './resources';
 import type {
   GeneratedDocument,
   RenderEnvironment,
@@ -37,6 +47,13 @@ const DEFAULT_LIMITS: RenderLimits = Object.freeze({
   maxExpandedRows: 100_000,
   maxPages: 10_000,
   maxLayoutTimeMs: 5_000,
+  maxExpandedColumns: 16_384,
+  maxGeneratedSheets: 256,
+  maxNestingDepth: 8,
+  maxResources: 256,
+  maxResourceBytes: 16 * 1024 * 1024,
+  maxTotalResourceBytes: 64 * 1024 * 1024,
+  maxResolveConcurrency: 4,
 });
 
 const PAPER = Object.freeze({
@@ -53,6 +70,7 @@ interface ResolvedTarget {
 
 function freeze<T>(value: T): T {
   if (Array.isArray(value)) return Object.freeze(value.map(freeze)) as T;
+  if (ArrayBuffer.isView(value) || value instanceof Map || value instanceof Set) return value;
   if (value !== null && typeof value === 'object') {
     for (const child of Object.values(value as Record<string, unknown>)) freeze(child);
     return Object.freeze(value);
@@ -103,9 +121,10 @@ function usedRange(sheet: Sheet): DocumentCellRange {
 function transformRange(
   range: DocumentCellRange,
   insertions: ReadonlyMap<string, readonly RowInsertion[]>,
+  structuralMappings: readonly StructuralMapping[] = [],
 ): DocumentCellRange {
   const sheetInsertions = insertions.get(range.sheetId) ?? [];
-  return {
+  const mapped = {
     ...range,
     start: { ...range.start, row: mappedRow(range.start.row, sheetInsertions) },
     end: {
@@ -119,16 +138,40 @@ function transformRange(
         ),
     },
   };
+  const relevant = structuralMappings.filter(
+    ({ source }) =>
+      source.sheetId === range.sheetId &&
+      source.start.row >= range.start.row &&
+      source.end.row <= range.end.row &&
+      source.start.column >= range.start.column &&
+      source.end.column <= range.end.column,
+  );
+  const rowDelta = relevant.reduce(
+    (maximum, { source, generated }) => Math.max(maximum, generated.end.row - source.end.row),
+    0,
+  );
+  const columnDelta = relevant.reduce(
+    (maximum, { source, generated }) => Math.max(maximum, generated.end.column - source.end.column),
+    0,
+  );
+  return {
+    ...mapped,
+    end: {
+      row: mapped.end.row + rowDelta,
+      column: mapped.end.column + columnDelta,
+    },
+  };
 }
 
 function targets(
   document: SpreadsheetDocument,
   profile: TemplatePrintProfile,
   insertions: ReadonlyMap<string, readonly RowInsertion[]>,
+  structuralMappings: readonly StructuralMapping[] = [],
 ): readonly ResolvedTarget[] {
   const output: ResolvedTarget[] = [];
   const append = (range: DocumentCellRange, transform = true): void => {
-    const transformed = transform ? transformRange(range, insertions) : range;
+    const transformed = transform ? transformRange(range, insertions, structuralMappings) : range;
     const sheet = document.workbook.sheets.find(({ id }) => id === transformed.sheetId);
     if (sheet === undefined) return;
     output.push({
@@ -172,6 +215,7 @@ function paginationTargets(
   resolved: readonly ResolvedTarget[],
   profile: TemplatePrintProfile,
   insertions: ReadonlyMap<string, readonly RowInsertion[]>,
+  structuralMappings: readonly StructuralMapping[] = [],
 ): readonly PaginationTarget[] {
   return resolved.map(({ id, sheet, range }) => ({
     id,
@@ -184,7 +228,7 @@ function paginationTargets(
     ...(profile.repeatRows?.sheetId === sheet.id
       ? {
           repeatRows: (() => {
-            const repeated = transformRange(profile.repeatRows, insertions);
+            const repeated = transformRange(profile.repeatRows, insertions, structuralMappings);
             return Array.from({ length: repeated.end.row - repeated.start.row + 1 }, (_, index) =>
               rowHeight(sheet, repeated.start.row + index),
             );
@@ -275,6 +319,7 @@ function displayPages(
   profile: TemplatePrintProfile,
   resolvePresentation: (sheetId: DocumentSheetId, row: number, column: number) => CellPresentation,
   insertions: ReadonlyMap<string, readonly RowInsertion[]>,
+  structuralMappings: readonly StructuralMapping[],
   data: unknown,
   date: Date,
 ): readonly PrintDisplayPageInput[] {
@@ -292,7 +337,7 @@ function displayPages(
     const titleRows =
       profile.repeatRows?.sheetId === target.sheet.id
         ? (() => {
-            const range = transformRange(profile.repeatRows, insertions);
+            const range = transformRange(profile.repeatRows, insertions, structuralMappings);
             return Array.from(
               { length: range.end.row - range.start.row + 1 },
               (_, index) => range.start.row + index,
@@ -450,47 +495,104 @@ export async function renderSpreadsheetTemplate(
   }
   const limits = Object.freeze({ ...DEFAULT_LIMITS, ...request.limits });
   const start = Date.now();
+  const resourceController = new AbortController();
+  const abortResources = (): void => resourceController.abort();
+  request.signal?.addEventListener('abort', abortResources, { once: true });
+  const resourceResult = await resolveTemplateResources(request.resourceRefs ?? [], {
+    registry: environment.resourceRegistry ?? createResourceResolverRegistry([]),
+    signal: resourceController.signal,
+    purpose: environment.resourcePurpose ?? 'preview',
+    limits: {
+      maxResources: limits.maxResources,
+      maxResourceBytes: limits.maxResourceBytes,
+      maxTotalResourceBytes: limits.maxTotalResourceBytes,
+      maxResolveConcurrency: limits.maxResolveConcurrency,
+    },
+    ...(environment.decodeImage === undefined ? {} : { decodeImage: environment.decodeImage }),
+  });
+  request.signal?.removeEventListener('abort', abortResources);
+  if (resourceResult.store === undefined) {
+    return freeze({ diagnostics: resourceResult.diagnostics });
+  }
+  const resources: ResolvedResourceStore = resourceResult.store;
+  const failAfterResources = async (result: RenderResult): Promise<RenderResult> => {
+    await resources?.dispose();
+    return result;
+  };
   const profile = request.template.ir.profiles.find(({ id }) => id === request.profileId);
   if (profile === undefined) {
-    return freeze({
-      diagnostics: [
-        renderDiagnostic('INVALID_PRINT_TARGET', `Unknown print profile: ${request.profileId}`),
-      ],
-    });
+    return failAfterResources(
+      freeze({
+        diagnostics: [
+          renderDiagnostic('INVALID_PRINT_TARGET', `Unknown print profile: ${request.profileId}`),
+        ],
+      }),
+    );
   }
   let expansion;
   try {
-    expansion = expandTemplate(
-      request.template.sourceDocument,
-      request.template.ir.template,
-      request.template.ir.bindings,
-      request.data,
-      environment.formatters ?? {},
-      limits,
-      request.signal,
-    );
+    const hasAdvanced =
+      request.template.ir.regionTree !== undefined ||
+      request.template.ir.bindings.some(
+        ({ type }) =>
+          type === 'repeat-columns' ||
+          type === 'repeat-range' ||
+          type === 'repeat-page' ||
+          type === 'repeat-sheet' ||
+          type === 'subtemplate',
+      );
+    if (hasAdvanced) {
+      const advanced = expandAdvancedTemplate(
+        request.template,
+        request.data,
+        limits,
+        environment.formatters ?? {},
+        request.signal,
+      );
+      expansion = {
+        document: advanced.document,
+        diagnostics: advanced.diagnostics,
+        insertedRows: new Map<string, readonly RowInsertion[]>(),
+        repeatPageBreaks: advanced.forcedPageBreaks,
+        structuralMappings: advanced.structuralMappings,
+      };
+    } else {
+      expansion = expandTemplate(
+        request.template.sourceDocument,
+        request.template.ir.template,
+        request.template.ir.bindings,
+        request.data,
+        environment.formatters ?? {},
+        limits,
+        request.signal,
+      );
+      expansion = { ...expansion, structuralMappings: [] };
+    }
   } catch (cause) {
     if (!(cause instanceof TemplateExpressionError)) throw cause;
-    return freeze({
-      diagnostics: [
-        renderDiagnostic(
-          cause.code,
-          cause.code === 'FORMATTER_FAILED'
-            ? 'A template formatter failed during rendering'
-            : cause.message,
-        ),
-      ],
-    });
+    return failAfterResources(
+      freeze({
+        diagnostics: [
+          renderDiagnostic(
+            cause.code,
+            cause.code === 'FORMATTER_FAILED'
+              ? 'A template formatter failed during rendering'
+              : cause.message,
+          ),
+        ],
+      }),
+    );
   }
-  if (isAborted(request.signal)) return abortResult();
-  if (expansion.document === undefined) return freeze({ diagnostics: expansion.diagnostics });
+  if (isAborted(request.signal)) return failAfterResources(abortResult());
+  if (expansion.document === undefined)
+    return failAfterResources(freeze({ diagnostics: expansion.diagnostics }));
   const expansionDiagnostics = expansion.diagnostics.map((diagnostic) =>
     request.missingValue === 'warning-and-blank' && diagnostic.code === 'MISSING_DATA'
       ? { ...diagnostic, severity: 'warning' as const }
       : diagnostic,
   );
   if (expansionDiagnostics.some(({ severity }) => severity === 'error')) {
-    return freeze({ diagnostics: expansionDiagnostics });
+    return failAfterResources(freeze({ diagnostics: expansionDiagnostics }));
   }
   const formulaEngine = createFormulaEngine();
   const formulaProgram = formulaEngine.compile(expansion.document);
@@ -502,11 +604,21 @@ export async function renderSpreadsheetTemplate(
     tick: 0,
     functionRegistryVersion: 'builtin-1',
   });
-  const resolvedTargets = targets(expansion.document, profile, expansion.insertedRows);
+  const resolvedTargets = targets(
+    expansion.document,
+    profile,
+    expansion.insertedRows,
+    expansion.structuralMappings,
+  );
   const pageSize = paper(profile);
   const headingSize = profile.showHeadings ? 20 : 0;
   const pagination = paginateTemplateTargets({
-    targets: paginationTargets(resolvedTargets, profile, expansion.insertedRows),
+    targets: paginationTargets(
+      resolvedTargets,
+      profile,
+      expansion.insertedRows,
+      expansion.structuralMappings,
+    ),
     paper: pageSize,
     margins: {
       ...profile.page.margins,
@@ -547,16 +659,20 @@ export async function renderSpreadsheetTemplate(
     deadline: start + limits.maxLayoutTimeMs,
   });
   if (Date.now() - start > limits.maxLayoutTimeMs || isAborted(request.signal)) {
-    return isAborted(request.signal)
-      ? abortResult()
-      : freeze({
-          diagnostics: [
-            renderDiagnostic('LAYOUT_TIME_EXCEEDED', 'Template layout exceeded its time limit'),
-          ],
-        });
+    return failAfterResources(
+      isAborted(request.signal)
+        ? abortResult()
+        : freeze({
+            diagnostics: [
+              renderDiagnostic('LAYOUT_TIME_EXCEEDED', 'Template layout exceeded its time limit'),
+            ],
+          }),
+    );
   }
   if (pagination.diagnostics.some(({ severity }) => severity === 'error')) {
-    return freeze({ diagnostics: [...expansionDiagnostics, ...pagination.diagnostics] });
+    return failAfterResources(
+      freeze({ diagnostics: [...expansionDiagnostics, ...pagination.diagnostics] }),
+    );
   }
   const cache = createPresentationCache({
     maximumEntries: Math.max(1, limits.maxExpandedCells),
@@ -587,6 +703,7 @@ export async function renderSpreadsheetTemplate(
     profile,
     (sheetId, row, column) => presentation.resolve({ sheetId, row, column }),
     expansion.insertedRows,
+    expansion.structuralMappings,
     request.data,
     environment.clock,
   );
@@ -603,7 +720,7 @@ export async function renderSpreadsheetTemplate(
     ...displayList.diagnostics,
   ];
   if (diagnostics.some(({ severity }) => severity === 'error')) {
-    return freeze({ diagnostics });
+    return failAfterResources(freeze({ diagnostics }));
   }
   const document: GeneratedDocument = freeze({
     workbook: expansion.document.workbook,
@@ -621,7 +738,7 @@ export async function renderSpreadsheetTemplate(
       })),
       displayList,
     },
-    resources: {},
+    resources,
     diagnostics,
     metadata: {
       templateId: request.template.templateId,

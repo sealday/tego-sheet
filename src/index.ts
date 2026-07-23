@@ -284,6 +284,7 @@ export {
   createBlobResourceResolver,
   createDataUrlResourceResolver,
   createResourceResolverRegistry,
+  createResolvedResourceCache,
   resolveTemplateResources,
 } from './template';
 export type {
@@ -307,6 +308,7 @@ export type {
   RenderRequest,
   RenderResult,
   ResolvedResource,
+  ResolvedResourceCache,
   ResolvedResourceStore,
   ResourceLimits,
   ResourcePipelineOptions,

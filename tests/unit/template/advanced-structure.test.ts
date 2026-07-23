@@ -102,6 +102,48 @@ describe('TP2 advanced template structures', () => {
     ]);
   });
 
+  it('materializes nested repeat values in outer-to-inner input order', () => {
+    const { document, template } = source([
+      {
+        id: 'outer',
+        type: 'repeat-rows',
+        range: range(0, 5),
+        source: 'groups',
+        empty: 'remove',
+        pageBreak: 'auto',
+      },
+      {
+        id: 'inner',
+        type: 'repeat-rows',
+        range: range(2, 2),
+        source: 'item.values',
+        empty: 'remove',
+        pageBreak: 'auto',
+      },
+      {
+        id: 'value',
+        type: 'value',
+        target: { sheetId: 'sheet-1', row: 2, column: 0 },
+        expression: 'parent.name + ":" + item',
+      },
+    ] as never);
+    const compiled = compileSpreadsheetTemplate(document, template.id, options).template!;
+    const expanded = expandAdvancedTemplate(
+      compiled,
+      {
+        groups: [
+          { name: 'A', values: ['a1', 'a2'] },
+          { name: 'B', values: ['b1'] },
+        ],
+      },
+      options.limits,
+    );
+    const values = expanded.document?.workbook.sheets[0]?.cells
+      .filter(({ column, cell }) => column === 0 && cell.input.type === 'string')
+      .map(({ cell }) => (cell.input.type === 'string' ? cell.input.value : ''));
+    expect(values).toEqual(expect.arrayContaining(['A:a1', 'A:a2', 'B:b1']));
+  });
+
   it('rejects partial overlap and reports a complete subtemplate cycle', () => {
     const { document, template } = source([
       {
@@ -150,6 +192,48 @@ describe('TP2 advanced template structures', () => {
       expect.objectContaining({
         code: 'SUBTEMPLATE_CYCLE',
         message: expect.stringContaining('a -> b -> a'),
+      }),
+    );
+  });
+
+  it('reuses an explicitly registered subtemplate without runtime discovery', () => {
+    const { document, template } = source([
+      {
+        id: 'child-slot',
+        type: 'subtemplate',
+        range: range(1, 1, 0, 0),
+        templateId: 'child',
+        source: 'customer',
+      },
+    ] as never);
+    const child = {
+      id: 'child' as never,
+      name: 'Child',
+      bindings: [
+        {
+          id: 'child-name' as never,
+          type: 'value',
+          target: { sheetId: 'sheet-1' as never, row: 0, column: 0 },
+          expression: 'item.name',
+        },
+      ],
+      printProfiles: [],
+    } as SpreadsheetTemplate;
+    const advancedOptions = {
+      ...options,
+      subtemplates: new Map([['child' as never, child]]),
+    };
+    const compiled = compileSpreadsheetTemplate(document, template.id, advancedOptions).template!;
+    const expanded = expandAdvancedTemplate(
+      compiled,
+      { customer: { name: 'Ada' } },
+      options.limits,
+    );
+    expect(expanded.document?.workbook.sheets[0]?.cells).toContainEqual(
+      expect.objectContaining({
+        row: 1,
+        column: 0,
+        cell: { input: { type: 'string', value: 'Ada' } },
       }),
     );
   });
@@ -218,6 +302,14 @@ describe('TP2 advanced template structures', () => {
     expect(compileSpreadsheetTemplate(document, template.id, options).diagnostics).toContainEqual(
       expect.objectContaining({ code: 'OBJECT_REPEAT_POLICY_REQUIRED' }),
     );
+    const forbidden = {
+      ...template,
+      bindings: [{ ...(template.bindings[0] as object), objectPolicy: 'forbidden' }],
+    } as unknown as SpreadsheetTemplate;
+    expect(
+      compileSpreadsheetTemplate({ ...document, templates: [forbidden] }, forbidden.id, options)
+        .diagnostics,
+    ).toContainEqual(expect.objectContaining({ code: 'OBJECT_REPEAT_FORBIDDEN' }));
 
     const valid = {
       ...template,
@@ -228,6 +320,21 @@ describe('TP2 advanced template structures', () => {
       valid.id,
       options,
     ).template!;
+    expect(
+      compileSpreadsheetTemplate(
+        {
+          ...document,
+          templates: [
+            {
+              ...valid,
+              bindings: [{ ...(valid.bindings[0] as object), objectPolicy: 'shared' }],
+            } as unknown as SpreadsheetTemplate,
+          ],
+        },
+        valid.id,
+        options,
+      ).hasErrors,
+    ).toBe(false);
     const expanded = expandAdvancedTemplate(
       compiled,
       { rows: Array.from({ length: 100 }, () => 1) },

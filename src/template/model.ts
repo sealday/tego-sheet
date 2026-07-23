@@ -11,6 +11,12 @@ import type {
 import type { FontMetrics } from '../presentation';
 import type { PrintDisplayList } from '../print';
 import type { CompiledTemplateExpression, TemplateFormatterRegistry } from './expression';
+import type {
+  ResolvedResourceStore,
+  ResourcePurpose,
+  ResourceRef,
+  ResourceResolverRegistry,
+} from './resources';
 
 /** Binding kinds supported by the template compiler. */
 export type TemplateBinding =
@@ -354,6 +360,8 @@ export interface RenderRequest {
   readonly signal?: AbortSignal;
   /** Optional host limit overrides. */
   readonly limits?: Partial<RenderLimits>;
+  /** Explicit logical resources discovered for this render session. */
+  readonly resourceRefs?: readonly ResourceRef[];
 }
 
 /** Deterministic host capabilities required by rendering. */
@@ -370,6 +378,20 @@ export interface RenderEnvironment {
   readonly fontMetrics: FontMetrics;
   /** Explicit pure formatter registry. */
   readonly formatters?: TemplateFormatterRegistry;
+  /** Explicit resolver registry; it never installs a network client implicitly. */
+  readonly resourceRegistry?: ResourceResolverRegistry;
+  /** Output purpose forwarded to capability-limited resolvers. */
+  readonly resourcePurpose?: ResourcePurpose;
+  /** Host image decoder used after MIME and quota validation. */
+  readonly decodeImage?: (
+    bytes: Uint8Array,
+    mimeType: string,
+    signal: AbortSignal,
+  ) => Promise<{
+    readonly width: number;
+    readonly height: number;
+    readonly representation: unknown;
+  }>;
 }
 
 /** Semantic identity and geometry for one generated page. */
@@ -408,8 +430,8 @@ export interface GeneratedDocument {
   readonly workbook: SpreadsheetDocument['workbook'];
   /** Shared immutable print pages and commands. */
   readonly print: PrintDocument;
-  /** TP1 empty resource store reserved for the resource pipeline. */
-  readonly resources: Readonly<Record<string, never>>;
+  /** Session-owned, content-addressed resolved resource store. */
+  readonly resources: ResolvedResourceStore;
   /** Ordered render diagnostics. */
   readonly diagnostics: readonly Diagnostic[];
   /** Deterministic render metadata. */
