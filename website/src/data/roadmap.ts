@@ -92,6 +92,7 @@ export const allRoadmapItems = [
     'Atomic Command / Transaction',
     'One validated and reversible mutation boundary for every edit.',
     '/docs/roadmap/foundation',
+    'shipped',
   ),
   item(
     'formula-format-core',

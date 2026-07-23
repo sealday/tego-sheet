@@ -23,8 +23,9 @@ it('maps every roadmap item to acceptance evidence without duplicate ids', () =>
   );
   expect(
     roadmapAcceptance.filter((entry) => entry.state === 'shipped').map((entry) => entry.id),
-  ).toEqual(['workbook-2', 'extension-kernel']);
+  ).toEqual(['workbook-2', 'transactions', 'extension-kernel']);
   expect(getRoadmapDeliveryState('workbook-2')).toBe('shipped');
+  expect(getRoadmapDeliveryState('transactions')).toBe('shipped');
   expect(getRoadmapDeliveryState('extension-kernel')).toBe('shipped');
 });
 

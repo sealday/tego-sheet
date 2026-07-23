@@ -35,12 +35,16 @@ const miniRfcs = {
 describe('product roadmap data', () => {
   it('contains the approved capabilities in dependency order', () => {
     expect(roadmapPhases.map((phase) => phase.id)).toEqual([0, 1, 2, 3, 4]);
-    expect(roadmapItems).toHaveLength(31);
+    expect(roadmapItems).toHaveLength(30);
     expect(allRoadmapItems).toHaveLength(roadmapItems.length + shippedRoadmapItems.length);
-    expect(shippedRoadmapItems.map((item) => item.id)).toEqual(['workbook-2', 'extension-kernel']);
-    expect(new Set(roadmapItems.map((item) => item.id))).toHaveProperty('size', 31);
+    expect(shippedRoadmapItems.map((item) => item.id)).toEqual([
+      'workbook-2',
+      'transactions',
+      'extension-kernel',
+    ]);
+    expect(new Set(roadmapItems.map((item) => item.id))).toHaveProperty('size', 30);
     expect(roadmapItems.every((item) => item.status === 'planned')).toBe(true);
-    expect(roadmapItems[0]?.title).toBe('Atomic Command / Transaction');
+    expect(roadmapItems[0]?.title).toBe('Formula dependency and number-format core');
     expect(
       roadmapItems.some(
         (item) => item.title === 'Safe scalar bindings, repeat rows and conditional ranges',
@@ -148,7 +152,9 @@ describe('product roadmap data', () => {
           expect(miniRfc, `${file} ${id} must include ${section}`).toMatch(section);
         }
 
-        expect(miniRfc).toContain(id === 'F1' || id === 'F5' ? 'shipped' : 'planned');
+        expect(miniRfc).toContain(
+          id === 'F1' || id === 'F2' || id === 'F5' ? 'shipped' : 'planned',
+        );
       }
     }
   });

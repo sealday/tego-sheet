@@ -6,11 +6,18 @@ verification commands pass.
 | Phase | Capability                                    | Status  | Design                      |
 | ----- | --------------------------------------------- | ------- | --------------------------- |
 | 0     | Workbook 2.0 typed document model             | shipped | [Foundation](foundation.md) |
+| 0     | Atomic Command / Transaction                  | shipped | [Foundation](foundation.md) |
 | 0     | Minimal cell-type and adapter registry kernel | shipped | [Foundation](foundation.md) |
 
 Workbook 2.0 completed its schema boundary, legacy migration, runtime-controller integration,
 React ingress migration, and command-based rich-cell transforms on 2026-07-23. Its acceptance
 ledger and focused, architecture, package, SSR, and browser suites passed before shipment.
+
+Atomic Command / Transaction shipped on 2026-07-23 with versioned public commands, atomic
+multi-command commits, revision and permission gates, dry-run previews, minimal forward/inverse
+patch history, unified coordinate transforms, multi-sheet change summaries, and observer-safe
+commit notifications. Generated transaction invariants, public API, package, SSR, and docs gates
+passed before shipment.
 
 The minimal extension kernel shipped on 2026-07-23 with declaration-mergeable capability typing,
 host-environment-bound deterministic resolution, safe manifest snapshots, and reentrancy-safe
