@@ -69,6 +69,64 @@ describe('XlsxAdapter', () => {
     expect(xml['xl/worksheets/sheet1.xml']).not.toContain('<f>');
   });
 
+  it('marks cached formula errors with the OOXML error type', async () => {
+    const fixture = outputGeneratedDocument();
+    const xml = await parts(
+      await new XlsxAdapter().render(
+        {
+          ...fixture,
+          calculatedCells: [
+            {
+              address: { sheetId: 'sheet-1', row: 1, column: 1 },
+              value: { type: 'error', value: '#DIV/0!' },
+            },
+          ],
+        } as never,
+        { formulaMode: 'formula-and-cached-value', compatibility: 'excel' },
+      ),
+    );
+
+    expect(xml['xl/worksheets/sheet1.xml']).toContain(
+      '<c r="B2" t="e"><f>A2+1</f><v>#DIV/0!</v></c>',
+    );
+  });
+
+  it('preserves exact range print areas and custom paper geometry', async () => {
+    const fixture = outputGeneratedDocument();
+    const blob = await new XlsxAdapter().render(
+      {
+        ...fixture,
+        print: {
+          ...fixture.print,
+          profile: {
+            ...fixture.print.profile,
+            targets: [
+              {
+                type: 'range',
+                range: {
+                  sheetId: 'sheet-1',
+                  start: { row: 1, column: 1 },
+                  end: { row: 2, column: 1 },
+                },
+              },
+            ],
+            page: {
+              ...fixture.print.profile.page,
+              paper: { type: 'custom', width: 384, height: 192 },
+            },
+          },
+        },
+      } as never,
+      { formulaMode: 'values-only', compatibility: 'excel' },
+    );
+    const xml = await parts(blob);
+
+    expect(xml['xl/workbook.xml']).toContain(
+      `<definedName name="_xlnm.Print_Area" localSheetId="0">'Invoice'!$B$2:$B$3</definedName>`,
+    );
+    expect(xml['xl/worksheets/sheet1.xml']).toContain('paperWidth="4in" paperHeight="2in"');
+  });
+
   it('produces byte-identical ZIP output for equal inputs and options', async () => {
     const adapter = new XlsxAdapter();
     const options = {
@@ -229,6 +287,71 @@ describe('XlsxAdapter', () => {
       code: 'XLSX_UNSUPPORTED_FEATURE',
       diagnostic: { location: { sheetId: 'sheet-1' } },
     });
+  });
+
+  it('rejects non-allowlisted OOXML border and validation enums', async () => {
+    const fixture = outputGeneratedDocument();
+    const invalidBorder = {
+      ...fixture,
+      workbook: {
+        ...fixture.workbook,
+        styles: [
+          {
+            id: 'bad',
+            value: { border: { left: ['javascript', '#000000'] } },
+          },
+        ],
+      },
+    };
+    await expect(
+      new XlsxAdapter().render(invalidBorder as never, {
+        formulaMode: 'values-only',
+        compatibility: 'excel',
+      }),
+    ).rejects.toMatchObject({ code: 'XLSX_UNSUPPORTED_FEATURE' });
+
+    const invalidOperator = {
+      ...fixture,
+      workbook: {
+        ...fixture.workbook,
+        validations: [
+          {
+            id: 'positive',
+            value: { type: 'decimal', operator: 'javascript', formula1: 0 },
+          },
+        ],
+      },
+    };
+    await expect(
+      new XlsxAdapter().render(invalidOperator as never, {
+        formulaMode: 'values-only',
+        compatibility: 'excel',
+      }),
+    ).rejects.toMatchObject({ code: 'XLSX_UNSUPPORTED_FEATURE' });
+  });
+
+  it('preflights source strings, resources, and uncompressed parts before publishing', async () => {
+    const fixture = outputGeneratedDocument();
+    const options = {
+      formulaMode: 'values-only' as const,
+      compatibility: 'excel' as const,
+    };
+
+    await expect(
+      new XlsxAdapter({ limits: { maxStringBytes: 1 } }).render(fixture, options),
+    ).rejects.toMatchObject({ code: 'XLSX_PACKAGE_LIMIT_EXCEEDED' });
+    await expect(
+      new XlsxAdapter({ limits: { maxResourceBytes: 1 } }).render(
+        {
+          ...fixture,
+          resources: { ...fixture.resources, totalBytes: 2 },
+        },
+        options,
+      ),
+    ).rejects.toMatchObject({ code: 'XLSX_PACKAGE_LIMIT_EXCEEDED' });
+    await expect(
+      new XlsxAdapter({ limits: { maxUncompressedBytes: 1 } }).render(fixture, options),
+    ).rejects.toMatchObject({ code: 'XLSX_PACKAGE_LIMIT_EXCEEDED' });
   });
 
   it('aborts before publishing a partial ZIP', async () => {

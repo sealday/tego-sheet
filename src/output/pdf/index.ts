@@ -124,17 +124,53 @@ function fontResources(document: GeneratedDocument): ReadonlyMap<string, Resolve
   return resources;
 }
 
+function fontFsType(resource: ResolvedResource): number | undefined {
+  const bytes = new Uint8Array(resource.bytes);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (bytes.byteLength < 12) return undefined;
+  const tag = (offset: number): string =>
+    String.fromCharCode(bytes[offset]!, bytes[offset + 1]!, bytes[offset + 2]!, bytes[offset + 3]!);
+  let sfntOffset = 0;
+  if (tag(0) === 'ttcf') {
+    if (bytes.byteLength < 16 || view.getUint32(8) === 0) return undefined;
+    sfntOffset = view.getUint32(12);
+  }
+  if (sfntOffset > bytes.byteLength - 12) return undefined;
+  const tableCount = view.getUint16(sfntOffset + 4);
+  const directoryEnd = sfntOffset + 12 + tableCount * 16;
+  if (directoryEnd > bytes.byteLength) return undefined;
+  for (let index = 0; index < tableCount; index += 1) {
+    const record = sfntOffset + 12 + index * 16;
+    if (tag(record) !== 'OS/2') continue;
+    const tableOffset = view.getUint32(record + 8);
+    const tableLength = view.getUint32(record + 12);
+    if (tableLength < 10 || tableOffset > bytes.byteLength - tableLength) return undefined;
+    return view.getUint16(tableOffset + 8);
+  }
+  return undefined;
+}
+
 function checkFontPermission(resource: ResolvedResource): void {
-  const permission = (
-    resource as ResolvedResource & {
-      readonly fontEmbedding?: 'allowed' | 'forbidden';
-    }
-  ).fontEmbedding;
-  if (permission === 'forbidden') {
+  const fsType = fontFsType(resource);
+  if (fsType === undefined) {
+    throw outputError(
+      'PDF_FONT_SUBSET_FAILED',
+      `Font ${resource.fontFamily ?? resource.contentHash} has no readable OS/2 embedding policy`,
+      { details: { resource: resource.contentHash } },
+    );
+  }
+  if ((fsType & 0x0002) !== 0 || (fsType & 0x0200) !== 0) {
     throw outputError(
       'PDF_FONT_EMBEDDING_FORBIDDEN',
       `Font ${resource.fontFamily ?? resource.contentHash} forbids embedding`,
-      { details: { resource: resource.contentHash } },
+      { details: { resource: resource.contentHash, fsType } },
+    );
+  }
+  if ((fsType & 0x0100) !== 0) {
+    throw outputError(
+      'PDF_FONT_SUBSET_FAILED',
+      `Font ${resource.fontFamily ?? resource.contentHash} forbids subsetting`,
+      { details: { resource: resource.contentHash, fsType } },
     );
   }
 }
@@ -199,10 +235,14 @@ function drawCommands(
   commands: readonly PrintDisplayCommand[],
   document: GeneratedDocument,
   fonts: ReadonlyMap<string, ResolvedResource>,
+  deadline: number,
   signal?: AbortSignal,
 ): void {
   for (const candidate of commands as readonly unknown[]) {
     throwIfAborted(signal);
+    if (Date.now() >= deadline) {
+      throw outputError('PDF_OUTPUT_LIMIT_EXCEEDED', 'PDF generation exceeded its time limit');
+    }
     if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) {
       throw outputError('PDF_UNSUPPORTED_DRAW_COMMAND', 'PDF draw command is invalid');
     }
@@ -328,7 +368,7 @@ function drawCommands(
             points(command.rect.height),
           )
           .clip();
-        drawCommands(pdf, command.commands, document, fonts, signal);
+        drawCommands(pdf, command.commands, document, fonts, deadline, signal);
         pdf.restore();
         break;
       case 'link':
@@ -365,12 +405,23 @@ function collectPdf(
   pdf: DestroyablePdfDocument,
   signal: AbortSignal | undefined,
   maxOutputBytes: number,
+  deadline: number,
 ): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const chunks: BlobPart[] = [];
     let total = 0;
     let settled = false;
-    const cleanup = (): void => signal?.removeEventListener('abort', abort);
+    const timeout = setTimeout(
+      () => {
+        pdf.destroy();
+        fail(outputError('PDF_OUTPUT_LIMIT_EXCEEDED', 'PDF generation exceeded its time limit'));
+      },
+      Math.max(0, deadline - Date.now()),
+    );
+    const cleanup = (): void => {
+      clearTimeout(timeout);
+      signal?.removeEventListener('abort', abort);
+    };
     const fail = (error: unknown): void => {
       if (settled) return;
       settled = true;
@@ -420,6 +471,7 @@ export class PdfAdapter {
   async render(document: GeneratedDocument, options: PdfOutputOptions): Promise<Blob> {
     throwIfAborted(options.signal);
     const startedAt = Date.now();
+    const deadline = startedAt + this.#limits.maxDurationMs;
     const pageIndices = selectedPages(document, options.pages);
     if (pageIndices.length > this.#limits.maxPages) {
       throw outputError('PDF_OUTPUT_LIMIT_EXCEEDED', 'PDF page count exceeds its limit');
@@ -429,6 +481,9 @@ export class PdfAdapter {
     }
     const module = await import('pdfkit/js/pdfkit.standalone.js');
     throwIfAborted(options.signal);
+    if (Date.now() >= deadline) {
+      throw outputError('PDF_OUTPUT_LIMIT_EXCEEDED', 'PDF generation exceeded its time limit');
+    }
     const PDFDocument = module.default;
     const info: PDFKit.PDFDocumentOptions['info'] = {
       Producer: 'tego-sheet',
@@ -456,7 +511,7 @@ export class PdfAdapter {
       tagged: false,
       fontLayoutCache: false,
     }) as DestroyablePdfDocument;
-    const output = collectPdf(pdf, options.signal, this.#limits.maxOutputBytes);
+    const output = collectPdf(pdf, options.signal, this.#limits.maxOutputBytes, deadline);
     const fonts = fontResources(document);
     try {
       for (const resource of fonts.values()) {
@@ -465,7 +520,7 @@ export class PdfAdapter {
       }
       for (const pageIndex of pageIndices) {
         throwIfAborted(options.signal);
-        if (Date.now() - startedAt > this.#limits.maxDurationMs) {
+        if (Date.now() >= deadline) {
           throw outputError('PDF_OUTPUT_LIMIT_EXCEEDED', 'PDF generation exceeded its time limit');
         }
         const semantic = document.print.pages[pageIndex]!;
@@ -487,7 +542,7 @@ export class PdfAdapter {
         });
         pdf.addNamedDestination(semantic.id);
         pdf.outline.addItem(semantic.id);
-        drawCommands(pdf, display.commands, document, fonts, options.signal);
+        drawCommands(pdf, display.commands, document, fonts, deadline, options.signal);
       }
       pdf.end();
       return await output;

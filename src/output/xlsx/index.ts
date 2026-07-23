@@ -11,6 +11,9 @@ const DEFAULT_LIMITS: XlsxOutputLimits = Object.freeze({
   maxCells: 1_000_000,
   maxStyles: 65_000,
   maxImages: 10_000,
+  maxStringBytes: 64 * 1024 * 1024,
+  maxResourceBytes: 64 * 1024 * 1024,
+  maxUncompressedBytes: 512 * 1024 * 1024,
   maxPackageBytes: 256 * 1024 * 1024,
 });
 
@@ -34,6 +37,12 @@ export interface XlsxOutputLimits {
   readonly maxStyles: number;
   /** Maximum generated worksheet images. */
   readonly maxImages: number;
+  /** Maximum UTF-8 bytes across source strings. */
+  readonly maxStringBytes: number;
+  /** Maximum bytes across resolved resources. */
+  readonly maxResourceBytes: number;
+  /** Maximum total bytes across uncompressed package parts. */
+  readonly maxUncompressedBytes: number;
   /** Maximum finalized ZIP bytes. */
   readonly maxPackageBytes: number;
 }
@@ -156,6 +165,58 @@ function scalarValue(value: FormulaValue | undefined): string {
   return xml(String(value.value));
 }
 
+function utf8Length(value: string): number {
+  let bytes = 0;
+  for (const character of value) {
+    const point = character.codePointAt(0)!;
+    bytes += point <= 0x7f ? 1 : point <= 0x7ff ? 2 : point <= 0xffff ? 3 : 4;
+  }
+  return bytes;
+}
+
+function jsonStringBytes(value: JsonValue): number {
+  if (typeof value === 'string') return utf8Length(value);
+  if (Array.isArray(value)) {
+    return value.reduce((sum, entry) => sum + jsonStringBytes(entry), 0);
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.entries(value).reduce(
+      (sum, [key, entry]) => sum + utf8Length(key) + jsonStringBytes(entry),
+      0,
+    );
+  }
+  return 0;
+}
+
+function sourceStringBytes(document: GeneratedDocument): number {
+  let total = 0;
+  for (const sheet of document.workbook.sheets) {
+    total += utf8Length(sheet.id) + utf8Length(sheet.name);
+    for (const { cell } of sheet.cells) {
+      const input = cell.input;
+      if (input.type === 'string') total += utf8Length(input.value);
+      if (input.type === 'formula') total += utf8Length(input.source);
+      if (input.type === 'custom') {
+        total += utf8Length(input.cellType) + jsonStringBytes(input.value);
+      }
+    }
+  }
+  for (const style of document.workbook.styles) {
+    total += utf8Length(style.id) + jsonStringBytes(style.value);
+  }
+  for (const validation of document.workbook.validations) {
+    total += utf8Length(validation.id) + jsonStringBytes(validation.value);
+  }
+  const { header, footer } = document.print.profile;
+  for (const band of [header, footer]) {
+    if (band === undefined) continue;
+    for (const value of [band.left, band.center, band.right]) {
+      if (value !== undefined) total += utf8Length(value);
+    }
+  }
+  return total;
+}
+
 function cellXml(
   sheet: Sheet,
   row: number,
@@ -214,7 +275,13 @@ function cellXml(
   }
   const formula = input.source.startsWith('=') ? input.source.slice(1) : input.source;
   const cachedType =
-    cached?.type === 'string' ? ' t="str"' : cached?.type === 'boolean' ? ' t="b"' : '';
+    cached?.type === 'string'
+      ? ' t="str"'
+      : cached?.type === 'boolean'
+        ? ' t="b"'
+        : cached?.type === 'error'
+          ? ' t="e"'
+          : '';
   return `<c r="${reference}"${cachedType}${styleAttribute}><f>${xml(formula)}</f><v>${scalarValue(cached)}</v></c>`;
 }
 
@@ -274,6 +341,26 @@ function styleXml(workbook: Workbook): {
       const value = border?.[name];
       if (!Array.isArray(value)) return `<${name}/>`;
       const lineStyle = typeof value[0] === 'string' ? value[0] : 'thin';
+      const borderStyles = new Set([
+        'hair',
+        'dotted',
+        'dashDotDot',
+        'dashDot',
+        'dashed',
+        'thin',
+        'mediumDashDotDot',
+        'slantDashDot',
+        'mediumDashDot',
+        'mediumDashed',
+        'medium',
+        'thick',
+        'double',
+      ]);
+      if (!borderStyles.has(lineStyle)) {
+        throw outputError('XLSX_UNSUPPORTED_FEATURE', `Border style ${lineStyle} is unsupported`, {
+          details: { styleId: entry.id, side: name, lineStyle },
+        });
+      }
       const color = typeof value[1] === 'string' ? value[1].replace('#', '') : 'FF000000';
       return `<${name} style="${xml(lineStyle)}"><color rgb="${color.length === 6 ? `FF${color}` : color}"/></${name}>`;
     };
@@ -286,7 +373,22 @@ function styleXml(workbook: Workbook): {
     const horizontal =
       typeof style.horizontalAlign === 'string' ? style.horizontalAlign : 'general';
     const vertical = typeof style.verticalAlign === 'string' ? style.verticalAlign : 'bottom';
-    return `<xf numFmtId="${format}" fontId="${index + 1}" fillId="${index + 2}" borderId="${index + 1}" xfId="0" applyFont="1" applyFill="1" applyBorder="1"${format === 0 ? '' : ' applyNumberFormat="1"'}><alignment horizontal="${xml(horizontal)}" vertical="${xml(vertical)}"${style.wrap === true ? ' wrapText="1"' : ''}/></xf>`;
+    if (!new Set(['general', 'left', 'center', 'right']).has(horizontal)) {
+      throw outputError(
+        'XLSX_UNSUPPORTED_FEATURE',
+        `Horizontal alignment ${horizontal} is unsupported`,
+        { details: { styleId: entry.id, horizontal } },
+      );
+    }
+    if (!new Set(['top', 'middle', 'bottom']).has(vertical)) {
+      throw outputError(
+        'XLSX_UNSUPPORTED_FEATURE',
+        `Vertical alignment ${vertical} is unsupported`,
+        { details: { styleId: entry.id, vertical } },
+      );
+    }
+    const xlsxVertical = vertical === 'middle' ? 'center' : vertical;
+    return `<xf numFmtId="${format}" fontId="${index + 1}" fillId="${index + 2}" borderId="${index + 1}" xfId="0" applyFont="1" applyFill="1" applyBorder="1"${format === 0 ? '' : ' applyNumberFormat="1"'}><alignment horizontal="${horizontal}" vertical="${xlsxVertical}"${style.wrap === true ? ' wrapText="1"' : ''}/></xf>`;
   });
   return {
     indices,
@@ -330,6 +432,25 @@ function validationXml(sheet: Sheet, workbook: Workbook): string {
       });
     }
     const operator = typeof rule.operator === 'string' ? ` operator="${xml(rule.operator)}"` : '';
+    if (
+      typeof rule.operator === 'string' &&
+      !new Set([
+        'between',
+        'notBetween',
+        'equal',
+        'notEqual',
+        'greaterThan',
+        'lessThan',
+        'greaterThanOrEqual',
+        'lessThanOrEqual',
+      ]).has(rule.operator)
+    ) {
+      throw outputError(
+        'XLSX_UNSUPPORTED_FEATURE',
+        `Validation operator ${rule.operator} is unsupported`,
+        { location: { sheetId: sheet.id, cell: { sheetId: sheet.id, row, column } } },
+      );
+    }
     const allowBlank = rule.allowBlank === true ? ' allowBlank="1"' : '';
     const formula1 =
       typeof rule.formula1 === 'string' || typeof rule.formula1 === 'number'
@@ -359,6 +480,10 @@ function pageXml(profile: TemplatePrintProfile | undefined, sheet: Sheet): strin
         : profile.page.paper.type === 'Letter'
           ? 1
           : undefined;
+  const paperGeometry =
+    profile.page.paper.type === 'custom'
+      ? ` paperWidth="${profile.page.paper.width / 96}in" paperHeight="${profile.page.paper.height / 96}in"`
+      : '';
   const scale = profile.page.scale;
   const setup =
     scale.type === 'fixed'
@@ -373,7 +498,7 @@ function pageXml(profile: TemplatePrintProfile | undefined, sheet: Sheet): strin
       : `${value.left === undefined ? '' : `&L${value.left}`}${value.center === undefined ? '' : `&C${value.center}`}${value.right === undefined ? '' : `&R${value.right}`}`;
   return (
     `<pageMargins left="${margins.left / 96}" right="${margins.right / 96}" top="${margins.top / 96}" bottom="${margins.bottom / 96}" header="0" footer="0"/>` +
-    `<pageSetup orientation="${profile.page.orientation}"${paper === undefined ? '' : ` paperSize="${paper}"`}${setup}/>` +
+    `<pageSetup orientation="${profile.page.orientation}"${paper === undefined ? '' : ` paperSize="${paper}"`}${paperGeometry}${setup}/>` +
     (breaks.length === 0
       ? ''
       : `<rowBreaks count="${breaks.length}" manualBreakCount="${breaks.length}">${breaks.map(({ beforeRow }) => `<brk id="${beforeRow}" min="0" max="16383" man="1"/>`).join('')}</rowBreaks>`) +
@@ -531,15 +656,20 @@ function workbookDefinedNames(
   if (profile === undefined) return '';
   const names = workbook.sheets.flatMap((sheet, index) => {
     const result: string[] = [];
-    const selected = profile.targets.some(
-      (target) =>
-        (target.type === 'sheet' && target.sheetId === sheet.id) ||
-        (target.type === 'range' && target.range.sheetId === sheet.id) ||
-        (target.type === 'ranges' && target.ranges.some((range) => range.sheetId === sheet.id)),
-    );
-    if (selected) {
+    const printAreas = profile.targets.flatMap((target): readonly SheetRange[] => {
+      if (target.type === 'sheet') return target.sheetId === sheet.id ? [sheetRange(sheet)] : [];
+      if (target.type === 'range') {
+        return target.range.sheetId === sheet.id
+          ? [{ start: target.range.start, end: target.range.end }]
+          : [];
+      }
+      return target.ranges
+        .filter((range) => range.sheetId === sheet.id)
+        .map((range) => ({ start: range.start, end: range.end }));
+    });
+    if (printAreas.length > 0) {
       result.push(
-        `<definedName name="_xlnm.Print_Area" localSheetId="${index}">${quotedSheetName(sheet.name)}!${absoluteRange(sheetRange(sheet))}</definedName>`,
+        `<definedName name="_xlnm.Print_Area" localSheetId="${index}">${printAreas.map((range) => `${quotedSheetName(sheet.name)}!${absoluteRange(range)}`).join(',')}</definedName>`,
       );
     }
     const titleRows = profile.repeatRows?.sheetId === sheet.id ? profile.repeatRows : undefined;
@@ -670,15 +800,31 @@ export class XlsxAdapter {
     throwIfAborted(options.signal);
     const workbook = document.workbook;
     const cells = workbook.sheets.reduce((sum, sheet) => sum + sheet.cells.length, 0);
+    const stringBytes = sourceStringBytes(document);
     if (
       workbook.sheets.length > this.#limits.maxSheets ||
       cells > this.#limits.maxCells ||
       workbook.styles.length > this.#limits.maxStyles ||
-      document.objects.length > this.#limits.maxImages
+      document.objects.length > this.#limits.maxImages ||
+      stringBytes > this.#limits.maxStringBytes ||
+      document.resources.totalBytes > this.#limits.maxResourceBytes
     ) {
       throw outputError('XLSX_PACKAGE_LIMIT_EXCEEDED', 'XLSX semantic limits were exceeded');
     }
     const parts = packageParts(document, options);
+    const uncompressedBytes = [...parts.values()].reduce(
+      (total, bytes) => total + bytes.byteLength,
+      0,
+    );
+    if (
+      !Number.isSafeInteger(uncompressedBytes) ||
+      uncompressedBytes > this.#limits.maxUncompressedBytes
+    ) {
+      throw outputError(
+        'XLSX_PACKAGE_LIMIT_EXCEEDED',
+        'XLSX uncompressed parts exceed their byte limit',
+      );
+    }
     throwIfAborted(options.signal);
     const ordered: Parameters<typeof zipSync>[0] = {};
     for (const [path, bytes] of [...parts.entries()].sort(([left], [right]) =>

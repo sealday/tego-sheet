@@ -7,6 +7,20 @@ async function pdfText(blob: Blob): Promise<string> {
   return new TextDecoder('latin1').decode(await blob.arrayBuffer());
 }
 
+function withFontFsType(bytes: Uint8Array, fsType: number): number[] {
+  const copy = new Uint8Array(bytes);
+  const view = new DataView(copy.buffer);
+  const tableCount = view.getUint16(4);
+  for (let index = 0; index < tableCount; index += 1) {
+    const record = 12 + index * 16;
+    const tag = new TextDecoder().decode(copy.slice(record, record + 4));
+    if (tag !== 'OS/2') continue;
+    view.setUint16(view.getUint32(record + 8) + 8, fsType);
+    return [...copy];
+  }
+  throw new Error('CJK font fixture must contain an OS/2 table');
+}
+
 describe('PdfAdapter', () => {
   it('translates exact selected page geometry, vector content, searchable text, links, and metadata', async () => {
     const fixture = outputGeneratedDocument();
@@ -112,6 +126,36 @@ describe('PdfAdapter', () => {
     expect(blob.size).toBeLessThan(100_000);
   });
 
+  it('rejects restricted OS/2 font embedding before PDFKit receives the font', async () => {
+    const fixture = outputGeneratedDocument();
+    const encoded = readFileSync(
+      new URL('../../fixtures/output/NotoSansSC-CJK.subset.ttf.base64', import.meta.url),
+      'utf8',
+    ).trim();
+    const resource = {
+      contentHash: 'sha256:restricted-cjk-fixture',
+      type: 'font' as const,
+      mimeType: 'font/ttf',
+      bytes: withFontFsType(Buffer.from(encoded, 'base64'), 0x0002),
+      fontFamily: 'Noto Sans',
+    };
+
+    await expect(
+      new PdfAdapter().render(
+        {
+          ...fixture,
+          resources: {
+            ...fixture.resources,
+            byHash: { [resource.contentHash]: resource },
+            byReference: { noto: resource },
+            totalBytes: resource.bytes.length,
+          },
+        },
+        { pages: [0], tagged: false },
+      ),
+    ).rejects.toMatchObject({ code: 'PDF_FONT_EMBEDDING_FORBIDDEN' });
+  });
+
   it('produces byte-identical output for equal inputs and metadata', async () => {
     const fixture = outputGeneratedDocument();
     const source = {
@@ -188,5 +232,14 @@ describe('PdfAdapter', () => {
         { pages: 'all', tagged: false },
       ),
     ).resolves.toBeInstanceOf(Blob);
+  });
+
+  it('enforces the wall-clock deadline for a single-page render', async () => {
+    await expect(
+      new PdfAdapter({ limits: { maxDurationMs: 0 } }).render(outputGeneratedDocument(), {
+        pages: [0],
+        tagged: false,
+      }),
+    ).rejects.toMatchObject({ code: 'PDF_OUTPUT_LIMIT_EXCEEDED' });
   });
 });
