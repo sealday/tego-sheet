@@ -80,6 +80,12 @@ export {
 } from './coordinates/a1';
 export type { A1Reference, CoordinateDelta } from './coordinates/a1';
 export {
+  CoordinateTransform,
+  transformDocumentCoordinates,
+  transformSheetCoordinates,
+} from './coordinates/coordinate-transform';
+export type { CoordinateAxis, CoordinateTransformKind } from './coordinates/coordinate-transform';
+export {
   containsCell,
   containsRange,
   differenceRanges,
@@ -244,3 +250,23 @@ export type {
   WorkbookControllerOptions,
   WorkbookHistoryEntry,
 } from './controller/workbook-controller';
+export { SpreadsheetDocumentController } from './controller/spreadsheet-document-controller';
+export type {
+  ExecuteOptions,
+  SerializableCommandEnvelope,
+  SerializableTransactionEnvelope,
+  SpreadsheetControllerCheckpoint,
+  SpreadsheetControllerCommit,
+  SpreadsheetControllerEvent,
+  SpreadsheetControllerSnapshot,
+  SpreadsheetDispatchOptions,
+  TransactionCommit,
+  TransactionNoop,
+  TransactionOptions,
+  TransactionPermissionContext,
+  TransactionPermissionGate,
+  TransactionPreview,
+  TransactionRejection,
+  TransactionRejectionCode,
+  TransactionResult,
+} from './controller/spreadsheet-document-controller';

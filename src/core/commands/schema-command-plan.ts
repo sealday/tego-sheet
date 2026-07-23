@@ -14,6 +14,10 @@ import type {
   SpreadsheetDocumentInput,
 } from '../../document/model/document';
 import { parseSpreadsheetDocument } from '../../document/parse-document';
+import {
+  CoordinateTransform,
+  transformDocumentCoordinates,
+} from '../coordinates/coordinate-transform';
 
 type ValidationId = NonNullable<Cell['validationId']>;
 
@@ -38,58 +42,6 @@ function sheetIndex(sheetIds: readonly SheetId[], sheet: SheetId): number {
   return sheetIds.findIndex((candidate) => candidate === sheet);
 }
 
-function transformIndex(
-  index: number,
-  command: Extract<
-    WorkbookCommand,
-    { readonly type: 'insert-row' | 'delete-row' | 'insert-column' | 'delete-column' }
-  >,
-): number | null {
-  const count = command.count ?? 1;
-  if (command.type === 'insert-row' || command.type === 'insert-column') {
-    return index < command.index ? index : index + count;
-  }
-  if (index < command.index) return index;
-  if (index >= command.index + count) return index - count;
-  return null;
-}
-
-function transformRange(
-  range: CellRange,
-  axis: 'row' | 'column',
-  command: Extract<
-    WorkbookCommand,
-    { readonly type: 'insert-row' | 'delete-row' | 'insert-column' | 'delete-column' }
-  >,
-): CellRange | null {
-  const start = range.start[axis];
-  const end = range.end[axis];
-  const count = command.count ?? 1;
-  let nextStart: number;
-  let nextEnd: number;
-  if (command.type === 'insert-row' || command.type === 'insert-column') {
-    nextStart = start < command.index ? start : start + count;
-    nextEnd = end < command.index ? end : end + count;
-  } else {
-    const deletionEnd = command.index + count - 1;
-    if (end < command.index) {
-      nextStart = start;
-      nextEnd = end;
-    } else if (start > deletionEnd) {
-      nextStart = start - count;
-      nextEnd = end - count;
-    } else {
-      nextStart = start < command.index ? start : command.index;
-      nextEnd = end > deletionEnd ? end - count : command.index - 1;
-      if (nextStart > nextEnd) return null;
-    }
-  }
-  return {
-    start: { ...range.start, [axis]: nextStart },
-    end: { ...range.end, [axis]: nextEnd },
-  };
-}
-
 function transformStructure(
   input: SpreadsheetDocumentInput,
   command: Extract<
@@ -97,46 +49,37 @@ function transformStructure(
     { readonly type: 'insert-row' | 'delete-row' | 'insert-column' | 'delete-column' }
   >,
   sheetIds: readonly SheetId[],
+  authoritativeInputs: Map<string, Set<string>>,
   authoritativeValidations: Map<string, Map<string, ValidationId | null>>,
 ): void {
   const index = sheetIndex(sheetIds, command.sheet);
   const sheet = input.workbook.sheets[index];
   if (sheet === undefined) return;
   const axis = command.type.endsWith('row') ? 'row' : 'column';
-  sheet.cells = sheet.cells.flatMap((item) => {
-    const next = transformIndex(item[axis], command);
-    return next === null ? [] : [{ ...item, [axis]: next }];
-  });
+  const transform =
+    command.type === 'insert-row' || command.type === 'insert-column'
+      ? CoordinateTransform.insert(axis, command.index, command.count ?? 1)
+      : CoordinateTransform.delete(axis, command.index, command.count ?? 1);
+  const transformedDocument = transformDocumentCoordinates(input, sheet.id, transform);
+  input.workbook = transformedDocument.workbook;
+  input.templates = transformedDocument.templates;
+  const transformedSheet = input.workbook.sheets[index] as SheetInput;
+  for (const candidate of input.workbook.sheets) {
+    const formulaKeys = new Set(
+      candidate.cells
+        .filter((item) => item.cell.input.type === 'formula')
+        .map((item) => cellKey(item.row, item.column)),
+    );
+    if (formulaKeys.size > 0) authoritativeInputs.set(candidate.id, formulaKeys);
+  }
   authoritativeValidations.set(
-    sheet.id,
+    transformedSheet.id,
     new Map(
-      sheet.cells
+      transformedSheet.cells
         .filter((item) => item.cell.validationId !== undefined)
         .map((item) => [cellKey(item.row, item.column), item.cell.validationId as ValidationId]),
     ),
   );
-  if (axis === 'row') {
-    sheet.rows = (sheet.rows ?? []).flatMap((row) => {
-      const next = transformIndex(row.index, command);
-      return next === null ? [] : [{ ...row, index: next }];
-    });
-  } else {
-    sheet.columns = (sheet.columns ?? []).flatMap((column) => {
-      const next = transformIndex(column.index, command);
-      return next === null ? [] : [{ ...column, index: next }];
-    });
-  }
-  for (const template of input.templates) {
-    if (template.sheetId !== sheet.id || template.range === undefined) continue;
-    const transformed = transformRange(template.range, axis, command);
-    if (transformed === null) delete template.range;
-    else {
-      template.range = {
-        sheetId: template.range.sheetId,
-        ...transformed,
-      };
-    }
-  }
 }
 
 function getCell(sheet: SheetInput, row: number, column: number): Cell | undefined {
@@ -297,7 +240,7 @@ export function prepareSchemaCommand(
     case 'delete-row':
     case 'insert-column':
     case 'delete-column':
-      transformStructure(input, command, sheetIds, authoritativeValidations);
+      transformStructure(input, command, sheetIds, authoritativeInputs, authoritativeValidations);
       break;
     case 'paste-internal':
     case 'autofill':
