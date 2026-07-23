@@ -327,12 +327,14 @@ const structuredAliases = {
 } as const;
 
 const tegoSheetPropNames = [
+  'activePrintProfileId',
   'className',
   'defaultDocument',
   'document',
   'initialActiveSheetIndex',
   'locale',
   'mode',
+  'onActivePrintProfileChange',
   'onActiveSheetChange',
   'onCellEdit',
   'onDiagnostics',
@@ -352,6 +354,7 @@ const tegoSheetPropNames = [
 ] as const;
 
 const callbackNames = [
+  'onActivePrintProfileChange',
   'onActiveSheetChange',
   'onCellEdit',
   'onDiagnostics',

@@ -23,6 +23,7 @@ import {
   type InteractionSnapshot,
   type ScrollState,
   type SelectionState,
+  type TemplateCanvasDecoration,
   type ViewportMetrics,
 } from '../../engine';
 import { createPresentationCache, createPresentationResolver } from '../../presentation';
@@ -59,6 +60,7 @@ export interface EngineAdapter {
   readonly stageSelection: (selection: SelectionState) => Selection | null;
   readonly updateReadOnly: (readOnly: boolean) => void;
   readonly updateLiveOptions: (options: Readonly<{ readonly showGrid?: boolean }>) => void;
+  readonly updateTemplateDecorations: (decorations: readonly TemplateCanvasDecoration[]) => void;
   readonly dispose: () => void;
 }
 
@@ -111,6 +113,7 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
   let disposed = false;
   let liveReadOnly: boolean | null = null;
   let showGrid = options.showGrid;
+  let templateDecorations: readonly TemplateCanvasDecoration[] = [];
   const presentationCache = createPresentationCache({
     maximumEntries: 10_000,
     maximumBytes: 8 * 1024 * 1024,
@@ -168,6 +171,7 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
       },
       ...(selection === null ? {} : { selection: selection.range }),
       showGrid,
+      templateDecorations,
     };
     engine.render(renderSnapshot);
   };
@@ -372,6 +376,11 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
     updateLiveOptions(next) {
       if (disposed || showGrid === next.showGrid) return;
       showGrid = next.showGrid;
+      paint();
+    },
+    updateTemplateDecorations(next) {
+      if (disposed) return;
+      templateDecorations = next;
       paint();
     },
     dispose() {

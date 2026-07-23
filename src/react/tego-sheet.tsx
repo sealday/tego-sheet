@@ -1072,6 +1072,90 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
     },
     [controller, dispatcher, engineSlot, props.template, setActiveSheet],
   );
+  const templateDecorations = useMemo(() => {
+    if (
+      props.mode !== 'template' ||
+      props.template === undefined ||
+      activeDocumentSheet === undefined
+    )
+      return [];
+    const invalidBindings = new Set(
+      compileSpreadsheetTemplate(props.epoch.snapshot.document, props.template).diagnostics.flatMap(
+        (diagnostic) =>
+          diagnostic.severity === 'error' && diagnostic.location?.bindingId !== undefined
+            ? [diagnostic.location.bindingId]
+            : [],
+      ),
+    );
+    const decorations: import('../engine').TemplateCanvasDecoration[] =
+      props.template.bindings.flatMap((binding) => {
+        const range =
+          binding.type === 'value'
+            ? {
+                sheetId: binding.target.sheetId,
+                start: { row: binding.target.row, column: binding.target.column },
+                end: { row: binding.target.row, column: binding.target.column },
+              }
+            : binding.range;
+        return range.sheetId === activeDocumentSheet.id
+          ? [
+              {
+                range: { start: range.start, end: range.end },
+                kind: binding.type === 'repeat-rows' ? ('repeat' as const) : ('value' as const),
+                label: binding.id,
+                invalid: invalidBindings.has(binding.id),
+              },
+            ]
+          : [];
+      });
+    const profile =
+      props.template.printProfiles.find(({ id }) => id === props.activePrintProfileId) ??
+      props.template.printProfiles[0];
+    if (profile !== undefined) {
+      for (const target of profile.targets) {
+        const ranges =
+          target.type === 'range'
+            ? [target.range]
+            : target.type === 'ranges'
+              ? target.ranges
+              : target.sheetId === activeDocumentSheet.id
+                ? [
+                    {
+                      sheetId: activeDocumentSheet.id,
+                      start: { row: 0, column: 0 },
+                      end: {
+                        row: Math.max(0, ...activeDocumentSheet.cells.map(({ row }) => row)),
+                        column: Math.max(
+                          0,
+                          ...activeDocumentSheet.cells.map(({ column }) => column),
+                        ),
+                      },
+                    },
+                  ]
+                : [];
+        for (const range of ranges) {
+          if (range.sheetId !== activeDocumentSheet.id) continue;
+          decorations.push({
+            range: { start: range.start, end: range.end },
+            kind: 'print',
+            label: profile.name,
+          });
+        }
+      }
+    }
+    return decorations;
+  }, [
+    activeDocumentSheet,
+    props.activePrintProfileId,
+    props.epoch.snapshot.document,
+    props.mode,
+    props.template,
+  ]);
+  useEffect(() => {
+    const engine = engineSlot.get();
+    if (engine === null) return;
+    engine.updateTemplateDecorations(templateDecorations);
+  }, [engineGeneration, engineSlot, templateDecorations]);
   return (
     <div
       ref={rootCallback}
@@ -1185,37 +1269,6 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
                 props.mode === 'template' ? props.template?.bindings.length : undefined
               }
             />
-            {props.mode === 'template' && props.template !== undefined ? (
-              <div
-                className="tego-sheet__template-decorations"
-                aria-label="Template canvas decorations"
-              >
-                {props.template.bindings.map((binding) => {
-                  const range =
-                    binding.type === 'value'
-                      ? {
-                          sheetId: binding.target.sheetId,
-                          start: { row: binding.target.row, column: binding.target.column },
-                          end: { row: binding.target.row, column: binding.target.column },
-                        }
-                      : binding.range;
-                  return range.sheetId !== activeDocumentSheet?.id ? null : (
-                    <button
-                      key={binding.id}
-                      type="button"
-                      data-binding-id={binding.id}
-                      data-start-row={range.start.row}
-                      data-start-column={range.start.column}
-                      data-end-row={range.end.row}
-                      data-end-column={range.end.column}
-                      onClick={() => locateTemplateBinding(binding.id)}
-                    >
-                      {binding.id}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
             {selection === null ||
             activeData === null ||
             activeDocumentSheet === undefined ||
@@ -1278,6 +1331,8 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
           onDiagnostics={props.onDiagnostics}
           selection={templateSelection}
           onLocateBinding={locateTemplateBinding}
+          activeProfileId={props.activePrintProfileId}
+          onActiveProfileChange={props.onActivePrintProfileChange}
         />
       ) : null}
     </div>
@@ -1353,8 +1408,9 @@ function TemplateSurface(props: {
   readonly sampleData: unknown;
   readonly environment: NonNullable<TegoSheetProps['renderEnvironment']>;
   readonly onDiagnostics: TegoSheetProps['onDiagnostics'];
+  readonly activeProfileId?: string;
 }) {
-  const { document, environment, onDiagnostics, sampleData, template } = props;
+  const { activeProfileId, document, environment, onDiagnostics, sampleData, template } = props;
   const compilation = useMemo(
     () => compileSpreadsheetTemplate(document, template),
     [document, template],
@@ -1362,7 +1418,8 @@ function TemplateSurface(props: {
   useEffect(() => {
     onDiagnostics?.(compilation.diagnostics);
   }, [compilation.diagnostics, onDiagnostics]);
-  const profile = template.printProfiles[0];
+  const profile =
+    template.printProfiles.find(({ id }) => id === activeProfileId) ?? template.printProfiles[0];
   if (compilation.template !== undefined && profile !== undefined) {
     return (
       <PreviewRenderSession
@@ -1391,8 +1448,19 @@ function TemplateDesignerSurface(props: {
   readonly onDiagnostics: TegoSheetProps['onDiagnostics'];
   readonly selection?: import('../document').DocumentCellRange;
   readonly onLocateBinding?: (bindingId: import('../document').BindingId) => void;
+  readonly activeProfileId?: string;
+  readonly onActiveProfileChange?: (profileId: string) => void;
 }) {
-  const { document, onChange, onDiagnostics, onLocateBinding, selection, template } = props;
+  const {
+    activeProfileId,
+    document,
+    onActiveProfileChange,
+    onChange,
+    onDiagnostics,
+    onLocateBinding,
+    selection,
+    template,
+  } = props;
   const diagnostics = useMemo(
     () => compileSpreadsheetTemplate(document, template).diagnostics,
     [document, template],
@@ -1405,6 +1473,8 @@ function TemplateDesignerSurface(props: {
       onChange={onChange}
       selection={selection}
       onLocateBinding={onLocateBinding}
+      activeProfileId={activeProfileId}
+      onActiveProfileChange={onActiveProfileChange}
     />
   );
 }
@@ -1461,6 +1531,7 @@ export const TegoSheet = forwardRef<TegoSheetHandle, TegoSheetProps>(
           sampleData={props.sampleData}
           environment={props.renderEnvironment}
           onDiagnostics={props.onDiagnostics}
+          activeProfileId={props.activePrintProfileId}
         />
       );
     }

@@ -20,6 +20,10 @@ export interface TemplateDesignerProps {
   readonly onLocateBinding?: (bindingId: BindingId) => void;
   /** Current grid selection used when creating bindings and print targets. */
   readonly selection?: DocumentCellRange;
+  /** Currently selected print profile. */
+  readonly activeProfileId?: string;
+  /** Receives print profile selection changes. */
+  readonly onActiveProfileChange?: (profileId: string) => void;
 }
 
 function bindingExpression(binding: TemplateBinding): string {
@@ -61,6 +65,13 @@ function bindingTarget(range: DocumentCellRange): DocumentCellAddress {
   return { sheetId: range.sheetId, row: range.start.row, column: range.start.column };
 }
 
+function nextAvailableId(prefix: string, existing: readonly string[]): string {
+  const used = new Set(existing);
+  let suffix = 1;
+  while (used.has(`${prefix}-${suffix}`)) suffix += 1;
+  return `${prefix}-${suffix}`;
+}
+
 /** Accessible property panel that edits the same immutable model consumed by the SDK. */
 export function TemplateDesigner({
   template,
@@ -68,6 +79,8 @@ export function TemplateDesigner({
   onChange,
   onLocateBinding,
   selection,
+  activeProfileId,
+  onActiveProfileChange,
 }: TemplateDesignerProps): ReactElement {
   const selectedRange = selection ?? firstTarget(template);
   const updateBinding = (
@@ -88,7 +101,10 @@ export function TemplateDesigner({
       );
     };
   const addBinding = (type: TemplateBinding['type']): void => {
-    const id = `binding-${template.bindings.length + 1}` as BindingId;
+    const id = nextAvailableId(
+      'binding',
+      template.bindings.map(({ id: bindingId }) => bindingId),
+    ) as BindingId;
     const binding: TemplateBinding =
       type === 'value'
         ? {
@@ -122,7 +138,10 @@ export function TemplateDesigner({
   };
   const addProfile = (): void => {
     const profile: TemplatePrintProfile = {
-      id: `profile-${template.printProfiles.length + 1}`,
+      id: nextAvailableId(
+        'profile',
+        template.printProfiles.map(({ id }) => id),
+      ),
       name: `Print profile ${template.printProfiles.length + 1}`,
       targets: [{ type: 'range', range: selectedRange }],
       page: {
@@ -227,6 +246,9 @@ export function TemplateDesigner({
                 </label>
               </>
             ) : null}
+            <button type="button" onClick={() => onLocateBinding?.(binding.id)}>
+              Locate {binding.id}
+            </button>
             <button
               type="button"
               onClick={() =>
@@ -246,6 +268,26 @@ export function TemplateDesigner({
           Add print profile
         </button>
         {template.printProfiles.length === 0 ? <p>No print profile</p> : null}
+        {template.printProfiles.length > 0 ? (
+          <label>
+            Active print profile
+            <select
+              aria-label="Active print profile"
+              value={
+                template.printProfiles.some(({ id }) => id === activeProfileId)
+                  ? activeProfileId
+                  : template.printProfiles[0]!.id
+              }
+              onChange={(event) => onActiveProfileChange?.(event.currentTarget.value)}
+            >
+              {template.printProfiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         {template.printProfiles.map((profile, profileIndex) => (
           <fieldset key={profile.id}>
             <legend>{profile.name}</legend>

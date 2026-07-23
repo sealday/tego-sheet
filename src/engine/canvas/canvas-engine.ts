@@ -11,6 +11,14 @@ import { paintHeaders } from './header-painter';
 import { RenderScheduler } from './render-scheduler';
 import type { AnimationFramePort } from './render-scheduler';
 import { paintSelection } from './selection-painter';
+import { paintTemplateDecorations } from './template-decoration-painter';
+
+export interface TemplateCanvasDecoration {
+  readonly range: CellRange;
+  readonly kind: 'value' | 'repeat' | 'print';
+  readonly label: string;
+  readonly invalid?: boolean;
+}
 
 export type { CanvasSurfacePort, TextMeasurementPort } from './draw-context';
 export type { AnimationFramePort } from './render-scheduler';
@@ -20,6 +28,7 @@ export interface CanvasRenderSnapshot {
   readonly viewport: ViewportMetrics;
   readonly selection?: CellRange;
   readonly invalidCells?: readonly CellPoint[];
+  readonly templateDecorations?: readonly TemplateCanvasDecoration[];
   readonly showGrid?: boolean;
   /** Shared presentation batch for the visible document revision. */
   readonly presentations?: {
@@ -115,6 +124,12 @@ export class CanvasEngine {
           paintCells(this.draw, snapshot, cells, presentations);
           paintFilterOverlays(this.draw, snapshot, indexes.rows, indexes.columns);
           paintSelection(this.draw, snapshot.selection, viewport, pane.kind);
+          paintTemplateDecorations(
+            this.draw,
+            snapshot.templateDecorations ?? [],
+            viewport,
+            pane.kind,
+          );
         },
         {
           x:

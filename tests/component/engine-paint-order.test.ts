@@ -160,3 +160,56 @@ it('suppresses repeated paints for a failed controller snapshot and retries on e
   expect(onRenderError).toHaveBeenCalledOnce();
   engine.dispose();
 });
+
+it('paints template value, repeat, print, and invalid decorations with canvas geometry', () => {
+  const frames: FrameRequestCallback[] = [];
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    frames.push(callback);
+    return frames.length;
+  });
+  vi.stubGlobal('cancelAnimationFrame', vi.fn());
+  const root = document.createElement('div');
+  Object.defineProperties(root, {
+    clientWidth: { configurable: true, value: 500 },
+    clientHeight: { configurable: true, value: 300 },
+  });
+  const canvas = createCanvasHarness();
+  const controller = new SpreadsheetDocumentController(
+    testDocument({ rows: { len: 3 }, cols: { len: 3 } }),
+  );
+  const sheet = controller.getSheetIds()[0]!;
+  const engine = createEngineAdapter({
+    root,
+    canvas: canvas.canvas as unknown as HTMLCanvasElement,
+  });
+  engine.render(controller.getSnapshot(), sheet);
+  frames.shift()!(0);
+  canvas.operations.length = 0;
+  engine.updateTemplateDecorations([
+    {
+      range: { start: { row: 0, column: 0 }, end: { row: 0, column: 0 } },
+      kind: 'value',
+      label: 'customer',
+    },
+    {
+      range: { start: { row: 1, column: 0 }, end: { row: 2, column: 1 } },
+      kind: 'repeat',
+      label: 'lines',
+      invalid: true,
+    },
+    {
+      range: { start: { row: 0, column: 0 }, end: { row: 2, column: 2 } },
+      kind: 'print',
+      label: 'A4',
+    },
+  ]);
+  frames.shift()!(1);
+
+  expect(
+    canvas.operations.filter(({ name }) => name === 'fillText').map(({ args }) => args[0]),
+  ).toEqual(expect.arrayContaining(['customer', 'lines', 'A4']));
+  expect(
+    canvas.operations.filter(({ name }) => name === 'set:strokeStyle').map(({ args }) => args[0]),
+  ).toEqual(expect.arrayContaining(['#2563eb', '#dc2626', '#059669']));
+  engine.dispose();
+});

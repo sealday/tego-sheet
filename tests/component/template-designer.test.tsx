@@ -213,6 +213,48 @@ describe('TemplateDesigner', () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ printProfiles: [] }));
   });
 
+  it('selects profiles and allocates collision-free binding and profile IDs', () => {
+    const onChange = vi.fn();
+    const onActiveProfileChange = vi.fn();
+    const collisionTemplate: SpreadsheetTemplate = {
+      ...template,
+      bindings: [template.bindings[0]!, { ...template.bindings[0]!, id: 'binding-3' as never }],
+      printProfiles: [
+        template.printProfiles[0]!,
+        { ...template.printProfiles[0]!, id: 'profile-3', name: 'Letter' },
+      ],
+    };
+    const rendered = render(
+      <TemplateDesigner
+        template={collisionTemplate}
+        diagnostics={[]}
+        onChange={onChange}
+        activeProfileId="profile-3"
+        onActiveProfileChange={onActiveProfileChange}
+      />,
+    );
+    const view = within(rendered.container);
+    expect((view.getByLabelText('Active print profile') as HTMLSelectElement).value).toBe(
+      'profile-3',
+    );
+    fireEvent.change(view.getByLabelText('Active print profile'), {
+      target: { value: 'profile-1' },
+    });
+    expect(onActiveProfileChange).toHaveBeenCalledWith('profile-1');
+    fireEvent.click(view.getByRole('button', { name: 'Add value' }));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindings: expect.arrayContaining([expect.objectContaining({ id: 'binding-2' })]),
+      }),
+    );
+    fireEvent.click(view.getByRole('button', { name: 'Add print profile' }));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        printProfiles: expect.arrayContaining([expect.objectContaining({ id: 'profile-2' })]),
+      }),
+    );
+  });
+
   it('bridges template binding decorations to the live grid selection', async () => {
     const onSelectionChange = vi.fn();
     const onTemplateChange = vi.fn();
@@ -242,8 +284,9 @@ describe('TemplateDesigner', () => {
     );
     const view = within(rendered.container);
 
-    await waitFor(() => expect(view.getByLabelText('Template canvas decorations')).toBeTruthy());
-    fireEvent.click(view.getByRole('button', { name: 'binding-1' }));
+    await waitFor(() => expect(rendered.container.querySelector('canvas')).toBeTruthy());
+    expect(rendered.container.querySelector('canvas')?.dataset.templateBindingCount).toBe('1');
+    fireEvent.click(view.getByRole('button', { name: 'Locate binding-1' }));
     expect(onSelectionChange).toHaveBeenLastCalledWith(
       expect.objectContaining({
         active: { row: 2, column: 1 },
@@ -379,6 +422,55 @@ describe('TemplatePreview', () => {
     await waitFor(() => expect(view.getByRole('img')).toBeTruthy());
     expect(view.getByLabelText('Template preview diagnostics').textContent).toContain(
       'resolved to a missing value',
+    );
+  });
+
+  it('previews the explicitly selected print profile', async () => {
+    const selectedTemplate: SpreadsheetTemplate = {
+      ...template,
+      printProfiles: [
+        template.printProfiles[0]!,
+        {
+          ...template.printProfiles[0]!,
+          id: 'profile-2',
+          name: 'Letter landscape',
+          page: {
+            ...template.printProfiles[0]!.page,
+            paper: { type: 'Letter' },
+            orientation: 'landscape',
+            scale: { type: 'fit-page' },
+          },
+        },
+      ],
+    };
+    const rendered = render(
+      <TegoSheet
+        document={createSpreadsheetDocument({
+          id: 'preview-profile-document',
+          sheetId: 'sheet-1',
+          sheetName: 'Invoice',
+        })}
+        mode="preview"
+        template={selectedTemplate}
+        activePrintProfileId="profile-2"
+        sampleData={{ customer: { name: 'Ada' } }}
+        renderEnvironment={{
+          locale: 'en-US',
+          timeZone: 'UTC',
+          dateSystem: 'excel-1900',
+          clock: new Date('2026-01-01T00:00:00.000Z'),
+          fontMetrics: createFontMetrics({
+            fonts: { Arial: { averageAdvance: 6, lineHeight: 12 } },
+            fallbackFont: 'Arial',
+            fallback: { averageAdvance: 6, lineHeight: 12 },
+          }),
+        }}
+      />,
+    );
+    const view = within(rendered.container);
+    await waitFor(() => expect(view.getByRole('img')).toBeTruthy());
+    expect(view.getByLabelText('Template preview metadata').textContent).toContain(
+      'Letter · landscape · Fit page',
     );
   });
 });

@@ -56,6 +56,10 @@ interface TegoSheetSharedProps extends TegoSheetCallbacks {
   readonly mode?: 'spreadsheet' | 'template' | 'preview';
   /** Full TP1 template model used by template and preview modes. */
   readonly template?: SpreadsheetTemplate;
+  /** Print profile selected by template and preview modes; defaults to the first profile. */
+  readonly activePrintProfileId?: string;
+  /** Receives print profile selection changes from the template designer. */
+  readonly onActivePrintProfileChange?: (profileId: string) => void;
   /** Sample structured data resolved by preview mode. */
   readonly sampleData?: unknown;
   /** Deterministic preview environment; required when mode is `preview`. */

@@ -47,6 +47,7 @@ export type {
   CanvasEngineOptions,
   CanvasRenderSnapshot,
   CanvasSurfacePort,
+  TemplateCanvasDecoration,
   TextMeasurementPort,
 } from './canvas/canvas-engine';
 export { ResourceRegistry } from './interaction/resource-registry';
