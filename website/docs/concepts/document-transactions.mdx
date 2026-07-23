@@ -1,0 +1,78 @@
+---
+title: Document Transactions
+---
+
+# Document Transactions
+
+Use `createDocumentController` when application logic needs typed, serializable edits without
+mounting the React component. The controller owns one immutable Workbook 2.0 document and commits a
+transaction as one revision, one change event, and one undo item.
+
+```ts
+import {
+  createDocumentController,
+  createSpreadsheetDocument,
+  type DocumentTransactionEnvelope,
+  type SheetId,
+} from 'tego-sheet';
+
+const document = createSpreadsheetDocument({
+  id: 'budget',
+  sheetId: 'income',
+});
+const controller = createDocumentController(document);
+const income = 'income' as SheetId;
+
+const transaction: DocumentTransactionEnvelope = {
+  schemaVersion: 1,
+  id: 'seed-income',
+  baseRevision: controller.getSnapshot().revision,
+  commands: [
+    {
+      schemaVersion: 1,
+      id: 'set-label',
+      command: {
+        type: 'set-cell-text',
+        address: { sheet: income, row: 0, column: 0 },
+        text: 'Revenue',
+      },
+    },
+    {
+      schemaVersion: 1,
+      id: 'set-value',
+      command: {
+        type: 'set-cell-text',
+        address: { sheet: income, row: 0, column: 1 },
+        text: '1200',
+      },
+    },
+  ],
+};
+
+const result = controller.transact(transaction);
+if (result.status === 'committed') {
+  console.log(result.revision, result.change?.sheets);
+}
+```
+
+`baseRevision` provides optimistic concurrency control. A stale transaction returns
+`REVISION_CONFLICT` before mutation. A synchronous `permissionGate` can reject a transaction before
+candidate execution, and `dryRun` returns the candidate document without changing revision, history,
+or subscriptions.
+
+Committed transaction records contain JSON-safe forward and inverse patches plus diagnostics. These
+patches are audit data: the package intentionally exposes no API for applying externally supplied
+patches. Submit typed commands through `execute` or `transact` instead.
+
+`undo()` and `redo()` are controller methods and are deliberately excluded from
+`DocumentCommand`. This keeps history traversal outside serialized transaction envelopes.
+
+Subscribers receive only the immutable document, revision, aggregate affected-sheet/range summary,
+and committed transaction record. If a subscriber throws after a commit, mutation methods still
+return a committed result with `notificationError`; the document is not rolled back.
+
+The facade does not expose engine projections, replacement hooks, or internal checkpoints. Call
+`dispose()` when the controller is no longer needed.
+
+See the generated [DocumentController API](/docs/api/interfaces/DocumentController) and
+[DocumentCommand API](/docs/api/type-aliases/DocumentCommand).

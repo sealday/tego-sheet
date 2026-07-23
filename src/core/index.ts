@@ -42,6 +42,8 @@ export type {
   LocaleDefinition,
   LocaleMessages,
   PasteEvent,
+  TransactionChangeAggregate,
+  TransactionSheetChange,
   WorkbookChange,
   WorkbookChangeKind,
 } from './types/changes';

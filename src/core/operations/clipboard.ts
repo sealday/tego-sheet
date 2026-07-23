@@ -13,6 +13,7 @@ import type { CellRange } from '../types/coordinates';
 import type { CellData, CellStyle, SheetData } from '../types/workbook';
 import { assertRangeEditable } from './editable';
 
+/** Content categories transferred by paste and autofill commands. */
 export type PasteMode = 'all' | 'value' | 'format';
 
 export const MAX_CLIPBOARD_CELLS = 250_000;

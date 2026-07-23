@@ -1,4 +1,5 @@
 import { describe, expectTypeOf, it } from 'vitest';
+import { createDocumentController, createSpreadsheetDocument } from '../../src/index';
 import type {
   ActiveSheetChangeEvent,
   BorderMode,
@@ -7,6 +8,12 @@ import type {
   CellEditEvent,
   CellRange,
   CellStyle,
+  DocumentCommandEnvelope,
+  DocumentController,
+  DocumentControllerEvent,
+  DocumentTransactionEnvelope,
+  DocumentTransactionPermissionContext,
+  DocumentTransactionResult,
   FilterDefinition,
   JsonValue,
   LocaleDefinition,
@@ -24,12 +31,58 @@ import type {
   ValidationResult,
   ValidationRule,
   WorkbookChange,
+  SpreadsheetDocument,
 } from '../../src/index';
 import type { WorkbookData, WorkbookInput } from '../../src/core';
 import type { SheetId } from '../../src/index';
 import type { CellsData, ColsData, ColumnData, ValidationData } from '../../src/index';
 
 describe('the public type contract', () => {
+  it('exposes a narrow JSON-safe document transaction facade', () => {
+    const controller: DocumentController = createDocumentController(
+      createSpreadsheetDocument({ id: 'document-1', sheetId: 'sheet-1' }),
+    );
+    const command: DocumentCommandEnvelope = {
+      schemaVersion: 1,
+      id: 'command-1',
+      command: {
+        type: 'set-cell-text',
+        address: { sheet: 'sheet-1' as SheetId, row: 0, column: 0 },
+        text: 'value',
+      },
+    };
+    const transaction: DocumentTransactionEnvelope = {
+      schemaVersion: 1,
+      id: 'transaction-1',
+      baseRevision: controller.getSnapshot().revision,
+      commands: [command],
+    };
+    const result: DocumentTransactionResult = controller.transact(transaction, {
+      permissionGate: (context: DocumentTransactionPermissionContext) =>
+        context.snapshot.revision === context.transaction.baseRevision,
+    });
+    const unsubscribe = controller.subscribe((event: DocumentControllerEvent) => {
+      expectTypeOf(event.document).toMatchTypeOf<SpreadsheetDocument>();
+      expectTypeOf(event.transaction).not.toBeAny();
+    });
+
+    expectTypeOf(result.status).toEqualTypeOf<'committed' | 'noop' | 'rejected'>();
+    expectTypeOf(controller).not.toHaveProperty('checkpoint');
+    expectTypeOf(controller).not.toHaveProperty('replace');
+    expectTypeOf(controller.getSnapshot()).not.toHaveProperty('projection');
+    unsubscribe();
+
+    // @ts-expect-error commands are deeply readonly
+    command.command.type = 'delete-row';
+    const invalid: DocumentCommandEnvelope = {
+      schemaVersion: 1,
+      id: 'invalid',
+      // @ts-expect-error commands must remain JSON-compatible
+      command: { type: 'invalid', callback: () => undefined },
+    };
+    expectTypeOf(invalid).toEqualTypeOf<DocumentCommandEnvelope>();
+  });
+
   it('accepts canonical workbook arrays and permissive single-sheet input', () => {
     const sheet: SheetData = {
       name: '',

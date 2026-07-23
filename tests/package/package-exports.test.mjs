@@ -35,6 +35,7 @@ test('the built root has only the approved runtime exports and internal subpaths
       const expected = [
         'TegoSheet',
         'TegoSheetException',
+        'createDocumentController',
         'createSpreadsheetDocument',
         'migrateLegacyWorkbook',
         'parseSpreadsheetDocument',

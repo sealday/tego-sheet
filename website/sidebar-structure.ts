@@ -244,6 +244,7 @@ export function createDocumentationSidebars(typedocSidebar: SidebarItemConfig[])
           'concepts/controlled-and-uncontrolled',
           'concepts/workbook-data',
           'concepts/refs-and-commands',
+          'concepts/document-transactions',
           'concepts/callbacks-and-errors',
         ],
       },
