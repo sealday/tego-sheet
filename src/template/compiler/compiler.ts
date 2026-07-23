@@ -283,6 +283,47 @@ function resolveTemplate(
   return { document, ...(template === undefined ? {} : { template }) };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function hasRuntimeTemplateShape(value: unknown): value is SpreadsheetTemplate {
+  if (!isRecord(value) || !Array.isArray(value.bindings) || !Array.isArray(value.printProfiles)) {
+    return false;
+  }
+  const bindingsAreValid = value.bindings.every((binding) => {
+    if (!isRecord(binding) || typeof binding.id !== 'string' || typeof binding.type !== 'string') {
+      return false;
+    }
+    if (binding.type === 'value') {
+      return isRecord(binding.target) && typeof binding.expression === 'string';
+    }
+    if (binding.type === 'repeat-rows') {
+      return (
+        isRecord(binding.range) &&
+        typeof binding.source === 'string' &&
+        (binding.empty === 'remove' || binding.empty === 'keep-template-row') &&
+        (binding.pageBreak === 'auto' || binding.pageBreak === 'before-each-item')
+      );
+    }
+    return (
+      binding.type === 'conditional-range' &&
+      isRecord(binding.range) &&
+      typeof binding.when === 'string'
+    );
+  });
+  return (
+    bindingsAreValid &&
+    value.printProfiles.every(
+      (profile) =>
+        isRecord(profile) &&
+        Array.isArray(profile.targets) &&
+        isRecord(profile.page) &&
+        Array.isArray(profile.manualBreaks),
+    )
+  );
+}
+
 /** Compiles one persisted template into immutable, DOM-free template IR. */
 export function compileSpreadsheetTemplate(
   document: SpreadsheetDocument,
@@ -293,6 +334,13 @@ export function compileSpreadsheetTemplate(
   const template = resolved.template;
   if (template === undefined) {
     const frozenDiagnostics = immutableClone(diagnostics);
+    return immutableClone({ diagnostics: frozenDiagnostics, hasErrors: true });
+  }
+  if (!hasRuntimeTemplateShape(template)) {
+    const frozenDiagnostics = immutableClone([
+      ...diagnostics,
+      diagnostic('INVALID_TEMPLATE_STRUCTURE', 'Template structure is malformed'),
+    ]);
     return immutableClone({ diagnostics: frozenDiagnostics, hasErrors: true });
   }
   const bindings: TemplateIRBinding[] = [];

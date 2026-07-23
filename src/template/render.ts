@@ -114,7 +114,7 @@ function transformRange(
         range.end.row +
         sheetInsertions.reduce(
           (delta, insertion) =>
-            delta + (range.end.row >= insertion.afterSourceRow ? Math.max(0, insertion.delta) : 0),
+            delta + (range.end.row >= insertion.afterSourceRow ? insertion.delta : 0),
           0,
         ),
     },

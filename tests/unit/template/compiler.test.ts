@@ -141,6 +141,31 @@ describe('template compiler', () => {
     );
   });
 
+  it('returns an atomic diagnostic for malformed JavaScript input', () => {
+    const malformed = {
+      ...template(),
+      bindings: [
+        {
+          id: 'broken',
+          type: 'repeat-rows',
+          source: 'items',
+          empty: 'remove',
+          pageBreak: 'auto',
+        },
+      ],
+    } as unknown as SpreadsheetTemplate;
+    const persisted = { ...document, templates: [malformed] } as SpreadsheetDocument;
+    expect(() => compileSpreadsheetTemplate(persisted, malformed.id)).not.toThrow();
+    expect(compileSpreadsheetTemplate(persisted, malformed.id)).toEqual(
+      expect.objectContaining({
+        hasErrors: true,
+        diagnostics: expect.arrayContaining([
+          expect.objectContaining({ code: 'INVALID_TEMPLATE_STRUCTURE' }),
+        ]),
+      }),
+    );
+  });
+
   it('compiles metadata bindings into immutable IR and hashes the complete source', () => {
     const result = compileSpreadsheetTemplate(document, template());
     expect(result.hasErrors).toBe(false);

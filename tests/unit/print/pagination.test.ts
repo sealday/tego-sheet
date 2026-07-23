@@ -69,4 +69,23 @@ describe('deterministic template pagination', () => {
     expect(fitted.pages).toHaveLength(2);
     expect(fitted.pages[0]?.scale).toBe(1);
   });
+
+  it('does not reserve repeated titles twice when the complete target fits the first page', () => {
+    const result = paginateTemplateTargets({
+      targets: [
+        {
+          id: 'titles',
+          rows: [40, 40],
+          columns: [100],
+          repeatRows: [40],
+        },
+      ],
+      paper: { width: 120, height: 100 },
+      margins: { top: 10, right: 10, bottom: 10, left: 10 },
+      scale: { type: 'fit-page' },
+      manualBreaks: [],
+      maxPages: 10,
+    });
+    expect(result.pages).toHaveLength(1);
+  });
 });

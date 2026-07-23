@@ -106,19 +106,16 @@ export function paginateTemplateTargets(input: PaginationInput): PaginationResul
       input.margins.left -
       input.margins.right -
       (target.repeatColumns ?? []).reduce((sum, width) => sum + width * scale, 0);
-    if (availableTargetHeight <= 0 || availableTargetWidth <= 0) {
-      terminalDiagnostic = diagnostic(
-        'INVALID_PRINT_TARGET',
-        `Repeated titles consume the page for ${target.id}`,
-      );
-      break;
-    }
     const columnSegments: { readonly start: number; readonly end: number }[] = [];
     let columnStart = 0;
     let columnWidth = 0;
     for (let column = 0; column < target.columns.length; column += 1) {
       const width = target.columns[column]! * scale;
-      if (width > availableTargetWidth) {
+      const pageWidth =
+        columnStart === 0
+          ? input.paper.width - input.margins.left - input.margins.right
+          : availableTargetWidth;
+      if (pageWidth <= 0 || width > pageWidth) {
         diagnostics.push(
           diagnostic(
             'COLUMN_EXCEEDS_PAGE',
@@ -127,7 +124,7 @@ export function paginateTemplateTargets(input: PaginationInput): PaginationResul
         );
         continue;
       }
-      if (columnWidth + width > availableTargetWidth && column > columnStart) {
+      if (columnWidth + width > pageWidth && column > columnStart) {
         columnSegments.push({ start: columnStart, end: column - 1 });
         columnStart = column;
         columnWidth = 0;
@@ -184,7 +181,8 @@ export function paginateTemplateTargets(input: PaginationInput): PaginationResul
         break;
       }
       const rowHeight = target.rows[row]! * scale;
-      if (rowHeight > availableTargetHeight) {
+      const pageHeight = start === 0 ? availableHeight : availableTargetHeight;
+      if (pageHeight <= 0 || rowHeight > pageHeight) {
         emit(row - 1);
         diagnostics.push(
           diagnostic('ROW_EXCEEDS_PAGE', `Row ${row} in ${target.id} exceeds the printable page`),
@@ -193,7 +191,7 @@ export function paginateTemplateTargets(input: PaginationInput): PaginationResul
         height = 0;
         continue;
       }
-      if ((breaks.has(row) && row > start) || height + rowHeight > availableTargetHeight) {
+      if ((breaks.has(row) && row > start) || height + rowHeight > pageHeight) {
         emit(row - 1);
         start = row;
         height = 0;

@@ -366,6 +366,129 @@ describe('template render pipeline', () => {
     expect(result.document?.print.pages).toHaveLength(3);
   });
 
+  it('keeps the untouched template row for an empty keep-template-row repeat', async () => {
+    const keepTemplate: SpreadsheetTemplate = {
+      ...template,
+      bindings: [
+        {
+          id: 'lines' as never,
+          type: 'repeat-rows',
+          range: {
+            sheetId: 'sheet-1' as never,
+            start: { row: 1, column: 0 },
+            end: { row: 1, column: 1 },
+          },
+          source: 'items',
+          empty: 'keep-template-row',
+          pageBreak: 'auto',
+        },
+        {
+          id: 'item-name' as never,
+          type: 'value',
+          target: { sheetId: 'sheet-1' as never, row: 1, column: 0 },
+          expression: 'item.name',
+        },
+      ],
+    };
+    const compiled = compileSpreadsheetTemplate(source, keepTemplate).template!;
+    const result = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: { items: [] },
+        profileId: 'profile-1',
+        missingValue: 'error',
+      },
+      environment,
+    );
+    expect(result.diagnostics.filter(({ severity }) => severity === 'error')).toEqual([]);
+    expect(result.document?.workbook.sheets[0]?.cells).toContainEqual(
+      expect.objectContaining({
+        row: 1,
+        column: 0,
+        cell: { input: { type: 'string', value: 'item' } },
+      }),
+    );
+  });
+
+  it('maps scalar targets after conditional row removal', async () => {
+    const mappedTemplate: SpreadsheetTemplate = {
+      ...template,
+      bindings: [
+        {
+          id: 'hide-first' as never,
+          type: 'conditional-range',
+          range: {
+            sheetId: 'sheet-1' as never,
+            start: { row: 0, column: 0 },
+            end: { row: 0, column: 1 },
+          },
+          when: 'visible',
+        },
+        {
+          id: 'mapped-value' as never,
+          type: 'value',
+          target: { sheetId: 'sheet-1' as never, row: 1, column: 0 },
+          expression: 'replacement',
+        },
+      ],
+    };
+    const compiled = compileSpreadsheetTemplate(source, mappedTemplate).template!;
+    const result = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: { visible: false, replacement: 'mapped' },
+        profileId: 'profile-1',
+        missingValue: 'error',
+      },
+      environment,
+    );
+    expect(result.document?.workbook.sheets[0]?.cells).toContainEqual(
+      expect.objectContaining({
+        row: 0,
+        column: 0,
+        cell: { input: { type: 'string', value: 'mapped' } },
+      }),
+    );
+  });
+
+  it('does not execute formatter accessors and returns an atomic diagnostic', async () => {
+    const formatterTemplate: SpreadsheetTemplate = {
+      ...template,
+      bindings: [
+        {
+          id: 'formatted-name' as never,
+          type: 'value',
+          target: { sheetId: 'sheet-1' as never, row: 0, column: 1 },
+          expression: 'customer.name',
+          formatter: 'danger',
+        },
+      ],
+    };
+    const compiled = compileSpreadsheetTemplate(source, formatterTemplate).template!;
+    const formatters = Object.defineProperty({}, 'danger', {
+      enumerable: true,
+      get() {
+        throw new Error('must not execute');
+      },
+    });
+    await expect(
+      renderSpreadsheetTemplate(
+        {
+          template: compiled,
+          currentDocumentHash: compiled.sourceDocumentHash,
+          data: { customer: { name: 'Ada' } },
+          profileId: 'profile-1',
+          missingValue: 'error',
+        },
+        { ...environment, formatters },
+      ),
+    ).resolves.toEqual({
+      diagnostics: [expect.objectContaining({ code: 'UNKNOWN_FORMATTER' })],
+    });
+  });
+
   it('renders merged geometry, titles, headings, bands, and gridline policy into the display list', async () => {
     const displaySource = {
       ...source,

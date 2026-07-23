@@ -51,7 +51,8 @@ function formatBindingValue(
   if (!Object.prototype.hasOwnProperty.call(formatters, formatter)) {
     throw new TemplateExpressionError('UNKNOWN_FORMATTER', `Unknown formatter: ${formatter}`);
   }
-  const callable = formatters[formatter];
+  const descriptor = Object.getOwnPropertyDescriptor(formatters, formatter);
+  const callable = descriptor !== undefined && 'value' in descriptor ? descriptor.value : undefined;
   if (typeof callable !== 'function') {
     throw new TemplateExpressionError('UNKNOWN_FORMATTER', `Unknown formatter: ${formatter}`);
   }
@@ -121,14 +122,15 @@ function expandRepeat(
   signal?: AbortSignal,
 ): Sheet {
   const height = binding.range.end.row - binding.range.start.row + 1;
-  const copies = items.length === 0 && binding.empty === 'keep-template-row' ? [undefined] : items;
+  const preserveTemplate = items.length === 0 && binding.empty === 'keep-template-row';
+  const copies = preserveTemplate ? [undefined] : items;
   if (copies.length === 0) return removeRange(sheet, binding.range);
   const delta = height * (copies.length - 1);
   const existingSourceCells = sheet.cells.filter(
     ({ row }) => row >= binding.range.start.row && row <= binding.range.end.row,
   );
   const sourceCells = [...existingSourceCells];
-  for (const valueBinding of valueBindings) {
+  for (const valueBinding of preserveTemplate ? [] : valueBindings) {
     if (
       !sourceCells.some(
         ({ row, column }) =>
@@ -157,7 +159,7 @@ function expandRepeat(
         ({ target }) => target.row === entry.row && target.column === entry.column,
       );
       let cell = translatedCell(entry.cell, rowDelta);
-      if (valueBinding !== undefined) {
+      if (valueBinding !== undefined && !preserveTemplate) {
         let value = evaluateTemplateExpression(
           valueBinding.expression,
           {
@@ -262,6 +264,7 @@ export function expandTemplate(
     const items = Array.isArray(value) ? value : [];
     const height = binding.range.end.row - binding.range.start.row + 1;
     const copies = items.length === 0 && binding.empty === 'keep-template-row' ? 1 : items.length;
+    const preserveTemplate = items.length === 0 && binding.empty === 'keep-template-row';
     expandedRows += height * copies;
     if (expandedRows > limits.maxExpandedRows) {
       return freeze({
@@ -292,7 +295,7 @@ export function expandTemplate(
       sheets[sheetIndex]!.cells.filter(
         ({ row }) => row >= binding.range.start.row && row <= binding.range.end.row,
       ).length +
-      valueBindings.filter(
+      (preserveTemplate ? [] : valueBindings).filter(
         ({ target }) =>
           !sheets[sheetIndex]!.cells.some(
             ({ row, column }) => row === target.row && column === target.column,
@@ -328,7 +331,7 @@ export function expandTemplate(
       items,
       data,
       formatters,
-      valueBindings,
+      preserveTemplate ? [] : valueBindings,
       diagnostics,
       signal,
     );
@@ -374,6 +377,12 @@ export function expandTemplate(
       end: { ...binding.range.end, row: mapRow(binding.range.end.row, sheetInsertions) },
     };
     sheets[sheetIndex] = removeRange(sheets[sheetIndex]!, mappedRange);
+    const list = insertions.get(binding.range.sheetId) ?? [];
+    list.push({
+      afterSourceRow: binding.range.end.row,
+      delta: -(binding.range.end.row - binding.range.start.row + 1),
+    });
+    insertions.set(binding.range.sheetId, list);
   }
   for (const binding of bindings) {
     if (binding.type !== 'value') continue;
