@@ -1,0 +1,51 @@
+{
+  "name": "Legacy report",
+  "freeze": "C3",
+  "styles": [
+    { "format": "0.00", "font": { "bold": true, "vendorFont": "dropped" } },
+    { "font": { "bold": true }, "format": "0.00" }
+  ],
+  "merges": ["A1:B2"],
+  "rows": {
+    "len": 10001,
+    "0": {
+      "height": 28,
+      "hide": false,
+      "style": 0,
+      "cells": {
+        "0": {
+          "text": "=1+1",
+          "value": 2,
+          "style": 0,
+          "editable": false,
+          "printable": false
+        },
+        "1": { "text": "", "style": 1 },
+        "2": { "type": "number", "value": 0 },
+        "3": { "type": "boolean", "value": false },
+        "4": {}
+      }
+    },
+    "10000": { "cells": { "52": { "text": "sparse" } } }
+  },
+  "cols": {
+    "len": 53,
+    "0": { "width": 144, "hide": true, "style": 0 }
+  },
+  "validations": [
+    {
+      "refs": ["A1:A2"],
+      "mode": "cell",
+      "type": "number",
+      "required": false,
+      "operator": "gte",
+      "value": 0
+    }
+  ],
+  "autofilter": {
+    "ref": "A1:E10",
+    "filters": [{ "ci": 0, "operator": "in", "value": ["kept"] }],
+    "sort": { "ci": 0, "order": "asc" }
+  },
+  "vendorSheet": { "not": "copied" }
+}

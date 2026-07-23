@@ -59,6 +59,7 @@ export type {
 export { TegoSheetException } from './core';
 export {
   createSpreadsheetDocument,
+  migrateLegacyWorkbook,
   parseSpreadsheetDocument,
   serializeSpreadsheetDocument,
 } from './document';
@@ -81,6 +82,11 @@ export type {
   DocumentParseResult,
   DocumentSheetId,
   ExtensionStore,
+  LegacyMigrationDiagnosticCode,
+  LegacyMigrationIdFactory,
+  LegacyMigrationOptions,
+  MigrationDiagnostic,
+  MigrationResult,
   ObjectId,
   PrintMargins,
   PrintProfile,

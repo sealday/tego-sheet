@@ -71,6 +71,29 @@ These are the only approved visible departures from legacy behavior:
 
 Sparse row, column, and cell indexes; formulas; styles; merges; validation; filters; falsy values; and extension keys retain their serialized meaning. Invalid workbook replacement is atomic, so partially imported state is never exposed.
 
+## Migrate stored legacy workbooks to schema 2
+
+Use `migrateLegacyWorkbook()` once at the persistence boundary. It accepts the former
+single-sheet object or ordered sheet array and returns an atomic discriminated result:
+
+```ts
+import { migrateLegacyWorkbook, serializeSpreadsheetDocument } from 'tego-sheet';
+
+const result = migrateLegacyWorkbook(legacyWorkbook);
+if (!result.ok) {
+  console.error(result.diagnostics);
+  throw new Error('Legacy workbook migration failed');
+}
+
+const schema2Json = serializeSpreadsheetDocument(result.document);
+```
+
+For reproducible fixtures or migrations, provide deterministic `ids.documentId` and
+`ids.sheetId` factories. Formulas remain source text and cached legacy values are never
+treated as document truth. Features that schema 2 cannot represent are reported through
+structured `LEGACY_FIELD_DEGRADED` or `LEGACY_FIELD_DROPPED` diagnostics rather than being
+copied into an extension bag.
+
 `SheetId` is a runtime-only opaque identity used by callbacks and ref commands. Do not persist it in workbook JSON. A genuine external workbook replacement creates new IDs; edits, renames, history, and controlled acknowledgements retain existing IDs.
 
 The package exposes only `tego-sheet`, `tego-sheet/styles.css`, the four locale subpaths, and `tego-sheet/package.json`. Imports from controller, engine, React internals, source, or legacy paths are unsupported and blocked by the export map.

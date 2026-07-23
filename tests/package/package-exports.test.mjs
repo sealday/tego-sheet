@@ -36,6 +36,7 @@ test('the built root has only the approved runtime exports and internal subpaths
         'TegoSheet',
         'TegoSheetException',
         'createSpreadsheetDocument',
+        'migrateLegacyWorkbook',
         'parseSpreadsheetDocument',
         'serializeSpreadsheetDocument',
       ];
@@ -53,6 +54,18 @@ test('the built root has only the approved runtime exports and internal subpaths
       const parsed = root.parseSpreadsheetDocument(serialized);
       if (!parsed.ok || parsed.document.id !== 'packed-document') {
         throw new Error('bad Workbook 2.0 runtime');
+      }
+      const migrated = root.migrateLegacyWorkbook(
+        { name: 'Legacy' },
+        {
+          ids: {
+            documentId: () => 'migrated-document',
+            sheetId: (index) => 'migrated-sheet-' + index,
+          },
+        },
+      );
+      if (!migrated.ok || migrated.document.id !== 'migrated-document') {
+        throw new Error('bad legacy migration runtime');
       }
     `,
     ],

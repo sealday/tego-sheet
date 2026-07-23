@@ -1,4 +1,5 @@
 export { createSpreadsheetDocument } from './create-document';
+export { migrateLegacyWorkbook } from './migrate-legacy';
 export { parseSpreadsheetDocument } from './parse-document';
 export { serializeSpreadsheetDocument } from './serialize-document';
 export type {
@@ -46,3 +47,10 @@ export type {
 } from './model/ids';
 export type { CellInputRecord, SparseCell, SparseCellInput } from './model/sparse-cells';
 export type { DocumentLimits, DocumentParseOptions, DocumentParseResult } from './parse-document';
+export type {
+  LegacyMigrationDiagnosticCode,
+  LegacyMigrationIdFactory,
+  LegacyMigrationOptions,
+  MigrationDiagnostic,
+  MigrationResult,
+} from './migrate-legacy';

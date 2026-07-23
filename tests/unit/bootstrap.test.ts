@@ -6,6 +6,7 @@ it('imports the library entry without browser globals', async () => {
   expect(Object.getOwnPropertyNames(entry)).toEqual([
     'TegoSheetException',
     'createSpreadsheetDocument',
+    'migrateLegacyWorkbook',
     'parseSpreadsheetDocument',
     'serializeSpreadsheetDocument',
     'TegoSheet',
