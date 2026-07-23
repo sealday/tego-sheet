@@ -59,6 +59,8 @@ import {
 } from './sheet-chrome-runtime';
 import { AccessibilityGrid } from './accessibility/accessibility-grid';
 import { createPresentationCache, createPresentationResolver } from '../presentation';
+import { createValidationEngine } from '../validation';
+import type { ValidationEngine, ValidationResult as AdvancedValidationResult } from '../validation';
 import { createPresentationValidationResolver } from './adapters/presentation-adapter';
 import { compileSpreadsheetTemplate, renderSpreadsheetTemplate } from '../template';
 import { TemplateDesigner } from './template-designer';
@@ -163,6 +165,10 @@ const SELECTION_ACTIONS = new Set<ToolbarAction['type']>([
 interface SlotRuntime extends TegoSheetHandleRuntime {
   readonly selection: Selection | null;
   readonly readOnly: boolean;
+  readonly validationEngine: ValidationEngine;
+  readonly confirmValidationWarning?: (
+    result: AdvancedValidationResult,
+  ) => boolean | Promise<boolean>;
 }
 
 interface DialogAuthority {
@@ -498,6 +504,7 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const interactionManagerRef = useRef<InteractionManager | null>(null);
   const [engineSlot] = useState(createEngineAdapterSlot);
+  const [defaultValidationEngine] = useState(createValidationEngine);
   const [accessibilityCache] = useState(() =>
     createPresentationCache({
       maximumEntries: 2_000,
@@ -632,6 +639,10 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
     engineSlot,
     isActive: props.epoch.isActive,
     readOnly: props.readOnly ?? false,
+    validationEngine: props.validationEngine ?? defaultValidationEngine,
+    ...(props.confirmValidationWarning === undefined
+      ? {}
+      : { confirmValidationWarning: props.confirmValidationWarning }),
     root: null,
     selection,
     setActiveSheet,

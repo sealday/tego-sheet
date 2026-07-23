@@ -1,4 +1,4 @@
-import { useCallback, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, type RefObject } from 'react';
 import {
   containsCell,
   parseA1Range,
@@ -11,6 +11,11 @@ import {
 import type { ChromeEditor } from '../../ui/sheet-chrome';
 import type { EditorCommitResult, EditorSelectionTarget } from '../adapters/interaction-adapter';
 import type { TegoSheetHandleRuntime, TegoSheetRuntimeAuthority } from './use-tego-sheet-handle';
+import type {
+  ValidationEngine,
+  ValidationResult as AdvancedValidationResult,
+} from '../../validation';
+import { documentValidationRequest } from '../../validation/document-rule';
 
 export interface ActiveCellEditor extends ChromeEditor {
   readonly address: CellAddress;
@@ -19,6 +24,10 @@ export interface ActiveCellEditor extends ChromeEditor {
 
 export interface CellEditorRuntime extends TegoSheetHandleRuntime {
   readonly readOnly: boolean;
+  readonly validationEngine: ValidationEngine;
+  readonly confirmValidationWarning?: (
+    result: AdvancedValidationResult,
+  ) => boolean | Promise<boolean>;
 }
 
 export interface CellEditorRuntimeOptions<Runtime extends CellEditorRuntime> {
@@ -70,6 +79,17 @@ export function useCellEditorRuntime<Runtime extends CellEditorRuntime>(
   requestEdit: (point: CellPoint, initialText: string | undefined, source: ChangeSource) => void;
 }> {
   const { editorRef, isActive, replaceEditor, runtimeAuthority, setSelection } = options;
+  const pendingValidation = useRef<{
+    readonly token: object;
+    readonly controller: AbortController;
+  } | null>(null);
+  useEffect(
+    () => () => {
+      pendingValidation.current?.controller.abort();
+      pendingValidation.current = null;
+    },
+    [],
+  );
   const commitEditor = useCallback(
     (
       selectionAfterCommit?: EditorSelectionTarget,
@@ -98,6 +118,70 @@ export function useCellEditorRuntime<Runtime extends CellEditorRuntime>(
           ? proposedTarget
           : null;
       let selectionHandled = nextTarget === null;
+      const abortController = new AbortController();
+      const validationRequest = documentValidationRequest(
+        runtime.controller.getDocument(),
+        {
+          sheetId: current.address.sheet as unknown as import('../../document').DocumentSheetId,
+          row: current.address.row,
+          column: current.address.column,
+        },
+        current.value,
+        abortController.signal,
+      );
+      if (validationRequest !== undefined) {
+        if (pendingValidation.current !== null) return { allow: false };
+        const token = {};
+        pendingValidation.current = { token, controller: abortController };
+        void runtime.dispatcher
+          .dispatchValidatedUi(
+            {
+              engine: runtime.validationEngine,
+              request: validationRequest,
+              text: current.value,
+              ...(runtime.confirmValidationWarning === undefined
+                ? {}
+                : { confirmWarning: runtime.confirmValidationWarning }),
+              canCommit: () =>
+                isActive() &&
+                pendingValidation.current?.token === token &&
+                editorRef.current === current,
+            },
+            current.source,
+            nextTarget === null
+              ? undefined
+              : {
+                  selectionAfterCommit: nextTarget.selection,
+                  beforeSelectionNotify: () => {
+                    engine?.stageSelection(nextTarget.state);
+                    setSelection(nextTarget.selection);
+                    selectionHandled = true;
+                  },
+                },
+          )
+          .then((outcome) => {
+            if (pendingValidation.current?.token !== token) return;
+            pendingValidation.current = null;
+            if (!isActive() || editorRef.current !== current) return;
+            if (outcome.status === 'validation-rejected') return;
+            if (outcome.status === 'rejected') {
+              runtime.dispatcher.reportUiError(outcome.error);
+              return;
+            }
+            replaceEditor(null);
+            if (nextTarget !== null && outcome.status === 'noop') {
+              engine?.stageSelection(nextTarget.state);
+              setSelection(nextTarget.selection);
+              runtime.dispatcher.emitSelectionChange(nextTarget.selection);
+              engine?.render(runtime.controller.getSnapshot(), runtime.activeSheet);
+              selectionHandled = true;
+            }
+            runtime.root?.focus();
+          });
+        return { allow: false };
+      }
+      abortController.abort();
+      // Cells without a typed async rule use the prevalidated/internal synchronous dispatch path.
       replaceEditor(null);
       const outcome = runtime.dispatcher.dispatchUi(
         { type: 'set-cell-text', address: current.address, text: current.value },
@@ -158,6 +242,8 @@ export function useCellEditorRuntime<Runtime extends CellEditorRuntime>(
     (point: CellPoint, initialText: string | undefined, source: ChangeSource) => {
       if (!isActive()) return;
       const runtime = runtimeAuthority.require();
+      pendingValidation.current?.controller.abort();
+      pendingValidation.current = null;
       if (
         runtime.readOnly ||
         runtime.controller.getSnapshot().readOnly ||
@@ -175,6 +261,8 @@ export function useCellEditorRuntime<Runtime extends CellEditorRuntime>(
         source,
         value: initialText ?? original,
         onCancel: () => {
+          pendingValidation.current?.controller.abort();
+          pendingValidation.current = null;
           replaceEditor(null);
           runtime.root?.focus();
         },

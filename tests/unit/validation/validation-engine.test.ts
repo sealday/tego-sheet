@@ -116,4 +116,48 @@ describe('VAL-01 validation foundation', () => {
     expect(controller.getSnapshot().revision).toBe(1);
     expect(controller.undo()).toMatchObject({ status: 'committed' });
   });
+
+  it('rejects a stale async validation result instead of overwriting a newer revision', async () => {
+    const controller = createDocumentController(
+      createSpreadsheetDocument({ id: 'document-race', sheetId: 'sheet-1' }),
+    );
+    let release!: (values: readonly string[]) => void;
+    const values = new Promise<readonly string[]>((resolve) => {
+      release = resolve;
+    });
+    const registry = createValidationResolverRegistry();
+    registry.register('delayed', () => values);
+    const pending = executeValidatedCellEdit({
+      controller,
+      engine: createValidationEngine({ resolvers: registry }),
+      request: {
+        address: { sheetId, row: 0, column: 0 },
+        value: { type: 'string', value: 'old' },
+        rule: {
+          id: 'delayed-rule',
+          type: 'list',
+          predicate: { source: { type: 'resolver', id: 'delayed' } },
+          behavior: 'reject',
+          allowBlank: false,
+        },
+      },
+      text: 'old',
+    });
+    controller.execute({
+      schemaVersion: 1,
+      id: 'newer-edit',
+      command: {
+        type: 'set-cell-text',
+        address: { sheet: 'sheet-1' as never, row: 0, column: 0 },
+        text: 'newer',
+      },
+    });
+    release(['old']);
+
+    await expect(pending).resolves.toMatchObject({
+      status: 'rejected',
+      code: 'REVISION_CONFLICT',
+    });
+    expect(controller.getSnapshot().revision).toBe(1);
+  });
 });

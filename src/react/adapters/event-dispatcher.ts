@@ -15,6 +15,13 @@ import {
   type TegoSheetError,
 } from '../../core';
 import type { TegoSheetCallbacks } from '../tego-sheet.types';
+import {
+  executeValidatedCellEdit,
+  type ValidationEngine,
+  type ValidationRequest,
+  type ValidationResult as AdvancedValidationResult,
+} from '../../validation';
+import type { DocumentController } from '../../document-controller';
 
 export interface DispatchNotificationOptions {
   readonly selectionAfterCommit?: Selection;
@@ -30,6 +37,10 @@ export type UiDispatchOutcome =
       readonly commit: SpreadsheetControllerCommit<unknown, WorkbookCommand>;
     }
   | { readonly status: 'rejected'; readonly error: TegoSheetError };
+
+export type ValidatedUiDispatchOutcome =
+  | UiDispatchOutcome
+  | { readonly status: 'validation-rejected'; readonly result: AdvancedValidationResult };
 
 type RefDispatchOutcome = Exclude<UiDispatchOutcome, { readonly status: 'rejected' }>;
 
@@ -56,6 +67,18 @@ export interface EventDispatcher {
     source?: ChangeSource,
     options?: DispatchNotificationOptions,
   ) => RefDispatchOutcome;
+  /** Validates an editor value asynchronously, then commits exactly one transaction. */
+  readonly dispatchValidatedUi: (
+    input: {
+      readonly engine: ValidationEngine;
+      readonly request: ValidationRequest;
+      readonly text: string;
+      readonly confirmWarning?: (result: AdvancedValidationResult) => boolean | Promise<boolean>;
+      readonly canCommit?: () => boolean;
+    },
+    source: ChangeSource,
+    options?: DispatchNotificationOptions,
+  ) => Promise<ValidatedUiDispatchOutcome>;
   readonly emitSelectionChange: (selection: Selection) => void;
   readonly emitActiveSheetChange: (event: ActiveSheetChangeEvent) => void;
   readonly reportUiError: (error: TegoSheetError) => void;
@@ -151,6 +174,17 @@ function committedTarget(
 
 function pasteValues(result: unknown): readonly (readonly string[])[] {
   return Array.isArray(result) ? (result as readonly (readonly string[])[]) : [];
+}
+
+function isAdvancedValidationResult(result: {
+  readonly status: string;
+}): result is AdvancedValidationResult {
+  return (
+    result.status === 'accepted' ||
+    result.status === 'warning' ||
+    result.status === 'error' ||
+    (result.status === 'rejected' && 'diagnostics' in result)
+  );
 }
 
 export function createEventDispatcher(options: EventDispatcherOptions): EventDispatcher {
@@ -284,6 +318,56 @@ export function createEventDispatcher(options: EventDispatcherOptions): EventDis
         return { status: 'rejected', error: payload };
       }
       return notify(dispatched, notificationOptions);
+    },
+    async dispatchValidatedUi(input, source, notificationOptions = {}) {
+      if (!isActive()) {
+        return { status: 'rejected', error: clone(inactiveException().error) };
+      }
+      const address = {
+        sheet: input.request.address.sheetId as unknown as import('../../core').SheetId,
+        row: input.request.address.row,
+        column: input.request.address.column,
+      };
+      const previousText = controller.getCellText(address);
+      const result = await executeValidatedCellEdit({
+        controller: controller as unknown as DocumentController,
+        engine: input.engine,
+        request: input.request,
+        text: input.text,
+        source,
+        ...(input.confirmWarning === undefined ? {} : { confirmWarning: input.confirmWarning }),
+        canCommit: () => isActive() && input.canCommit?.() !== false,
+      });
+      if (isAdvancedValidationResult(result)) {
+        return { status: 'validation-rejected', result };
+      }
+      if (result.status === 'noop') return { status: 'noop' };
+      if (result.status === 'rejected') {
+        return {
+          status: 'rejected',
+          error: {
+            code: 'INVALID_COMMAND',
+            message: result.message ?? 'Validated edit transaction was rejected',
+            recoverable: true,
+            cause: result,
+          },
+        };
+      }
+      if (!isActive() || result.document === undefined || result.change === undefined) {
+        return { status: 'rejected', error: clone(inactiveException().error) };
+      }
+      const command = { type: 'set-cell-text' as const, address, text: input.text };
+      const commit = {
+        command,
+        change: result.change as unknown as SpreadsheetControllerCommit['change'],
+        result: undefined,
+        ['document']: result.document,
+        ...(result.transaction === undefined ? {} : { transaction: result.transaction as never }),
+      } satisfies SpreadsheetControllerCommit<void, typeof command>;
+      options.recordControlledCheckpoint?.(commit);
+      const controlledNotificationVersion = options.getControlledNotificationVersion?.();
+      notifyCommit(commit, previousText, controlledNotificationVersion, notificationOptions);
+      return { status: 'committed', commit };
     },
     dispatchRef: (command, source = 'ref', notificationOptions) =>
       notify(dispatchCore(command, source), notificationOptions),

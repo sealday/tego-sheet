@@ -16,6 +16,7 @@ import type {
 } from '../core';
 import type { SpreadsheetDocument } from '../document';
 import type { RenderEnvironment, SpreadsheetTemplate } from '../template';
+import type { ValidationEngine, ValidationResult as AdvancedValidationResult } from '../validation';
 import type { SheetTabsRenderer, ToolbarRenderer } from '../ui/slot-types';
 
 export type { SheetTabsRenderer, ToolbarRenderer } from '../ui/slot-types';
@@ -72,6 +73,12 @@ interface TegoSheetSharedProps extends TegoSheetCallbacks {
   readonly locale?: LocaleDefinition;
   /** Per-instance worksheet behavior and layout settings. */
   readonly options?: SheetOptions;
+  /** Async validation engine used by cell-owned Workbook 2.0 validation rules. */
+  readonly validationEngine?: ValidationEngine;
+  /** Explicit confirmation gate for warning-mode Workbook 2.0 validation rules. */
+  readonly confirmValidationWarning?: (
+    result: AdvancedValidationResult,
+  ) => boolean | Promise<boolean>;
   /** Uses the default toolbar, hides it, or replaces it with a custom renderer. */
   readonly toolbar?: 'default' | false | ToolbarRenderer;
   /** Uses the default sheet tabs, hides them, or replaces them with a custom renderer. */

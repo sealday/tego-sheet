@@ -455,6 +455,7 @@ const structuredAliases = {
 const tegoSheetPropNames = [
   'activePrintProfileId',
   'className',
+  'confirmValidationWarning',
   'defaultDocument',
   'document',
   'initialActiveSheetIndex',
@@ -477,6 +478,7 @@ const tegoSheetPropNames = [
   'style',
   'template',
   'toolbar',
+  'validationEngine',
 ] as const;
 
 const callbackNames = [

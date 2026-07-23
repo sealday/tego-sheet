@@ -2,7 +2,16 @@ import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { createRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { TegoSheet, type SpreadsheetDocument, type TegoSheetHandle } from '../../src';
+import {
+  parseSpreadsheetDocument,
+  TegoSheet,
+  type SpreadsheetDocument,
+  type TegoSheetHandle,
+} from '../../src';
+import type {
+  ValidationEngine,
+  ValidationResult as AdvancedValidationResult,
+} from '../../src/validation';
 import type { WorkbookInput } from '../../src/core';
 import { createCanvasHarness } from '../helpers/canvas-harness';
 import { legacyProjection, testDocument } from '../helpers/workbook-builders';
@@ -30,6 +39,152 @@ function sizeRoot(root: HTMLElement, width = 500, height = 300): void {
   });
   fireEvent(window, new Event('resize'));
 }
+
+function validatedDocument(): SpreadsheetDocument {
+  const parsed = parseSpreadsheetDocument({
+    schemaVersion: 2,
+    id: 'validated-editor',
+    workbook: {
+      sheets: [
+        {
+          id: 'sheet-1',
+          name: 'Sheet 1',
+          cells: [
+            {
+              row: 0,
+              column: 0,
+              cell: { input: { type: 'number', value: 1 }, validationId: 'amount' },
+            },
+          ],
+          merges: [],
+        },
+      ],
+      styles: [],
+      validations: [
+        {
+          id: 'amount',
+          value: {
+            id: 'amount',
+            type: 'number',
+            predicate: { operator: 'between', minimum: 0, maximum: 100 },
+            behavior: 'reject',
+            allowBlank: false,
+          },
+        },
+      ],
+      settings: { dateSystem: 'excel-1900' },
+    },
+    templates: [],
+    resources: { items: [] },
+    extensions: {},
+  });
+  if (!parsed.ok) throw new Error(JSON.stringify(parsed.diagnostics));
+  return parsed.document;
+}
+
+function deferredValidation(): {
+  readonly engine: ValidationEngine;
+  readonly release: (result: AdvancedValidationResult) => void;
+} {
+  let release!: (result: AdvancedValidationResult) => void;
+  const result = new Promise<AdvancedValidationResult>((resolve) => {
+    release = resolve;
+  });
+  return { engine: { validate: () => result }, release };
+}
+
+it('validates editor commits asynchronously before one controlled callback sequence', async () => {
+  const ref = createRef<TegoSheetHandle>();
+  const order: string[] = [];
+  const validation = deferredValidation();
+  function Controlled() {
+    const [document, setDocument] = useState(validatedDocument);
+    return (
+      <TegoSheet
+        ref={ref}
+        document={document}
+        validationEngine={validation.engine}
+        onDocumentChange={(next) => {
+          order.push('change');
+          setDocument(next);
+        }}
+        onCellEdit={() => order.push('cell-edit')}
+        onSelectionChange={() => order.push('selection')}
+      />
+    );
+  }
+  const rendered = render(<Controlled />);
+  await waitFor(() => expect(ref.current).not.toBeNull());
+  const root = rendered.container.querySelector<HTMLElement>('[data-tego-sheet]')!;
+  sizeRoot(root);
+  fireEvent.focusIn(root);
+  fireEvent.keyDown(window, { key: 'F2' });
+  const editor = await rendered.findByRole('textbox', { name: /cell editor/i });
+  fireEvent.change(editor, { target: { value: '12' } });
+  fireEvent.keyDown(editor, { key: 'Enter' });
+  expect(rendered.getByRole('textbox', { name: /cell editor/i })).toBe(editor);
+  expect(order).toEqual([]);
+
+  validation.release({ status: 'accepted', diagnostics: [] });
+  await waitFor(() => expect(rendered.queryByRole('textbox', { name: /cell editor/i })).toBeNull());
+  expect(order).toEqual(['change', 'cell-edit', 'selection']);
+  expect(legacyProjection(ref.current!.getDocument())[0]?.rows?.['0']).toMatchObject({
+    cells: { 0: { text: '12' } },
+  });
+});
+
+it('keeps stale async editor validation from overwriting a newer revision', async () => {
+  const ref = createRef<TegoSheetHandle>();
+  const validation = deferredValidation();
+  const rendered = render(
+    <TegoSheet
+      ref={ref}
+      defaultDocument={validatedDocument()}
+      validationEngine={validation.engine}
+    />,
+  );
+  await waitFor(() => expect(ref.current).not.toBeNull());
+  const root = rendered.container.querySelector<HTMLElement>('[data-tego-sheet]')!;
+  sizeRoot(root);
+  fireEvent.focusIn(root);
+  fireEvent.keyDown(window, { key: 'F2' });
+  const editor = await rendered.findByRole('textbox', { name: /cell editor/i });
+  fireEvent.change(editor, { target: { value: '12' } });
+  fireEvent.keyDown(editor, { key: 'Enter' });
+  ref.current!.setCellText(
+    { sheet: ref.current!.getDocument().workbook.sheets[0]!.id as never, row: 0, column: 0 },
+    'newer',
+  );
+  validation.release({ status: 'accepted', diagnostics: [] });
+
+  await waitFor(() => expect(rendered.getByRole('textbox', { name: /cell editor/i })).toBe(editor));
+  expect(legacyProjection(ref.current!.getDocument())[0]?.rows?.['0']).toMatchObject({
+    cells: { 0: { text: 'newer' } },
+  });
+});
+
+it('cancels pending async editor validation when the component is disposed', async () => {
+  const validation = deferredValidation();
+  const onDocumentChange = vi.fn();
+  const rendered = render(
+    <TegoSheet
+      defaultDocument={validatedDocument()}
+      validationEngine={validation.engine}
+      onDocumentChange={onDocumentChange}
+    />,
+  );
+  const root = rendered.container.querySelector<HTMLElement>('[data-tego-sheet]')!;
+  sizeRoot(root);
+  fireEvent.focusIn(root);
+  fireEvent.keyDown(window, { key: 'F2' });
+  const editor = await rendered.findByRole('textbox', { name: /cell editor/i });
+  fireEvent.change(editor, { target: { value: '12' } });
+  fireEvent.keyDown(editor, { key: 'Enter' });
+  rendered.unmount();
+  validation.release({ status: 'accepted', diagnostics: [] });
+  await Promise.resolve();
+  expect(onDocumentChange).not.toHaveBeenCalled();
+});
 
 it('@parity:formulas.editor-display keeps typing local, commits once, creates one undo entry, and preserves callback order', async () => {
   const ref = createRef<TegoSheetHandle>();
