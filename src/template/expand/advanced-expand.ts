@@ -1,11 +1,4 @@
-import type {
-  Cell,
-  Diagnostic,
-  DocumentCellRange,
-  Sheet,
-  SpreadsheetDocument,
-} from '../../document';
-import { parseFormula, renderFormula, translateFormula } from '../../formula';
+import type { Diagnostic, DocumentCellRange, Sheet, SpreadsheetDocument } from '../../document';
 import { compileSpreadsheetTemplate } from '../compiler';
 import { evaluateTemplateExpression, type TemplateFormatterRegistry } from '../expression';
 import type {
@@ -14,6 +7,21 @@ import type {
   TemplateIRBinding,
   TemplateRegionNode,
 } from '../model';
+import { cloneRange } from './advanced-clone-range';
+import {
+  expansionError as error,
+  freeze,
+  safeSheetName,
+  translatedCell,
+  valueInput,
+  type ExpansionScope as Scope,
+} from './advanced-internals';
+import {
+  createExpansionPlan,
+  estimateAllocation,
+  materializeAdvancedBindings,
+} from './advanced-plan';
+import { materializeSubtemplate } from './advanced-subtemplate';
 import { expandTemplate } from './expand';
 
 /** One source-to-generated structural coordinate mapping. */
@@ -40,271 +48,6 @@ export interface AdvancedExpansionResult {
   readonly structuralMappings: readonly StructuralMapping[];
   /** Hard page boundaries keyed by generated sheet. */
   readonly forcedPageBreaks: ReadonlyMap<string, readonly number[]>;
-}
-
-interface Scope {
-  readonly root: unknown;
-  readonly item?: unknown;
-  readonly parent?: unknown;
-  readonly index?: number;
-  readonly first?: boolean;
-  readonly last?: boolean;
-}
-
-function freeze<T>(value: T): T {
-  if (Array.isArray(value)) return Object.freeze(value.map(freeze)) as T;
-  if (value !== null && typeof value === 'object' && !(value instanceof Map)) {
-    for (const child of Object.values(value as Record<string, unknown>)) freeze(child);
-    return Object.freeze(value);
-  }
-  return value;
-}
-
-function error(code: string, message: string, bindingId?: string): Diagnostic {
-  return freeze({
-    code,
-    severity: 'error',
-    domain: 'template',
-    stage: 'expand',
-    message,
-    ...(bindingId === undefined ? {} : { location: { bindingId: bindingId as never } }),
-  });
-}
-
-function translatedCell(cell: Cell, rowDelta: number, columnDelta: number): Cell {
-  if (cell.input.type !== 'formula' || (rowDelta === 0 && columnDelta === 0)) return cell;
-  try {
-    return {
-      ...cell,
-      input: {
-        type: 'formula',
-        source: renderFormula(
-          translateFormula(parseFormula(cell.input.source), { rowDelta, columnDelta }),
-        ),
-      },
-    };
-  } catch {
-    return cell;
-  }
-}
-
-function cloneRange(
-  sheet: Sheet,
-  range: DocumentCellRange,
-  rowCopies: number,
-  columnCopies: number,
-  items: readonly unknown[],
-  axis: 'vertical' | 'horizontal' | 'both',
-  valueBindings: readonly Extract<TemplateIRBinding, { readonly type: 'value' }>[],
-  data: unknown,
-  formatters: TemplateFormatterRegistry,
-): { readonly sheet: Sheet; readonly mappings: readonly DocumentCellRange[] } {
-  const height = range.end.row - range.start.row + 1;
-  const width = range.end.column - range.start.column + 1;
-  const rowDeltaTotal = height * (rowCopies - 1);
-  const columnDeltaTotal = width * (columnCopies - 1);
-  const sourceCells = sheet.cells.filter(
-    ({ row, column }) =>
-      row >= range.start.row &&
-      row <= range.end.row &&
-      column >= range.start.column &&
-      column <= range.end.column,
-  );
-  const cellsOutside = sheet.cells
-    .filter(
-      ({ row, column }) =>
-        row < range.start.row ||
-        row > range.end.row ||
-        column < range.start.column ||
-        column > range.end.column,
-    )
-    .map((entry) => ({
-      ...entry,
-      row: entry.row > range.end.row ? entry.row + rowDeltaTotal : entry.row,
-      column: entry.column > range.end.column ? entry.column + columnDeltaTotal : entry.column,
-    }));
-  const copies = [];
-  const mappings: DocumentCellRange[] = [];
-  for (let rowIndex = 0; rowIndex < rowCopies; rowIndex += 1) {
-    for (let columnIndex = 0; columnIndex < columnCopies; columnIndex += 1) {
-      const rowDelta = rowIndex * height;
-      const columnDelta = columnIndex * width;
-      mappings.push({
-        sheetId: range.sheetId,
-        start: { row: range.start.row + rowDelta, column: range.start.column + columnDelta },
-        end: { row: range.end.row + rowDelta, column: range.end.column + columnDelta },
-      });
-      const item =
-        axis === 'vertical'
-          ? items[rowIndex]
-          : axis === 'horizontal'
-            ? items[columnIndex]
-            : Array.isArray(items[rowIndex])
-              ? (items[rowIndex] as readonly unknown[])[columnIndex]
-              : undefined;
-      const itemIndex = axis === 'horizontal' ? columnIndex : rowIndex;
-      const scope = {
-        root: data,
-        item,
-        index: itemIndex,
-        first: itemIndex === 0,
-        last: itemIndex === (axis === 'horizontal' ? columnCopies - 1 : rowCopies - 1),
-      };
-      for (const entry of sourceCells) {
-        const valueBinding = valueBindings.find(
-          ({ target }) => target.row === entry.row && target.column === entry.column,
-        );
-        let cell = translatedCell(entry.cell, rowDelta, columnDelta);
-        if (valueBinding !== undefined) {
-          let value = evaluateTemplateExpression(valueBinding.expression, scope, formatters);
-          if (valueBinding.formatter !== undefined) {
-            const formatter = Object.getOwnPropertyDescriptor(
-              formatters,
-              valueBinding.formatter,
-            )?.value;
-            if (typeof formatter === 'function') value = formatter(value);
-          }
-          cell = { ...cell, input: valueInput(value) };
-        }
-        copies.push({
-          ...entry,
-          row: entry.row + rowDelta,
-          column: entry.column + columnDelta,
-          cell,
-        });
-      }
-      for (const valueBinding of valueBindings.filter(
-        ({ target }) =>
-          !sourceCells.some(({ row, column }) => row === target.row && column === target.column),
-      )) {
-        copies.push({
-          row: valueBinding.target.row + rowDelta,
-          column: valueBinding.target.column + columnDelta,
-          cell: {
-            input: valueInput(
-              evaluateTemplateExpression(valueBinding.expression, scope, formatters),
-            ),
-          },
-        });
-      }
-    }
-  }
-  const sourceRows = sheet.rows.filter(
-    ({ index }) => index >= range.start.row && index <= range.end.row,
-  );
-  const rows = [
-    ...sheet.rows.filter(({ index }) => index < range.start.row),
-    ...Array.from({ length: rowCopies }, (_, copy) =>
-      sourceRows.map((row) => ({ ...row, index: row.index + copy * height })),
-    ).flat(),
-    ...sheet.rows
-      .filter(({ index }) => index > range.end.row)
-      .map((row) => ({ ...row, index: row.index + rowDeltaTotal })),
-  ];
-  const sourceColumns = sheet.columns.filter(
-    ({ index }) => index >= range.start.column && index <= range.end.column,
-  );
-  const columns = [
-    ...sheet.columns.filter(({ index }) => index < range.start.column),
-    ...Array.from({ length: columnCopies }, (_, copy) =>
-      sourceColumns.map((column) => ({ ...column, index: column.index + copy * width })),
-    ).flat(),
-    ...sheet.columns
-      .filter(({ index }) => index > range.end.column)
-      .map((column) => ({ ...column, index: column.index + columnDeltaTotal })),
-  ];
-  const sourceMerges = sheet.merges.filter(
-    ({ start, end }) =>
-      start.row >= range.start.row &&
-      end.row <= range.end.row &&
-      start.column >= range.start.column &&
-      end.column <= range.end.column,
-  );
-  const merges = [
-    ...sheet.merges
-      .filter((merge) => !sourceMerges.includes(merge))
-      .map((merge) => ({
-        start: {
-          row: merge.start.row > range.end.row ? merge.start.row + rowDeltaTotal : merge.start.row,
-          column:
-            merge.start.column > range.end.column
-              ? merge.start.column + columnDeltaTotal
-              : merge.start.column,
-        },
-        end: {
-          row: merge.end.row > range.end.row ? merge.end.row + rowDeltaTotal : merge.end.row,
-          column:
-            merge.end.column > range.end.column
-              ? merge.end.column + columnDeltaTotal
-              : merge.end.column,
-        },
-      })),
-    ...Array.from({ length: rowCopies }, (_, rowIndex) =>
-      Array.from({ length: columnCopies }, (_, columnIndex) =>
-        sourceMerges.map((merge) => ({
-          start: {
-            row: merge.start.row + rowIndex * height,
-            column: merge.start.column + columnIndex * width,
-          },
-          end: {
-            row: merge.end.row + rowIndex * height,
-            column: merge.end.column + columnIndex * width,
-          },
-        })),
-      ).flat(),
-    ).flat(),
-  ];
-  return {
-    sheet: {
-      ...sheet,
-      cells: [...cellsOutside, ...copies].sort(
-        (left, right) => left.row - right.row || left.column - right.column,
-      ),
-      rows,
-      columns,
-      merges,
-      ...(sheet.rowCount === undefined ? {} : { rowCount: sheet.rowCount + rowDeltaTotal }),
-      ...(sheet.columnCount === undefined
-        ? {}
-        : { columnCount: sheet.columnCount + columnDeltaTotal }),
-    },
-    mappings,
-  };
-}
-
-function collection(
-  binding: Extract<
-    TemplateIRBinding,
-    {
-      readonly type:
-        | 'repeat-columns'
-        | 'repeat-range'
-        | 'repeat-page'
-        | 'repeat-sheet'
-        | 'subtemplate';
-    }
-  >,
-  scope: Scope,
-  formatters: TemplateFormatterRegistry,
-): readonly unknown[] {
-  const value = evaluateTemplateExpression(binding.source, scope, formatters);
-  return Array.isArray(value) ? value : [];
-}
-
-function safeSheetName(value: unknown, fallback: string): string {
-  const sanitized = String(value ?? fallback)
-    .replace(/[:\\/?*[\]]/gu, '_')
-    .trim()
-    .slice(0, 31);
-  return sanitized || fallback;
-}
-
-function valueInput(value: unknown): Cell['input'] {
-  if (value === undefined || value === null) return { type: 'blank' };
-  if (typeof value === 'string') return { type: 'string', value };
-  if (typeof value === 'number' && Number.isFinite(value)) return { type: 'number', value };
-  if (typeof value === 'boolean') return { type: 'boolean', value };
-  return { type: 'string', value: JSON.stringify(value) };
 }
 
 function expandNestedRows(
@@ -1113,80 +856,11 @@ export function expandAdvancedTemplate(
       forcedPageBreaks: new Map(),
     });
   }
-  const bindingType = new Map(compiled.ir.bindings.map((binding) => [binding.id, binding.type]));
-  const horizontalNestedIds = new Set<string>();
-  const rowTreeIds = new Set<string>();
-  const collectRowTree = (node: TemplateRegionNode): void => {
-    rowTreeIds.add(node.bindingId);
-    node.children.forEach(collectRowTree);
-  };
-  (compiled.ir.regionTree ?? [])
-    .filter((node) => bindingType.get(node.bindingId) === 'repeat-rows')
-    .forEach(collectRowTree);
-  const collectHorizontal = (node: TemplateRegionNode): boolean => {
-    if (
-      bindingType.get(node.bindingId) !== 'repeat-columns' ||
-      !node.children.every(collectHorizontal)
-    ) {
-      return false;
-    }
-    horizontalNestedIds.add(node.bindingId);
-    node.children.forEach((child) => horizontalNestedIds.add(child.bindingId));
-    return true;
-  };
-  (compiled.ir.regionTree ?? []).forEach(collectHorizontal);
-  const advanced = compiled.ir.bindings.filter(
-    (
-      binding,
-    ): binding is Extract<
-      TemplateIRBinding,
-      {
-        readonly type:
-          | 'repeat-columns'
-          | 'repeat-range'
-          | 'repeat-page'
-          | 'repeat-sheet'
-          | 'subtemplate';
-      }
-    > =>
-      (binding.type === 'repeat-columns' ||
-        binding.type === 'repeat-range' ||
-        binding.type === 'repeat-page' ||
-        binding.type === 'repeat-sheet' ||
-        binding.type === 'subtemplate') &&
-      !rowTreeIds.has(binding.id) &&
-      !horizontalNestedIds.has(binding.id),
-  );
-  const tp1Bindings = compiled.ir.bindings.filter(
-    (binding) =>
-      binding.type === 'value' ||
-      binding.type === 'repeat-rows' ||
-      binding.type === 'conditional-range',
-  );
-  const nestedRanges = compiled.ir.bindings.flatMap((binding) =>
-    binding.type === 'repeat-rows' ||
-    binding.type === 'repeat-columns' ||
-    binding.type === 'repeat-range' ||
-    binding.type === 'repeat-page' ||
-    binding.type === 'repeat-sheet' ||
-    binding.type === 'subtemplate'
-      ? [binding.range]
-      : [],
-  );
-  const handledByNested = (binding: TemplateIRBinding): boolean =>
-    nestedRanges.some((range) =>
-      'target' in binding
-        ? binding.target.sheetId === range.sheetId &&
-          binding.target.row >= range.start.row &&
-          binding.target.row <= range.end.row
-        : binding.range.sheetId === range.sheetId &&
-          binding.range.start.row >= range.start.row &&
-          binding.range.end.row <= range.end.row,
-    );
+  const plan = createExpansionPlan(compiled);
   const base = expandTemplate(
     compiled.sourceDocument,
     compiled.ir.template,
-    tp1Bindings.filter((binding) => !handledByNested(binding)),
+    plan.tp1Bindings.filter((binding) => !plan.handledByNested(binding)),
     data,
     formatters,
     limits,
@@ -1222,63 +896,17 @@ export function expandAdvancedTemplate(
       forcedPageBreaks: new Map(),
     });
   }
-  const estimates = advanced.map((binding) => ({
-    binding,
-    items: collection(binding, { root: data }, formatters),
-  }));
-  const sourceCells = compiled.sourceDocument.workbook.sheets.reduce(
-    (count, sheet) => count + sheet.cells.length,
-    0,
-  );
-  let estimatedRows = 0;
-  let estimatedColumns = 0;
-  const estimatedCells = estimates.reduce((count, { binding, items }) => {
-    const source =
-      compiled.sourceDocument.workbook.sheets
-        .find(({ id }) => id === binding.range.sheetId)
-        ?.cells.filter(
-          ({ row, column }) =>
-            row >= binding.range.start.row &&
-            row <= binding.range.end.row &&
-            column >= binding.range.start.column &&
-            column <= binding.range.end.column,
-        ).length ?? 0;
-    const matrixRows = items.length;
-    const matrixColumns = Math.max(
-      0,
-      ...items.map((item) => (Array.isArray(item) ? item.length : 1)),
-    );
-    const multiplier =
-      binding.type === 'repeat-range' && binding.axis === 'both' && items.every(Array.isArray)
-        ? matrixRows * matrixColumns
-        : items.length;
-    const height = binding.range.end.row - binding.range.start.row + 1;
-    const width = binding.range.end.column - binding.range.start.column + 1;
-    if (
-      binding.type === 'repeat-page' ||
-      (binding.type === 'repeat-range' && binding.axis === 'vertical')
-    ) {
-      estimatedRows += height * multiplier;
-    } else if (
-      binding.type === 'repeat-columns' ||
-      (binding.type === 'repeat-range' && binding.axis === 'horizontal')
-    ) {
-      estimatedColumns += width * multiplier;
-    } else if (binding.type === 'repeat-range' && binding.axis === 'both') {
-      estimatedRows += height * matrixRows;
-      estimatedColumns += width * matrixColumns;
-    }
-    return count + source * Math.max(0, multiplier - 1);
-  }, sourceCells);
+  const estimates = materializeAdvancedBindings(plan.advanced, data, formatters);
+  const allocation = estimateAllocation(compiled, estimates);
   const generatedSheets =
     nestedColumns.document.workbook.sheets.length +
     estimates
       .filter(({ binding }) => binding.type === 'repeat-sheet')
       .reduce((sum, { items }) => sum + items.length, 0);
   if (
-    estimatedCells > limits.maxExpandedCells ||
-    estimatedRows > limits.maxExpandedRows ||
-    estimatedColumns > (limits.maxExpandedColumns ?? 16_384) ||
+    allocation.cells > limits.maxExpandedCells ||
+    allocation.rows > limits.maxExpandedRows ||
+    allocation.columns > (limits.maxExpandedColumns ?? 16_384) ||
     generatedSheets > (limits.maxGeneratedSheets ?? 256)
   ) {
     return freeze({
@@ -1296,7 +924,7 @@ export function expandAdvancedTemplate(
   );
   const generatedNames = new Set(document.workbook.sheets.map(({ name }) => name));
   const generatedIds = new Set(document.workbook.sheets.map(({ id }) => id));
-  for (const { binding, items } of estimates.sort(
+  for (const { binding, items } of [...estimates].sort(
     (left, right) =>
       right.binding.range.start.row - left.binding.range.start.row ||
       right.binding.range.start.column - left.binding.range.start.column,
@@ -1420,9 +1048,6 @@ export function expandAdvancedTemplate(
           forcedPageBreaks: new Map(),
         });
       }
-      const sheetIndex = document.workbook.sheets.findIndex(
-        ({ id }) => id === binding.range.sheetId,
-      );
       const context = evaluateTemplateExpression(binding.source, { root: data }, formatters);
       const subtemplateMap = new Map(
         (compiled.ir.subtemplates ?? []).map((template) => [template.id, template]),
@@ -1452,139 +1077,9 @@ export function expandAdvancedTemplate(
           forcedPageBreaks: new Map(),
         });
       }
-      if (sheetIndex >= 0) {
-        const sheet = document.workbook.sheets[sheetIndex]!;
-        const childCoordinates = registered.bindings.flatMap((candidate) =>
-          candidate.type === 'value'
-            ? [
-                {
-                  sheetId: candidate.target.sheetId,
-                  start: { row: candidate.target.row, column: candidate.target.column },
-                  end: { row: candidate.target.row, column: candidate.target.column },
-                },
-              ]
-            : [candidate.range],
-        );
-        const sourceSheetId = childCoordinates[0]?.sheetId ?? binding.range.sheetId;
-        const sourceSheet = childExpansion.document.workbook.sheets.find(
-          ({ id }) => id === sourceSheetId,
-        );
-        if (sourceSheet === undefined) continue;
-        const sourceRange = childCoordinates.reduce<DocumentCellRange>(
-          (range, candidate) => ({
-            sheetId: sourceSheetId,
-            start: {
-              row: Math.min(range.start.row, candidate.start.row),
-              column: Math.min(range.start.column, candidate.start.column),
-            },
-            end: {
-              row: Math.max(range.end.row, candidate.end.row),
-              column: Math.max(range.end.column, candidate.end.column),
-            },
-          }),
-          childCoordinates[0] ?? {
-            sheetId: sourceSheetId,
-            start: { row: 0, column: 0 },
-            end: { row: 0, column: 0 },
-          },
-        );
-        const expandedRange = childExpansion.structuralMappings.reduce(
-          (range, mapping) =>
-            mapping.source.sheetId === sourceSheetId
-              ? {
-                  ...range,
-                  end: {
-                    row: Math.max(range.end.row, mapping.generated.end.row),
-                    column: Math.max(range.end.column, mapping.generated.end.column),
-                  },
-                }
-              : range,
-          sourceRange,
-        );
-        const sourceHeight = expandedRange.end.row - expandedRange.start.row + 1;
-        const sourceWidth = expandedRange.end.column - expandedRange.start.column + 1;
-        const targetHeight = binding.range.end.row - binding.range.start.row + 1;
-        const targetWidth = binding.range.end.column - binding.range.start.column + 1;
-        const rowDelta = sourceHeight - targetHeight;
-        const columnDelta = sourceWidth - targetWidth;
-        const pastedCells = sourceSheet.cells
-          .filter(
-            ({ row, column }) =>
-              row >= expandedRange.start.row &&
-              row <= expandedRange.end.row &&
-              column >= expandedRange.start.column &&
-              column <= expandedRange.end.column,
-          )
-          .map((entry) => {
-            const row = binding.range.start.row + entry.row - expandedRange.start.row;
-            const column = binding.range.start.column + entry.column - expandedRange.start.column;
-            return {
-              ...entry,
-              row,
-              column,
-              cell: translatedCell(entry.cell, row - entry.row, column - entry.column),
-            };
-          });
-        const cells = [
-          ...sheet.cells
-            .filter(
-              ({ row, column }) =>
-                row < binding.range.start.row ||
-                row > binding.range.end.row ||
-                column < binding.range.start.column ||
-                column > binding.range.end.column,
-            )
-            .map((entry) => ({
-              ...entry,
-              row: entry.row > binding.range.end.row ? entry.row + rowDelta : entry.row,
-              column:
-                entry.column > binding.range.end.column ? entry.column + columnDelta : entry.column,
-            })),
-          ...pastedCells,
-        ].sort((left, right) => left.row - right.row || left.column - right.column);
-        const pastedMerges = sourceSheet.merges
-          .filter(
-            ({ start, end }) =>
-              start.row >= expandedRange.start.row &&
-              end.row <= expandedRange.end.row &&
-              start.column >= expandedRange.start.column &&
-              end.column <= expandedRange.end.column,
-          )
-          .map((merge) => ({
-            start: {
-              row: binding.range.start.row + merge.start.row - expandedRange.start.row,
-              column: binding.range.start.column + merge.start.column - expandedRange.start.column,
-            },
-            end: {
-              row: binding.range.start.row + merge.end.row - expandedRange.start.row,
-              column: binding.range.start.column + merge.end.column - expandedRange.start.column,
-            },
-          }));
-        document = freeze({
-          ...document,
-          workbook: {
-            ...document.workbook,
-            sheets: document.workbook.sheets.map((candidate, index) =>
-              index === sheetIndex
-                ? {
-                    ...candidate,
-                    cells,
-                    merges: [
-                      ...candidate.merges.filter(
-                        ({ start, end }) =>
-                          end.row < binding.range.start.row ||
-                          start.row > binding.range.end.row ||
-                          end.column < binding.range.start.column ||
-                          start.column > binding.range.end.column,
-                      ),
-                      ...pastedMerges,
-                    ],
-                  }
-                : candidate,
-            ),
-          },
-        });
-      }
+      const materialized = materializeSubtemplate(document, binding, registered, childExpansion);
+      if (materialized === undefined) continue;
+      document = materialized;
       mappings.push({
         bindingId: binding.id,
         itemIndex: 0,
