@@ -1027,8 +1027,8 @@ export function parseSpreadsheetDocument(
         error.code,
         error.path,
         error.message,
-        'document',
-        error.code === 'DOCUMENT_SCHEMA_INVALID' ? 'decode' : 'validate',
+        error.code === 'INVALID_EXTENSION_DATA' ? 'extension' : 'document',
+        error.code === 'DOCUMENT_LIMIT_EXCEEDED' ? 'validate' : 'decode',
       );
     } else {
       addDiagnostic(

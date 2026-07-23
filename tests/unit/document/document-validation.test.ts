@@ -198,6 +198,24 @@ describe('Workbook 2.0 validation', () => {
     expect(codesOf({ ...validDocument(), extensions })).toContain('INVALID_EXTENSION_DATA');
   });
 
+  it('preserves the extension diagnostic contract for non-JSON values', () => {
+    const result = parseSpreadsheetDocument({
+      ...validDocument(),
+      extensions: { 'vendor.example': undefined },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected invalid document');
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: 'INVALID_EXTENSION_DATA',
+        domain: 'extension',
+        stage: 'decode',
+        details: { path: '$.extensions.vendor.example' },
+      }),
+    );
+  });
+
   it.each([
     [{ maxSheets: 0 }, 'sheet'],
     [{ maxBytes: 1 }, 'byte'],
