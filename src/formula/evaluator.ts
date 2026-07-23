@@ -1,4 +1,4 @@
-import type { CellInput, SpreadsheetDocument } from '../document';
+import type { CellInput, DocumentSheetId, SpreadsheetDocument } from '../document';
 import type { FormulaAst, FormulaDiagnostic, FormulaValue, ScalarFormulaValue } from './ast';
 import { createDependencyGraph, formulaAddressKey, transitiveDependents } from './dependency-graph';
 import type { FormulaAddress, FormulaDependencyGraph } from './dependency-graph';
@@ -6,6 +6,7 @@ import type { FormulaFunctionContext, FormulaFunctionRegistry } from './function
 import { createFormulaFunctionRegistry } from './function-registry';
 import { parseFormula } from './parser';
 import { resolveFormulaReferences } from './reference-resolver';
+import { planFormulaSpill, type FormulaNameRegistry } from './advanced';
 
 /** Explicit deterministic inputs for one recalculation. */
 export interface CalculationEnvironment {
@@ -54,6 +55,8 @@ interface FormulaProgramState {
   inputs: Map<string, CellInput>;
   values: Map<string, FormulaValue>;
   diagnostics: Map<string, readonly FormulaDiagnostic[]>;
+  anchors: Map<string, FormulaAddress>;
+  spills: Map<string, ReadonlySet<string>>;
   lastTick?: number;
   lastFunctionRegistryVersion?: string;
   initialized: boolean;
@@ -89,6 +92,46 @@ export interface FormulaEngineOptions {
   readonly functions?: FormulaFunctionRegistry;
   /** Maximum formula evaluations allowed in one recalculation. */
   readonly maximumEvaluations?: number;
+  /** Optional stable named-range registry used during parsing and dependency binding. */
+  readonly names?: FormulaNameRegistry;
+  /** Maximum projected cells for one dynamic-array formula. */
+  readonly maximumSpillCells?: number;
+}
+
+function columnLabel(column: number): string {
+  let value = column + 1;
+  let label = '';
+  while (value > 0) {
+    value -= 1;
+    label = String.fromCharCode(65 + (value % 26)) + label;
+    value = Math.floor(value / 26);
+  }
+  return label;
+}
+
+function quotedSheetName(name: string): string {
+  return `'${name.replaceAll("'", "''")}'`;
+}
+
+function bindNames(
+  source: string,
+  document: SpreadsheetDocument,
+  currentSheetId: string,
+  names: FormulaNameRegistry | undefined,
+): string {
+  if (names === undefined) return source;
+  return source.replace(/\b[A-Za-z_][A-Za-z0-9_.]*\b/gu, (token, offset: number) => {
+    const following = source.slice(offset + token.length).trimStart()[0];
+    if (following === '(') return token;
+    const definition = names.resolve(token, currentSheetId);
+    if (definition === undefined) return token;
+    const sheet = document.workbook.sheets.find(({ id }) => id === definition.refersTo.sheetId);
+    if (sheet === undefined) return '#REF!';
+    const start = `${columnLabel(definition.refersTo.start.column)}${definition.refersTo.start.row + 1}`;
+    const end = `${columnLabel(definition.refersTo.end.column)}${definition.refersTo.end.row + 1}`;
+    const reference = start === end ? start : `${start}:${end}`;
+    return `${quotedSheetName(sheet.name)}!${reference}`;
+  });
 }
 
 function inputValue(input: CellInput): ScalarFormulaValue {
@@ -259,19 +302,22 @@ function containsVolatile(ast: FormulaAst, registry: FormulaFunctionRegistry): b
 export function createFormulaEngine(options: FormulaEngineOptions = {}): FormulaEngine {
   const registry = options.functions ?? createFormulaFunctionRegistry();
   const maximumEvaluations = options.maximumEvaluations ?? 100_000;
+  const maximumSpillCells = options.maximumSpillCells ?? 100_000;
   const formulaProgramStates = new WeakMap<FormulaProgram, FormulaProgramState>();
 
   return {
     compile(document) {
       const formulas = new Map<string, FormulaAst>();
+      const anchors = new Map<string, FormulaAddress>();
       const diagnostics = new Map<string, readonly FormulaDiagnostic[]>();
       for (const sheet of document.workbook.sheets) {
         for (const { row, column, cell } of sheet.cells) {
           if (cell.input.type !== 'formula') continue;
           const address = formulaAddressKey({ sheetId: sheet.id, row, column });
+          anchors.set(address, { sheetId: sheet.id, row, column });
           try {
             const resolution = resolveFormulaReferences(
-              parseFormula(cell.input.source),
+              parseFormula(bindNames(cell.input.source, document, sheet.id, options.names)),
               document,
               sheet.id,
             );
@@ -300,6 +346,8 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
         inputs: cellInputs(document),
         values,
         diagnostics,
+        anchors,
+        spills: new Map(),
         initialized: false,
       };
       const program: FormulaProgram = Object.freeze({
@@ -336,6 +384,8 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
         inputs: new Map(storedProgram.inputs),
         values: new Map(storedProgram.values),
         diagnostics: new Map(storedProgram.diagnostics),
+        anchors: new Map(storedProgram.anchors),
+        spills: new Map(storedProgram.spills),
         ...(storedProgram.lastTick === undefined ? {} : { lastTick: storedProgram.lastTick }),
         ...(storedProgram.lastFunctionRegistryVersion === undefined
           ? {}
@@ -351,9 +401,16 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
         const address = formulaAddressKey(change);
         program.inputs.set(address, change.input);
         if (change.input.type === 'formula') {
+          program.anchors.set(address, {
+            sheetId: change.sheetId,
+            row: change.row,
+            column: change.column,
+          });
           try {
             const resolution = resolveFormulaReferences(
-              parseFormula(change.input.source),
+              parseFormula(
+                bindNames(change.input.source, program_.document, change.sheetId, options.names),
+              ),
               program_.document,
               change.sheetId,
             );
@@ -374,6 +431,7 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
           changedFormulas.add(address);
           graphChanged = true;
         } else if (program.formulas.delete(address)) {
+          program.anchors.delete(address);
           program.values.delete(address);
           graphChanged = true;
         }
@@ -397,6 +455,14 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
             if (containsVolatile(ast, registry)) dirty.add(address);
           }
         }
+      }
+      for (const [anchor, projected] of program.spills) {
+        for (const address of projected) program.values.delete(address);
+        dirty.add(anchor);
+      }
+      program.spills.clear();
+      for (const [address, value] of program.values) {
+        if (value.type === 'error' && value.value === '#SPILL!') dirty.add(address);
       }
       for (const [address, diagnostics] of program.diagnostics) {
         const retained = diagnostics.filter(
@@ -463,7 +529,41 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
         evaluating.add(address);
         const value = evaluateAst(ast);
         evaluating.delete(address);
-        const snapshot = snapshotFormulaValue(value);
+        let snapshot = snapshotFormulaValue(value);
+        if (snapshot.type === 'array') {
+          const anchor = program.anchors.get(address);
+          if (anchor === undefined) {
+            snapshot = { type: 'error', value: '#SPILL!' };
+          } else {
+            const occupied = new Set(
+              [...program.inputs]
+                .filter(
+                  ([key, input]) =>
+                    key !== address &&
+                    input.type !== 'blank' &&
+                    !(program.spills.get(address)?.has(key) ?? false),
+                )
+                .map(([key]) => key),
+            );
+            const plan = planFormulaSpill({
+              anchor: { ...anchor, sheetId: anchor.sheetId as DocumentSheetId },
+              value: snapshot,
+              occupied,
+              limits: { maxCells: maximumSpillCells },
+            });
+            if (plan.status === 'blocked') {
+              snapshot = plan.value;
+            } else {
+              const projected = new Set<string>();
+              for (const [key, projectedValue] of plan.cells) {
+                values.set(key, snapshotFormulaValue(projectedValue));
+                projected.add(key);
+              }
+              program.spills.set(address, projected);
+              snapshot = values.get(address) ?? { type: 'blank' };
+            }
+          }
+        }
         values.set(address, snapshot);
         evaluated.push(address);
         return snapshot;
@@ -618,6 +718,8 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
       storedProgram.inputs = program.inputs;
       storedProgram.values = program.values;
       storedProgram.diagnostics = program.diagnostics;
+      storedProgram.anchors = program.anchors;
+      storedProgram.spills = program.spills;
       storedProgram.initialized = program.initialized;
       storedProgram.lastTick = program.lastTick;
       storedProgram.lastFunctionRegistryVersion = program.lastFunctionRegistryVersion;
