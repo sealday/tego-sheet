@@ -18,7 +18,11 @@ test('metadata describes React peers and explicit output dependencies and export
     type: 'git',
     url: 'git+https://github.com/sealday/tego-sheet.git',
   });
-  assert.deepEqual(pkg.dependencies, { fflate: '0.8.3', pdfkit: '0.19.1' });
+  assert.deepEqual(pkg.dependencies, {
+    fflate: '0.8.3',
+    fontkit: '2.0.4',
+    pdfkit: '0.19.1',
+  });
   assert.deepEqual(pkg.peerDependencies, { react: '^19.2.7', 'react-dom': '^19.2.7' });
   assert.deepEqual(pkg.files, ['dist', 'docs/migration-from-x-data-spreadsheet.md']);
   assert.deepEqual(pkg.sideEffects, ['**/*.css']);

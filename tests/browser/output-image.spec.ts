@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 
 test('@parity:output.export-download Image output emits inert SVG and a structurally valid PNG at the requested pixels', async ({
   page,
@@ -153,9 +154,25 @@ test('@parity:output.export-download PNG output rasterizes inside a module Worke
 }) => {
   if (browserName !== 'chromium') return;
   await page.goto('/');
-  const result = await page.evaluate(async () => {
-    const moduleUrl = new URL('/@id/tego-sheet/output/image', window.location.href).href;
-    const workerSource = `
+  const fontBytes = [
+    ...Buffer.from(
+      readFileSync(
+        new URL('../fixtures/output/NotoSansSC-CJK.subset.ttf.base64', import.meta.url),
+        'utf8',
+      ).trim(),
+      'base64',
+    ),
+  ];
+  const imageBytes = [
+    ...Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      'base64',
+    ),
+  ];
+  const result = await page.evaluate(
+    async ({ fontBytes, imageBytes }) => {
+      const moduleUrl = new URL('/@id/tego-sheet/output/image', window.location.href).href;
+      const workerSource = `
       self.onmessage = async ({ data }) => {
         try {
           const { ImageAdapter } = await import(${JSON.stringify(moduleUrl)});
@@ -168,12 +185,58 @@ test('@parity:output.export-download PNG output rasterizes inside a module Worke
           const bytes = new Uint8Array(await blob.arrayBuffer());
           const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
           const bitmap = await createImageBitmap(blob);
+          const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+          const context = canvas.getContext('2d');
+          context.drawImage(bitmap, 0, 0);
+          const imagePixel = Array.from(context.getImageData(0, 0, 1, 1).data);
+          const textRegion = context.getImageData(10, 8, 100, 30).data;
+          let nonRedTextPixels = 0;
+          for (let index = 0; index < textRegion.length; index += 4) {
+            if (
+              textRegion[index] !== 255 ||
+              textRegion[index + 1] !== 0 ||
+              textRegion[index + 2] !== 0 ||
+              textRegion[index + 3] !== 255
+            ) nonRedTextPixels += 1;
+          }
+          let missingResourceCode;
+          try {
+            await new ImageAdapter().render({
+              ...data,
+              print: {
+                ...data.print,
+                displayList: {
+                  ...data.print.displayList,
+                  pages: [{
+                    ...data.print.displayList.pages[0],
+                    commands: [{
+                      kind: 'image',
+                      resourceId: 'missing',
+                      rect: { x: 0, y: 0, width: 1, height: 1 },
+                      fit: 'contain',
+                    }],
+                  }],
+                },
+              },
+            }, {
+              format: 'png',
+              pages: [0],
+              dpi: 96,
+              background: 'transparent',
+            });
+          } catch (error) {
+            missingResourceCode =
+              error && typeof error === 'object' && 'code' in error ? error.code : 'unknown';
+          }
           self.postMessage({
             signature: Array.from(bytes.slice(0, 8)),
             width: view.getUint32(16),
             height: view.getUint32(20),
             decodedWidth: bitmap.width,
             decodedHeight: bitmap.height,
+            imagePixel,
+            nonRedTextPixels,
+            missingResourceCode,
           });
           bitmap.close();
         } catch (error) {
@@ -181,94 +244,141 @@ test('@parity:output.export-download PNG output rasterizes inside a module Worke
         }
       };
     `;
-    const workerUrl = URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' }));
-    const document = {
-      workbook: {
-        sheets: [],
-        styles: [],
-        validations: [],
-        settings: { dateSystem: 'excel-1900' },
-      },
-      calculatedCells: [],
-      print: {
-        pages: [
-          {
-            id: 'worker-image',
-            index: 0,
-            targetId: 'worker',
-            width: 96,
-            height: 192,
-            rowStart: 0,
-            rowEnd: 0,
-            columnStart: 0,
-            columnEnd: 0,
-          },
-        ],
-        displayList: {
-          diagnostics: [],
+      const workerUrl = URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' }));
+      const document = {
+        workbook: {
+          sheets: [],
+          styles: [],
+          validations: [],
+          settings: { dateSystem: 'excel-1900' },
+        },
+        calculatedCells: [],
+        print: {
           pages: [
             {
+              id: 'worker-image',
               index: 0,
+              targetId: 'worker',
               width: 96,
               height: 192,
-              commands: [
-                {
-                  kind: 'fill-rect',
-                  rect: { x: 0, y: 0, width: 96, height: 192 },
-                  color: '#ff0000',
-                },
-              ],
+              rowStart: 0,
+              rowEnd: 0,
+              columnStart: 0,
+              columnEnd: 0,
             },
           ],
-        },
-        profile: {
-          id: 'worker',
-          name: 'Worker',
-          targets: [],
-          page: {
-            paper: { type: 'custom', width: 96, height: 192 },
-            orientation: 'portrait',
-            margins: { top: 0, right: 0, bottom: 0, left: 0 },
-            scale: { type: 'fixed', value: 1 },
+          displayList: {
+            diagnostics: [],
+            pages: [
+              {
+                index: 0,
+                width: 96,
+                height: 192,
+                commands: [
+                  {
+                    kind: 'fill-rect',
+                    rect: { x: 0, y: 0, width: 96, height: 192 },
+                    color: '#ff0000',
+                  },
+                  {
+                    kind: 'text',
+                    text: '中文',
+                    x: 8,
+                    y: 20,
+                    maxWidth: 80,
+                    fontFamily: 'Noto Sans',
+                    fontSize: 12,
+                    color: '#000000',
+                    horizontalAlign: 'left',
+                  },
+                  {
+                    kind: 'image',
+                    resourceId: 'pixel',
+                    rect: { x: 0, y: 0, width: 1, height: 1 },
+                    fit: 'fill',
+                  },
+                ],
+              },
+            ],
           },
-          manualBreaks: [],
-          showGridlines: false,
-          showHeadings: false,
+          profile: {
+            id: 'worker',
+            name: 'Worker',
+            targets: [],
+            page: {
+              paper: { type: 'custom', width: 96, height: 192 },
+              orientation: 'portrait',
+              margins: { top: 0, right: 0, bottom: 0, left: 0 },
+              scale: { type: 'fixed', value: 1 },
+            },
+            manualBreaks: [],
+            showGridlines: false,
+            showHeadings: false,
+          },
         },
-      },
-      resources: { byHash: {}, byReference: {}, totalBytes: 0 },
-      objects: [],
-      diagnostics: [],
-      metadata: {
-        templateId: 'worker',
-        profileId: 'worker',
-        sourceDocumentHash: 'sha256:worker',
-        locale: 'en-US',
-        timeZone: 'UTC',
-        generatedAt: '2026-07-23T00:00:00.000Z',
-      },
-    };
-    try {
-      return await new Promise<{
-        signature?: readonly number[];
-        width?: number;
-        height?: number;
-        decodedWidth?: number;
-        decodedHeight?: number;
-        error?: string;
-      }>((resolve, reject) => {
-        const worker = new Worker(workerUrl, { type: 'module' });
-        worker.addEventListener('message', (event) => {
-          worker.terminate();
-          resolve(event.data);
+        resources: {
+          byHash: {
+            font: {
+              contentHash: 'sha256:worker-font',
+              type: 'font',
+              mimeType: 'font/ttf',
+              bytes: fontBytes,
+              fontFamily: 'Noto Sans',
+            },
+            image: {
+              contentHash: 'sha256:worker-image',
+              type: 'image',
+              mimeType: 'image/png',
+              bytes: imageBytes,
+            },
+          },
+          byReference: {
+            pixel: {
+              contentHash: 'sha256:worker-image',
+              type: 'image',
+              mimeType: 'image/png',
+              bytes: imageBytes,
+            },
+          },
+          totalBytes: fontBytes.length + imageBytes.length,
+        },
+        objects: [],
+        diagnostics: [],
+        metadata: {
+          templateId: 'worker',
+          profileId: 'worker',
+          sourceDocumentHash: 'sha256:worker',
+          locale: 'en-US',
+          timeZone: 'UTC',
+          generatedAt: '2026-07-23T00:00:00.000Z',
+        },
+      };
+      try {
+        return await new Promise<{
+          signature?: readonly number[];
+          width?: number;
+          height?: number;
+          decodedWidth?: number;
+          decodedHeight?: number;
+          imagePixel?: readonly number[];
+          nonRedTextPixels?: number;
+          missingResourceCode?: string;
+          error?: string;
+        }>((resolve, reject) => {
+          const worker = new Worker(workerUrl, { type: 'module' });
+          worker.addEventListener('message', (event) => {
+            worker.terminate();
+            resolve(event.data);
+          });
+          worker.addEventListener('error', reject);
+          worker.postMessage(document);
         });
-        worker.addEventListener('error', reject);
-        worker.postMessage(document);
-      });
-    } finally {
-      URL.revokeObjectURL(workerUrl);
-    }
-  });
+      } finally {
+        URL.revokeObjectURL(workerUrl);
+      }
+    },
+    { fontBytes, imageBytes },
+  );
 
   expect(result.error).toBeUndefined();
   expect(result.signature).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -277,5 +387,8 @@ test('@parity:output.export-download PNG output rasterizes inside a module Worke
     height: 300,
     decodedWidth: 150,
     decodedHeight: 300,
+    imagePixel: [0, 0, 0, 255],
+    missingResourceCode: 'IMAGE_ENCODING_FAILED',
   });
+  expect(result.nonRedTextPixels).toBeGreaterThan(20);
 });

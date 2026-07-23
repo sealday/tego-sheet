@@ -1,6 +1,11 @@
 import type PDFKit from 'pdfkit';
 import type { PrintDisplayCommand } from '../../print';
 import type { GeneratedDocument, ResolvedResource } from '../../template';
+import {
+  forbiddenFontEmbedding,
+  forbiddenFontSubsetting,
+  openTypeEmbeddingFlags,
+} from '../font-embedding';
 import { outputError, throwIfAborted } from '../output-error';
 
 const POINTS_PER_CSS_PIXEL = 72 / 96;
@@ -124,34 +129,8 @@ function fontResources(document: GeneratedDocument): ReadonlyMap<string, Resolve
   return resources;
 }
 
-function fontFsType(resource: ResolvedResource): number | undefined {
-  const bytes = new Uint8Array(resource.bytes);
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (bytes.byteLength < 12) return undefined;
-  const tag = (offset: number): string =>
-    String.fromCharCode(bytes[offset]!, bytes[offset + 1]!, bytes[offset + 2]!, bytes[offset + 3]!);
-  let sfntOffset = 0;
-  if (tag(0) === 'ttcf') {
-    if (bytes.byteLength < 16 || view.getUint32(8) === 0) return undefined;
-    sfntOffset = view.getUint32(12);
-  }
-  if (sfntOffset > bytes.byteLength - 12) return undefined;
-  const tableCount = view.getUint16(sfntOffset + 4);
-  const directoryEnd = sfntOffset + 12 + tableCount * 16;
-  if (directoryEnd > bytes.byteLength) return undefined;
-  for (let index = 0; index < tableCount; index += 1) {
-    const record = sfntOffset + 12 + index * 16;
-    if (tag(record) !== 'OS/2') continue;
-    const tableOffset = view.getUint32(record + 8);
-    const tableLength = view.getUint32(record + 12);
-    if (tableLength < 10 || tableOffset > bytes.byteLength - tableLength) return undefined;
-    return view.getUint16(tableOffset + 8);
-  }
-  return undefined;
-}
-
 function checkFontPermission(resource: ResolvedResource): void {
-  const fsType = fontFsType(resource);
+  const fsType = openTypeEmbeddingFlags(resource.bytes);
   if (fsType === undefined) {
     throw outputError(
       'PDF_FONT_SUBSET_FAILED',
@@ -159,14 +138,14 @@ function checkFontPermission(resource: ResolvedResource): void {
       { details: { resource: resource.contentHash } },
     );
   }
-  if ((fsType & 0x0002) !== 0 || (fsType & 0x0200) !== 0) {
+  if (forbiddenFontEmbedding(fsType)) {
     throw outputError(
       'PDF_FONT_EMBEDDING_FORBIDDEN',
       `Font ${resource.fontFamily ?? resource.contentHash} forbids embedding`,
       { details: { resource: resource.contentHash, fsType } },
     );
   }
-  if ((fsType & 0x0100) !== 0) {
+  if (forbiddenFontSubsetting(fsType)) {
     throw outputError(
       'PDF_FONT_SUBSET_FAILED',
       `Font ${resource.fontFamily ?? resource.contentHash} forbids subsetting`,

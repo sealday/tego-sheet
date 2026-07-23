@@ -3,6 +3,20 @@ import { describe, expect, it, vi } from 'vitest';
 import { ImageAdapter, type ImageRasterizer } from '../../../src/output/image';
 import { outputGeneratedDocument } from '../../fixtures/output/generated-document';
 
+function withFontFsType(bytes: readonly number[], fsType: number): number[] {
+  const copy = new Uint8Array(bytes);
+  const view = new DataView(copy.buffer);
+  const tableCount = view.getUint16(4);
+  for (let index = 0; index < tableCount; index += 1) {
+    const record = 12 + index * 16;
+    const tag = new TextDecoder().decode(copy.slice(record, record + 4));
+    if (tag !== 'OS/2') continue;
+    view.setUint16(view.getUint32(record + 8) + 8, fsType);
+    return [...copy];
+  }
+  throw new Error('Image font fixture must contain an OS/2 table');
+}
+
 function imageDocument() {
   const fixture = outputGeneratedDocument();
   const encoded = readFileSync(
@@ -20,6 +34,22 @@ function imageDocument() {
   };
   return {
     ...fixture,
+    print: {
+      ...fixture.print,
+      displayList: {
+        ...fixture.print.displayList,
+        pages: fixture.print.displayList.pages.map((page, pageIndex) =>
+          pageIndex === 0
+            ? {
+                ...page,
+                commands: page.commands.map((command) =>
+                  command.kind === 'text' ? { ...command, text: '中文' } : command,
+                ),
+              }
+            : page,
+        ),
+      },
+    },
     resources: {
       ...fixture.resources,
       byHash: { [resource.contentHash]: resource },
@@ -41,6 +71,9 @@ describe('ImageAdapter', () => {
     expect(blobs.map((blob) => blob.type)).toEqual(['image/svg+xml', 'image/svg+xml']);
     expect(markup[0]).toContain('data-page-id="invoice-2"');
     expect(markup[1]).toContain('viewBox="0 0 210 297"');
+    expect(markup[1]).toContain('<path');
+    expect(markup.join('')).not.toContain('<style');
+    expect(markup.join('')).not.toContain('base64');
     expect(markup.join('')).not.toMatch(/<script|foreignObject|\s(?:src|href)=["']https?:/iu);
   });
 
@@ -61,6 +94,62 @@ describe('ImageAdapter', () => {
     expect(rasterize).toHaveBeenCalledWith(
       expect.objectContaining({ width, height, dpi, background: '#ffffff' }),
     );
+  });
+
+  it('uses glyph outlines without exposing font-family CSS and rejects restricted fonts', async () => {
+    const fixture = imageDocument();
+    const resource = Object.values(fixture.resources.byHash)[0]!;
+    const injectedFamily = 'Noto Sans";}@import url(https://example.com/font);/*';
+    const injected = {
+      ...fixture,
+      print: {
+        ...fixture.print,
+        displayList: {
+          ...fixture.print.displayList,
+          pages: fixture.print.displayList.pages.map((page, pageIndex) =>
+            pageIndex === 0
+              ? {
+                  ...page,
+                  commands: page.commands.map((command) =>
+                    command.kind === 'text' ? { ...command, fontFamily: injectedFamily } : command,
+                  ),
+                }
+              : page,
+          ),
+        },
+      },
+      resources: {
+        ...fixture.resources,
+        byHash: {
+          [resource.contentHash]: { ...resource, fontFamily: injectedFamily },
+        },
+      },
+    };
+    const [blob] = await new ImageAdapter().render(injected, {
+      format: 'svg',
+      pages: [0],
+    });
+    const svg = await blob!.text();
+
+    expect(svg).toContain('<path');
+    expect(svg).not.toContain(injectedFamily);
+    expect(svg).not.toMatch(/<style|@import|\s(?:src|href|xlink:href)=["']https?:/iu);
+
+    const restricted = {
+      ...fixture,
+      resources: {
+        ...fixture.resources,
+        byHash: {
+          [resource.contentHash]: {
+            ...resource,
+            bytes: withFontFsType(resource.bytes, 0x0002),
+          },
+        },
+      },
+    };
+    await expect(
+      new ImageAdapter().render(restricted, { format: 'svg', pages: [0] }),
+    ).rejects.toMatchObject({ code: 'IMAGE_FONT_EMBEDDING_FAILED' });
   });
 
   it('rejects the total pixel budget before allocating a raster surface', async () => {

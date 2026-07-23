@@ -4,6 +4,12 @@ import {
 } from '../browser-print-adapter';
 import type { PrintDisplayCommand } from '../../print';
 import type { GeneratedDocument, ResolvedResource } from '../../template';
+import type { FontkitFont } from 'fontkit';
+import {
+  forbiddenFontEmbedding,
+  forbiddenFontSubsetting,
+  openTypeEmbeddingFlags,
+} from '../font-embedding';
 import { outputError, throwIfAborted } from '../output-error';
 
 const DEFAULT_LIMITS: ImageOutputLimits = Object.freeze({
@@ -80,14 +86,6 @@ function escapeMarkup(value: string): string {
     .replaceAll("'", '&#39;');
 }
 
-function base64(bytes: readonly number[]): string {
-  let binary = '';
-  for (let offset = 0; offset < bytes.length; offset += 32_768) {
-    binary += String.fromCharCode(...bytes.slice(offset, offset + 32_768));
-  }
-  return btoa(binary);
-}
-
 function selectedPages(document: GeneratedDocument, pages: readonly number[]): readonly number[] {
   const pageCount = document.print.pages.length;
   if (
@@ -112,40 +110,10 @@ function safeBackground(value: string | undefined): string | 'transparent' {
   return background;
 }
 
-function sanitizeCommand(command: PrintDisplayCommand): PrintDisplayCommand {
-  if (command.kind === 'clip') {
-    return Object.freeze({
-      ...command,
-      commands: Object.freeze(command.commands.map(sanitizeCommand)),
-    });
-  }
-  if (command.kind === 'link' && /^(?:https?:|mailto:)/iu.test(command.href)) {
-    return Object.freeze({ ...command, href: 'unsafe:removed' });
-  }
-  return command;
-}
-
-function imageDocument(document: GeneratedDocument): GeneratedDocumentForBrowserPrint {
-  return {
-    print: {
-      pages: document.print.pages,
-      displayList: {
-        diagnostics: document.print.displayList.diagnostics,
-        pages: document.print.displayList.pages.map((page) => ({
-          ...page,
-          commands: page.commands.map(sanitizeCommand),
-        })),
-      },
-    },
-    resources: document.resources,
-  };
-}
-
-function usedFontFamilies(commands: readonly PrintDisplayCommand[], target: Set<string>): void {
-  for (const command of commands) {
-    if (command.kind === 'text') target.add(command.fontFamily);
-    if (command.kind === 'clip') usedFontFamilies(command.commands, target);
-  }
+function isStandardFont(family: string): boolean {
+  return /^(?:arial|helvetica|sans-serif|times(?: new roman)?|serif|courier|monospace)$/iu.test(
+    family.trim(),
+  );
 }
 
 function fontResources(document: GeneratedDocument): ReadonlyMap<string, ResolvedResource> {
@@ -164,70 +132,146 @@ function fontResources(document: GeneratedDocument): ReadonlyMap<string, Resolve
   return resources;
 }
 
-function embeddedFonts(
-  document: GeneratedDocument,
-  commands: readonly PrintDisplayCommand[],
-): string {
-  const families = new Set<string>();
-  usedFontFamilies(commands, families);
-  const resources = fontResources(document);
-  return [...families]
-    .sort()
-    .flatMap((family) => {
-      const resource = resources.get(family);
-      if (resource === undefined) {
-        if (
-          /^(?:arial|helvetica|sans-serif|times(?: new roman)?|serif|courier|monospace)$/iu.test(
-            family,
-          )
-        ) {
-          return [];
-        }
-        throw outputError(
-          'IMAGE_FONT_EMBEDDING_FAILED',
-          `No resolved image font matches ${family}`,
-          { details: { fontFamily: family } },
-        );
-      }
-      const permission = (
-        resource as ResolvedResource & {
-          readonly fontEmbedding?: 'allowed' | 'forbidden';
-        }
-      ).fontEmbedding;
-      if (permission === 'forbidden') {
-        throw outputError('IMAGE_FONT_EMBEDDING_FAILED', `Font ${family} forbids embedding`, {
-          details: { fontFamily: family, resource: resource.contentHash },
-        });
-      }
-      if (!resource.mimeType.startsWith('font/')) {
-        throw outputError('IMAGE_FONT_EMBEDDING_FAILED', `Font ${family} has invalid MIME`, {
-          details: { fontFamily: family, mimeType: resource.mimeType },
-        });
-      }
-      return [
-        `@font-face{font-family:"${escapeMarkup(family)}";src:url("data:${escapeMarkup(resource.mimeType)};base64,${base64(resource.bytes)}")}`,
-      ];
-    })
-    .join('');
+function assertOutlinePermission(resource: ResolvedResource): void {
+  const flags = openTypeEmbeddingFlags(resource.bytes);
+  if (flags === undefined || forbiddenFontEmbedding(flags) || forbiddenFontSubsetting(flags)) {
+    throw outputError(
+      'IMAGE_FONT_EMBEDDING_FAILED',
+      `Font ${resource.fontFamily ?? resource.contentHash} forbids used-glyph output`,
+      {
+        details: {
+          resource: resource.contentHash,
+          ...(flags === undefined ? {} : { flags }),
+        },
+      },
+    );
+  }
 }
 
-function decorateSvg(
-  svg: string,
+async function outlineText(
+  command: Extract<PrintDisplayCommand, { readonly kind: 'text' }>,
+  resources: ReadonlyMap<string, ResolvedResource>,
+  fonts: Map<string, FontkitFont>,
+): Promise<PrintDisplayCommand> {
+  if (isStandardFont(command.fontFamily)) return command;
+  const resource = resources.get(command.fontFamily);
+  if (resource === undefined) {
+    throw outputError(
+      'IMAGE_FONT_EMBEDDING_FAILED',
+      `No resolved image font matches ${command.fontFamily}`,
+      { details: { fontFamily: command.fontFamily } },
+    );
+  }
+  assertOutlinePermission(resource);
+  let font = fonts.get(resource.contentHash);
+  if (font === undefined) {
+    const { create } = await import('fontkit');
+    font = create(new Uint8Array(resource.bytes));
+    fonts.set(resource.contentHash, font);
+  }
+  for (const character of command.text) {
+    if (!font.hasGlyphForCodePoint(character.codePointAt(0)!)) {
+      throw outputError(
+        'IMAGE_FONT_EMBEDDING_FAILED',
+        `Font ${command.fontFamily} cannot represent selected text`,
+        { details: { fontFamily: command.fontFamily } },
+      );
+    }
+  }
+  const run = font.layout(command.text);
+  const scaleY = command.fontSize / font.unitsPerEm;
+  const naturalWidth = run.advanceWidth * scaleY;
+  const widthScale =
+    naturalWidth > command.maxWidth && naturalWidth > 0 ? command.maxWidth / naturalWidth : 1;
+  const scaleX = scaleY * widthScale;
+  const renderedWidth = run.advanceWidth * scaleX;
+  const startX =
+    command.horizontalAlign === 'center'
+      ? command.x - renderedWidth / 2
+      : command.horizontalAlign === 'right'
+        ? command.x - renderedWidth
+        : command.x;
+  let advance = 0;
+  const paths = run.glyphs.map((glyph, index) => {
+    const position = run.positions[index]!;
+    const path = glyph.path
+      .transform(
+        scaleX,
+        0,
+        0,
+        -scaleY,
+        startX + (advance + position.xOffset) * scaleX,
+        command.y - position.yOffset * scaleY,
+      )
+      .toSVG();
+    advance += position.xAdvance;
+    return path;
+  });
+  return Object.freeze({
+    kind: 'path',
+    data: paths.join(''),
+    fill: command.color,
+  });
+}
+
+async function imageCommands(
   document: GeneratedDocument,
   commands: readonly PrintDisplayCommand[],
+  fonts: Map<string, FontkitFont>,
+): Promise<readonly PrintDisplayCommand[]> {
+  const resources = fontResources(document);
+  const output: PrintDisplayCommand[] = [];
+  for (const command of commands) {
+    if (command.kind === 'text') {
+      output.push(await outlineText(command, resources, fonts));
+    } else if (command.kind === 'clip') {
+      output.push(
+        Object.freeze({
+          ...command,
+          commands: Object.freeze(await imageCommands(document, command.commands, fonts)),
+        }),
+      );
+    } else if (command.kind === 'link' && /^(?:https?:|mailto:)/iu.test(command.href)) {
+      output.push(Object.freeze({ ...command, href: 'unsafe:removed' }));
+    } else {
+      output.push(command);
+    }
+  }
+  return Object.freeze(output);
+}
+
+function serializeImagePage(
+  document: GeneratedDocument,
+  pageIndex: number,
+  commands: readonly PrintDisplayCommand[],
   background: string | 'transparent',
-): string {
-  const style = embeddedFonts(document, commands);
+): {
+  readonly page: { readonly width: number; readonly height: number };
+  readonly display: { readonly commands: readonly PrintDisplayCommand[] };
+  readonly svg: string;
+} {
+  const semantic = document.print.pages[pageIndex]!;
+  const display = document.print.displayList.pages[pageIndex]!;
+  const projection: GeneratedDocumentForBrowserPrint = {
+    print: {
+      pages: [{ ...semantic, index: 0 }],
+      displayList: {
+        diagnostics: document.print.displayList.diagnostics,
+        pages: [{ ...display, index: 0, commands }],
+      },
+    },
+    resources: document.resources,
+  };
+  const page = serializeGeneratedDocumentSvgPages(projection)[0]!;
   const pageBackground =
     background === 'transparent'
       ? ''
       : `<rect width="100%" height="100%" fill="${escapeMarkup(background)}"/>`;
-  const additions = `${style === '' ? '' : `<style>${style}</style>`}${pageBackground}`;
-  const output = svg.replace(' role="img">', ` role="img">${additions}`);
+  const output = page.svg.replace(' role="img">', ` role="img">${pageBackground}`);
   if (/<script|<foreignObject|\s(?:src|href|xlink:href)=["']https?:/iu.test(output)) {
     throw outputError('IMAGE_ENCODING_FAILED', 'SVG output contains active external content');
   }
-  return output;
+  return { page, display: { commands }, svg: output };
 }
 
 async function rasterizeWithBrowser(request: ImageRasterizeRequest): Promise<Blob> {
@@ -272,27 +316,6 @@ async function rasterizeWithBrowser(request: ImageRasterizeRequest): Promise<Blo
 }
 
 type RasterContext = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
-
-async function installFonts(request: ImageRasterizeRequest): Promise<void> {
-  if (typeof globalThis.FontFace !== 'function') return;
-  const families = new Set<string>();
-  usedFontFamilies(request.commands, families);
-  const resources = fontResources({
-    resources: request.resources,
-  } as GeneratedDocument);
-  const fontSet = (
-    globalThis as typeof globalThis & {
-      readonly fonts?: { add(font: FontFace): void };
-    }
-  ).fonts;
-  for (const family of [...families].sort()) {
-    const resource = resources.get(family);
-    if (resource === undefined) continue;
-    const face = new FontFace(family, new Uint8Array(resource.bytes));
-    await face.load();
-    fontSet?.add(face);
-  }
-}
 
 function imagePlacement(
   sourceWidth: number,
@@ -353,6 +376,9 @@ async function paintCommands(
         context.fillText(command.text, command.x, command.y, command.maxWidth);
         break;
       case 'path': {
+        if (typeof globalThis.Path2D !== 'function') {
+          throw new Error('Path2D is unavailable for Worker image rasterization');
+        }
         const path = new Path2D(command.data);
         if (command.fill !== undefined) {
           context.fillStyle = command.fill;
@@ -377,7 +403,13 @@ async function paintCommands(
         break;
       case 'image': {
         const resource = request.resources.byReference[command.resourceId];
-        if (resource?.vector !== undefined) {
+        if (resource === undefined) {
+          throw new Error(`Image resource ${command.resourceId} is missing`);
+        }
+        if (resource.vector !== undefined) {
+          if (typeof globalThis.Path2D !== 'function') {
+            throw new Error('Path2D is unavailable for Worker vector rasterization');
+          }
           const vector = resource.vector;
           const [x, y, width, height] = imagePlacement(
             vector.viewBox[2],
@@ -399,10 +431,10 @@ async function paintCommands(
           context.fillStyle = vector.foreground;
           for (const data of vector.paths) context.fill(new Path2D(data));
           context.restore();
-        } else if (
-          resource?.type === 'image' &&
-          typeof globalThis.createImageBitmap === 'function'
-        ) {
+        } else if (resource.type === 'image') {
+          if (typeof globalThis.createImageBitmap !== 'function') {
+            throw new Error('createImageBitmap is unavailable for Worker image rasterization');
+          }
           const bitmap = await createImageBitmap(
             new Blob([new Uint8Array(resource.bytes)], { type: resource.mimeType }),
           );
@@ -422,6 +454,8 @@ async function paintCommands(
           } finally {
             bitmap.close();
           }
+        } else {
+          throw new Error(`Resource ${command.resourceId} is not an image`);
         }
         break;
       }
@@ -430,7 +464,6 @@ async function paintCommands(
 }
 
 async function rasterizeDisplayList(request: ImageRasterizeRequest): Promise<Blob> {
-  await installFonts(request);
   throwIfAborted(request.signal);
   const canvas = new OffscreenCanvas(request.width, request.height);
   const context = canvas.getContext('2d');
@@ -464,39 +497,47 @@ export class ImageAdapter {
       throw outputError('IMAGE_PIXEL_LIMIT_EXCEEDED', 'Image page count exceeds its limit');
     }
     const background = safeBackground(options.background);
-    const serialized = serializeGeneratedDocumentSvgPages(imageDocument(document));
-    const selected = pages.map((pageIndex) => {
-      const page = serialized[pageIndex]!;
-      const display = document.print.displayList.pages[pageIndex]!;
-      return {
-        page,
-        display,
-        svg: decorateSvg(page.svg, document, display.commands, background),
-      };
-    });
-    if (options.format === 'svg') {
-      throwIfAborted(options.signal);
-      return Object.freeze(selected.map(({ svg }) => new Blob([svg], { type: 'image/svg+xml' })));
-    }
     const dpi = options.dpi ?? 96;
-    if (!Number.isFinite(dpi) || dpi <= 0 || dpi > this.#limits.maxDpi) {
+    if (
+      options.format === 'png' &&
+      (!Number.isFinite(dpi) || dpi <= 0 || dpi > this.#limits.maxDpi)
+    ) {
       throw outputError('IMAGE_ENCODING_FAILED', 'PNG DPI is outside the supported range');
     }
-    const pixelPages = selected.map((entry) => ({
-      ...entry,
-      width: Math.round((entry.page.width * dpi) / 96),
-      height: Math.round((entry.page.height * dpi) / 96),
+    const pixelSizes = pages.map((pageIndex) => ({
+      width: Math.round((document.print.pages[pageIndex]!.width * dpi) / 96),
+      height: Math.round((document.print.pages[pageIndex]!.height * dpi) / 96),
     }));
-    const totalPixels = pixelPages.reduce((sum, { width, height }) => sum + width * height, 0);
+    const totalPixels = pixelSizes.reduce((sum, { width, height }) => sum + width * height, 0);
     if (
-      !Number.isSafeInteger(totalPixels) ||
-      pixelPages.some(({ width, height }) => width <= 0 || height <= 0) ||
-      totalPixels > this.#limits.maxPixels
+      options.format === 'png' &&
+      (!Number.isSafeInteger(totalPixels) ||
+        pixelSizes.some(({ width, height }) => width <= 0 || height <= 0) ||
+        totalPixels > this.#limits.maxPixels)
     ) {
       throw outputError('IMAGE_PIXEL_LIMIT_EXCEEDED', 'PNG output exceeds its total pixel limit', {
         details: { dpi, totalPixels, maxPixels: this.#limits.maxPixels },
       });
     }
+    const fonts = new Map<string, FontkitFont>();
+    const selected = [];
+    for (const pageIndex of pages) {
+      throwIfAborted(options.signal);
+      const display = document.print.displayList.pages[pageIndex];
+      if (display === undefined) {
+        throw outputError('IMAGE_ENCODING_FAILED', 'Image display page is missing');
+      }
+      const commands = await imageCommands(document, display.commands, fonts);
+      selected.push(serializeImagePage(document, pageIndex, commands, background));
+    }
+    if (options.format === 'svg') {
+      throwIfAborted(options.signal);
+      return Object.freeze(selected.map(({ svg }) => new Blob([svg], { type: 'image/svg+xml' })));
+    }
+    const pixelPages = selected.map((entry, index) => ({
+      ...entry,
+      ...pixelSizes[index]!,
+    }));
     const completed: Blob[] = [];
     try {
       for (const page of pixelPages) {

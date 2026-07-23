@@ -29,7 +29,7 @@ export default defineConfig({
     ],
   },
   optimizeDeps: {
-    include: ['pdfkit/js/pdfkit.standalone.js'],
+    include: ['fontkit', 'pdfkit/js/pdfkit.standalone.js'],
   },
   server: {
     host: '127.0.0.1',
