@@ -82,6 +82,15 @@ function tokenize(source: string): readonly Token[] {
     const reference = referencePattern.exec(source.slice(index));
     if (reference !== null) {
       const following = source[index + reference[0].length];
+      if (following === '!') {
+        index += reference[0].length;
+        tokens.push({
+          kind: 'word',
+          value: reference[0],
+          span: { start, end: index },
+        });
+        continue;
+      }
       if (following === undefined || !/[A-Z0-9_]/iu.test(following)) {
         index += reference[0].length;
         tokens.push({
@@ -295,8 +304,32 @@ class Parser {
 
 /** Parses restricted formula source into a typed, non-executable AST. */
 export function parseFormula(source: string): FormulaAst {
+  if (source.length > 8192) {
+    throw new FormulaSyntaxError('Formula exceeds the 8192 character limit', {
+      start: 8192,
+      end: source.length,
+    });
+  }
   if (!source.startsWith('=')) {
     throw new FormulaSyntaxError('Formula source must start with =', { start: 0, end: 0 });
   }
-  return freezeFormulaAst(new Parser(tokenize(source)).parse());
+  const tokens = tokenize(source);
+  if (tokens.length > 4096) {
+    throw new FormulaSyntaxError('Formula exceeds the 4096 token limit', {
+      start: 0,
+      end: source.length,
+    });
+  }
+  let depth = 0;
+  for (const token of tokens) {
+    if (token.kind === 'left') {
+      depth += 1;
+      if (depth > 256) {
+        throw new FormulaSyntaxError('Formula exceeds the nesting limit', token.span);
+      }
+    } else if (token.kind === 'right') {
+      depth -= 1;
+    }
+  }
+  return freezeFormulaAst(new Parser(tokens).parse());
 }

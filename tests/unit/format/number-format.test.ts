@@ -40,6 +40,10 @@ describe('Excel-oriented number formats', () => {
     expect(formatter.format({ type: 'string', value: 'ok' }, '0;0;0;"value=" @', context)).toBe(
       'value= ok',
     );
+    expect(formatter.format({ type: 'number', value: 45293 }, 'dddd, mmmm d, yyyy', context)).toBe(
+      'Tuesday, January 2, 2024',
+    );
+    expect(formatter.format({ type: 'number', value: 1.5 }, '[h]:mm', context)).toBe('36:00');
   });
 
   it('honors date systems and explicit locale/time zone without consulting host defaults', () => {

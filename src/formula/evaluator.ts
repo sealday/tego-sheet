@@ -27,7 +27,10 @@ export interface CalculationEnvironment {
 }
 
 /** One cell whose input or structure changed. */
-export type DependencyChange = FormulaAddress;
+export interface DependencyChange extends FormulaAddress {
+  /** Optional replacement input from the committed transaction snapshot. */
+  readonly input?: CellInput;
+}
 
 /** Rebuildable formula AST, dependency, diagnostic, and value cache. */
 export interface FormulaProgram {
@@ -45,14 +48,13 @@ export interface FormulaProgram {
 
 interface FormulaProgramState {
   readonly formulas: Map<string, FormulaAst>;
-  readonly graph: FormulaDependencyGraph;
+  graph: FormulaDependencyGraph;
+  readonly inputs: Map<string, CellInput>;
   readonly values: Map<string, FormulaValue>;
   diagnostics: Map<string, readonly FormulaDiagnostic[]>;
   lastTick?: number;
   initialized: boolean;
 }
-
-const formulaProgramStates = new WeakMap<FormulaProgram, FormulaProgramState>();
 
 /** Result of one deterministic incremental recalculation. */
 export interface CalculationResult {
@@ -104,8 +106,29 @@ function cellInputs(document: SpreadsheetDocument): Map<string, CellInput> {
   return inputs;
 }
 
+function snapshotGraph(graph: FormulaDependencyGraph): FormulaDependencyGraph {
+  return {
+    dependencies: new Map(
+      [...graph.dependencies].map(([address, dependencies]) => [address, new Set(dependencies)]),
+    ),
+    dependents: new Map(
+      [...graph.dependents].map(([address, dependents]) => [address, new Set(dependents)]),
+    ),
+  };
+}
+
 function scalar(value: FormulaValue): ScalarFormulaValue {
   return value.type === 'array' ? { type: 'error', value: '#VALUE!' } : value;
+}
+
+function snapshotFormulaValue(value: FormulaValue): FormulaValue {
+  if (value.type !== 'array') return Object.freeze({ ...value });
+  return Object.freeze({
+    type: 'array',
+    rows: Object.freeze(
+      value.rows.map((row) => Object.freeze(row.map((item) => Object.freeze({ ...item })))),
+    ),
+  });
 }
 
 function error(value: ScalarFormulaValue): value is Extract<ScalarFormulaValue, { type: 'error' }> {
@@ -219,6 +242,7 @@ function containsVolatile(ast: FormulaAst, registry: FormulaFunctionRegistry): b
 export function createFormulaEngine(options: FormulaEngineOptions = {}): FormulaEngine {
   const registry = options.functions ?? createFormulaFunctionRegistry();
   const maximumEvaluations = options.maximumEvaluations ?? 100_000;
+  const formulaProgramStates = new WeakMap<FormulaProgram, FormulaProgramState>();
 
   return {
     compile(document) {
@@ -250,12 +274,13 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
       const values = new Map<string, FormulaValue>();
       for (const [address, formulaDiagnostics] of diagnostics) {
         if (formulaDiagnostics.some(({ code }) => code === 'FORMULA_PARSE_ERROR')) {
-          values.set(address, { type: 'error', value: '#VALUE!' });
+          values.set(address, snapshotFormulaValue({ type: 'error', value: '#VALUE!' }));
         }
       }
       const state: FormulaProgramState = {
         formulas,
         graph,
+        inputs: cellInputs(document),
         values,
         diagnostics,
         initialized: false,
@@ -266,7 +291,7 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
           return new Map(formulas);
         },
         get graph() {
-          return graph;
+          return snapshotGraph(state.graph);
         },
         get values() {
           return new Map(state.values);
@@ -282,12 +307,58 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
     recalculate(program_, changes, environment) {
       const program = formulaProgramStates.get(program_);
       if (program === undefined) throw new TypeError('FormulaProgram belongs to another engine');
-      const inputs = cellInputs(program_.document);
-      const all = new Set(program.formulas.keys());
+      if (environment.functionRegistryVersion !== registry.version) {
+        throw new TypeError(
+          `Formula registry version ${environment.functionRegistryVersion} does not match ${registry.version}`,
+        );
+      }
+      const changedKeys = changes.map(formulaAddressKey);
+      const previouslyAffected = transitiveDependents(program.graph, changedKeys);
+      const changedFormulas = new Set<string>();
+      let graphChanged = false;
+      for (const change of changes) {
+        if (change.input === undefined) continue;
+        const address = formulaAddressKey(change);
+        program.inputs.set(address, change.input);
+        if (change.input.type === 'formula') {
+          try {
+            const resolution = resolveFormulaReferences(
+              parseFormula(change.input.source),
+              program_.document,
+              change.sheetId,
+            );
+            program.formulas.set(address, resolution.ast);
+            if (resolution.diagnostics.length > 0)
+              program.diagnostics.set(address, resolution.diagnostics);
+            else program.diagnostics.delete(address);
+          } catch (cause) {
+            program.formulas.delete(address);
+            program.values.set(address, snapshotFormulaValue({ type: 'error', value: '#VALUE!' }));
+            program.diagnostics.set(address, [
+              {
+                code: 'FORMULA_PARSE_ERROR',
+                message: cause instanceof Error ? cause.message : 'Formula parse failed',
+              },
+            ]);
+          }
+          changedFormulas.add(address);
+          graphChanged = true;
+        } else if (program.formulas.delete(address)) {
+          program.values.delete(address);
+          graphChanged = true;
+        }
+      }
+      if (graphChanged) program.graph = createDependencyGraph(program.formulas);
+
       let dirty: Set<string>;
-      if (!program.initialized) dirty = all;
+      if (!program.initialized) dirty = new Set(program.formulas.keys());
       else {
-        dirty = new Set(transitiveDependents(program.graph, changes.map(formulaAddressKey)));
+        dirty = new Set(previouslyAffected);
+        if (graphChanged) {
+          for (const address of transitiveDependents(program.graph, changedKeys))
+            dirty.add(address);
+        }
+        for (const address of changedFormulas) dirty.add(address);
         if (program.lastTick !== environment.tick) {
           for (const [address, ast] of program.formulas) {
             if (containsVolatile(ast, registry)) dirty.add(address);
@@ -316,30 +387,33 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
         if (!dirty.has(address) && values.has(address)) return values.get(address) as FormulaValue;
         if (cycleAddresses.has(address)) {
           const value: FormulaValue = { type: 'error', value: '#REF!' };
-          values.set(address, value);
-          return value;
+          const snapshot = snapshotFormulaValue(value);
+          values.set(address, snapshot);
+          return snapshot;
         }
         const ast = program.formulas.get(address);
-        if (ast === undefined) return inputValue(inputs.get(address) ?? { type: 'blank' });
+        if (ast === undefined) return inputValue(program.inputs.get(address) ?? { type: 'blank' });
         if (evaluating.has(address)) return { type: 'error', value: '#REF!' };
         evaluationCount += 1;
         if (evaluationCount > maximumEvaluations) {
           const value: FormulaValue = { type: 'error', value: '#NUM!' };
-          values.set(address, value);
+          const snapshot = snapshotFormulaValue(value);
+          values.set(address, snapshot);
           program.diagnostics.set(address, [
             {
               code: 'FORMULA_EVALUATION_LIMIT_EXCEEDED',
               message: `Calculation exceeded ${maximumEvaluations} formula evaluations`,
             },
           ]);
-          return value;
+          return snapshot;
         }
         evaluating.add(address);
         const value = evaluateAst(ast);
         evaluating.delete(address);
-        values.set(address, value);
+        const snapshot = snapshotFormulaValue(value);
+        values.set(address, snapshot);
         evaluated.push(address);
-        return value;
+        return snapshot;
       };
 
       const evaluateReference = (sheetId: string | undefined, row: number, column: number) =>
@@ -404,12 +478,45 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
           }
           return { type: 'error', value: '#NAME?' };
         }
-        if (definition.mode === 'async') return { type: 'error', value: '#N/A' };
+        if (definition.mode === 'async') {
+          const address = [...evaluating].at(-1);
+          if (address !== undefined) {
+            program.diagnostics.set(address, [
+              {
+                code: 'ASYNC_FORMULA_NOT_RESOLVED',
+                message: `Async formula function ${ast.name} has no fixed result`,
+                span: ast.span,
+              },
+            ]);
+          }
+          return { type: 'error', value: '#N/A' };
+        }
+        if (ast.name === 'IF') {
+          const condition = scalar(
+            evaluateAst(ast.arguments[0] ?? { kind: 'boolean', value: false, span: ast.span }),
+          );
+          if (error(condition)) return condition;
+          const selected = (
+            condition.type === 'blank'
+              ? false
+              : condition.type === 'boolean'
+                ? condition.value
+                : number(condition)
+          )
+            ? ast.arguments[1]
+            : ast.arguments[2];
+          return selected === undefined ? { type: 'blank' } : evaluateAst(selected);
+        }
         const arguments_: ScalarFormulaValue[] = [];
         for (const argument of ast.arguments) {
           const value = evaluateAst(argument);
           if (value.type === 'array') {
-            for (const row of value.rows) arguments_.push(...row);
+            for (const row of value.rows) {
+              for (const item of row) {
+                if (error(item)) return item;
+                arguments_.push(item);
+              }
+            }
           } else {
             if (error(value)) return value;
             arguments_.push(value);
@@ -428,7 +535,10 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
           dateSystem: environment.dateSystem,
           now: calculationNow,
         });
-        const result = definition.evaluate(Object.freeze(arguments_), context);
+        const frozenArguments = Object.freeze(
+          arguments_.map((value) => Object.freeze({ ...value })),
+        );
+        const result = definition.evaluate(frozenArguments, context);
         return result instanceof Promise ? { type: 'error', value: '#N/A' } : result;
       };
 

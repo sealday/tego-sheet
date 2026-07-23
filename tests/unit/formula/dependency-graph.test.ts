@@ -13,6 +13,37 @@ const environment: CalculationEnvironment = {
 };
 
 describe('formula dependency graph', () => {
+  it('does not expose mutable dependency state through program snapshots', () => {
+    const document = formulaDocument([
+      {
+        id: 'sheet-1',
+        name: 'Sheet1',
+        cells: [
+          { row: 0, column: 0, input: { type: 'number', value: 1 } },
+          { row: 0, column: 1, input: { type: 'formula', source: '=A1+1' } },
+        ],
+      },
+    ]);
+    const engine = createFormulaEngine();
+    const program = engine.compile(document);
+    engine.recalculate(program, [], environment);
+    (program.graph.dependencies as Map<string, ReadonlySet<string>>).clear();
+    (program.graph.dependents as Map<string, ReadonlySet<string>>).clear();
+    const result = engine.recalculate(
+      program,
+      [
+        {
+          sheetId: 'sheet-1',
+          row: 0,
+          column: 0,
+          input: { type: 'number', value: 2 },
+        },
+      ],
+      environment,
+    );
+    expect(result.values.get('sheet-1!B1')).toEqual({ type: 'number', value: 3 });
+  });
+
   it('recalculates only transitive dirty dependents in stable order', () => {
     const document = formulaDocument([
       {
@@ -37,6 +68,21 @@ describe('formula dependency graph', () => {
     expect(result.evaluatedAddresses).toEqual(['sheet-1!B1', 'sheet-1!C1']);
     expect(result.evaluatedAddresses).not.toContain('sheet-1!Z1');
     expect(result.values.get('sheet-1!C1')).toEqual({ type: 'number', value: 3 });
+
+    const edited = engine.recalculate(
+      program,
+      [
+        {
+          sheetId: 'sheet-1',
+          row: 0,
+          column: 0,
+          input: { type: 'number', value: 5 },
+        },
+      ],
+      environment,
+    );
+    expect(edited.evaluatedAddresses).toEqual(['sheet-1!B1', 'sheet-1!C1']);
+    expect(edited.values.get('sheet-1!C1')).toEqual({ type: 'number', value: 7 });
   });
 
   it('returns a stable minimal cycle and propagates standard errors', () => {
@@ -62,6 +108,35 @@ describe('formula dependency graph', () => {
     expect(result.values.get('sheet-1!E1')).toEqual({ type: 'error', value: '#NAME?' });
   });
 
+  it('propagates errors through ranges and lazily evaluates IF branches', () => {
+    const document = formulaDocument([
+      {
+        id: 'sheet-1',
+        name: 'Sheet1',
+        cells: [
+          { row: 0, column: 0, input: { type: 'formula', source: '=1/0' } },
+          { row: 0, column: 1, input: { type: 'formula', source: '=SUM(A1:A1)' } },
+          { row: 0, column: 2, input: { type: 'formula', source: '=IF(TRUE,1,1/0)' } },
+        ],
+      },
+    ]);
+    const engine = createFormulaEngine();
+    const result = engine.recalculate(engine.compile(document), [], environment);
+    expect(result.values.get('sheet-1!B1')).toEqual({ type: 'error', value: '#DIV/0!' });
+    expect(result.values.get('sheet-1!C1')).toEqual({ type: 'number', value: 1 });
+  });
+
+  it('enforces dependency expansion limits before publishing a program', () => {
+    const document = formulaDocument([
+      {
+        id: 'sheet-1',
+        name: 'Sheet1',
+        cells: [{ row: 0, column: 0, input: { type: 'formula', source: '=SUM(A1:A100001)' } }],
+      },
+    ]);
+    expect(() => createFormulaEngine().compile(document)).toThrow(/dependency limit/u);
+  });
+
   it('uses the explicit clock and invalidates volatile functions only on tick changes', () => {
     const document = formulaDocument([
       {
@@ -78,5 +153,23 @@ describe('formula dependency graph', () => {
     expect(first.values.get('sheet-1!A1')).toEqual(unchanged.values.get('sheet-1!A1'));
     expect(unchanged.evaluatedAddresses).toEqual([]);
     expect(next.evaluatedAddresses).toEqual(['sheet-1!A1']);
+  });
+
+  it('isolates program ownership and validates the declared registry version', () => {
+    const document = formulaDocument([
+      {
+        id: 'sheet-1',
+        name: 'Sheet1',
+        cells: [{ row: 0, column: 0, input: { type: 'formula', source: '=NOW()' } }],
+      },
+    ]);
+    const owner = createFormulaEngine();
+    const program = owner.compile(document);
+    expect(() => createFormulaEngine().recalculate(program, [], environment)).toThrow(
+      /another engine/u,
+    );
+    expect(() =>
+      owner.recalculate(program, [], { ...environment, functionRegistryVersion: 'wrong' }),
+    ).toThrow(/registry version/u);
   });
 });

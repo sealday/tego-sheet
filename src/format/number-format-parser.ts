@@ -143,6 +143,13 @@ function parseSection(source: string): NumberFormatSection {
       index += 1;
       continue;
     }
+    const elapsed = /^\[h+\]/iu.exec(remaining.slice(index));
+    if (elapsed !== null) {
+      flush();
+      tokens.push({ kind: 'date-pattern', value: elapsed[0] });
+      index += elapsed[0].length;
+      continue;
+    }
     const date = /^(?:yyyy|yy|mmmm|mmm|mm|m|dddd|ddd|dd|d|hh|h|ss|s)/iu.exec(
       remaining.slice(index),
     );
@@ -153,7 +160,7 @@ function parseSection(source: string): NumberFormatSection {
       continue;
     }
     const number = /^[#0?,.E+%]+/u.exec(remaining.slice(index));
-    if (number !== null) {
+    if (number !== null && /[#0?E%]/iu.test(number[0])) {
       flush();
       tokens.push({ kind: 'number-pattern', value: number[0] });
       index += number[0].length;

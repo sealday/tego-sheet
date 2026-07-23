@@ -46,6 +46,19 @@ describe('typed formula parser', () => {
     });
   });
 
+  it('distinguishes unquoted sheet names ending in digits from cell references', () => {
+    expect(parseFormula('=Sheet1!A1')).toMatchObject({
+      kind: 'reference',
+      reference: { sheetToken: 'Sheet1', row: 0, column: 0 },
+    });
+  });
+
+  it('rejects formulas beyond the fixed parser safety budget', () => {
+    expect(() => parseFormula(`=${'1+'.repeat(5000)}1`)).toThrow(
+      expect.objectContaining({ code: 'FORMULA_PARSE_ERROR' }),
+    );
+  });
+
   it('translates only relative axes during copy and normalizes source from the typed AST', () => {
     const translated = translateFormula(parseFormula('=$A1+B$1+$C$1'), {
       rowDelta: 2,

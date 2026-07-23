@@ -130,14 +130,29 @@ function formatDateToken(
   token: string,
   parts: ReturnType<typeof serialParts>,
   previous: string,
+  serial: number,
+  locale: string,
 ): string {
   const lower = token.toLowerCase();
+  if (/^\[h+\]$/u.test(lower)) return String(Math.floor(serial * 24));
   if (lower === 'yyyy') return pad(parts.year, 4);
   if (lower === 'yy') return pad(parts.year % 100);
+  if (lower === 'ddd' || lower === 'dddd') {
+    return new Intl.DateTimeFormat(locale, {
+      weekday: lower === 'ddd' ? 'short' : 'long',
+      timeZone: 'UTC',
+    }).format(Date.UTC(parts.year, parts.month - 1, parts.day));
+  }
   if (lower.startsWith('d')) return lower === 'dd' ? pad(parts.day) : String(parts.day);
   if (lower.startsWith('h')) return lower === 'hh' ? pad(parts.hour) : String(parts.hour);
   if (lower.startsWith('s')) return lower === 'ss' ? pad(parts.second) : String(parts.second);
   const isMinute = previous.endsWith(':');
+  if (!isMinute && (lower === 'mmm' || lower === 'mmmm')) {
+    return new Intl.DateTimeFormat(locale, {
+      month: lower === 'mmm' ? 'short' : 'long',
+      timeZone: 'UTC',
+    }).format(Date.UTC(parts.year, parts.month - 1, parts.day));
+  }
   const value = isMinute ? parts.minute : parts.month;
   return lower === 'mm' ? pad(value) : String(value);
 }
@@ -194,7 +209,13 @@ function formatValue(value: FormulaValue, ast: NumberFormatAst, context: FormatC
       continue;
     }
     if (token.kind === 'date-pattern') {
-      output += formatDateToken(token.value, parts as ReturnType<typeof serialParts>, output);
+      output += formatDateToken(
+        token.value,
+        parts as ReturnType<typeof serialParts>,
+        output,
+        sourceNumber,
+        context.locale,
+      );
       continue;
     }
     if (!renderedNumber && value.type === 'number') {

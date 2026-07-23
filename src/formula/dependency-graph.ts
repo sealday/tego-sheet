@@ -59,6 +59,10 @@ export function collectFormulaDependencies(ast: FormulaAst): ReadonlySet<string>
       const endRow = Math.max(node.start.row, node.end.row);
       const startColumn = Math.min(node.start.column, node.end.column);
       const endColumn = Math.max(node.start.column, node.end.column);
+      const size = (endRow - startRow + 1) * (endColumn - startColumn + 1);
+      if (!Number.isSafeInteger(size) || size > 100_000) {
+        throw new RangeError('Formula dependency limit exceeds 100000 cells');
+      }
       for (let row = startRow; row <= endRow; row += 1) {
         for (let column = startColumn; column <= endColumn; column += 1) {
           result.add(formulaAddressKey({ sheetId: node.start.sheetId, row, column }));

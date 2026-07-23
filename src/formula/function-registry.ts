@@ -69,12 +69,36 @@ function numeric(value: ScalarFormulaValue): number | undefined {
   return undefined;
 }
 
-function excelSerial(timestamp: number, dateSystem: 'excel-1900' | 'excel-1904'): number {
-  const utcDay = Math.floor(timestamp / 86_400_000);
+function excelSerial(
+  timestamp: number,
+  dateSystem: 'excel-1900' | 'excel-1904',
+  timeZone: string,
+): number {
+  const parts = new Map(
+    new Intl.DateTimeFormat('en-US-u-nu-latn', {
+      timeZone,
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+      hourCycle: 'h23',
+    })
+      .formatToParts(timestamp)
+      .map(({ type, value }) => [type, Number(value)]),
+  );
+  const year = parts.get('year') as number;
+  const month = parts.get('month') as number;
+  const day = parts.get('day') as number;
+  const hour = parts.get('hour') as number;
+  const minute = parts.get('minute') as number;
+  const second = parts.get('second') as number;
+  const utcDay = Math.floor(Date.UTC(year, month - 1, day) / 86_400_000);
   const epoch = dateSystem === 'excel-1900' ? Date.UTC(1899, 11, 31) : Date.UTC(1904, 0, 1);
   let serial = utcDay - Math.floor(epoch / 86_400_000);
   if (dateSystem === 'excel-1900' && serial >= 60) serial += 1;
-  return serial;
+  return serial + (hour * 3600 + minute * 60 + second) / 86_400;
 }
 
 const numberResult = (value: number): FormulaValue =>
@@ -152,9 +176,7 @@ const builtins: readonly FormulaFunctionDefinition[] = [
     mode: 'sync',
     evaluate: (_, context) => ({
       type: 'number',
-      value:
-        excelSerial(context.now, context.dateSystem) +
-        (((context.now % 86_400_000) + 86_400_000) % 86_400_000) / 86_400_000,
+      value: excelSerial(context.now, context.dateSystem, context.timeZone),
     }),
   },
   {
@@ -182,10 +204,19 @@ const builtins: readonly FormulaFunctionDefinition[] = [
     mode: 'sync',
     evaluate: (_, context) => ({
       type: 'number',
-      value: excelSerial(context.now, context.dateSystem),
+      value: Math.floor(excelSerial(context.now, context.dateSystem, context.timeZone)),
     }),
   },
 ];
+
+function snapshotDefinition(
+  definition: FormulaFunctionDefinition,
+): Readonly<FormulaFunctionDefinition> {
+  return Object.freeze({
+    ...definition,
+    parameters: Object.freeze({ ...definition.parameters }),
+  });
+}
 
 function truthy(value: ScalarFormulaValue): boolean {
   if (value.type === 'blank' || value.type === 'error') return false;
@@ -199,7 +230,9 @@ export const BUILTIN_FORMULA_COMPATIBILITY: readonly FormulaFunctionCompatibilit
 
 /** Creates an isolated registry populated with the supported built-in functions. */
 export function createFormulaFunctionRegistry(): FormulaFunctionRegistry {
-  const definitions = new Map(builtins.map((definition) => [definition.name, definition]));
+  const definitions = new Map(
+    builtins.map((definition) => [definition.name, snapshotDefinition(definition)]),
+  );
   let generation = 0;
   return {
     get version() {
@@ -210,11 +243,7 @@ export function createFormulaFunctionRegistry(): FormulaFunctionRegistry {
       if (!/^[A-Z_][A-Z0-9_.]*$/u.test(name)) throw new TypeError('Invalid function name');
       if (definitions.has(name))
         throw new TypeError(`Formula function ${name} is already registered`);
-      const snapshot = Object.freeze({
-        ...definition,
-        name,
-        parameters: Object.freeze({ ...definition.parameters }),
-      });
+      const snapshot = snapshotDefinition({ ...definition, name });
       definitions.set(name, snapshot);
       generation += 1;
       return () => {
