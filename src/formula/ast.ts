@@ -51,6 +51,12 @@ export type FormulaAst =
       readonly value: boolean;
     })
   | (FormulaNodeBase & {
+      /** Standard spreadsheet error literal node. */
+      readonly kind: 'error';
+      /** Stable spreadsheet error. */
+      readonly value: FormulaError;
+    })
+  | (FormulaNodeBase & {
       /** Single-cell reference node. */
       readonly kind: 'reference';
       /** Parsed reference. */

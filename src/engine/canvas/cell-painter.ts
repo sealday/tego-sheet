@@ -68,10 +68,14 @@ export function resolveCellPresentation(
   const printable = cell?.printable !== false;
   if (print && !printable) return { cell, style, text: '', printable };
   let rendered;
-  try {
-    rendered = evaluateCell(point, (candidate) => cellSource(sheet, candidate), budget);
-  } catch {
-    rendered = '#ERROR!' as const;
+  if (typeof cell?.text === 'string' && cell.text.startsWith('=') && cell.value !== undefined) {
+    rendered = cell.value as string | number | boolean;
+  } else {
+    try {
+      rendered = evaluateCell(point, (candidate) => cellSource(sheet, candidate), budget);
+    } catch {
+      rendered = '#ERROR!' as const;
+    }
   }
   return {
     cell,

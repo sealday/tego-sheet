@@ -152,6 +152,37 @@ describe('formula dependency graph', () => {
     expect(() => createFormulaEngine().compile(cumulative)).toThrow(/dependency limit/u);
   });
 
+  it('does not mutate a program when an incremental graph rebuild exceeds its budget', () => {
+    const document = formulaDocument([
+      {
+        id: 'sheet-1',
+        name: 'Sheet1',
+        cells: [{ row: 0, column: 0, input: { type: 'formula', source: '=1' } }],
+      },
+    ]);
+    const engine = createFormulaEngine();
+    const program = engine.compile(document);
+    engine.recalculate(program, [], environment);
+
+    expect(() =>
+      engine.recalculate(
+        program,
+        [
+          {
+            sheetId: 'sheet-1',
+            row: 0,
+            column: 0,
+            input: { type: 'formula', source: '=SUM(A1:A100001)' },
+          },
+        ],
+        environment,
+      ),
+    ).toThrow(/dependency limit/u);
+
+    expect(program.formulas.get('sheet-1!A1')).toMatchObject({ kind: 'number', value: 1 });
+    expect(program.values.get('sheet-1!A1')).toEqual({ type: 'number', value: 1 });
+  });
+
   it('propagates an incrementally introduced parse error and clears stale cycle diagnostics', () => {
     const document = formulaDocument([
       {

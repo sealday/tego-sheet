@@ -4,6 +4,7 @@ import type {
   SheetRange,
   SpreadsheetDocumentInput,
 } from '../../document/model/document';
+import { parseFormula, renderFormula, transformFormulaCoordinates } from '../../formula';
 import { parseA1Reference, renderA1Reference } from './a1';
 
 export type CoordinateAxis = 'row' | 'column';
@@ -121,6 +122,20 @@ export class CoordinateTransform {
     },
   ): string {
     if (!source.startsWith('=')) return source;
+    try {
+      return renderFormula(
+        transformFormulaCoordinates(
+          parseFormula(source),
+          {
+            transformPoint: (point) => this.point(point),
+            transformRange: (range) => this.range(range),
+          },
+          context,
+        ),
+      );
+    } catch {
+      // Unsupported legacy source falls through to the bounded compatibility scanner below.
+    }
     let output = '';
     let index = 0;
     let inString = false;

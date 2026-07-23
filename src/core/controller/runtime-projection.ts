@@ -19,6 +19,8 @@ import type {
   SpreadsheetDocument,
   SpreadsheetDocumentInput,
 } from '../../document/model/document';
+import type { FormulaValue } from '../../formula/ast';
+import { formulaAddressKey } from '../../formula/dependency-graph';
 import { parseSpreadsheetDocument } from '../../document/parse-document';
 
 type ValidationId = NonNullable<Cell['validationId']>;
@@ -47,14 +49,27 @@ function rangeA1(range: {
   return start === end ? start : `${start}:${end}`;
 }
 
-function legacyInput(input: CellInput): Pick<CellData, 'text' | 'value'> & { type?: string } {
+function legacyFormulaValue(value: FormulaValue | undefined): CellData['value'] {
+  if (value === undefined) return undefined;
+  if (value.type === 'blank') return null;
+  if (value.type === 'array') return '#SPILL!';
+  return value.value;
+}
+
+function legacyInput(
+  input: CellInput,
+  calculated?: FormulaValue,
+): Pick<CellData, 'text' | 'value'> & { type?: string } {
   switch (input.type) {
     case 'blank':
       return {};
     case 'string':
       return { text: input.value };
     case 'formula':
-      return { text: input.source };
+      return {
+        text: input.source,
+        ...(calculated === undefined ? {} : { value: legacyFormulaValue(calculated) }),
+      };
     case 'number':
       return { type: 'number', value: input.value };
     case 'boolean':
@@ -71,7 +86,10 @@ function jsonRecord(value: JsonValue): Record<string, JsonValue> {
 }
 
 /** @internal Projects a schema 2 snapshot into the sole legacy operation boundary. */
-export function projectDocumentToLegacy(document: SpreadsheetDocument): WorkbookData {
+export function projectDocumentToLegacy(
+  document: SpreadsheetDocument,
+  calculatedValues: ReadonlyMap<string, FormulaValue> = new Map(),
+): WorkbookData {
   const styles = document.workbook.styles.map((entry) => entry.value as CellStyle);
   const styleIndexes = new Map(document.workbook.styles.map((entry, index) => [entry.id, index]));
 
@@ -100,7 +118,16 @@ export function projectDocumentToLegacy(document: SpreadsheetDocument): Workbook
       const currentRow = (rows[rowKey] ?? {}) as Record<string, unknown>;
       const cells = (currentRow.cells ?? {}) as Record<string, unknown>;
       cells[String(sparse.column)] = {
-        ...legacyInput(sparse.cell.input),
+        ...legacyInput(
+          sparse.cell.input,
+          calculatedValues.get(
+            formulaAddressKey({
+              sheetId: sheet.id,
+              row: sparse.row,
+              column: sparse.column,
+            }),
+          ),
+        ),
         ...(sparse.cell.styleId === undefined
           ? {}
           : { style: styleIndexes.get(sparse.cell.styleId) }),

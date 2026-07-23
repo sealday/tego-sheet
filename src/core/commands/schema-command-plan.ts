@@ -18,6 +18,7 @@ import {
   CoordinateTransform,
   transformDocumentCoordinates,
 } from '../coordinates/coordinate-transform';
+import { parseFormula, renameFormulaSheet, renderFormula } from '../../formula';
 
 type ValidationId = NonNullable<Cell['validationId']>;
 
@@ -80,6 +81,100 @@ function transformStructure(
         .map((item) => [cellKey(item.row, item.column), item.cell.validationId as ValidationId]),
     ),
   );
+}
+
+function transformSheetRename(
+  input: SpreadsheetDocumentInput,
+  command: Extract<WorkbookCommand, { readonly type: 'rename-sheet' }>,
+  sheetIds: readonly SheetId[],
+  authoritativeInputs: Map<string, Set<string>>,
+): void {
+  const renamedSheet = input.workbook.sheets[sheetIndex(sheetIds, command.sheet)];
+  if (renamedSheet === undefined || renamedSheet.name === command.name) return;
+  const previousName = renamedSheet.name;
+  for (const sheet of input.workbook.sheets) {
+    const formulaKeys = new Set<string>();
+    for (const item of sheet.cells) {
+      if (item.cell.input.type !== 'formula') continue;
+      let source: string;
+      try {
+        source = renderFormula(
+          renameFormulaSheet(parseFormula(item.cell.input.source), previousName, command.name),
+        );
+      } catch {
+        source = renameLegacySheetQualifiers(item.cell.input.source, previousName, command.name);
+      }
+      if (source === item.cell.input.source) continue;
+      item.cell = { ...item.cell, input: { ...item.cell.input, source } };
+      formulaKeys.add(cellKey(item.row, item.column));
+    }
+    if (formulaKeys.size > 0) authoritativeInputs.set(sheet.id, formulaKeys);
+  }
+}
+
+function renderSheetQualifier(name: string): string {
+  return /^[A-Z_][A-Z0-9_.]*$/iu.test(name) ? `${name}!` : `'${name.replaceAll("'", "''")}'!`;
+}
+
+function renameLegacySheetQualifiers(
+  source: string,
+  previousName: string,
+  nextName: string,
+): string {
+  let output = '';
+  let index = 0;
+  let inString = false;
+  while (index < source.length) {
+    const character = source[index] as string;
+    if (character === '"') {
+      output += character;
+      if (inString && source[index + 1] === '"') {
+        output += '"';
+        index += 2;
+        continue;
+      }
+      inString = !inString;
+      index += 1;
+      continue;
+    }
+    if (!inString && character === "'") {
+      let cursor = index + 1;
+      let sheetName = '';
+      while (cursor < source.length) {
+        if (source[cursor] !== "'") {
+          sheetName += source[cursor];
+          cursor += 1;
+          continue;
+        }
+        if (source[cursor + 1] === "'") {
+          sheetName += "'";
+          cursor += 2;
+          continue;
+        }
+        break;
+      }
+      if (source[cursor] === "'" && source[cursor + 1] === '!') {
+        output +=
+          sheetName === previousName
+            ? renderSheetQualifier(nextName)
+            : source.slice(index, cursor + 2);
+        index = cursor + 2;
+        continue;
+      }
+    }
+    if (!inString) {
+      const qualifier = /^[A-Z_][A-Z0-9_.]*!/iu.exec(source.slice(index));
+      if (qualifier !== null) {
+        const sheetName = qualifier[0].slice(0, -1);
+        output += sheetName === previousName ? renderSheetQualifier(nextName) : qualifier[0];
+        index += qualifier[0].length;
+        continue;
+      }
+    }
+    output += character;
+    index += 1;
+  }
+  return output;
 }
 
 function getCell(sheet: SheetInput, row: number, column: number): Cell | undefined {
@@ -241,6 +336,9 @@ export function prepareSchemaCommand(
     case 'insert-column':
     case 'delete-column':
       transformStructure(input, command, sheetIds, authoritativeInputs, authoritativeValidations);
+      break;
+    case 'rename-sheet':
+      transformSheetRename(input, command, sheetIds, authoritativeInputs);
       break;
     case 'paste-internal':
     case 'autofill':

@@ -5,6 +5,7 @@ import {
   serializeSpreadsheetDocument,
 } from '../../../src/document';
 import { sheetId } from '../../../src/core';
+import { getCellData } from '../../../src/core/model/cells';
 import {
   SpreadsheetDocumentController,
   type SerializableCommandEnvelope,
@@ -62,7 +63,233 @@ function createMultiSheetDocument() {
   return parsed.document;
 }
 
+function createFormulaDocument() {
+  const parsed = parseSpreadsheetDocument({
+    schemaVersion: 2,
+    id: 'formula-document',
+    workbook: {
+      sheets: [
+        {
+          id: 'sheet-1',
+          name: 'Sheet1',
+          cells: [
+            { row: 0, column: 0, cell: { input: { type: 'number', value: 1 } } },
+            { row: 0, column: 1, cell: { input: { type: 'formula', source: '=A1+1' } } },
+          ],
+          merges: [],
+        },
+      ],
+      styles: [],
+      validations: [],
+      settings: { dateSystem: 'excel-1900' },
+    },
+    templates: [],
+    resources: { items: [] },
+    extensions: {},
+  });
+  if (!parsed.ok) throw new TypeError('Expected formula document to parse');
+  return parsed.document;
+}
+
+function createCrossSheetFormulaDocument() {
+  const parsed = parseSpreadsheetDocument({
+    schemaVersion: 2,
+    id: 'cross-sheet-formula-document',
+    workbook: {
+      sheets: [
+        {
+          id: 'sheet-1',
+          name: 'Inputs',
+          cells: [{ row: 0, column: 0, cell: { input: { type: 'number', value: 2 } } }],
+          merges: [],
+        },
+        {
+          id: 'sheet-2',
+          name: 'Results',
+          cells: [
+            {
+              row: 0,
+              column: 0,
+              cell: { input: { type: 'formula', source: '=Inputs!A1*2' } },
+            },
+          ],
+          merges: [],
+        },
+      ],
+      styles: [],
+      validations: [],
+      settings: { dateSystem: 'excel-1900' },
+    },
+    templates: [],
+    resources: { items: [] },
+    extensions: {},
+  });
+  if (!parsed.ok) throw new TypeError('Expected cross-sheet formula document to parse');
+  return parsed.document;
+}
+
+function createBlankFormulaDocument() {
+  const parsed = parseSpreadsheetDocument({
+    schemaVersion: 2,
+    id: 'blank-formula-document',
+    workbook: {
+      sheets: [
+        {
+          id: 'sheet-1',
+          name: 'Sheet1',
+          cells: [
+            {
+              row: 0,
+              column: 0,
+              cell: { input: { type: 'formula', source: '=IF(FALSE,1)' } },
+            },
+          ],
+          merges: [],
+        },
+      ],
+      styles: [],
+      validations: [],
+      settings: { dateSystem: 'excel-1900' },
+    },
+    templates: [],
+    resources: { items: [] },
+    extensions: {},
+  });
+  if (!parsed.ok) throw new TypeError('Expected blank formula document to parse');
+  return parsed.document;
+}
+
+function createLegacySyntaxFormulaDocument() {
+  const input = structuredClone(createCrossSheetFormulaDocument());
+  const formula = input.workbook.sheets[1]?.cells[0]?.cell.input;
+  if (formula?.type !== 'formula') throw new TypeError('Expected formula fixture');
+  (formula as { source: string }).source = '=SUM(Inputs!A:A)';
+  const parsed = parseSpreadsheetDocument(input);
+  if (!parsed.ok) throw new TypeError('Expected legacy-syntax formula document to parse');
+  return parsed.document;
+}
+
+function projectedValue(
+  controller: SpreadsheetDocumentController,
+  row: number,
+  column: number,
+  sheetIndex = 0,
+) {
+  const sheet = controller.getSnapshot().projection[sheetIndex];
+  return sheet === undefined ? undefined : getCellData(sheet, row, column)?.value;
+}
+
 describe('SpreadsheetDocumentController transactions', () => {
+  it('owns revision-scoped typed calculation through edit, undo, and redo', () => {
+    const controller = new SpreadsheetDocumentController(createFormulaDocument());
+    expect(projectedValue(controller, 0, 1)).toBe(2);
+
+    expect(controller.execute(command('edit-input', 0, '5')).status).toBe('committed');
+    expect(projectedValue(controller, 0, 1)).toBe(6);
+
+    expect(controller.undo().status).toBe('committed');
+    expect(projectedValue(controller, 0, 1)).toBe(2);
+    expect(controller.redo().status).toBe('committed');
+    expect(projectedValue(controller, 0, 1)).toBe(6);
+  });
+
+  it('recalculates cross-sheet dependents after a source-cell edit', () => {
+    const controller = new SpreadsheetDocumentController(createCrossSheetFormulaDocument());
+    expect(projectedValue(controller, 0, 0, 1)).toBe(4);
+
+    expect(controller.execute(command('edit-cross-sheet-input', 0, '7')).status).toBe('committed');
+
+    expect(projectedValue(controller, 0, 0, 1)).toBe(14);
+  });
+
+  it('recompiles formulas after structural edits and history traversal', () => {
+    const controller = new SpreadsheetDocumentController(createFormulaDocument());
+
+    expect(
+      controller.dispatch(
+        { type: 'insert-row', sheet: sheetId('sheet-1'), index: 0 },
+        'context-menu',
+      ).status,
+    ).toBe('committed');
+    expect(
+      controller.getDocument().workbook.sheets[0]?.cells.find((cell) => cell.column === 1)?.cell
+        .input,
+    ).toEqual({ type: 'formula', source: '=A2+1' });
+    expect(projectedValue(controller, 1, 1)).toBe(2);
+
+    expect(controller.undo().status).toBe('committed');
+    expect(projectedValue(controller, 0, 1)).toBe(2);
+  });
+
+  it('preserves cross-sheet formulas when the referenced sheet is renamed', () => {
+    const controller = new SpreadsheetDocumentController(createCrossSheetFormulaDocument());
+
+    expect(
+      controller.dispatch(
+        { type: 'rename-sheet', sheet: sheetId('sheet-1'), name: 'Renamed Inputs' },
+        'sheet-tabs',
+      ).status,
+    ).toBe('committed');
+
+    expect(controller.getDocument().workbook.sheets[1]?.cells[0]?.cell.input).toEqual({
+      type: 'formula',
+      source: "='Renamed Inputs'!A1*2",
+    });
+    expect(projectedValue(controller, 0, 0, 1)).toBe(4);
+  });
+
+  it('renames sheet qualifiers in formulas that require the legacy syntax fallback', () => {
+    const controller = new SpreadsheetDocumentController(createLegacySyntaxFormulaDocument());
+
+    expect(
+      controller.dispatch(
+        { type: 'rename-sheet', sheet: sheetId('sheet-1'), name: 'Renamed Inputs' },
+        'sheet-tabs',
+      ).status,
+    ).toBe('committed');
+
+    expect(controller.getDocument().workbook.sheets[1]?.cells[0]?.cell.input).toEqual({
+      type: 'formula',
+      source: "=SUM('Renamed Inputs'!A:A)",
+    });
+  });
+
+  it('rolls back a direct dispatch when formula dependency compilation exceeds its budget', () => {
+    const controller = new SpreadsheetDocumentController(createFormulaDocument());
+    const before = controller.getSnapshot();
+
+    expect(() =>
+      controller.dispatch(
+        {
+          type: 'set-cell-text',
+          address: { sheet: sheetId('sheet-1'), row: 0, column: 1 },
+          text: '=SUM(A1:A100001)',
+        },
+        'ref',
+      ),
+    ).toThrow(/dependency limit/u);
+
+    expect(controller.getSnapshot()).toEqual(before);
+    expect(controller.historySize).toEqual({ undo: 0, redo: 0 });
+    expect(projectedValue(controller, 0, 1)).toBe(2);
+  });
+
+  it('rebuilds typed calculation state when the document is replaced', () => {
+    const controller = new SpreadsheetDocumentController(createFormulaDocument());
+
+    controller.replace(createCrossSheetFormulaDocument());
+
+    expect(projectedValue(controller, 0, 0, 1)).toBe(4);
+    expect(controller.execute(command('edit-replaced-input', 0, '3')).status).toBe('committed');
+    expect(projectedValue(controller, 0, 0, 1)).toBe(6);
+  });
+
+  it('projects typed formula blanks as an explicit cache value', () => {
+    const controller = new SpreadsheetDocumentController(createBlankFormulaDocument());
+
+    expect(projectedValue(controller, 0, 0)).toBeNull();
+  });
+
   it('commits multiple commands as one revision, event, and undo item', () => {
     const controller = new SpreadsheetDocumentController(
       createSpreadsheetDocument({ id: 'document-1', sheetId: 'sheet-1' }),
@@ -378,6 +605,26 @@ describe('SpreadsheetDocumentController transactions', () => {
     }
   });
 
+  it('restores formula calculation state after a dry-run', () => {
+    const controller = new SpreadsheetDocumentController(createFormulaDocument());
+
+    expect(
+      controller.dryRun(transaction(controller, [command('preview-input', 0, '5')])).status,
+    ).toBe('ready');
+    expect(
+      controller.dispatch(
+        {
+          type: 'set-cell-text',
+          address: { sheet: sheetId('sheet-1'), row: 0, column: 2 },
+          text: 'unrelated',
+        },
+        'ref',
+      ).status,
+    ).toBe('committed');
+
+    expect(projectedValue(controller, 0, 1)).toBe(2);
+  });
+
   it('rolls back every observable state field when a later command fails', () => {
     const controller = new SpreadsheetDocumentController(
       createSpreadsheetDocument({ id: 'document-1', sheetId: 'sheet-1' }),
@@ -407,6 +654,37 @@ describe('SpreadsheetDocumentController transactions', () => {
     if (committed.status === 'committed') {
       expect(committed.change.id).toMatch(/^change-\d+-1$/);
     }
+  });
+
+  it('restores formula calculation state after a failed multi-command transaction', () => {
+    const controller = new SpreadsheetDocumentController(createFormulaDocument());
+    const invalid: SerializableCommandEnvelope = {
+      schemaVersion: 1,
+      id: 'invalid-formula-transaction-command',
+      command: {
+        type: 'set-cell-text',
+        address: { sheet: sheetId('missing-sheet'), row: 0, column: 0 },
+        text: 'invalid',
+      },
+    };
+
+    expect(
+      controller.transact(
+        transaction(controller, [command('temporary-formula-input', 0, '5'), invalid]),
+      ),
+    ).toMatchObject({ status: 'rejected' });
+    expect(
+      controller.dispatch(
+        {
+          type: 'set-cell-text',
+          address: { sheet: sheetId('sheet-1'), row: 0, column: 2 },
+          text: 'unrelated',
+        },
+        'ref',
+      ).status,
+    ).toBe('committed');
+
+    expect(projectedValue(controller, 0, 1)).toBe(2);
   });
 
   it('undoes and redoes a transaction as one semantically equivalent unit', () => {

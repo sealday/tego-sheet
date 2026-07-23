@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { parseFormula } from '../../../src/formula/parser';
 import { resolveFormulaReferences } from '../../../src/formula/reference-resolver';
-import { renderFormula, translateFormula } from '../../../src/formula/reference-transform';
+import {
+  renderFormula,
+  transformFormulaCoordinates,
+  translateFormula,
+} from '../../../src/formula/reference-transform';
 import { formulaDocument } from './helpers';
 
 describe('typed formula parser', () => {
@@ -84,5 +88,30 @@ describe('typed formula parser', () => {
     expect(Object.isFrozen(ast)).toBe(true);
     expect(ast.kind === 'call' && Object.isFrozen(ast.arguments)).toBe(true);
     expect(ast.kind === 'call' && Object.isFrozen(ast.arguments[0])).toBe(true);
+  });
+
+  it('rewrites stable AST references for structural edits and emits #REF for deletions', () => {
+    const inserted = transformFormulaCoordinates(
+      parseFormula("='Data Sheet'!A2+A2"),
+      {
+        transformPoint: ({ row, column }) => ({ row: row + 2, column }),
+        transformRange: (range) => ({
+          start: { row: range.start.row + 2, column: range.start.column },
+          end: { row: range.end.row + 2, column: range.end.column },
+        }),
+      },
+      { targetSheetName: 'Data Sheet', transformUnqualified: false },
+    );
+    expect(renderFormula(inserted)).toBe("='Data Sheet'!A4+A2");
+
+    const deleted = transformFormulaCoordinates(
+      parseFormula('=A1+1'),
+      {
+        transformPoint: () => null,
+        transformRange: () => null,
+      },
+      { targetSheetName: 'Sheet1', transformUnqualified: true },
+    );
+    expect(renderFormula(deleted)).toBe('=#REF!+1');
   });
 });

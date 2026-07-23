@@ -47,10 +47,10 @@ export interface FormulaProgram {
 }
 
 interface FormulaProgramState {
-  readonly formulas: Map<string, FormulaAst>;
+  formulas: Map<string, FormulaAst>;
   graph: FormulaDependencyGraph;
-  readonly inputs: Map<string, CellInput>;
-  readonly values: Map<string, FormulaValue>;
+  inputs: Map<string, CellInput>;
+  values: Map<string, FormulaValue>;
   diagnostics: Map<string, readonly FormulaDiagnostic[]>;
   lastTick?: number;
   initialized: boolean;
@@ -302,7 +302,7 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
       const program: FormulaProgram = Object.freeze({
         document,
         get formulas() {
-          return new Map(formulas);
+          return new Map(state.formulas);
         },
         get graph() {
           return snapshotGraph(state.graph);
@@ -319,13 +319,23 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
     },
 
     recalculate(program_, changes, environment) {
-      const program = formulaProgramStates.get(program_);
-      if (program === undefined) throw new TypeError('FormulaProgram belongs to another engine');
+      const storedProgram = formulaProgramStates.get(program_);
+      if (storedProgram === undefined)
+        throw new TypeError('FormulaProgram belongs to another engine');
       if (environment.functionRegistryVersion !== registry.version) {
         throw new TypeError(
           `Formula registry version ${environment.functionRegistryVersion} does not match ${registry.version}`,
         );
       }
+      const program: FormulaProgramState = {
+        formulas: new Map(storedProgram.formulas),
+        graph: storedProgram.graph,
+        inputs: new Map(storedProgram.inputs),
+        values: new Map(storedProgram.values),
+        diagnostics: new Map(storedProgram.diagnostics),
+        ...(storedProgram.lastTick === undefined ? {} : { lastTick: storedProgram.lastTick }),
+        initialized: storedProgram.initialized,
+      };
       const changedKeys = changes.map(formulaAddressKey);
       const previouslyAffected = transitiveDependents(program.graph, changedKeys);
       const changedFormulas = new Set<string>();
@@ -449,6 +459,7 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
         if (ast.kind === 'number') return { type: 'number', value: ast.value };
         if (ast.kind === 'string') return { type: 'string', value: ast.value };
         if (ast.kind === 'boolean') return { type: 'boolean', value: ast.value };
+        if (ast.kind === 'error') return { type: 'error', value: ast.value };
         if (ast.kind === 'reference') {
           return evaluateReference(ast.reference.sheetId, ast.reference.row, ast.reference.column);
         }
@@ -569,6 +580,13 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
       for (const address of [...dirty].sort()) resolveAddress(address);
       program.initialized = true;
       program.lastTick = environment.tick;
+      storedProgram.formulas = program.formulas;
+      storedProgram.graph = program.graph;
+      storedProgram.inputs = program.inputs;
+      storedProgram.values = program.values;
+      storedProgram.diagnostics = program.diagnostics;
+      storedProgram.initialized = program.initialized;
+      storedProgram.lastTick = program.lastTick;
       return {
         values: new Map(values),
         evaluatedAddresses: Object.freeze([...new Set(evaluated)]),

@@ -31,9 +31,22 @@ export type {
   FormulaFunctionDefinition,
   FormulaFunctionRegistry,
 } from './function-registry';
-export { BUILTIN_FORMULA_COMPATIBILITY, createFormulaFunctionRegistry } from './function-registry';
+export {
+  BUILTIN_FORMULA_COMPATIBILITY,
+  createFormulaFunctionRegistry,
+  registerKernelFormulaFunctions,
+} from './function-registry';
 export { parseFormula } from './parser';
 export type { ReferenceResolutionResult } from './reference-resolver';
 export { resolveFormulaReferences } from './reference-resolver';
-export type { FormulaTranslation } from './reference-transform';
-export { renderFormula, translateFormula } from './reference-transform';
+export type {
+  FormulaCoordinateMapper,
+  FormulaCoordinateTransformContext,
+  FormulaTranslation,
+} from './reference-transform';
+export {
+  renameFormulaSheet,
+  renderFormula,
+  transformFormulaCoordinates,
+  translateFormula,
+} from './reference-transform';

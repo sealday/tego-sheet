@@ -1,6 +1,13 @@
 import { parseSpreadsheetDocument } from '../../document/parse-document';
 import { projectDocumentToLegacy, projectLegacyToDocument } from './runtime-projection';
-import type { SpreadsheetDocument } from '../../document/model/document';
+import type { CellInput, SpreadsheetDocument } from '../../document/model/document';
+import {
+  createFormulaEngine,
+  type CalculationEnvironment,
+  type FormulaEngine,
+  type FormulaProgram,
+  type FormulaValue,
+} from '../../formula';
 import type { CommandResult, WorkbookCommand } from '../commands/workbook-command';
 import type {
   ChangeSource,
@@ -167,6 +174,21 @@ export type TransactionPreview =
 
 const MAX_TRANSACTION_COMMANDS = 1_000;
 const MAX_TRANSACTION_BYTES = 4 * 1_024 * 1_024;
+
+function calculationEnvironment(
+  document: SpreadsheetDocument,
+  revision: number,
+  registryVersion: string,
+): CalculationEnvironment {
+  return {
+    locale: document.workbook.settings.localeHint ?? 'en-US',
+    timeZone: 'UTC',
+    dateSystem: document.workbook.settings.dateSystem,
+    clock: { now: () => 0 },
+    tick: revision,
+    functionRegistryVersion: registryVersion,
+  };
+}
 
 function captureJsonValue(value: unknown, seen = new Set<object>()): unknown {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
@@ -355,6 +377,9 @@ export class SpreadsheetDocumentController {
   private currentDocument: SpreadsheetDocument;
   private checkpointDocument: SpreadsheetDocument | undefined;
   private readonly documentHistory = new History<DocumentPatch, null>();
+  private readonly formulaEngine: FormulaEngine;
+  private formulaProgram: FormulaProgram;
+  private formulaValues: ReadonlyMap<string, FormulaValue>;
   private readonly legacy: WorkbookController;
   private readonly subscriptions = new SubscriptionStore<SpreadsheetControllerEvent>();
   private permissionGateActive = false;
@@ -374,10 +399,20 @@ export class SpreadsheetDocumentController {
     }
     const { ['document']: parsedDocument } = parsed;
     this.currentDocument = parsedDocument;
-    this.legacy = new WorkbookController(projectDocumentToLegacy(this.currentDocument), {
-      ...options,
-      sheetIds: this.currentDocument.workbook.sheets.map((sheet) => sheetId(sheet.id)),
-    });
+    this.formulaEngine = createFormulaEngine();
+    this.formulaProgram = this.formulaEngine.compile(this.currentDocument);
+    this.formulaValues = this.formulaEngine.recalculate(
+      this.formulaProgram,
+      [],
+      calculationEnvironment(this.currentDocument, 0, 'builtin-1'),
+    ).values;
+    this.legacy = new WorkbookController(
+      projectDocumentToLegacy(this.currentDocument, this.formulaValues),
+      {
+        ...options,
+        sheetIds: this.currentDocument.workbook.sheets.map((sheet) => sheetId(sheet.id)),
+      },
+    );
   }
 
   get historySize() {
@@ -579,6 +614,7 @@ export class SpreadsheetDocumentController {
       });
     }
     this.legacy.assertCommand(command);
+    const rollbackCheckpoint = this.checkpoint();
     const plan = prepareSchemaCommand(this.currentDocument, command, this.legacy.getSheetIds());
     const plannedProjection = projectDocumentToLegacy(plan.document);
     const historyCheckpoint = this.documentHistory.checkpoint();
@@ -670,8 +706,19 @@ export class SpreadsheetDocumentController {
     if (preparedDocument === undefined || preparedCommit === undefined) {
       throw new Error('Spreadsheet document transaction was not prepared');
     }
-    this.currentDocument = preparedDocument;
     const commit = preparedCommit;
+    try {
+      this.refreshFormulaCalculation(preparedDocument, commit.change);
+      this.legacy.reconcileProjection(
+        projectDocumentToLegacy(preparedDocument, this.formulaValues),
+        this.legacy.getSheetIds(),
+        command.type === 'undo' ? 'undo' : command.type === 'redo' ? 'redo' : 'commit',
+      );
+      this.currentDocument = preparedDocument;
+    } catch (error) {
+      this.restore(rollbackCheckpoint);
+      throw error;
+    }
     if (options.notify !== false) {
       const event = cloneFrozenDocumentValue({
         snapshot: this.getSnapshot(),
@@ -691,6 +738,67 @@ export class SpreadsheetDocumentController {
       }
     }
     return { status: 'committed', commit };
+  }
+
+  private refreshFormulaCalculation(document: SpreadsheetDocument, change: WorkbookChange): void {
+    const impacts =
+      change.kind === 'transaction'
+        ? change.aggregate?.sheets.flatMap((entry) =>
+            entry.kinds.every((kind) => kind === 'cell')
+              ? entry.ranges.map((range) => ({ sheet: entry.sheet, range }))
+              : [],
+          )
+        : change.kind === 'cell' && change.range !== undefined
+          ? [{ sheet: change.sheet, range: change.range }]
+          : [];
+    const incremental =
+      impacts !== undefined &&
+      impacts.length > 0 &&
+      (change.kind === 'cell' ||
+        change.aggregate?.sheets.every((entry) => entry.kinds.every((kind) => kind === 'cell')) ===
+          true);
+    if (!incremental) {
+      const formulaProgram = this.formulaEngine.compile(document);
+      const formulaValues = this.formulaEngine.recalculate(
+        formulaProgram,
+        [],
+        calculationEnvironment(document, this.getSnapshot().revision, 'builtin-1'),
+      ).values;
+      this.formulaProgram = formulaProgram;
+      this.formulaValues = formulaValues;
+      return;
+    }
+
+    const sheetById = new Map(document.workbook.sheets.map((sheet) => [String(sheet.id), sheet]));
+    const dependencies = impacts.flatMap(({ sheet: changedSheet, range }) => {
+      const sheet = sheetById.get(String(changedSheet));
+      if (sheet === undefined) return [];
+      const inputs = new Map(
+        sheet.cells.map(({ row, column, cell }) => [`${row}:${column}`, cell.input]),
+      );
+      const output: Array<{
+        sheetId: string;
+        row: number;
+        column: number;
+        input: CellInput;
+      }> = [];
+      for (let row = range.start.row; row <= range.end.row; row += 1) {
+        for (let column = range.start.column; column <= range.end.column; column += 1) {
+          output.push({
+            sheetId: sheet.id,
+            row,
+            column,
+            input: inputs.get(`${row}:${column}`) ?? { type: 'blank' },
+          });
+        }
+      }
+      return output;
+    });
+    this.formulaValues = this.formulaEngine.recalculate(
+      this.formulaProgram,
+      dependencies,
+      calculationEnvironment(document, this.getSnapshot().revision, 'builtin-1'),
+    ).values;
   }
 
   undo(source: ChangeSource = 'ref', options: SpreadsheetDispatchOptions = {}) {
@@ -735,15 +843,27 @@ export class SpreadsheetDocumentController {
     const rollbackLegacy = this.legacy.checkpoint();
     const rollbackHistory = this.documentHistory.checkpoint();
     const rollbackDocument = this.currentDocument;
+    const rollbackFormulaProgram = this.formulaProgram;
+    const rollbackFormulaValues = this.formulaValues;
+    const { ['document']: checkpointDocument } = checkpoint;
     try {
+      const formulaProgram = this.formulaEngine.compile(checkpointDocument);
+      const formulaValues = this.formulaEngine.recalculate(
+        formulaProgram,
+        [],
+        calculationEnvironment(checkpointDocument, checkpoint.legacy.revision, 'builtin-1'),
+      ).values;
       this.legacy.restore(checkpoint.legacy);
       this.documentHistory.restore(checkpoint.documentHistory);
-      const { ['document']: checkpointDocument } = checkpoint;
       this.currentDocument = checkpointDocument;
+      this.formulaProgram = formulaProgram;
+      this.formulaValues = formulaValues;
     } catch (error) {
       this.legacy.restore(rollbackLegacy);
       this.documentHistory.restore(rollbackHistory);
       this.currentDocument = rollbackDocument;
+      this.formulaProgram = rollbackFormulaProgram;
+      this.formulaValues = rollbackFormulaValues;
       throw error;
     }
   }
@@ -760,12 +880,20 @@ export class SpreadsheetDocumentController {
       });
     }
     const { ['document']: parsedDocument } = parsed;
-    const projection = projectDocumentToLegacy(parsedDocument);
+    const formulaProgram = this.formulaEngine.compile(parsedDocument);
+    const formulaValues = this.formulaEngine.recalculate(
+      formulaProgram,
+      [],
+      calculationEnvironment(parsedDocument, this.getSnapshot().revision, 'builtin-1'),
+    ).values;
+    const projection = projectDocumentToLegacy(parsedDocument, formulaValues);
     this.legacy.replace(
       projection,
       parsedDocument.workbook.sheets.map((sheet) => sheetId(sheet.id)),
     );
     this.currentDocument = parsedDocument;
+    this.formulaProgram = formulaProgram;
+    this.formulaValues = formulaValues;
     this.documentHistory.clear();
     this.checkpointOwner = Object.freeze({});
     this.checkpoints = new WeakSet<SpreadsheetControllerCheckpoint>();

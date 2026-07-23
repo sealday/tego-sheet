@@ -1,4 +1,6 @@
 import type { FormulaValue, ScalarFormulaValue } from './ast';
+import type { AdapterRegistryKernel } from '../extensions/kernel/registry';
+import type { KernelEnvironment } from '../extensions/kernel/manifest';
 
 /** Restricted immutable context supplied to formula functions. */
 export interface FormulaFunctionContext {
@@ -260,5 +262,33 @@ export function createFormulaFunctionRegistry(): FormulaFunctionRegistry {
         ),
       );
     },
+  };
+}
+
+/**
+ * Copies registered F5 formula capabilities into an isolated calculation registry.
+ *
+ * The returned callback removes only the copied definitions. Kernel lifecycle remains owned by
+ * the caller.
+ */
+export function registerKernelFormulaFunctions(
+  registry: FormulaFunctionRegistry,
+  kernel: AdapterRegistryKernel,
+  environment: KernelEnvironment,
+): () => void {
+  const removals: Array<() => void> = [];
+  try {
+    for (const { id } of kernel.list('formula-function')) {
+      removals.push(registry.register(kernel.resolve('formula-function', { id, environment })));
+    }
+  } catch (error) {
+    for (const remove of removals.reverse()) remove();
+    throw error;
+  }
+  let active = true;
+  return () => {
+    if (!active) return;
+    active = false;
+    for (const remove of removals.reverse()) remove();
   };
 }

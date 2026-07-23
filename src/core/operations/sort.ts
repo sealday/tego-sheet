@@ -72,6 +72,10 @@ function renderedValue(
   column: number,
   budget: FormulaEvaluationBudget,
 ): unknown {
+  const cell = getCellData(sheet, row, column);
+  if (typeof cell?.text === 'string' && cell.text.startsWith('=') && cell.value !== undefined) {
+    return cell.value;
+  }
   return evaluateCell(
     { row, column },
     (point) => getCellData(sheet, point.row, point.column)?.text,

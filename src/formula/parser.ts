@@ -6,6 +6,7 @@ type TokenKind =
   | 'string'
   | 'word'
   | 'reference'
+  | 'error'
   | 'operator'
   | 'left'
   | 'right'
@@ -32,6 +33,19 @@ function tokenize(source: string): readonly Token[] {
     const character = source[index] as string;
     if (/\s/u.test(character)) {
       index += 1;
+      continue;
+    }
+    if (character === '#') {
+      const error = /^(?:#REF!|#VALUE!|#DIV\/0!|#NAME\?|#N\/A|#NUM!|#SPILL!)/u.exec(
+        source.slice(index),
+      );
+      if (error === null)
+        throw new FormulaSyntaxError('Unknown formula error literal', {
+          start,
+          end: start + 1,
+        });
+      index += error[0].length;
+      tokens.push({ kind: 'error', value: error[0], span: { start, end: index } });
       continue;
     }
     if (character === '"' || character === "'") {
@@ -248,6 +262,14 @@ class Parser {
     if (token.kind === 'string') {
       this.#index += 1;
       return { kind: 'string', value: token.value, span: token.span };
+    }
+    if (token.kind === 'error') {
+      this.#index += 1;
+      return {
+        kind: 'error',
+        value: token.value as Extract<FormulaAst, { kind: 'error' }>['value'],
+        span: token.span,
+      };
     }
     if (token.kind === 'left') {
       this.#index += 1;
