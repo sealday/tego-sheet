@@ -92,7 +92,9 @@ For reproducible fixtures or migrations, provide deterministic `ids.documentId` 
 `ids.sheetId` factories. Formulas remain source text and cached legacy values are never
 treated as document truth. Features that schema 2 cannot represent are reported through
 structured `LEGACY_FIELD_DEGRADED` or `LEGACY_FIELD_DROPPED` diagnostics rather than being
-copied into an extension bag.
+copied into an extension bag. Current row and column dimensions, hidden/default styles,
+freeze panes, filters, validation, merges, and editable/printable cell flags are
+persisted in normalized schema 2 fields.
 
 `SheetId` is a runtime-only opaque identity used by callbacks and ref commands. Do not persist it in workbook JSON. A genuine external workbook replacement creates new IDs; edits, renames, history, and controlled acknowledgements retain existing IDs.
 

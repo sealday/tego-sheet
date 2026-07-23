@@ -81,6 +81,44 @@ describe('Workbook 2.0 parsing and serialization', () => {
     });
   });
 
+  it('round-trips normalized sheet layout, filter, and print semantics', () => {
+    const fixture = documentWithInputs([{ type: 'string', value: 'kept' }]);
+    fixture.workbook.styles = [{ id: 'style-layout', value: { align: 'right' } }];
+    Object.assign(fixture.workbook.sheets[0]!, {
+      rowCount: 100,
+      columnCount: 26,
+      rows: [{ index: 2, height: 42, hidden: false, styleId: 'style-layout' }],
+      columns: [{ index: 4, width: 72, hidden: true, styleId: 'style-layout' }],
+      freeze: { row: 2, column: 2 },
+      filter: {
+        range: { start: { row: 0, column: 0 }, end: { row: 4, column: 2 } },
+        filters: [{ column: 1, operator: 'in', values: ['open'] }],
+        sort: { column: 2, direction: 'desc' },
+      },
+    });
+    Object.assign(fixture.workbook.sheets[0]!.cells[0]!.cell, {
+      editable: false,
+      printable: false,
+    });
+
+    const document = parseOk(fixture);
+    const reparsed = parseOk(serializeSpreadsheetDocument(document));
+
+    expect(reparsed.workbook.sheets[0]).toMatchObject({
+      rowCount: 100,
+      columnCount: 26,
+      rows: [{ index: 2, height: 42, hidden: false, styleId: 'style-layout' }],
+      columns: [{ index: 4, width: 72, hidden: true, styleId: 'style-layout' }],
+      freeze: { row: 2, column: 2 },
+      filter: {
+        range: { start: { row: 0, column: 0 }, end: { row: 4, column: 2 } },
+        filters: [{ column: 1, operator: 'in', values: ['open'] }],
+        sort: { column: 2, direction: 'desc' },
+      },
+      cells: [{ cell: expect.objectContaining({ editable: false, printable: false }) }],
+    });
+  });
+
   it.each(['excel-1900', 'excel-1904'] as const)(
     'preserves Excel date serial numbers with the explicit %s date system',
     (dateSystem) => {

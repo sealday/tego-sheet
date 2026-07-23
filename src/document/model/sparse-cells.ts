@@ -23,6 +23,8 @@ export interface CellInputRecord {
   resourceId?: string;
   templateId?: string;
   metadata?: import('../../core/types/json').JsonValue;
+  editable?: boolean;
+  printable?: boolean;
 }
 
 export function compareSparseCells(

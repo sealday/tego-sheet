@@ -14,7 +14,11 @@ import type {
   PrintProfile,
   ResourceMetadata,
   Sheet,
+  SheetColumn,
+  SheetFilter,
+  SheetFilterItem,
   SheetRange,
+  SheetRow,
   SpreadsheetDocument,
   SpreadsheetTemplate,
 } from './model/document';
@@ -37,6 +41,10 @@ export interface DocumentLimits {
   readonly maxCells?: number;
   /** Maximum total number of merge ranges. */
   readonly maxMerges?: number;
+  /** Maximum total number of sparse row layout entries. */
+  readonly maxRows?: number;
+  /** Maximum total number of sparse column layout entries. */
+  readonly maxColumns?: number;
   /** Maximum UTF-8 byte size of the input document. */
   readonly maxBytes?: number;
 }
@@ -68,6 +76,8 @@ const DEFAULT_LIMITS = {
   maxSheets: 1_000,
   maxCells: 1_000_000,
   maxMerges: 2_000,
+  maxRows: 1_000_000,
+  maxColumns: 1_000_000,
   maxBytes: 64 * 1024 * 1024,
 } as const;
 const NAMESPACE_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)+$/i;
@@ -105,10 +115,19 @@ interface ResolvedDocumentLimits {
   readonly maxSheets: number;
   readonly maxCells: number;
   readonly maxMerges: number;
+  readonly maxRows: number;
+  readonly maxColumns: number;
   readonly maxBytes: number;
 }
 
-const LIMIT_NAMES = ['maxSheets', 'maxCells', 'maxMerges', 'maxBytes'] as const;
+const LIMIT_NAMES = [
+  'maxSheets',
+  'maxCells',
+  'maxMerges',
+  'maxRows',
+  'maxColumns',
+  'maxBytes',
+] as const;
 
 function resolveLimits(
   options: DocumentParseOptions,
@@ -149,6 +168,8 @@ interface InputCaptureContext {
   bytes: number;
   cells: number;
   merges: number;
+  rows: number;
+  columns: number;
 }
 
 function captureInput(input: unknown, limits: ResolvedDocumentLimits): unknown {
@@ -159,6 +180,8 @@ function captureInput(input: unknown, limits: ResolvedDocumentLimits): unknown {
     bytes: 0,
     cells: 0,
     merges: 0,
+    rows: 0,
+    columns: 0,
   };
 
   const consume = (text: string): void => {
@@ -237,6 +260,26 @@ function captureInput(input: unknown, limits: ResolvedDocumentLimits): unknown {
               'DOCUMENT_LIMIT_EXCEEDED',
               '$.workbook.sheets',
               '$.workbook.sheets exceeds its configured document limit',
+            );
+          }
+        }
+        if (/^\$\.workbook\.sheets\[\d+\]\.rows$/.test(path)) {
+          context.rows += length;
+          if (context.rows > context.limits.maxRows) {
+            throw new InputCaptureError(
+              'DOCUMENT_LIMIT_EXCEEDED',
+              '$.workbook.sheets',
+              '$.workbook.sheets exceeds its configured row layout limit',
+            );
+          }
+        }
+        if (/^\$\.workbook\.sheets\[\d+\]\.columns$/.test(path)) {
+          context.columns += length;
+          if (context.columns > context.limits.maxColumns) {
+            throw new InputCaptureError(
+              'DOCUMENT_LIMIT_EXCEEDED',
+              '$.workbook.sheets',
+              '$.workbook.sheets exceeds its configured column layout limit',
             );
           }
         }
@@ -326,6 +369,8 @@ function exceedsCollectionLimits(
   if (sheets.length > limits.maxSheets) return '$.workbook.sheets';
   let cells = 0;
   let merges = 0;
+  let rows = 0;
+  let columns = 0;
   for (const sheet of sheets) {
     if (!isRecord(sheet)) continue;
     if (Array.isArray(sheet.cells)) {
@@ -335,6 +380,14 @@ function exceedsCollectionLimits(
     if (Array.isArray(sheet.merges)) {
       merges += sheet.merges.length;
       if (merges > limits.maxMerges) return '$.workbook.sheets';
+    }
+    if (Array.isArray(sheet.rows)) {
+      rows += sheet.rows.length;
+      if (rows > limits.maxRows) return '$.workbook.sheets';
+    }
+    if (Array.isArray(sheet.columns)) {
+      columns += sheet.columns.length;
+      if (columns > limits.maxColumns) return '$.workbook.sheets';
     }
   }
   return undefined;
@@ -405,6 +458,21 @@ function stringAt(value: unknown, path: string, context: ParseContext): string {
       'DOCUMENT_SCHEMA_INVALID',
       path,
       `${path} must be a non-empty string`,
+      'document',
+      'decode',
+    );
+    return '';
+  }
+  return value;
+}
+
+function displayStringAt(value: unknown, path: string, context: ParseContext): string {
+  if (typeof value !== 'string') {
+    addDiagnostic(
+      context,
+      'DOCUMENT_SCHEMA_INVALID',
+      path,
+      `${path} must be a string`,
       'document',
       'decode',
     );
@@ -632,6 +700,118 @@ function cellAt(value: unknown, path: string, context: ParseContext): Cell {
     ...(record?.metadata === undefined
       ? {}
       : { metadata: canonicalJson(jsonAt(record.metadata, `${path}.metadata`, context)) }),
+    ...(record?.editable === undefined
+      ? {}
+      : { editable: booleanAt(record.editable, `${path}.editable`, context) }),
+    ...(record?.printable === undefined
+      ? {}
+      : { printable: booleanAt(record.printable, `${path}.printable`, context) }),
+  };
+}
+
+function booleanAt(value: unknown, path: string, context: ParseContext): boolean {
+  if (typeof value !== 'boolean') {
+    addDiagnostic(
+      context,
+      'DOCUMENT_SCHEMA_INVALID',
+      path,
+      `${path} must be a boolean`,
+      'document',
+      'decode',
+    );
+    return false;
+  }
+  return value;
+}
+
+function layoutAt<T extends SheetRow | SheetColumn>(
+  value: unknown,
+  path: string,
+  context: ParseContext,
+  sizeField: 'height' | 'width',
+): T[] {
+  const seen = new Set<number>();
+  return arrayAt(value ?? [], path, context).map((entry, index) => {
+    const entryPath = `${path}[${index}]`;
+    const item = recordAt(entry, entryPath, context);
+    const layoutIndex = indexAt(item?.index, `${entryPath}.index`, context);
+    if (seen.has(layoutIndex)) {
+      addDiagnostic(
+        context,
+        'DOCUMENT_SCHEMA_INVALID',
+        entryPath,
+        `${path} indexes must be unique`,
+      );
+    }
+    seen.add(layoutIndex);
+    return {
+      index: layoutIndex,
+      ...(item?.[sizeField] === undefined
+        ? {}
+        : { [sizeField]: finiteAt(item[sizeField], `${entryPath}.${sizeField}`, context) }),
+      ...(item?.hidden === undefined
+        ? {}
+        : { hidden: booleanAt(item.hidden, `${entryPath}.hidden`, context) }),
+      ...(item?.styleId === undefined
+        ? {}
+        : { styleId: stringAt(item.styleId, `${entryPath}.styleId`, context) as StyleId }),
+    } as T;
+  });
+}
+
+function filterAt(value: unknown, path: string, context: ParseContext): SheetFilter | undefined {
+  if (value === undefined) return undefined;
+  const source = recordAt(value, path, context);
+  const filterItems = arrayAt(source?.filters, `${path}.filters`, context).map(
+    (entry, index): SheetFilterItem => {
+      const entryPath = `${path}.filters[${index}]`;
+      const item = recordAt(entry, entryPath, context);
+      const operator = item?.operator === 'all' || item?.operator === 'in' ? item.operator : 'all';
+      if (item?.operator !== operator) {
+        addDiagnostic(
+          context,
+          'DOCUMENT_SCHEMA_INVALID',
+          `${entryPath}.operator`,
+          `${entryPath}.operator must be all or in`,
+        );
+      }
+      return {
+        column: indexAt(item?.column, `${entryPath}.column`, context),
+        operator,
+        values: arrayAt(item?.values, `${entryPath}.values`, context).map((entry, valueIndex) =>
+          stringAt(entry, `${entryPath}.values[${valueIndex}]`, context),
+        ),
+      };
+    },
+  );
+  let sort: SheetFilter['sort'];
+  if (source?.sort === null) sort = null;
+  else if (source?.sort !== undefined) {
+    const item = recordAt(source.sort, `${path}.sort`, context);
+    const direction =
+      item?.direction === 'asc' || item?.direction === 'desc' ? item.direction : 'asc';
+    if (item?.direction !== direction) {
+      addDiagnostic(
+        context,
+        'DOCUMENT_SCHEMA_INVALID',
+        `${path}.sort.direction`,
+        `${path}.sort.direction must be asc or desc`,
+      );
+    }
+    sort = {
+      column: indexAt(item?.column, `${path}.sort.column`, context),
+      direction,
+    };
+  }
+  const range =
+    source?.range === undefined ? undefined : rangeAt(source.range, `${path}.range`, context);
+  if (range !== undefined && !isNormalized(range)) {
+    addDiagnostic(context, 'INVALID_RANGE', `${path}.range`, 'Filter range must be normalized');
+  }
+  return {
+    ...(range === undefined ? {} : { range }),
+    filters: filterItems,
+    ...(sort === undefined ? {} : { sort }),
   };
 }
 
@@ -649,6 +829,11 @@ function sheetAt(value: unknown, path: string, context: ParseContext): Sheet {
       cell: cellAt(item?.cell, `${entryPath}.cell`, context),
     };
   });
+  const rows = layoutAt<SheetRow>(record?.rows, `${path}.rows`, context, 'height');
+  const columns = layoutAt<SheetColumn>(record?.columns, `${path}.columns`, context, 'width');
+  const freeze =
+    record?.freeze === undefined ? undefined : pointAt(record.freeze, `${path}.freeze`, context);
+  const filter = filterAt(record?.filter, `${path}.filter`, context);
 
   for (const [index, merge] of merges.entries()) {
     if (!isNormalized(merge)) {
@@ -676,9 +861,19 @@ function sheetAt(value: unknown, path: string, context: ParseContext): Sheet {
 
   return {
     id: stringAt(record?.id, `${path}.id`, context) as DocumentSheetId,
-    name: stringAt(record?.name, `${path}.name`, context),
+    name: displayStringAt(record?.name, `${path}.name`, context),
     cells,
     merges,
+    ...(record?.rowCount === undefined
+      ? {}
+      : { rowCount: indexAt(record.rowCount, `${path}.rowCount`, context) }),
+    ...(record?.columnCount === undefined
+      ? {}
+      : { columnCount: indexAt(record.columnCount, `${path}.columnCount`, context) }),
+    rows,
+    columns,
+    ...(freeze === undefined ? {} : { freeze }),
+    ...(filter === undefined ? {} : { filter }),
   };
 }
 
@@ -804,6 +999,21 @@ function validateReferences(document: SpreadsheetDocument, context: ParseContext
         }
       }
     });
+    for (const [collectionName, collection] of [
+      ['rows', sheet.rows],
+      ['columns', sheet.columns],
+    ] as const) {
+      collection.forEach((entry, entryIndex) => {
+        if (entry.styleId !== undefined && !styleIds.has(entry.styleId)) {
+          addDiagnostic(
+            context,
+            'DANGLING_REFERENCE',
+            `$.workbook.sheets[${sheetIndex}].${collectionName}[${entryIndex}].styleId`,
+            'Referenced styleId does not exist',
+          );
+        }
+      });
+    }
     sheet.merges.forEach((merge, mergeIndex) => {
       for (let previous = 0; previous < mergeIndex; previous += 1) {
         if (rangesOverlap(sheet.merges[previous]!, merge)) {
@@ -959,6 +1169,8 @@ function canonicalizeDocument(document: SpreadsheetDocument): SpreadsheetDocumen
       sheets: document.workbook.sheets.map((sheet) => ({
         ...sheet,
         cells: [...sheet.cells].sort(compareSparseCells),
+        rows: [...sheet.rows].sort((left, right) => left.index - right.index),
+        columns: [...sheet.columns].sort((left, right) => left.index - right.index),
       })),
       styles: [...document.workbook.styles].sort((left, right) =>
         compareCodeUnits(left.id, right.id),

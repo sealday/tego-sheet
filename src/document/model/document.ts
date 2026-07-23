@@ -98,6 +98,59 @@ export interface Cell {
   readonly templateId?: TemplateId;
   /** Application-defined JSON metadata. */
   readonly metadata?: JsonValue;
+  /** Whether users may edit this cell. */
+  readonly editable?: boolean;
+  /** Whether cell content participates in print output. */
+  readonly printable?: boolean;
+}
+
+/** Sparse normalized row layout properties. */
+export interface SheetRow {
+  /** Zero-based row index. */
+  readonly index: number;
+  /** Row height in CSS pixels. */
+  readonly height?: number;
+  /** Whether the row is hidden. */
+  readonly hidden?: boolean;
+  /** Default style inherited by cells in the row. */
+  readonly styleId?: StyleId;
+}
+
+/** Sparse normalized column layout properties. */
+export interface SheetColumn {
+  /** Zero-based column index. */
+  readonly index: number;
+  /** Column width in CSS pixels. */
+  readonly width?: number;
+  /** Whether the column is hidden. */
+  readonly hidden?: boolean;
+  /** Default style inherited by cells in the column. */
+  readonly styleId?: StyleId;
+}
+
+/** One normalized value filter. */
+export interface SheetFilterItem {
+  /** Absolute zero-based filtered column. */
+  readonly column: number;
+  /** Whether all values or only listed values remain visible. */
+  readonly operator: 'all' | 'in';
+  /** Values retained when the operator is `in`. */
+  readonly values: readonly string[];
+}
+
+/** Normalized sheet filter and sort state. */
+export interface SheetFilter {
+  /** Inclusive filtered region. */
+  readonly range?: SheetRange;
+  /** Per-column filter definitions. */
+  readonly filters: readonly SheetFilterItem[];
+  /** Optional active sort state. */
+  readonly sort?: {
+    /** Absolute zero-based sorted column. */
+    readonly column: number;
+    /** Sort direction. */
+    readonly direction: 'asc' | 'desc';
+  } | null;
 }
 
 /** Ordered worksheet with sparse cells and normalized merges. */
@@ -110,6 +163,18 @@ export interface Sheet {
   readonly cells: readonly SparseCell[];
   /** User-defined normalized merge ranges. */
   readonly merges: readonly SheetRange[];
+  /** Logical row count when explicitly supplied by the source. */
+  readonly rowCount?: number;
+  /** Logical column count when explicitly supplied by the source. */
+  readonly columnCount?: number;
+  /** Sparse row layout in ascending index order. */
+  readonly rows: readonly SheetRow[];
+  /** Sparse column layout in ascending index order. */
+  readonly columns: readonly SheetColumn[];
+  /** First unfrozen row and column. */
+  readonly freeze?: CellPoint;
+  /** Optional normalized filter and sort state. */
+  readonly filter?: SheetFilter;
 }
 
 /** One stable-ID entry in a JSON-valued registry. */
@@ -231,6 +296,16 @@ export interface SheetInput {
   name: string;
   cells: SparseCellInput[];
   merges: { start: CellPoint; end: CellPoint }[];
+  rowCount?: number;
+  columnCount?: number;
+  rows?: { index: number; height?: number; hidden?: boolean; styleId?: string }[];
+  columns?: { index: number; width?: number; hidden?: boolean; styleId?: string }[];
+  freeze?: CellPoint;
+  filter?: {
+    range?: { start: CellPoint; end: CellPoint };
+    filters: { column: number; operator: 'all' | 'in'; values: string[] }[];
+    sort?: { column: number; direction: 'asc' | 'desc' } | null;
+  };
 }
 
 export interface SpreadsheetDocumentInput {

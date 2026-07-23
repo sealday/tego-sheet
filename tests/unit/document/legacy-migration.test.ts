@@ -35,6 +35,49 @@ function cellAt(document: SpreadsheetDocument, row: number, column: number) {
 }
 
 describe('legacy WorkbookInput migration', () => {
+  it.each([
+    'autofilter',
+    'blank-object',
+    'cells',
+    'columns',
+    'empty-array',
+    'multiple-sheets',
+    'rows',
+    'sheet-fields',
+    'sparse-falsy',
+    'styles',
+    'validations',
+  ])('migrates the current %s serialization fixture', (name) => {
+    const current = (
+      fixture(`../../../parity/fixtures/workbooks/${name}`) as {
+        input: unknown;
+      }
+    ).input;
+
+    const result = migrateLegacyWorkbook(current, { ids: deterministicIds });
+    expect(result.ok, JSON.stringify(result.diagnostics)).toBe(true);
+  });
+
+  it('persists legacy dimensions, visibility, defaults, freeze, filter, and print flags', () => {
+    const { document, diagnostics } = migrated(fixture('complete'));
+    const sheet = document.workbook.sheets[0]!;
+
+    expect(sheet).toMatchObject({
+      rowCount: 10001,
+      columnCount: 53,
+      freeze: { row: 2, column: 2 },
+      rows: [{ index: 0, height: 28, hidden: false, styleId: 'legacy-style-0' }],
+      columns: [{ index: 0, width: 144, hidden: true, styleId: 'legacy-style-0' }],
+      filter: {
+        range: { start: { row: 0, column: 0 }, end: { row: 9, column: 4 } },
+        filters: [{ column: 0, operator: 'in', values: ['kept'] }],
+        sort: { column: 0, direction: 'asc' },
+      },
+    });
+    expect(cellAt(document, 0, 0)).toMatchObject({ editable: false, printable: false });
+    expect(diagnostics.map(({ code }) => code)).not.toContain('LEGACY_FIELD_DEGRADED');
+  });
+
   it('migrates single-sheet and ordered multi-sheet inputs with injected stable IDs', () => {
     const single = migrated(fixture('complete'));
     const multiple = migrated(fixture('multiple-sheets'));
@@ -86,26 +129,8 @@ describe('legacy WorkbookInput migration', () => {
     });
   });
 
-  it('reports unsupported known and unknown fields without copying them', () => {
+  it('reports unknown fields without copying them', () => {
     const { document, diagnostics } = migrated(fixture('complete'));
-    const degradedPaths = diagnostics
-      .filter(({ code }) => code === 'LEGACY_FIELD_DEGRADED')
-      .map(({ details }) => (details as { path?: string } | undefined)?.path);
-
-    expect(degradedPaths).toEqual(
-      expect.arrayContaining([
-        '$[0].freeze',
-        '$[0].rows.len',
-        '$[0].rows.0.height',
-        '$[0].rows.0.hide',
-        '$[0].cols.len',
-        '$[0].cols.0.width',
-        '$[0].cols.0.hide',
-        '$[0].autofilter',
-        '$[0].rows.0.cells.0.editable',
-        '$[0].rows.0.cells.0.printable',
-      ]),
-    );
     expect(diagnostics).toContainEqual(
       expect.objectContaining({
         code: 'LEGACY_FIELD_DROPPED',
@@ -148,7 +173,6 @@ describe('legacy WorkbookInput migration', () => {
 
   it('returns atomic located errors for invalid legacy values and references', () => {
     const invalidCases = [
-      { rows: { bad: { cells: {} } } },
       { rows: { 0: { cells: { 0: { type: 'number', value: Number.NaN } } } } },
       { styles: [], rows: { 0: { cells: { 0: { text: 'x', style: 3 } } } } },
       { merges: ['not-a-range'] },
@@ -182,6 +206,147 @@ describe('legacy WorkbookInput migration', () => {
           code: 'LEGACY_VALUE_INVALID',
           details: { path: '$[0].rows.0.cells.0.value' },
         },
+      ],
+    });
+  });
+
+  it('ignores a cached Date when authoritative text supplies the input', () => {
+    const cached = new Date('2026-01-02T00:00:00Z');
+    const result = migrated({ rows: { 0: { cells: { 0: { text: '=TODAY()', value: cached } } } } });
+
+    expect(cellAt(result.document, 0, 0)?.input).toEqual({
+      type: 'formula',
+      source: '=TODAY()',
+    });
+  });
+
+  it('deduplicates identical sheet and cell merge representations', () => {
+    const current = (
+      fixture('../../../parity/fixtures/workbooks/sheet-fields') as {
+        input: unknown;
+      }
+    ).input;
+    const result = migrated(current);
+
+    expect(result.document.workbook.sheets[0]?.merges).toEqual([
+      { start: { row: 0, column: 0 }, end: { row: 1, column: 1 } },
+    ]);
+  });
+
+  it('normalizes leading-zero sparse keys and drops collection extensions', () => {
+    const result = migrated({
+      rows: {
+        '01': { cells: { '002': { text: 'normalized' }, vendorCells: { ignored: true } } },
+        vendorRows: { ignored: true },
+      },
+      cols: { '003': { width: 80 }, vendorCols: false },
+    });
+
+    expect(cellAt(result.document, 1, 2)?.input).toEqual({
+      type: 'string',
+      value: 'normalized',
+    });
+    expect(result.document.workbook.sheets[0]?.columns).toEqual([{ index: 3, width: 80 }]);
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ details: { path: '$[0].rows.vendorRows' } }),
+        expect.objectContaining({ details: { path: '$[0].rows.01.cells.vendorCells' } }),
+        expect.objectContaining({ details: { path: '$[0].cols.vendorCols' } }),
+      ]),
+    );
+  });
+
+  it.each([
+    { styles: [{ font: { bold: 'yes' } }] },
+    { styles: [{ align: 'diagonal' }] },
+    { validations: [{ refs: ['A1'], mode: 'cell', type: 'bogus', required: false }] },
+    { validations: [{ refs: ['A1'], mode: 'cell', type: 'number', required: 'no' }] },
+    {
+      validations: [
+        { refs: ['A1'], mode: 'cell', type: 'number', required: false, operator: 'bogus' },
+      ],
+    },
+    {
+      validations: [
+        {
+          refs: ['A1'],
+          mode: 'cell',
+          type: 'list',
+          required: false,
+          operator: 'in',
+          value: 'not-a-list',
+        },
+      ],
+    },
+    { rows: { 0: { cells: { 0: { type: 'bogus' } } } } },
+  ])('rejects invalid known legacy semantics atomically: %o', (input) => {
+    const result = migrateLegacyWorkbook(input, { ids: deterministicIds });
+
+    expect(result).toMatchObject({
+      ok: false,
+      diagnostics: [expect.objectContaining({ code: 'LEGACY_VALUE_INVALID' })],
+    });
+  });
+
+  it('rejects sparse key collisions after leading-zero normalization', () => {
+    const result = migrateLegacyWorkbook(
+      { rows: { 1: { cells: {} }, '01': { cells: {} } } },
+      { ids: deterministicIds },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      diagnostics: [
+        expect.objectContaining({
+          code: 'LEGACY_VALUE_INVALID',
+          details: { path: '$[0].rows.01' },
+        }),
+      ],
+    });
+  });
+
+  it('enforces the cumulative validation expansion limit', () => {
+    const result = migrateLegacyWorkbook(
+      {
+        validations: [
+          {
+            refs: ['A1:A600000', 'B1:B600000'],
+            mode: 'cell',
+            type: 'number',
+            required: false,
+          },
+        ],
+      },
+      { ids: deterministicIds },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      diagnostics: [
+        expect.objectContaining({
+          code: 'LEGACY_REFERENCE_INVALID',
+          details: { path: '$[0].validations[0].refs[1]' },
+        }),
+      ],
+    });
+  });
+
+  it('returns an atomic failure instead of invoking accessor properties', () => {
+    const input = Object.defineProperty({}, 'name', {
+      enumerable: true,
+      get: () => {
+        throw new Error('boom');
+      },
+    });
+
+    expect(() => migrateLegacyWorkbook(input, { ids: deterministicIds })).not.toThrow();
+    expect(migrateLegacyWorkbook(input, { ids: deterministicIds })).toMatchObject({
+      ok: false,
+      diagnostics: [
+        expect.objectContaining({
+          code: 'LEGACY_VALUE_INVALID',
+          details: { path: '$[0].name' },
+        }),
       ],
     });
   });

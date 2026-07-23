@@ -234,6 +234,17 @@ describe('Workbook 2.0 validation', () => {
     expect(codesOf(fixture, { limits: { maxCells: 0 } })).toContain('DOCUMENT_LIMIT_EXCEEDED');
   });
 
+  it('enforces configured sparse row and column layout limits', () => {
+    const fixture = validDocument();
+    Object.assign(fixture.workbook.sheets[0]!, {
+      rows: [{ index: 1, height: 20 }],
+      columns: [{ index: 1, width: 80 }],
+    });
+
+    expect(codesOf(fixture, { limits: { maxRows: 0 } })).toContain('DOCUMENT_LIMIT_EXCEEDED');
+    expect(codesOf(fixture, { limits: { maxColumns: 0 } })).toContain('DOCUMENT_LIMIT_EXCEEDED');
+  });
+
   it('aggregates independent diagnostics without exposing a partial document', () => {
     const fixture = validDocument();
     fixture.workbook.sheets.push({ ...fixture.workbook.sheets[0]! });

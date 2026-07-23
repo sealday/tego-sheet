@@ -109,3 +109,79 @@ hidden/default styles, freeze, autofilter, or legacy editable/printable state. T
 therefore reports each such known field as `LEGACY_FIELD_DEGRADED` and deliberately does
 not hide it in `extensions`. A future schema task must add normalized fields before these
 features can be converted without loss.
+
+## Review-fix addendum
+
+The independent Task 2B review returned `REQUEST_CHANGES`. The original concern above
+is resolved by the follow-up commit rather than deferred: schema 2 now persists sparse
+row/column layout and default style references, logical counts, freeze coordinates,
+normalized filter/sort state, and cell editable/printable flags. Parser validation,
+canonical ordering, row/column limits, public types, TypeDoc, serializer round trips,
+package declarations, and migration docs cover these additions.
+
+### Review RED evidence
+
+Focused schema and migration regressions initially produced 13 failures:
+
+- layout/filter/print fields were absent after parse/serialize;
+- authoritative text with a cached `Date` failed;
+- duplicate sheet/cell merge representations reached `INVALID_MERGE`;
+- leading-zero keys and sparse collection extensions failed;
+- invalid style, validation, and cell discriminator semantics succeeded;
+- cumulative validation expansion reached the parser only after allocation;
+- an accessor-backed legacy object threw past `MigrationResult`.
+
+A separate validation-limit RED proved `maxRows`/`maxColumns` were not enforced, and a
+validation-payload RED proved an invalid list payload was accepted.
+
+### Review GREEN evidence
+
+The final fresh gate run after all review fixes:
+
+```text
+npx vitest run --project unit tests/unit/document
+Test Files  3 passed (3)
+Tests       86 passed (86)
+
+npx vitest run --project unit tests/unit/bootstrap.test.ts \
+  --project architecture tests/architecture/public-surface.test.ts \
+  tests/architecture/public-api-documentation.test.ts \
+  tests/architecture/core-purity.test.ts
+Test Files  4 passed (4)
+Tests       14 passed (14)
+
+npm run test:package
+tests 40; pass 40; fail 0
+
+npm run typecheck
+npm run lint
+npm run format:check
+all exit 0
+```
+
+The fixture matrix now directly migrates all 11 current workbook serialization inputs:
+autofilter, blank object, cells, columns, empty array, multiple sheets, rows, sheet
+fields, sparse falsy/extensions, styles, and validations.
+
+### Review decisions
+
+- Exact duplicate merge ranges from sheet and anchor-cell representations are
+  deduplicated; distinct overlaps remain for the schema parser to reject.
+- Legacy input is captured once from own data-property descriptors. Accessors,
+  descriptor failures, and cycles return located atomic migration failures.
+- Leading-zero decimal keys normalize before collision detection. Nonnumeric collection
+  extensions produce located drop warnings and are never copied.
+- Known legacy style, validation type/operator/payload, cell discriminator, layout,
+  filter, editable, and printable values receive semantic validation before generic
+  schema registries can accept them.
+- Validation expansion uses a cumulative one-million-cell work limit before allocation;
+  the schema parser remains the final authority afterward.
+- Cached values, including `Date`, are ignored when authoritative `text` exists.
+
+### Follow-up commit
+
+`fix(document): preserve legacy workbook semantics` (SHA reported after commit creation).
+
+### Remaining concerns
+
+None known within Task 2B scope.
