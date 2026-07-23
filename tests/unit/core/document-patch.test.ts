@@ -74,4 +74,16 @@ describe('internal document patches', () => {
     expect(applyDocumentPatch(before, createDocumentPatch(before, after))).toEqual(after);
     expect(applyDocumentPatch(after, createDocumentPatch(after, before))).toEqual(before);
   });
+
+  it('encodes a large same-length left shift as one deletion and one necessary insertion', () => {
+    const before = Array.from({ length: 1_000 }, (_, id) => ({ id, value: `value-${id}` }));
+    const after = [...before.slice(1), { id: 1_000, value: 'value-1000' }];
+    const patch = createDocumentPatch(before, after);
+    const splices = patch.operations.filter((operation) => operation.op === 'splice');
+
+    expect(splices).toHaveLength(2);
+    expect(splices.reduce((total, operation) => total + operation.deleteCount, 0)).toBe(1);
+    expect(splices.reduce((total, operation) => total + operation.values.length, 0)).toBe(1);
+    expect(applyDocumentPatch(before, patch)).toEqual(after);
+  });
 });

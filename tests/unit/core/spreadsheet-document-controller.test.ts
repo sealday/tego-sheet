@@ -1209,6 +1209,35 @@ describe('SpreadsheetDocumentController', () => {
     }
   });
 
+  it('rejects beforeNotify lifecycle disposal without corrupting the active controller', () => {
+    const controller = new SpreadsheetDocumentController(
+      createSpreadsheetDocument({ id: 'document-1', sheetId: 'sheet-1' }),
+    );
+    const before = controller.getSnapshot();
+    expect(() =>
+      controller.dispatch(
+        {
+          type: 'set-cell-text',
+          address: { sheet: sheetId('sheet-1'), row: 0, column: 0 },
+          text: 'outer',
+        },
+        'ref',
+        { beforeNotify: () => controller.dispose() },
+      ),
+    ).toThrow('Commit callback');
+    expect(controller.getSnapshot()).toEqual(before);
+    expect(
+      controller.dispatch(
+        {
+          type: 'set-cell-text',
+          address: { sheet: sheetId('sheet-1'), row: 0, column: 0 },
+          text: 'still-active',
+        },
+        'ref',
+      ).status,
+    ).toBe('committed');
+  });
+
   it('rejects foreign and forged outer checkpoints before changing either runtime truth', () => {
     const first = new SpreadsheetDocumentController(
       createSpreadsheetDocument({ id: 'first', sheetId: 'sheet-1' }),

@@ -81,6 +81,50 @@ function diffValue(
   if (sameValue(before, after)) return;
   if (Array.isArray(before) && Array.isArray(after)) {
     if (before.length === after.length) {
+      for (let shift = 1; shift <= Math.floor(before.length / 2); shift += 1) {
+        if (
+          sameValue(before[shift], after[0]) &&
+          before.slice(shift).every((item, index) => sameValue(item, after[index]))
+        ) {
+          operations.push({
+            op: 'splice',
+            path,
+            index: 0,
+            deleteCount: shift,
+            values: [],
+          });
+          operations.push({
+            op: 'splice',
+            path,
+            index: before.length - shift,
+            deleteCount: 0,
+            values: after.slice(before.length - shift).map((item) => cloneValue(item)),
+          });
+          return;
+        }
+        if (
+          sameValue(before[0], after[shift]) &&
+          before
+            .slice(0, before.length - shift)
+            .every((item, index) => sameValue(item, after[index + shift]))
+        ) {
+          operations.push({
+            op: 'splice',
+            path,
+            index: before.length - shift,
+            deleteCount: shift,
+            values: [],
+          });
+          operations.push({
+            op: 'splice',
+            path,
+            index: 0,
+            deleteCount: 0,
+            values: after.slice(0, shift).map((item) => cloneValue(item)),
+          });
+          return;
+        }
+      }
       for (let index = 0; index < before.length; index += 1) {
         diffValue(before[index], after[index], [...path, index], operations);
       }

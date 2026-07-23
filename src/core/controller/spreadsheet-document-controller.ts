@@ -684,6 +684,7 @@ export class SpreadsheetDocumentController {
   }
 
   dispose(): void {
+    this.assertNoActiveCommitMutation();
     this.subscriptions.dispose();
     this.legacy.dispose();
   }
