@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import type { DocumentSheetId } from '../../../src/document';
 import { createValidationEngine, createValidationResolverRegistry } from '../../../src/validation';
 
 describe('VAL-01 validation foundation', () => {
+  const sheetId = 'sheet-1' as DocumentSheetId;
+
   it('distinguishes reject, warn, and accepted edits without mutation', async () => {
     const engine = createValidationEngine();
     const base = {
-      address: { sheetId: 'sheet-1', row: 0, column: 0 },
+      address: { sheetId, row: 0, column: 0 },
       value: { type: 'number' as const, value: 12 },
     };
     await expect(
@@ -60,7 +63,7 @@ describe('VAL-01 validation foundation', () => {
     });
     await expect(
       engine.validate({
-        address: { sheetId: 'sheet-1', row: 0, column: 0 },
+        address: { sheetId, row: 0, column: 0 },
         value: { type: 'string', value: 'CN' },
         rule: {
           id: 'country',
