@@ -74,6 +74,49 @@ afterEach(() => {
 });
 
 describe('IsolatedBrowserPrintAdapter', () => {
+  it('serializes a resolved raster resource into both preview and browser-print SVG', () => {
+    const source = generatedDocument();
+    const documentWithImage = {
+      ...source,
+      resources: {
+        byReference: {
+          logo: {
+            contentHash: 'sha256:logo',
+            type: 'image',
+            mimeType: 'image/png',
+            bytes: [1, 2],
+          },
+        },
+      },
+      print: {
+        ...source.print,
+        displayList: {
+          diagnostics: [],
+          pages: [
+            {
+              ...source.print.displayList.pages[0]!,
+              commands: [
+                {
+                  kind: 'image',
+                  resourceId: 'logo',
+                  rect: { x: 10, y: 20, width: 40, height: 30 },
+                  fit: 'contain',
+                },
+              ],
+            },
+            source.print.displayList.pages[1]!,
+          ],
+        },
+      },
+    } as GeneratedDocumentForBrowserPrint;
+
+    const [page] = serializeGeneratedDocumentSvgPages(documentWithImage);
+
+    expect(page?.svg).toContain('href="data:image/png;base64,AQI="');
+    expect(page?.svg).toContain('preserveAspectRatio="xMidYMid meet"');
+    expect(page?.svg).not.toContain('<rect x="10" y="20" width="40" height="30" fill="none"/>');
+  });
+
   it('mounts a hidden same-origin iframe containing only generated SVG pages', async () => {
     const editor = document.createElement('main');
     editor.dataset.editor = '';

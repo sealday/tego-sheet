@@ -280,6 +280,7 @@ const expectedPublicExports = [
   'TemplatePreviewProps',
   'TemplatePrintProfile',
   'TemplateRegionNode',
+  'TemplateResourceBinding',
   'ToolbarAction',
   'ToolbarRenderProps',
   'ToolbarRenderer',

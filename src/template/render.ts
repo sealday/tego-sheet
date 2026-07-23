@@ -40,6 +40,7 @@ import type {
   RenderRequest,
   RenderResult,
   TemplatePrintProfile,
+  TemplateResourceBinding,
 } from './model';
 
 const DEFAULT_LIMITS: RenderLimits = Object.freeze({
@@ -333,6 +334,7 @@ function displayPages(
   resolvePresentation: (sheetId: DocumentSheetId, row: number, column: number) => CellPresentation,
   insertions: ReadonlyMap<string, readonly RowInsertion[]>,
   structuralMappings: readonly StructuralMapping[],
+  resourceBindings: readonly TemplateResourceBinding[],
   data: unknown,
   date: Date,
 ): readonly PrintDisplayPageInput[] {
@@ -471,11 +473,53 @@ function displayPages(
         });
       }
     }
+    const overlays = resourceBindings.flatMap((binding): readonly PrintDisplayCommand[] => {
+      const placement = transformRange(binding.target, insertions, structuralMappings);
+      if (placement.sheetId !== target.sheet.id) return [];
+      const firstRow = Math.max(placement.start.row, startRow);
+      const lastRow = Math.min(placement.end.row, endRow);
+      const firstColumn = Math.max(placement.start.column, startColumn);
+      const lastColumn = Math.min(placement.end.column, endColumn);
+      if (firstRow > lastRow || firstColumn > lastColumn) return [];
+      const rowIndex = rows.indexOf(firstRow);
+      const columnIndex = columns.indexOf(firstColumn);
+      if (rowIndex < 0 || columnIndex < 0) return [];
+      return [
+        {
+          kind: 'image',
+          resourceId: binding.resourceId,
+          fit: binding.fit,
+          rect: {
+            x:
+              profile.page.margins.left +
+              headingSize +
+              columns
+                .slice(0, columnIndex)
+                .reduce((sum, column) => sum + columnWidth(target.sheet, column), 0) *
+                page.scale,
+            y:
+              profile.page.margins.top +
+              headingSize +
+              rows.slice(0, rowIndex).reduce((sum, row) => sum + rowHeight(target.sheet, row), 0) *
+                page.scale,
+            width:
+              columns
+                .filter((column) => column >= firstColumn && column <= lastColumn)
+                .reduce((sum, column) => sum + columnWidth(target.sheet, column), 0) * page.scale,
+            height:
+              rows
+                .filter((row) => row >= firstRow && row <= lastRow)
+                .reduce((sum, row) => sum + rowHeight(target.sheet, row), 0) * page.scale,
+          },
+        },
+      ];
+    });
     return {
       width: page.width,
       height: page.height,
       cells,
       decorations,
+      overlays,
       showGridlines: profile.showGridlines,
     };
   });
@@ -540,6 +584,38 @@ export async function renderSpreadsheetTemplate(
         freeze({
           diagnostics: [
             renderDiagnostic('INVALID_PRINT_TARGET', `Unknown print profile: ${request.profileId}`),
+          ],
+        }),
+      );
+    }
+    const resourceBindings = request.template.ir.template.resourceBindings ?? [];
+    const unresolvedResource = resourceBindings.find(
+      ({ resourceId }) => resources.byReference[resourceId] === undefined,
+    );
+    if (unresolvedResource !== undefined) {
+      return failAfterResources(
+        freeze({
+          diagnostics: [
+            renderDiagnostic(
+              'RESOURCE_BINDING_UNRESOLVED',
+              `Template resource ${unresolvedResource.resourceId} was not resolved`,
+            ),
+          ],
+        }),
+      );
+    }
+    const unsupportedResource = resourceBindings.find(({ resourceId }) => {
+      const resource = resources.byReference[resourceId];
+      return resource?.type !== 'image' && resource?.type !== 'svg' && resource?.type !== 'qr';
+    });
+    if (unsupportedResource !== undefined) {
+      return failAfterResources(
+        freeze({
+          diagnostics: [
+            renderDiagnostic(
+              'RESOURCE_TYPE_MISMATCH',
+              `Template resource ${unsupportedResource.resourceId} is not displayable`,
+            ),
           ],
         }),
       );
@@ -719,6 +795,7 @@ export async function renderSpreadsheetTemplate(
       (sheetId, row, column) => presentation.resolve({ sheetId, row, column }),
       expansion.insertedRows,
       expansion.structuralMappings,
+      resourceBindings,
       request.data,
       environment.clock,
     );

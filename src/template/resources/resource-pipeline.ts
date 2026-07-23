@@ -135,6 +135,8 @@ export interface DecodedResourceImage {
 export interface ResolvedResource {
   /** SHA-256 content identity. */
   readonly contentHash: string;
+  /** Validated logical resource category. */
+  readonly type: ResourceType;
   /** Validated canonical MIME. */
   readonly mimeType: string;
   /** Immutable byte snapshot; adapters create their own typed view when needed. */
@@ -980,6 +982,7 @@ export async function resolveTemplateResources(
             );
           return freeze({
             contentHash: hash,
+            type: ref.type,
             mimeType: raw.mimeType,
             bytes: Object.freeze([...verifiedBytes]),
             ...(width === undefined ? {} : { width }),

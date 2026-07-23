@@ -18,6 +18,26 @@ export interface GeneratedDocumentForBrowserPrint {
     /** Exact display list shared with SVG preview and browser output. */
     readonly displayList: PrintDisplayList;
   };
+  /** Ready immutable resources referenced by image display commands. */
+  readonly resources?: {
+    /** Logical resource references resolved for this render session. */
+    readonly byReference: Readonly<
+      Record<
+        string,
+        {
+          readonly type: string;
+          readonly mimeType: string;
+          readonly bytes: readonly number[];
+          readonly vector?: {
+            readonly viewBox: readonly [number, number, number, number];
+            readonly paths: readonly string[];
+            readonly foreground: string;
+            readonly background: string;
+          };
+        }
+      >
+    >;
+  };
 }
 
 /** One SVG page produced without consulting mutable editor state. */
@@ -112,7 +132,23 @@ function safeLinkHref(href: string): string | undefined {
   return undefined;
 }
 
-function serializeCommands(commands: readonly PrintDisplayCommand[], path: string): string {
+function base64(bytes: readonly number[]): string {
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 32_768) {
+    binary += String.fromCharCode(...bytes.slice(offset, offset + 32_768));
+  }
+  return btoa(binary);
+}
+
+function preserveAspectRatio(fit: 'contain' | 'cover' | 'fill'): string {
+  return fit === 'fill' ? 'none' : fit === 'cover' ? 'xMidYMid slice' : 'xMidYMid meet';
+}
+
+function serializeCommands(
+  commands: readonly PrintDisplayCommand[],
+  path: string,
+  resources: GeneratedDocumentForBrowserPrint['resources'],
+): string {
   return commands
     .map((command, index) => {
       const commandPath = `${path}-${index}`;
@@ -136,7 +172,7 @@ function serializeCommands(commands: readonly PrintDisplayCommand[], path: strin
           return `<path d="${escapeMarkup(command.data)}"${command.fill === undefined ? ' fill="none"' : ` fill="${escapeMarkup(command.fill)}"`}${command.stroke === undefined ? '' : ` stroke="${escapeMarkup(command.stroke)}"`}${command.width === undefined ? '' : ` stroke-width="${number(command.width)}"`}/>`;
         case 'clip': {
           const clipId = `tego-clip-${commandPath}`;
-          return `<defs><clipPath id="${clipId}"><rect ${rectAttributes(command.rect)}/></clipPath></defs><g clip-path="url(#${clipId})">${serializeCommands(command.commands, commandPath)}</g>`;
+          return `<defs><clipPath id="${clipId}"><rect ${rectAttributes(command.rect)}/></clipPath></defs><g clip-path="url(#${clipId})">${serializeCommands(command.commands, commandPath, resources)}</g>`;
         }
         case 'link': {
           const href = safeLinkHref(command.href);
@@ -145,8 +181,28 @@ function serializeCommands(commands: readonly PrintDisplayCommand[], path: strin
             ? body
             : `<a href="${escapeMarkup(href)}" aria-label="${escapeMarkup(command.label)}">${body}</a>`;
         }
-        case 'image':
+        case 'image': {
+          const resource = resources?.byReference[command.resourceId];
+          if (resource?.vector !== undefined) {
+            const vector = resource.vector;
+            const background =
+              vector.background === 'transparent'
+                ? ''
+                : `<rect x="${number(vector.viewBox[0])}" y="${number(vector.viewBox[1])}" width="${number(vector.viewBox[2])}" height="${number(vector.viewBox[3])}" fill="${escapeMarkup(vector.background)}"/>`;
+            const paths = vector.paths
+              .map(
+                (data) =>
+                  `<path d="${escapeMarkup(data)}" fill="${escapeMarkup(vector.foreground)}"/>`,
+              )
+              .join('');
+            return `<svg ${rectAttributes(command.rect)} viewBox="${vector.viewBox.map(number).join(' ')}" preserveAspectRatio="${preserveAspectRatio(command.fit)}" data-resource-id="${escapeMarkup(command.resourceId)}">${background}${paths}</svg>`;
+          }
+          if (resource !== undefined && resource.type === 'image') {
+            const href = `data:${resource.mimeType};base64,${base64(resource.bytes)}`;
+            return `<image ${rectAttributes(command.rect)} href="${escapeMarkup(href)}" preserveAspectRatio="${preserveAspectRatio(command.fit)}" data-resource-id="${escapeMarkup(command.resourceId)}"/>`;
+          }
           return `<g data-resource-id="${escapeMarkup(command.resourceId)}" data-fit="${command.fit}"><rect ${rectAttributes(command.rect)} fill="none"/></g>`;
+        }
       }
     })
     .join('');
@@ -175,7 +231,7 @@ export function serializeGeneratedDocumentSvgPages(
           `<svg xmlns="http://www.w3.org/2000/svg" data-page-id="${escapeMarkup(id)}" ` +
           `width="${number(page.width)}" height="${number(page.height)}" ` +
           `viewBox="0 0 ${number(page.width)} ${number(page.height)}" role="img">` +
-          `${serializeCommands(page.commands, `page-${page.index}`)}</svg>`,
+          `${serializeCommands(page.commands, `page-${page.index}`, document.resources)}</svg>`,
       });
     }),
   );

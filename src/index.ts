@@ -347,6 +347,7 @@ export type {
   StructuralMapping,
   TemplateIRBinding,
   TemplatePrintProfile,
+  TemplateResourceBinding,
   ValueBinding,
 } from './template';
 export { TemplatePreview } from './react/preview';

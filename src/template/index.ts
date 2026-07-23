@@ -77,5 +77,6 @@ export type {
   TemplateRegionNode,
   TemplateIRBinding,
   TemplatePrintProfile,
+  TemplateResourceBinding,
   ValueBinding,
 } from './model';

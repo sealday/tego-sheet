@@ -173,6 +173,8 @@ export interface PrintDisplayPageInput {
   readonly cells: readonly PrintDisplayCell[];
   /** Page decorations such as headings, headers, and footers. */
   readonly decorations?: readonly PrintDisplayCommand[];
+  /** Resource and object commands painted after cell contents. */
+  readonly overlays?: readonly PrintDisplayCommand[];
   /** Whether default cell gridlines are emitted. */
   readonly showGridlines?: boolean;
 }
@@ -396,6 +398,7 @@ export function createPrintDisplayList(input: PrintDisplayListInput): PrintDispl
         });
       }
     }
+    commands.push(...(page.overlays ?? []));
     return Object.freeze({
       index,
       width: page.width,

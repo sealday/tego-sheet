@@ -112,6 +112,64 @@ describe('resource/render atomic boundary', () => {
     expect(dispose).toHaveBeenCalledOnce();
   });
 
+  it('maps a template resource binding through the ready store into the print display list', async () => {
+    const resourceTemplate = {
+      ...template,
+      resourceBindings: [
+        {
+          id: 'logo-binding',
+          target: {
+            sheetId: 'sheet-1',
+            start: { row: 0, column: 0 },
+            end: { row: 0, column: 0 },
+          },
+          resourceId: 'logo',
+          fit: 'contain',
+        },
+      ],
+    } as unknown as SpreadsheetTemplate;
+    const compiled = compileSpreadsheetTemplate(source, resourceTemplate).template!;
+    const result = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: {},
+        profileId: 'profile',
+        missingValue: 'error',
+        resourceRefs: [
+          {
+            id: 'logo',
+            type: 'image',
+            resolverId: 'app',
+            key: 'logo',
+            expectedMime: 'image/png',
+          },
+        ],
+      },
+      {
+        ...environment,
+        resourceRegistry: createResourceResolverRegistry([
+          {
+            id: 'app',
+            supports: () => true,
+            resolve: async () => ({ bytes: png(), mimeType: 'image/png' }),
+          },
+        ]),
+      },
+    );
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.document?.print.displayList.pages[0]?.commands).toContainEqual(
+      expect.objectContaining({
+        kind: 'image',
+        resourceId: 'logo',
+        fit: 'contain',
+        rect: { x: 10, y: 10, width: 100, height: 20 },
+      }),
+    );
+    await result.document?.resources.dispose();
+  });
+
   it('releases ready resources when a later render stage fails', async () => {
     const dispose = vi.fn();
     const failing = {

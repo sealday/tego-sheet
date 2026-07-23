@@ -263,8 +263,23 @@ export interface TemplatePrintProfile {
   readonly showHeadings: boolean;
 }
 
-/** Full TP1 template model persisted in `SpreadsheetDocument.templates`. */
-export type SpreadsheetTemplate = StoredSpreadsheetTemplate;
+/** One validated resource positioned over a template cell range. */
+export interface TemplateResourceBinding {
+  /** Stable binding identity. */
+  readonly id: BindingId;
+  /** Cells covered by the resource in template coordinates. */
+  readonly target: DocumentCellRange;
+  /** Logical resource reference resolved by the render session. */
+  readonly resourceId: string;
+  /** Deterministic sizing policy inside the target rectangle. */
+  readonly fit: 'contain' | 'cover' | 'fill';
+}
+
+/** Full template model persisted in `SpreadsheetDocument.templates`. */
+export type SpreadsheetTemplate = StoredSpreadsheetTemplate & {
+  /** Optional resource placements resolved before layout and painted as overlays. */
+  readonly resourceBindings?: readonly TemplateResourceBinding[];
+};
 
 /** Binding IR with every expression parsed into safe nodes. */
 export type TemplateIRBinding =
