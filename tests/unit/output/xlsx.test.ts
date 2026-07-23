@@ -84,7 +84,7 @@ describe('XlsxAdapter', () => {
     );
     expect(second).toEqual(first);
     const directory = await centralDirectory(new Blob([first]));
-    expect(directory.map(({ name }) => name)).toEqual(directory.map(({ name }) => name).toSorted());
+    expect(directory.map(({ name }) => name)).toEqual(directory.map(({ name }) => name).sort());
     expect(new Set(directory.map(({ time, date }) => `${time}:${date}`))).toEqual(
       new Set(['0:33']),
     );
