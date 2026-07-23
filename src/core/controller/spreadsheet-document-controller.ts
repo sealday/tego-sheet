@@ -55,7 +55,12 @@ export interface SpreadsheetControllerCheckpoint {
   readonly legacy: ReturnType<WorkbookController['checkpoint']>;
   readonly documentHistory: HistoryCheckpoint<SpreadsheetDocument, null>;
   readonly ['document']: SpreadsheetDocument;
+  readonly [spreadsheetCheckpointOwner]: object;
 }
+
+const spreadsheetCheckpointOwner: unique symbol = Symbol(
+  'tego-sheet.spreadsheet-controller-checkpoint-owner',
+);
 
 /** A JSON-serializable, versioned document command submitted to the transaction boundary. */
 export interface SerializableCommandEnvelope {
@@ -110,6 +115,7 @@ export interface TransactionCommit {
   readonly revision: number;
   readonly change: WorkbookChange;
   readonly ['document']: SpreadsheetDocument;
+  readonly notificationError?: string;
 }
 
 export interface TransactionNoop {
@@ -284,6 +290,9 @@ export class SpreadsheetDocumentController {
   private readonly legacy: WorkbookController;
   private readonly subscriptions = new SubscriptionStore<SpreadsheetControllerEvent>();
   private permissionGateActive = false;
+  private commitMutationActive = false;
+  private checkpointOwner: object = Object.freeze({});
+  private checkpoints = new WeakSet<SpreadsheetControllerCheckpoint>();
 
   constructor(input: SpreadsheetDocument, options: WorkbookControllerOptions = {}) {
     const parsed = parseSpreadsheetDocument(input);
@@ -432,8 +441,15 @@ export class SpreadsheetDocumentController {
       this.restore(checkpoint);
       return this.rejectTransaction(error);
     }
-    this.subscriptions.publish(event);
-    return result;
+    try {
+      this.subscriptions.publish(event);
+      return result;
+    } catch (error) {
+      return cloneFrozenDocumentValue({
+        ...result,
+        notificationError: error instanceof Error ? error.message : 'Transaction observer failed',
+      }) as TransactionCommit;
+    }
   }
 
   dryRun(
@@ -475,6 +491,7 @@ export class SpreadsheetDocumentController {
         readonly status: 'committed';
         readonly commit: SpreadsheetControllerCommit<CommandResult<Command>, Command>;
       } {
+    this.assertNoActiveCommitMutation();
     if (this.permissionGateActive) {
       throw new TegoSheetException({
         code: 'INVALID_COMMAND',
@@ -539,6 +556,7 @@ export class SpreadsheetDocumentController {
       beforeNotify,
       notify: false,
     };
+    this.commitMutationActive = true;
     try {
       outcome = this.legacy.dispatch(command, source, legacyOptions);
       if (outcome.status === 'noop' && !sameJson(plan.document, this.currentDocument)) {
@@ -568,6 +586,8 @@ export class SpreadsheetDocumentController {
     } catch (error) {
       this.documentHistory.restore(historyCheckpoint);
       throw error;
+    } finally {
+      this.commitMutationActive = false;
     }
     if (outcome.status === 'noop') return outcome;
     if (preparedDocument === undefined || preparedCommit === undefined) {
@@ -594,21 +614,54 @@ export class SpreadsheetDocumentController {
   }
 
   checkpoint(): SpreadsheetControllerCheckpoint {
-    return {
+    const checkpoint = {
       legacy: this.legacy.checkpoint(),
       documentHistory: this.documentHistory.checkpoint(),
       ['document']: this.checkpointDocument ?? this.currentDocument,
-    };
+    } as SpreadsheetControllerCheckpoint;
+    Object.defineProperty(checkpoint, spreadsheetCheckpointOwner, {
+      configurable: false,
+      enumerable: false,
+      value: this.checkpointOwner,
+      writable: false,
+    });
+    Object.freeze(checkpoint);
+    this.checkpoints.add(checkpoint);
+    return checkpoint;
   }
 
   restore(checkpoint: SpreadsheetControllerCheckpoint): void {
-    this.legacy.restore(checkpoint.legacy);
-    this.documentHistory.restore(checkpoint.documentHistory);
-    const { ['document']: checkpointDocument } = checkpoint;
-    this.currentDocument = checkpointDocument;
+    this.assertNoActiveCommitMutation();
+    if (
+      typeof checkpoint !== 'object' ||
+      checkpoint === null ||
+      !this.checkpoints.has(checkpoint) ||
+      checkpoint[spreadsheetCheckpointOwner] !== this.checkpointOwner
+    ) {
+      throw new TegoSheetException({
+        code: 'INVALID_COMMAND',
+        message: 'Checkpoint does not belong to this spreadsheet document controller',
+        recoverable: true,
+      });
+    }
+    const rollbackLegacy = this.legacy.checkpoint();
+    const rollbackHistory = this.documentHistory.checkpoint();
+    const rollbackDocument = this.currentDocument;
+    try {
+      this.legacy.restore(checkpoint.legacy);
+      this.documentHistory.restore(checkpoint.documentHistory);
+      const { ['document']: checkpointDocument } = checkpoint;
+      this.currentDocument = checkpointDocument;
+    } catch (error) {
+      this.legacy.restore(rollbackLegacy);
+      this.documentHistory.restore(rollbackHistory);
+      this.currentDocument = rollbackDocument;
+      throw error;
+    }
   }
 
   replace(input: SpreadsheetDocument): void {
+    this.assertNoActiveCommitMutation();
     const parsed = parseSpreadsheetDocument(input);
     if (!parsed.ok) {
       throw new TegoSheetException({
@@ -626,9 +679,12 @@ export class SpreadsheetDocumentController {
     );
     this.currentDocument = parsedDocument;
     this.documentHistory.clear();
+    this.checkpointOwner = Object.freeze({});
+    this.checkpoints = new WeakSet<SpreadsheetControllerCheckpoint>();
   }
 
   setReadOnly(readOnly: boolean): void {
+    this.assertNoActiveCommitMutation();
     this.legacy.setReadOnly(readOnly);
   }
 
@@ -643,6 +699,13 @@ export class SpreadsheetDocumentController {
   ): SerializableTransactionEnvelope | TransactionRejection {
     const transaction = snapshotTransaction(input);
     if ('status' in transaction) return transaction;
+    if (this.commitMutationActive) {
+      return {
+        status: 'rejected',
+        code: 'COMMAND_NOT_ALLOWED',
+        message: 'Commit callback reentrancy is not allowed',
+      };
+    }
     if (this.permissionGateActive) {
       return {
         status: 'rejected',
@@ -720,5 +783,14 @@ export class SpreadsheetDocumentController {
           : 'TRANSACTION_INVARIANT_FAILED',
       message: error instanceof Error ? error.message : 'Transaction failed',
     };
+  }
+
+  private assertNoActiveCommitMutation(): void {
+    if (!this.commitMutationActive) return;
+    throw new TegoSheetException({
+      code: 'INVALID_COMMAND',
+      message: 'Commit callback cannot reenter the document mutation boundary',
+      recoverable: true,
+    });
   }
 }

@@ -78,6 +78,26 @@ describe('CoordinateTransform', () => {
     }
   });
 
+  it('keeps formula function names intact while transforming their arguments', () => {
+    const transform = CoordinateTransform.insert('row', 1, 2);
+
+    expect(transform.formula('=LOG10(A2)+DAYS360(A2,B3)+SUM(A2:B3)')).toBe(
+      '=LOG10(A4)+DAYS360(A4,B5)+SUM(A4:B5)',
+    );
+  });
+
+  it('shrinks or drops formula ranges as one coordinate range during deletion', () => {
+    const transform = CoordinateTransform.delete('row', 1, 2);
+
+    expect(transform.formula('=A1:A4+B2:B3+C4:C5')).toBe('=A1:A2+#REF!+C2:C3');
+    expect(
+      transform.formula('=Data!A1:A4', {
+        targetSheetName: 'Data',
+        transformUnqualified: false,
+      }),
+    ).toBe('=Data!A1:A2');
+  });
+
   it('uses one insert transform for cells, formulas, ranges, layout, freeze, and filters', () => {
     const transform = CoordinateTransform.insert('row', 2, 2);
     const next = transformSheetCoordinates(sheet(), transform);

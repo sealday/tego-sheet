@@ -308,7 +308,7 @@ describe('SpreadsheetDocumentController transactions', () => {
     expect(serializeSpreadsheetDocument(controller.getDocument())).toBe(committed);
   });
 
-  it('keeps an already published transaction committed when a subscriber throws', () => {
+  it('reports observer failure without throwing or rolling back an already committed transaction', () => {
     const controller = new SpreadsheetDocumentController(
       createSpreadsheetDocument({ id: 'document-1', sheetId: 'sheet-1' }),
     );
@@ -317,9 +317,12 @@ describe('SpreadsheetDocumentController transactions', () => {
       throw observerError;
     });
 
-    expect(() =>
+    expect(
       controller.transact(transaction(controller, [command('command-1', 0, 'committed')])),
-    ).toThrow(observerError);
+    ).toMatchObject({
+      status: 'committed',
+      notificationError: 'observer failed',
+    });
     expect(controller.getSnapshot().revision).toBe(1);
     expect(controller.historySize).toEqual({ undo: 1, redo: 0 });
     expect(controller.getCellText({ sheet: sheetId('sheet-1'), row: 0, column: 0 })).toBe(

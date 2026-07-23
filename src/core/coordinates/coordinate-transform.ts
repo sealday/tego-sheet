@@ -147,6 +147,37 @@ export class CoordinateTransform {
         ) {
           const firstQualifier = match[1];
           const secondQualifier = match[3];
+          const nextNonSpace = source.slice(index + match[0].length).match(/^\s*(.)/)?.[1];
+          if (firstQualifier === undefined && match[4] === undefined && nextNonSpace === '(') {
+            output += match[0];
+            index += match[0].length;
+            continue;
+          }
+          if (
+            match[4] !== undefined &&
+            this.shouldTransformFormulaReference(firstQualifier, context) &&
+            this.shouldTransformFormulaReference(secondQualifier ?? firstQualifier, context)
+          ) {
+            const first = parseA1Reference((match[2] as string).toUpperCase());
+            const second = parseA1Reference(match[4].toUpperCase());
+            const range = this.range({
+              start: { row: first.row, column: first.column },
+              end: { row: second.row, column: second.column },
+            });
+            if (range === null) {
+              output += `${firstQualifier ?? ''}#REF!`;
+            } else {
+              output += `${firstQualifier ?? ''}${renderA1Reference({
+                ...first,
+                ...range.start,
+              })}:${secondQualifier ?? ''}${renderA1Reference({
+                ...second,
+                ...range.end,
+              })}`;
+            }
+            index += match[0].length;
+            continue;
+          }
           output += `${firstQualifier ?? ''}${this.transformFormulaReference(
             match[2] as string,
             firstQualifier,
@@ -174,13 +205,7 @@ export class CoordinateTransform {
     qualifier: string | undefined,
     context: FormulaTransformContext,
   ): string {
-    if (
-      qualifier === undefined
-        ? !context.transformUnqualified
-        : normalizeSheetQualifier(qualifier) !== context.targetSheetName.toLowerCase()
-    ) {
-      return token;
-    }
+    if (!this.shouldTransformFormulaReference(qualifier, context)) return token;
     const reference = parseA1Reference(token.toUpperCase());
     const current = this.axis === 'row' ? reference.row : reference.column;
     const next = this.scalar(current);
@@ -189,6 +214,15 @@ export class CoordinateTransform {
     return renderA1Reference(
       this.axis === 'row' ? { ...reference, row: next } : { ...reference, column: next },
     );
+  }
+
+  private shouldTransformFormulaReference(
+    qualifier: string | undefined,
+    context: FormulaTransformContext,
+  ): boolean {
+    return qualifier === undefined
+      ? context.transformUnqualified
+      : normalizeSheetQualifier(qualifier) === context.targetSheetName.toLowerCase();
   }
 }
 

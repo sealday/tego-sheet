@@ -10,6 +10,7 @@ import {
   SpreadsheetDocumentController,
 } from '../../../src/core/controller/spreadsheet-document-controller';
 import { WorkbookController } from '../../../src/core/controller/workbook-controller';
+import { History } from '../../../src/core/controller/history';
 import { sheetId } from '../../../src/core';
 
 function directDocument(overrides: Partial<SpreadsheetDocumentInput> = {}): SpreadsheetDocument {
@@ -1161,6 +1162,107 @@ describe('SpreadsheetDocumentController', () => {
     expect(accepted.status).toBe('committed');
     if (accepted.status === 'committed')
       expect(accepted.commit.change.id).toMatch(/^change-\d+-1$/);
+  });
+
+  it('rejects beforeNotify reentrant mutations without splitting document and projection truth', () => {
+    const controller = new SpreadsheetDocumentController(
+      createSpreadsheetDocument({ id: 'document-1', sheetId: 'sheet-1' }),
+    );
+    const before = controller.getSnapshot();
+    expect(() =>
+      controller.dispatch(
+        {
+          type: 'set-cell-text',
+          address: { sheet: sheetId('sheet-1'), row: 0, column: 0 },
+          text: 'outer',
+        },
+        'ref',
+        {
+          beforeNotify: () => {
+            controller.dispatch(
+              {
+                type: 'set-cell-text',
+                address: { sheet: sheetId('sheet-1'), row: 1, column: 0 },
+                text: 'inner',
+              },
+              'ref',
+            );
+          },
+        },
+      ),
+    ).toThrow('Commit callback');
+
+    expect(controller.getSnapshot()).toEqual(before);
+    expect(controller.getDocument().workbook.sheets[0]?.cells).toEqual([]);
+    expect(controller.getCellText({ sheet: sheetId('sheet-1'), row: 0, column: 0 })).toBe('');
+    const accepted = controller.dispatch(
+      {
+        type: 'set-cell-text',
+        address: { sheet: sheetId('sheet-1'), row: 0, column: 0 },
+        text: 'accepted',
+      },
+      'ref',
+    );
+    expect(accepted.status).toBe('committed');
+    if (accepted.status === 'committed') {
+      expect(accepted.commit.change.id).toMatch(/^change-\d+-1$/);
+    }
+  });
+
+  it('rejects foreign and forged outer checkpoints before changing either runtime truth', () => {
+    const first = new SpreadsheetDocumentController(
+      createSpreadsheetDocument({ id: 'first', sheetId: 'sheet-1' }),
+    );
+    const second = new SpreadsheetDocumentController(
+      createSpreadsheetDocument({ id: 'second', sheetId: 'sheet-2' }),
+    );
+    const foreign = first.checkpoint();
+    const genuine = second.checkpoint();
+    const before = second.getSnapshot();
+    const forged = {
+      ...genuine,
+      document: first.getDocument(),
+    };
+
+    expect(() => second.restore(foreign)).toThrow('Checkpoint');
+    expect(() => second.restore(forged)).toThrow('Checkpoint');
+    expect(second.getSnapshot()).toEqual(before);
+    expect(second.getDocument().id).toBe('second');
+  });
+
+  it('rolls back the legacy half when outer checkpoint restoration fails after it starts', () => {
+    const controller = new SpreadsheetDocumentController(
+      createSpreadsheetDocument({ id: 'document-1', sheetId: 'sheet-1' }),
+    );
+    const checkpoint = controller.checkpoint();
+    controller.dispatch(
+      {
+        type: 'set-cell-text',
+        address: { sheet: sheetId('sheet-1'), row: 0, column: 0 },
+        text: 'current',
+      },
+      'ref',
+    );
+    const before = controller.getSnapshot();
+    const original = History.prototype.restore;
+    let calls = 0;
+    const restore = vi
+      .spyOn(History.prototype, 'restore')
+      .mockImplementation(function (this: History<unknown, unknown>, value) {
+        calls += 1;
+        if (calls === 2) throw new Error('schema restore failed');
+        return original.call(this, value);
+      });
+    try {
+      expect(() => controller.restore(checkpoint)).toThrow('schema restore failed');
+    } finally {
+      restore.mockRestore();
+    }
+
+    expect(controller.getSnapshot()).toEqual(before);
+    expect(controller.getCellText({ sheet: sheetId('sheet-1'), row: 0, column: 0 })).toBe(
+      'current',
+    );
   });
 
   it('clones dangerous JSON keys into frozen null-prototype records', () => {
