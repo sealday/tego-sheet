@@ -176,6 +176,101 @@ function documentWithEveryInput(): SpreadsheetDocument {
   return parsed.document;
 }
 
+function schemaOnlyClipboardDocument(sameTarget = false): SpreadsheetDocument {
+  const source = {
+    input: {
+      type: 'custom' as const,
+      cellType: 'acme.source',
+      schemaVersion: 1,
+      value: { legacy: 'same' },
+    },
+    metadata: { provenance: 'source' },
+  };
+  const parsed = parseSpreadsheetDocument({
+    schemaVersion: 2,
+    id: 'schema-only-clipboard',
+    workbook: {
+      sheets: [
+        {
+          id: 'sheet-1',
+          name: 'Schema only',
+          cells: [
+            { row: 0, column: 0, cell: source },
+            {
+              row: 0,
+              column: 1,
+              cell: sameTarget
+                ? source
+                : {
+                    input: {
+                      type: 'custom',
+                      cellType: 'acme.target',
+                      schemaVersion: 9,
+                      value: { legacy: 'same' },
+                    },
+                    metadata: { provenance: 'target' },
+                  },
+            },
+          ],
+          merges: [],
+        },
+      ],
+      styles: [],
+      validations: [],
+      settings: { dateSystem: 'excel-1900' },
+    },
+    templates: [],
+    resources: { items: [] },
+    extensions: {},
+  });
+  if (!parsed.ok) throw new Error('Schema-only clipboard fixture must be valid');
+  return parsed.document;
+}
+
+function sparseCutDocument(): SpreadsheetDocument {
+  const parsed = parseSpreadsheetDocument({
+    schemaVersion: 2,
+    id: 'sparse-cut',
+    workbook: {
+      sheets: [
+        {
+          id: 'sheet-1',
+          name: 'Sparse cut',
+          cells: [
+            {
+              row: 0,
+              column: 0,
+              cell: { input: { type: 'string', value: 'move' } },
+            },
+            {
+              row: 1,
+              column: 1,
+              cell: {
+                input: {
+                  type: 'custom',
+                  cellType: 'acme.rich-target',
+                  schemaVersion: 3,
+                  value: { keep: true },
+                },
+                metadata: { untouched: true },
+              },
+            },
+          ],
+          merges: [],
+        },
+      ],
+      styles: [],
+      validations: [],
+      settings: { dateSystem: 'excel-1900' },
+    },
+    templates: [],
+    resources: { items: [] },
+    extensions: {},
+  });
+  if (!parsed.ok) throw new Error('Sparse cut fixture must be valid');
+  return parsed.document;
+}
+
 function selection(
   sheet: ReturnType<typeof sheetId>,
   row: number,
@@ -550,6 +645,8 @@ describe('SpreadsheetDocumentController', () => {
     const initial = directDocument();
     const controller = new SpreadsheetDocumentController(initial);
     const sheet = sheetId('sheet-1');
+    const validationRefs = () =>
+      controller.getSnapshot().projection[0]?.validations?.flatMap((rule) => rule.refs ?? []) ?? [];
     const command = {
       type: 'paste-internal',
       source: selection(sheet, 0, 0),
@@ -564,11 +661,81 @@ describe('SpreadsheetDocumentController', () => {
       pasted.workbook.sheets[0]?.cells.find((item) => item.row === 2 && item.column === 3)?.cell
         .validationId,
     ).toBeUndefined();
+    expect(validationRefs()).not.toContain('D3');
 
     controller.undo();
     expect(controller.getDocument()).toEqual(initial);
+    expect(validationRefs()).toContain('D3');
     controller.redo();
     expect(controller.getDocument()).toEqual(pasted);
+    expect(validationRefs()).not.toContain('D3');
+
+    controller.dispatch(
+      {
+        type: 'set-cell-text',
+        address: { sheet, row: 2, column: 3 },
+        text: '-1',
+      },
+      'ref',
+    );
+    expect(
+      controller
+        .getDocument()
+        .workbook.sheets[0]?.cells.find((item) => item.row === 2 && item.column === 3)?.cell
+        .validationId,
+    ).toBeUndefined();
+    expect(validationRefs()).not.toContain('D3');
+    expect(controller.validate()).toEqual({ valid: true, issues: [] });
+  });
+
+  it('keeps copied validation aligned across document, projection, validation, edits, and history', () => {
+    const initial = directDocument();
+    const controller = new SpreadsheetDocumentController(initial);
+    const sheet = sheetId('sheet-1');
+    const validationRefs = () =>
+      controller.getSnapshot().projection[0]?.validations?.flatMap((rule) => rule.refs ?? []) ?? [];
+    const command = {
+      type: 'paste-internal',
+      source: selection(sheet, 2, 3),
+      target: selection(sheet, 8, 8),
+      mode: 'all',
+      cut: false,
+    } as const;
+
+    controller.dispatch(command, 'context-menu');
+    const pasted = controller.getDocument();
+    expect(
+      pasted.workbook.sheets[0]?.cells.find((item) => item.row === 8 && item.column === 8)?.cell
+        .validationId,
+    ).toBe('validation-1');
+    expect(validationRefs()).toEqual(expect.arrayContaining(['D3', 'I9']));
+
+    controller.undo();
+    expect(controller.getDocument()).toEqual(initial);
+    expect(validationRefs()).toEqual(['D3']);
+    controller.redo();
+    expect(controller.getDocument()).toEqual(pasted);
+    expect(validationRefs()).toEqual(expect.arrayContaining(['D3', 'I9']));
+
+    controller.dispatch(
+      {
+        type: 'set-cell-text',
+        address: { sheet, row: 8, column: 8 },
+        text: '-1',
+      },
+      'ref',
+    );
+    expect(
+      controller
+        .getDocument()
+        .workbook.sheets[0]?.cells.find((item) => item.row === 8 && item.column === 8)?.cell
+        .validationId,
+    ).toBe('validation-1');
+    expect(validationRefs()).toEqual(expect.arrayContaining(['D3', 'I9']));
+    expect(controller.validate()).toMatchObject({
+      valid: false,
+      issues: [{ address: { sheet, row: 8, column: 8 } }],
+    });
   });
 
   it('removes a validated cut source without leaving a blank validation-only cell', () => {
@@ -598,8 +765,11 @@ describe('SpreadsheetDocumentController', () => {
   });
 
   it('autofill preserves the complete rich source cell', () => {
-    const controller = new SpreadsheetDocumentController(directDocument());
+    const initial = directDocument();
+    const controller = new SpreadsheetDocumentController(initial);
     const sheet = sheetId('sheet-1');
+    const validationRefs = () =>
+      controller.getSnapshot().projection[0]?.validations?.flatMap((rule) => rule.refs ?? []) ?? [];
     const source = richCells(controller.getDocument()).find(
       (item) => item.row === 2 && item.column === 3,
     )!.cell;
@@ -613,15 +783,46 @@ describe('SpreadsheetDocumentController', () => {
       'pointer',
     );
 
+    const filled = controller.getDocument();
+    expect(richCells(filled).find((item) => item.row === 8 && item.column === 3)?.cell).toEqual(
+      source,
+    );
+    expect(validationRefs()).toEqual(expect.arrayContaining(['D3', 'D9']));
+
+    controller.undo();
+    expect(controller.getDocument()).toEqual(initial);
+    expect(validationRefs()).toEqual(['D3']);
+    controller.redo();
+    expect(controller.getDocument()).toEqual(filled);
+    expect(validationRefs()).toEqual(expect.arrayContaining(['D3', 'D9']));
+
+    controller.dispatch(
+      {
+        type: 'set-cell-text',
+        address: { sheet, row: 8, column: 3 },
+        text: '-1',
+      },
+      'ref',
+    );
     expect(
-      richCells(controller.getDocument()).find((item) => item.row === 8 && item.column === 3)?.cell,
-    ).toEqual(source);
+      controller
+        .getDocument()
+        .workbook.sheets[0]?.cells.find((item) => item.row === 8 && item.column === 3)?.cell
+        .validationId,
+    ).toBe('validation-1');
+    expect(validationRefs()).toEqual(expect.arrayContaining(['D3', 'D9']));
+    expect(controller.validate()).toMatchObject({
+      valid: false,
+      issues: [{ address: { sheet, row: 8, column: 3 } }],
+    });
   });
 
   it('removes target validation when all-mode autofill uses an unvalidated cell', () => {
     const initial = directDocument();
     const controller = new SpreadsheetDocumentController(initial);
     const sheet = sheetId('sheet-1');
+    const validationRefs = () =>
+      controller.getSnapshot().projection[0]?.validations?.flatMap((rule) => rule.refs ?? []) ?? [];
     const command = {
       type: 'autofill',
       source: selection(sheet, 0, 0),
@@ -635,11 +836,165 @@ describe('SpreadsheetDocumentController', () => {
       filled.workbook.sheets[0]?.cells.find((item) => item.row === 2 && item.column === 3)?.cell
         .validationId,
     ).toBeUndefined();
+    expect(validationRefs()).not.toContain('D3');
+
+    controller.undo();
+    expect(controller.getDocument()).toEqual(initial);
+    expect(validationRefs()).toContain('D3');
+    controller.redo();
+    expect(controller.getDocument()).toEqual(filled);
+    expect(validationRefs()).not.toContain('D3');
+  });
+
+  it.each([
+    {
+      label: 'copy',
+      command: (sheet: ReturnType<typeof sheetId>) =>
+        ({
+          type: 'paste-internal',
+          source: selection(sheet, 0, 0),
+          target: selection(sheet, 0, 1),
+          mode: 'all',
+          cut: false,
+        }) as const,
+    },
+    {
+      label: 'autofill',
+      command: (sheet: ReturnType<typeof sheetId>) =>
+        ({
+          type: 'autofill',
+          source: selection(sheet, 0, 0),
+          target: selection(sheet, 0, 1),
+          mode: 'all',
+        }) as const,
+    },
+  ])('commits a schema-only $label exactly once with history', ({ command }) => {
+    const initial = schemaOnlyClipboardDocument();
+    const source = initial.workbook.sheets[0]!.cells[0]!.cell;
+    const controller = new SpreadsheetDocumentController(initial);
+    const subscriber = vi.fn();
+    const beforeNotify = vi.fn();
+    controller.subscribe(subscriber);
+
+    const outcome = controller.dispatch(command(sheetId('sheet-1')), 'context-menu', {
+      beforeNotify,
+    });
+
+    expect(outcome.status).toBe('committed');
+    expect(controller.getDocument().workbook.sheets[0]?.cells[1]?.cell).toEqual(source);
+    expect(controller.getSnapshot().revision).toBe(1);
+    expect(controller.historySize).toEqual({ undo: 1, redo: 0 });
+    expect(beforeNotify).toHaveBeenCalledOnce();
+    expect(subscriber).toHaveBeenCalledOnce();
 
     controller.undo();
     expect(controller.getDocument()).toEqual(initial);
     controller.redo();
-    expect(controller.getDocument()).toEqual(filled);
+    expect(controller.getDocument().workbook.sheets[0]?.cells[1]?.cell).toEqual(source);
+  });
+
+  it.each([
+    {
+      label: 'copy',
+      command: (sheet: ReturnType<typeof sheetId>) =>
+        ({
+          type: 'paste-internal',
+          source: selection(sheet, 0, 0),
+          target: selection(sheet, 0, 1),
+          mode: 'all',
+          cut: false,
+        }) as const,
+    },
+    {
+      label: 'autofill',
+      command: (sheet: ReturnType<typeof sheetId>) =>
+        ({
+          type: 'autofill',
+          source: selection(sheet, 0, 0),
+          target: selection(sheet, 0, 1),
+          mode: 'all',
+        }) as const,
+    },
+  ])('keeps a complete schema and operational $label no-op silent', ({ command }) => {
+    const controller = new SpreadsheetDocumentController(schemaOnlyClipboardDocument(true));
+    const before = controller.getSnapshot();
+    const subscriber = vi.fn();
+    const beforeNotify = vi.fn();
+    controller.subscribe(subscriber);
+
+    expect(
+      controller.dispatch(command(sheetId('sheet-1')), 'context-menu', { beforeNotify }),
+    ).toEqual({ status: 'noop' });
+    expect(controller.getSnapshot()).toEqual(before);
+    expect(controller.historySize).toEqual({ undo: 0, redo: 0 });
+    expect(beforeNotify).not.toHaveBeenCalled();
+    expect(subscriber).not.toHaveBeenCalled();
+  });
+
+  it('rolls back a rejected schema-only projection commit atomically', () => {
+    const initial = schemaOnlyClipboardDocument();
+    const controller = new SpreadsheetDocumentController(initial);
+    const before = controller.getSnapshot();
+    const subscriber = vi.fn();
+    controller.subscribe(subscriber);
+    const command = {
+      type: 'paste-internal',
+      source: selection(sheetId('sheet-1'), 0, 0),
+      target: selection(sheetId('sheet-1'), 0, 1),
+      mode: 'all',
+      cut: false,
+    } as const;
+
+    expect(() =>
+      controller.dispatch(command, 'context-menu', {
+        beforeNotify: () => {
+          throw new Error('reject schema-only projection');
+        },
+      }),
+    ).toThrow('reject schema-only projection');
+    expect(controller.getSnapshot()).toEqual(before);
+    expect(controller.getDocument()).toEqual(initial);
+    expect(controller.historySize).toEqual({ undo: 0, redo: 0 });
+    expect(subscriber).not.toHaveBeenCalled();
+
+    const accepted = controller.dispatch(command, 'context-menu');
+    expect(accepted.status).toBe('committed');
+    if (accepted.status === 'committed') {
+      expect(accepted.commit.change.id).toMatch(/^change-\d+-1$/);
+    }
+  });
+
+  it('keeps rich targets aligned with sparse cut semantics through undo and redo', () => {
+    const initial = sparseCutDocument();
+    const richTarget = initial.workbook.sheets[0]!.cells.find(
+      (item) => item.row === 1 && item.column === 1,
+    )!.cell;
+    const controller = new SpreadsheetDocumentController(initial);
+    const sheet = sheetId('sheet-1');
+
+    controller.dispatch(
+      {
+        type: 'paste-internal',
+        source: selection(sheet, 0, 0, 0, 1),
+        target: selection(sheet, 1, 0, 1, 1),
+        mode: 'all',
+        cut: true,
+      },
+      'context-menu',
+    );
+    const cut = controller.getDocument();
+    const cells = cut.workbook.sheets[0]!.cells;
+    expect(cells.find((item) => item.row === 0 && item.column === 0)).toBeUndefined();
+    expect(cells.find((item) => item.row === 1 && item.column === 0)?.cell.input).toEqual({
+      type: 'string',
+      value: 'move',
+    });
+    expect(cells.find((item) => item.row === 1 && item.column === 1)?.cell).toEqual(richTarget);
+
+    controller.undo();
+    expect(controller.getDocument()).toEqual(initial);
+    controller.redo();
+    expect(controller.getDocument()).toEqual(cut);
   });
 
   it('copies every CellInput variant with complete cell metadata', () => {

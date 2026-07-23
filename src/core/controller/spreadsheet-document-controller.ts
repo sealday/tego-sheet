@@ -14,7 +14,14 @@ import {
 } from './workbook-controller';
 import { SubscriptionStore } from './subscription-store';
 import { History, type HistoryCheckpoint } from './history';
-import { prepareSchemaCommand } from '../commands/schema-command-plan';
+import {
+  prepareSchemaCommand,
+  prepareSchemaProjectionCommit,
+} from '../commands/schema-command-plan';
+
+function sameJson(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
 
 export interface SpreadsheetControllerCommit<
   Result = void,
@@ -148,56 +155,87 @@ export class SpreadsheetDocumentController {
       } {
     this.legacy.assertCommand(command);
     const plan = prepareSchemaCommand(this.currentDocument, command, this.legacy.getSheetIds());
-    const beforeProjection = projectDocumentToLegacy(plan.document);
+    const plannedProjection = projectDocumentToLegacy(plan.document);
     const historyCheckpoint = this.documentHistory.checkpoint();
     let preparedDocument: SpreadsheetDocument | undefined;
     let preparedCommit: SpreadsheetControllerCommit<CommandResult<Command>, Command> | undefined;
     let outcome: ReturnType<WorkbookController['dispatch']>;
+    const beforeNotify: NonNullable<DispatchOptions['beforeNotify']> = (legacyCommit) => {
+      let candidate: SpreadsheetDocument;
+      if (command.type === 'undo') {
+        const entry = this.documentHistory.undo();
+        if (entry === null) throw new Error('Schema history is not aligned for undo');
+        candidate = entry.before;
+      } else if (command.type === 'redo') {
+        const entry = this.documentHistory.redo();
+        if (entry === null) throw new Error('Schema history is not aligned for redo');
+        candidate = entry.after;
+      } else {
+        candidate = projectLegacyToDocument(
+          plannedProjection,
+          legacyCommit.value,
+          plan.document,
+          this.legacy.getSheetIds(),
+          plan.authoritativeInputs,
+          plan.authoritativeValidations,
+        );
+        this.documentHistory.record({
+          before: this.currentDocument,
+          after: candidate,
+          metadata: null,
+        });
+      }
+      this.legacy.reconcileProjection(
+        projectDocumentToLegacy(candidate),
+        this.legacy.getSheetIds(),
+        command.type === 'undo' ? 'undo' : command.type === 'redo' ? 'redo' : 'commit',
+      );
+      const commit = cloneFrozenDocumentValue({
+        command: legacyCommit.command,
+        change: legacyCommit.change,
+        result: legacyCommit.result,
+        ['document']: candidate,
+      }) as SpreadsheetControllerCommit<CommandResult<Command>, Command>;
+      this.checkpointDocument = candidate;
+      try {
+        options.beforeNotify?.(commit as never);
+        preparedDocument = candidate;
+        preparedCommit = commit;
+      } finally {
+        this.checkpointDocument = undefined;
+      }
+    };
+    const legacyOptions: DispatchOptions = {
+      ...options,
+      beforeNotify,
+      notify: false,
+    };
     try {
-      outcome = this.legacy.dispatch(command, source, {
-        ...options,
-        beforeNotify: (legacyCommit) => {
-          let candidate: SpreadsheetDocument;
-          if (command.type === 'undo') {
-            const entry = this.documentHistory.undo();
-            if (entry === null) throw new Error('Schema history is not aligned for undo');
-            candidate = entry.before;
-          } else if (command.type === 'redo') {
-            const entry = this.documentHistory.redo();
-            if (entry === null) throw new Error('Schema history is not aligned for redo');
-            candidate = entry.after;
-          } else {
-            candidate = projectLegacyToDocument(
-              beforeProjection,
-              legacyCommit.value,
-              plan.document,
-              this.legacy.getSheetIds(),
-              plan.authoritativeInputs,
-              plan.authoritativeValidations,
-            );
-            this.documentHistory.record({
-              before: this.currentDocument,
-              after: candidate,
-              metadata: null,
-            });
-          }
-          const commit = cloneFrozenDocumentValue({
-            command: legacyCommit.command,
-            change: legacyCommit.change,
-            result: legacyCommit.result,
-            ['document']: candidate,
-          }) as SpreadsheetControllerCommit<CommandResult<Command>, Command>;
-          this.checkpointDocument = candidate;
-          try {
-            options.beforeNotify?.(commit as never);
-            preparedDocument = candidate;
-            preparedCommit = commit;
-          } finally {
-            this.checkpointDocument = undefined;
-          }
-        },
-        notify: false,
-      });
+      outcome = this.legacy.dispatch(command, source, legacyOptions);
+      if (outcome.status === 'noop' && !sameJson(plan.document, this.currentDocument)) {
+        if (command.type !== 'paste-internal' && command.type !== 'autofill') {
+          throw new Error(`Schema-only commit is not supported for ${command.type}`);
+        }
+        const projectionCommit = prepareSchemaProjectionCommit(
+          command,
+          this.legacy.getValue(),
+          this.legacy.getSheetIds(),
+          options.capturePasteValues !== false,
+        );
+        outcome = this.legacy.commitProjection(
+          command,
+          source,
+          {
+            value: plannedProjection,
+            sheetIds: this.legacy.getSheetIds(),
+            result: projectionCommit.result as CommandResult<Command>,
+            kind: projectionCommit.kind,
+            sheet: projectionCommit.sheet,
+            range: projectionCommit.range,
+          },
+          legacyOptions,
+        );
+      }
     } catch (error) {
       this.documentHistory.restore(historyCheckpoint);
       throw error;

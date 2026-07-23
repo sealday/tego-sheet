@@ -4,7 +4,7 @@ import { invalidCommand, validateCommand } from '../commands/validate-command';
 import type { CommandResult, WorkbookCommand } from '../commands/workbook-command';
 import { WorkbookState } from '../model/workbook-state';
 import { selectCellText } from '../selectors/cell';
-import type { ChangeSource, WorkbookChange } from '../types/changes';
+import type { ChangeSource, WorkbookChange, WorkbookChangeKind } from '../types/changes';
 import { assertCellAddress } from '../types/coordinates';
 import type { CellAddress, SheetId } from '../types/coordinates';
 import type { WorkbookData, WorkbookInput } from '../types/workbook';
@@ -70,6 +70,15 @@ interface MutationTransaction {
   readonly history: HistoryCheckpoint<WorkbookState, HistoryMetadata>;
   readonly revision: number;
   readonly changeSequence: number;
+}
+
+export interface ProjectionCommit<Result> {
+  readonly value: WorkbookInput;
+  readonly sheetIds: readonly SheetId[];
+  readonly result: Result;
+  readonly kind: WorkbookChangeKind;
+  readonly sheet: SheetId;
+  readonly range?: WorkbookChange['range'];
 }
 
 let nextControllerId = 1;
@@ -251,6 +260,56 @@ export class WorkbookController {
     this.runBeforeNotify(commit as CommandCommit<unknown, WorkbookCommand>, options, transaction);
     this.publish(commit, options);
     return { status: 'committed', commit };
+  }
+
+  /** @internal Commits a schema-authored projection when the legacy operation was a no-op. */
+  commitProjection<Command extends WorkbookCommand>(
+    command: Command,
+    source: ChangeSource,
+    projection: ProjectionCommit<CommandResult<Command>>,
+    options: DispatchOptions = {},
+  ): CommandOutcome<CommandResult<Command>, Command> {
+    this.ensureMutable();
+    const commandSnapshot = this.isolateCommand(command);
+    validateCommand(this.state, commandSnapshot);
+    const transaction = options.beforeNotify === undefined ? undefined : this.captureTransaction();
+    const before = this.state;
+    const after = before.replace(projection.value, projection.sheetIds);
+    const change = this.createChange(projection.kind, source, projection.sheet, projection.range);
+    this.state = after;
+    this.revision += 1;
+    const metadata = Object.freeze<HistoryMetadata>({ command: commandSnapshot, change });
+    this.history.record({ before, after, metadata });
+    const commit = this.createCommit(commandSnapshot, change, projection.result);
+    this.runBeforeNotify(commit as CommandCommit<unknown, WorkbookCommand>, options, transaction);
+    this.publish(commit, options);
+    return { status: 'committed', commit };
+  }
+
+  /**
+   * @internal Reconciles schema-authored fields into the current operational state and its
+   * matching history entry. This is called from an active `beforeNotify` transaction.
+   */
+  reconcileProjection(
+    input: WorkbookInput,
+    sheetIds: readonly SheetId[],
+    direction: 'commit' | 'undo' | 'redo',
+  ): void {
+    this.ensureActive();
+    const state = this.state.replace(input, sheetIds);
+    const checkpoint = this.history.checkpoint();
+    if (direction === 'undo') {
+      const redo = [...checkpoint.redo];
+      const entry = redo.at(-1);
+      if (entry !== undefined) redo[redo.length - 1] = Object.freeze({ ...entry, before: state });
+      this.history.restore({ undo: checkpoint.undo, redo });
+    } else {
+      const undo = [...checkpoint.undo];
+      const entry = undo.at(-1);
+      if (entry !== undefined) undo[undo.length - 1] = Object.freeze({ ...entry, after: state });
+      this.history.restore({ undo, redo: checkpoint.redo });
+    }
+    this.state = state;
   }
 
   undo(

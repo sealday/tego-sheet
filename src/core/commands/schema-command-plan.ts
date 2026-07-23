@@ -1,6 +1,12 @@
 import type { WorkbookCommand } from './workbook-command';
-import { assertClipboardResourceLimit, internalPasteRange } from '../operations/clipboard';
+import {
+  assertClipboardResourceLimit,
+  internalPasteRange,
+  pasteInternal,
+} from '../operations/clipboard';
 import type { CellRange, SheetId } from '../types/coordinates';
+import type { WorkbookChangeKind } from '../types/changes';
+import type { WorkbookData } from '../types/workbook';
 import type {
   Cell,
   SheetInput,
@@ -15,6 +21,13 @@ export interface SchemaCommandPlan {
   readonly document: SpreadsheetDocument;
   readonly authoritativeInputs: ReadonlyMap<string, ReadonlySet<string>>;
   readonly authoritativeValidations: ReadonlyMap<string, ReadonlyMap<string, ValidationId | null>>;
+}
+
+export interface SchemaProjectionCommit {
+  readonly result: unknown;
+  readonly kind: Extract<WorkbookChangeKind, 'clipboard' | 'autofill'>;
+  readonly sheet: SheetId;
+  readonly range: CellRange;
 }
 
 function cellKey(row: number, column: number): string {
@@ -215,6 +228,7 @@ function transformInternalPaste(
       const sourceColumn = source.start.column + ((column - range.start.column) % sourceColumns);
       const sourceCell = snapshots.get(cellKey(sourceRow, sourceColumn));
       const targetCell = getCell(targetSheet, row, column);
+      if (command.type === 'paste-internal' && command.cut && sourceCell === undefined) continue;
       setCell(targetSheet, row, column, mapPasteCell(targetCell, sourceCell, command.mode));
       if (sourceCell?.input.type === 'custom' && command.mode !== 'format') {
         const keys = authoritativeInputs.get(targetSheet.id) ?? new Set<string>();
@@ -228,6 +242,46 @@ function transformInternalPaste(
       }
     }
   }
+}
+
+export function prepareSchemaProjectionCommit(
+  command: Extract<WorkbookCommand, { readonly type: 'paste-internal' | 'autofill' }>,
+  projection: WorkbookData,
+  sheetIds: readonly SheetId[],
+  capturePasteValues: boolean,
+): SchemaProjectionCommit {
+  const range = internalPasteRange(
+    command.source.range,
+    command.target.range,
+    command.type === 'paste-internal' && command.cut,
+  );
+  if (command.type === 'autofill') {
+    return {
+      result: undefined,
+      kind: 'autofill',
+      sheet: command.target.sheet,
+      range,
+    };
+  }
+  const sourceSheet = projection[sheetIndex(sheetIds, command.source.sheet)];
+  const targetSheet = projection[sheetIndex(sheetIds, command.target.sheet)];
+  if (sourceSheet === undefined || targetSheet === undefined) {
+    throw new Error('Schema-only clipboard projection lost its source or target sheet');
+  }
+  return {
+    result: pasteInternal(
+      targetSheet,
+      sourceSheet,
+      command.source.range,
+      command.target.range,
+      command.mode,
+      command.cut,
+      capturePasteValues,
+    ).values,
+    kind: 'clipboard',
+    sheet: command.target.sheet,
+    range,
+  };
 }
 
 export function prepareSchemaCommand(
