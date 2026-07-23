@@ -1,6 +1,6 @@
-import { createFormulaEvaluationBudget } from '../../core/formulas/evaluator';
 import type { CellPoint, CellRange } from '../../core/types/coordinates';
 import type { CellStyle, SheetData } from '../../core/types/workbook';
+import { createLegacyPresentationResolver, type CellPresentation } from '../../presentation';
 import { frozenQuadrants } from '../geometry/frozen-pane-geometry';
 import type { ViewportMetrics } from '../ports';
 import { configuredCellDefaultStyle, paintCells, paintFilterOverlays } from './cell-painter';
@@ -21,6 +21,10 @@ export interface CanvasRenderSnapshot {
   readonly selection?: CellRange;
   readonly invalidCells?: readonly CellPoint[];
   readonly showGrid?: boolean;
+  /** Shared presentation batch for the visible document revision. */
+  readonly presentations?: {
+    readonly resolve: (point: CellPoint) => CellPresentation;
+  };
 }
 
 export interface CanvasEngineOptions {
@@ -96,13 +100,19 @@ export class CanvasEngine {
     });
     this.draw.resize(viewport.width, viewport.height);
     this.draw.clear(viewport.width, viewport.height);
-    const formulaBudget = createFormulaEvaluationBudget(250_000);
+    const legacyPresentations = createLegacyPresentationResolver(snapshot.sheet, this.defaultStyle);
+    const presentations =
+      snapshot.presentations === undefined
+        ? legacyPresentations
+        : {
+            resolve: (point: CellPoint) => snapshot.presentations!.resolve(point),
+          };
     for (const { pane, indexes, cells } of plans) {
       this.draw.withClip(
         pane,
         () => {
           if (snapshot.showGrid !== false) paintGrid(this.draw, indexes, viewport);
-          paintCells(this.draw, snapshot, cells, formulaBudget, this.defaultStyle);
+          paintCells(this.draw, snapshot, cells, presentations);
           paintFilterOverlays(this.draw, snapshot, indexes.rows, indexes.columns);
           paintSelection(this.draw, snapshot.selection, viewport, pane.kind);
         },

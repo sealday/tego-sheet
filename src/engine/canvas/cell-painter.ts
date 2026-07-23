@@ -1,11 +1,14 @@
 import { parseA1Range } from '../../core/coordinates/ranges';
-import { createFormulaEvaluationBudget, evaluateCell } from '../../core/formulas/evaluator';
-import type { FormulaEvaluationBudget } from '../../core/formulas/evaluator';
-import { formatValue, renderFormulaValue } from '../../core/formulas/rendered-value';
 import { getCellData } from '../../core/model/cells';
-import { selectCellStyle } from '../../core/selectors/style';
 import type { CellPoint, CellRange } from '../../core/types/coordinates';
-import type { CellData, CellStyle, SheetData } from '../../core/types/workbook';
+import type { CellStyle, SheetData } from '../../core/types/workbook';
+import type { CellData } from '../../core/types/workbook';
+import type {
+  CellPresentation,
+  LegacyPresentationResolver,
+  ResolvedStyle,
+} from '../../presentation';
+import { createLegacyPresentationResolver } from '../../presentation';
 import { cellRect } from '../geometry/grid-geometry';
 import type { CssRect, ViewportMetrics } from '../ports';
 import type { DrawContext } from './draw-context';
@@ -37,52 +40,52 @@ export interface CellPaintSnapshot {
   readonly invalidCells?: readonly CellPoint[];
 }
 
-export interface CellPresentation {
+/** @deprecated Use the shared presentation resolver. */
+export interface LegacyCellPresentation {
   readonly cell: CellData | null;
   readonly style: CellStyle;
   readonly text: string;
   readonly printable: boolean;
 }
 
-function isMergeAnchor(point: CellPoint, viewport: ViewportMetrics): boolean {
-  const merge = viewport.model.mergeAt(point);
-  return merge === null || (merge.start.row === point.row && merge.start.column === point.column);
-}
-
-function cellSource(
-  sheet: Readonly<SheetData>,
-  point: CellPoint,
-): string | number | boolean | null {
-  return getCellData(sheet, point.row, point.column)?.text ?? null;
-}
-
+/** @deprecated Compatibility projection for older engine tests and consumers. */
 export function resolveCellPresentation(
   sheet: Readonly<SheetData>,
   point: CellPoint,
   print: boolean,
-  budget: FormulaEvaluationBudget = createFormulaEvaluationBudget(250_000),
+  _budget?: unknown,
   defaultStyle: CellStyle = DEFAULT_STYLE,
-): CellPresentation {
-  const cell = getCellData(sheet, point.row, point.column);
-  const style = selectCellStyle(sheet, point.row, point.column, defaultStyle);
-  const printable = cell?.printable !== false;
-  if (print && !printable) return { cell, style, text: '', printable };
-  let rendered;
-  if (typeof cell?.text === 'string' && cell.text.startsWith('=') && cell.value !== undefined) {
-    rendered = cell.value as string | number | boolean;
-  } else {
-    try {
-      rendered = evaluateCell(point, (candidate) => cellSource(sheet, candidate), budget);
-    } catch {
-      rendered = '#ERROR!' as const;
-    }
-  }
+): LegacyCellPresentation {
+  const presentation = createLegacyPresentationResolver(sheet, defaultStyle).resolve(
+    point,
+    print ? 'print' : 'screen',
+  );
   return {
-    cell,
-    style,
-    text: formatValue(style.format, renderFormulaValue(rendered)),
-    printable,
+    cell: getCellData(sheet, point.row, point.column),
+    style: {
+      bgcolor: presentation.style.backgroundColor,
+      color: presentation.style.color,
+      align: presentation.style.horizontalAlign,
+      valign: presentation.style.verticalAlign,
+      textwrap: presentation.style.wrap,
+      ...(presentation.style.numberFormat === undefined
+        ? {}
+        : { format: presentation.style.numberFormat }),
+      font: {
+        name: presentation.style.fontFamily,
+        size: presentation.style.fontSize,
+        bold: presentation.style.bold,
+        italic: presentation.style.italic,
+      },
+    },
+    text: presentation.formattedText,
+    printable: presentation.visibility.printable,
   };
+}
+
+function isMergeAnchor(point: CellPoint, viewport: ViewportMetrics): boolean {
+  const merge = viewport.model.mergeAt(point);
+  return merge === null || (merge.start.row === point.row && merge.start.column === point.column);
 }
 
 const FONT_POINT_PIXELS = new Map<number, number>([
@@ -104,27 +107,26 @@ const FONT_POINT_PIXELS = new Map<number, number>([
   [42, 56],
 ]);
 
-function fontPixelSize(style: CellStyle, visualScale: number): number {
-  const pointSize = style.font?.size ?? 10;
+function fontPixelSize(style: ResolvedStyle, visualScale: number): number {
+  const pointSize = style.fontSize;
   return (FONT_POINT_PIXELS.get(pointSize) ?? pointSize) * visualScale;
 }
 
-function fontString(style: CellStyle, visualScale: number): string {
-  const font = style.font ?? {};
+function fontString(style: ResolvedStyle, visualScale: number): string {
   const size = fontPixelSize(style, visualScale);
-  return `${font.italic ? 'italic ' : ''}${font.bold ? 'bold ' : ''}${size}px ${font.name ?? 'Arial'}`;
+  return `${style.italic ? 'italic ' : ''}${style.bold ? 'bold ' : ''}${size}px ${style.fontFamily}`;
 }
 
-function textX(rect: CssRect, style: CellStyle, visualScale: number): number {
+function textX(rect: CssRect, style: ResolvedStyle, visualScale: number): number {
   const padding = 5 * visualScale;
-  return style.align === 'right'
+  return style.horizontalAlign === 'right'
     ? rect.left + rect.width - padding
-    : style.align === 'center'
+    : style.horizontalAlign === 'center'
       ? rect.left + rect.width / 2
       : rect.left + padding;
 }
 
-function border(draw: DrawContext, rect: CssRect, style: CellStyle, visualScale: number): void {
+function border(draw: DrawContext, rect: CssRect, style: ResolvedStyle, visualScale: number): void {
   const borders = style.border;
   if (borders === undefined) return;
   const sides = [
@@ -248,15 +250,15 @@ function paintCellContent(
   visualScale: number,
 ): void {
   const style = presentation.style;
-  draw.fillRect(cellContentRect(rect, visualScale), style.bgcolor ?? '#ffffff');
-  if (presentation.text === '') return;
+  draw.fillRect(cellContentRect(rect, visualScale), style.backgroundColor);
+  if (presentation.formattedText === '') return;
   const font = fontString(style, visualScale);
   const lines = wrapLines(
     draw,
-    presentation.text,
+    presentation.formattedText,
     font,
     Math.max(0, rect.width - 12 * visualScale),
-    style.textwrap === true,
+    style.wrap,
     visualScale,
   );
   const x = textX(rect, style, visualScale);
@@ -265,9 +267,9 @@ function paintCellContent(
   const textHeight = (lines.length - 1) * lineHeight;
   const padding = 5 * visualScale;
   const firstY =
-    style.valign === 'top'
+    style.verticalAlign === 'top'
       ? rect.top + padding
-      : style.valign === 'bottom'
+      : style.verticalAlign === 'bottom'
         ? rect.top + rect.height - padding - textHeight
         : rect.top + rect.height / 2 - textHeight / 2;
   for (const [index, line] of lines.entries()) {
@@ -276,40 +278,44 @@ function paintCellContent(
       line,
       { x, y },
       {
-        align: style.align ?? 'left',
-        baseline: style.valign ?? 'middle',
-        color: style.color ?? '#0a0a0a',
+        align: style.horizontalAlign,
+        baseline: style.verticalAlign,
+        color: style.color,
         font,
       },
     );
     const width = draw.measurement.measureText(line, font);
     const startX =
-      style.align === 'center' ? x - width / 2 : style.align === 'right' ? x - width : x;
+      style.horizontalAlign === 'center'
+        ? x - width / 2
+        : style.horizontalAlign === 'right'
+          ? x - width
+          : x;
     if (style.underline === true) {
       const underlineY =
-        style.valign === 'top'
+        style.verticalAlign === 'top'
           ? y + fontSize + 2 * visualScale
-          : style.valign === 'bottom'
+          : style.verticalAlign === 'bottom'
             ? y
             : y + fontSize / 2;
       draw.line(
         { x: startX, y: underlineY },
         { x: startX + width, y: underlineY },
-        { color: style.color ?? '#0a0a0a', scale: visualScale },
+        { color: style.color, scale: visualScale },
       );
     }
     if (style.strike === true) {
       const strikeY =
-        style.valign === 'top'
+        style.verticalAlign === 'top'
           ? y + fontSize / 2 + 2 * visualScale
-          : style.valign === 'bottom'
+          : style.verticalAlign === 'bottom'
             ? y - fontSize / 2
             : y;
       draw.line(
         { x: startX, y: strikeY },
         { x: startX + width, y: strikeY },
         {
-          color: style.color ?? '#0a0a0a',
+          color: style.color,
           scale: visualScale,
         },
       );
@@ -336,8 +342,7 @@ export function paintCells(
   draw: DrawContext,
   snapshot: CellPaintSnapshot,
   cells: readonly CellPoint[],
-  budget: FormulaEvaluationBudget,
-  defaultStyle: CellStyle,
+  presentations: LegacyPresentationResolver,
 ): void {
   const invalid = new Set(
     (snapshot.invalidCells ?? []).map((point) => `${point.row}:${point.column}`),
@@ -346,16 +351,10 @@ export function paintCells(
     if (getCellData(snapshot.sheet, point.row, point.column) === null) continue;
     if (!isMergeAnchor(point, snapshot.viewport)) continue;
     const rect = cellRect(point, snapshot.viewport);
-    const presentation = resolveCellPresentation(
-      snapshot.sheet,
-      point,
-      false,
-      budget,
-      defaultStyle,
-    );
+    const presentation = presentations.resolve(point, 'screen');
     paintCellAppearance(draw, rect, presentation, 1, () => {
       if (invalid.has(`${point.row}:${point.column}`)) marker(draw, rect, 'rgba(255, 0, 0, .65)');
-      if (presentation.cell?.editable === false) marker(draw, rect, 'rgba(0, 255, 0, .85)');
+      if (presentation.accessibility.readOnly) marker(draw, rect, 'rgba(0, 255, 0, .85)');
     });
   }
 }

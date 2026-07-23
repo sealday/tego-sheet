@@ -57,6 +57,8 @@ import {
   filterValuesForSelection,
   mountActiveSheetPrint,
 } from './sheet-chrome-runtime';
+import { AccessibilityGrid } from './accessibility/accessibility-grid';
+import { createLegacyPresentationResolver } from '../presentation';
 
 function callbacksFromProps(props: TegoSheetProps): TegoSheetCallbacks {
   return {
@@ -934,6 +936,23 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
   };
   const addFirstSheet = () => tabActions.add();
   const activeData = runtimeSheet(renderRuntime);
+  const accessibilityPresentations = useMemo(
+    () =>
+      activeData === null
+        ? null
+        : createLegacyPresentationResolver(
+            activeData,
+            initialOptions.defaultStyle ?? {
+              bgcolor: '#ffffff',
+              color: '#0a0a0a',
+              align: 'left',
+              valign: 'middle',
+              textwrap: false,
+              font: { name: 'Arial', size: 10, bold: false, italic: false },
+            },
+          ),
+    [activeData, initialOptions.defaultStyle],
+  );
   const activeStyle =
     selection === null || activeData === null
       ? (initialOptions.defaultStyle ?? {})
@@ -1062,7 +1081,36 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
         {sheets.length === 0 ? (
           <EmptyWorkbook readOnly={renderRuntime.readOnly} onAddSheet={addFirstSheet} t={t} />
         ) : (
-          <canvas ref={canvasRef} className="tego-sheet__canvas" />
+          <>
+            <canvas ref={canvasRef} className="tego-sheet__canvas" />
+            {selection === null ||
+            activeData === null ||
+            accessibilityPresentations === null ? null : (
+              <div className="tego-sheet__accessibility-grid">
+                <AccessibilityGrid
+                  rowCount={Math.max(
+                    selection.active.row + 1,
+                    typeof activeData.rows?.len === 'number' ? activeData.rows.len : 0,
+                  )}
+                  columnCount={Math.max(
+                    selection.active.column + 1,
+                    typeof activeData.cols?.len === 'number' ? activeData.cols.len : 0,
+                  )}
+                  viewport={{
+                    rowStart: Math.max(0, selection.active.row - 9),
+                    rowEnd: selection.active.row + 10,
+                    columnStart: Math.max(0, selection.active.column - 4),
+                    columnEnd: selection.active.column + 5,
+                  }}
+                  activeCell={selection.active}
+                  selection={selection.range}
+                  resolvePresentation={(point) =>
+                    accessibilityPresentations.resolve(point, 'screen')
+                  }
+                />
+              </div>
+            )}
+          </>
         )}
       </SheetChrome>
     </div>

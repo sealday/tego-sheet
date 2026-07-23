@@ -1,20 +1,41 @@
 import { rangesIntersect } from '../../core/coordinates/ranges';
-import { createFormulaEvaluationBudget } from '../../core/formulas/evaluator';
+import { getCellData } from '../../core/model/cells';
 import type { CellPoint, CellRange } from '../../core/types/coordinates';
 import type { CellStyle, SheetData } from '../../core/types/workbook';
+import {
+  createLegacyPresentationResolver,
+  resolveLegacyStyle,
+  type CellPresentation,
+  type LegacyPresentationResolver,
+} from '../../presentation';
 import { createSheetGridModel } from '../ports';
 import type { CssRect } from '../ports';
-import {
-  configuredCellDefaultStyle,
-  paintCellAppearance,
-  resolveCellPresentation,
-} from './cell-painter';
-import type { CellPresentation } from './cell-painter';
+import { configuredCellDefaultStyle, paintCellAppearance } from './cell-painter';
 import { currentDevicePixelRatio, DrawContext } from './draw-context';
 import type { CanvasSurfacePort, TextMeasurementPort } from './draw-context';
 
 const MAX_PRINT_CELLS = 250_000;
 const MAX_PRINT_PAGES = 10_000;
+
+function defaultStyleFromResolved(style: import('../../presentation').ResolvedStyle): CellStyle {
+  return {
+    bgcolor: style.backgroundColor,
+    color: style.color,
+    align: style.horizontalAlign,
+    valign: style.verticalAlign,
+    textwrap: style.wrap,
+    ...(style.numberFormat === undefined ? {} : { format: style.numberFormat }),
+    ...(style.underline === undefined ? {} : { underline: style.underline }),
+    ...(style.strike === undefined ? {} : { strike: style.strike }),
+    ...(style.border === undefined ? {} : { border: style.border as CellStyle['border'] }),
+    font: {
+      name: style.fontFamily,
+      size: style.fontSize,
+      bold: style.bold,
+      italic: style.italic,
+    },
+  };
+}
 
 function isolated<T>(value: T): T {
   if (Array.isArray(value)) {
@@ -209,6 +230,7 @@ function buildPageCells(
   columnEnd: number,
   invalidCells: ReadonlySet<string>,
   defaultStyle: CellStyle,
+  presentations: LegacyPresentationResolver,
 ): readonly PrintCellLayout[] {
   if (rows.end < rows.start) return [];
   const model = createSheetGridModel(sheet);
@@ -218,25 +240,25 @@ function buildPageCells(
   };
   const cells: PrintCellLayout[] = [];
   const seen = new Set<string>();
-  const budget = createFormulaEvaluationBudget(250_000);
   const add = (point: CellPoint): void => {
     const key = `${point.row}:${point.column}`;
     if (seen.has(key)) return;
     seen.add(key);
     const merge = model.mergeAt(point);
     if (mergeInterior(point, merge)) return;
-    const presentation = resolveCellPresentation(sheet, point, true, budget, defaultStyle);
-    if (presentation.cell === null) return;
+    const presentation = presentations.resolve(point, 'print');
+    const sourceCell = getCellData(sheet, point.row, point.column);
+    if (sourceCell === null) return;
     cells.push({
       row: point.row,
       column: point.column,
       rect: logicalRect(point, merge, model),
-      text: presentation.text,
-      printable: presentation.printable,
-      style: presentation.style,
+      text: presentation.formattedText,
+      printable: presentation.visibility.printable,
+      style: defaultStyleFromResolved(presentation.style),
       merge,
       invalid: invalidCells.has(key),
-      editable: presentation.cell.editable !== false,
+      editable: !presentation.accessibility.readOnly,
     });
   };
   for (let row = rows.start; row <= rows.end; row += 1) {
@@ -292,13 +314,16 @@ export function createPrintLayout(
     (options.invalidCells ?? []).map((point) => `${point.row}:${point.column}`),
   );
   const defaultStyle = configuredCellDefaultStyle(options.defaultStyle);
+  const presentations = createLegacyPresentationResolver(sheet, defaultStyle);
   const pages = rows.map((range, index) =>
     Object.freeze({
       index,
       rowStart: range.start,
       rowEnd: range.end,
       contentTop: model.rowOffset(Math.min(range.start, model.rowCount)),
-      cells: Object.freeze(buildPageCells(sheet, range, end.column, invalidCells, defaultStyle)),
+      cells: Object.freeze(
+        buildPageCells(sheet, range, end.column, invalidCells, defaultStyle, presentations),
+      ),
     }),
   );
   return isolated({
@@ -326,7 +351,28 @@ function canvasMeasurement(canvas: CanvasSurfacePort): TextMeasurementPort {
 }
 
 function printPresentation(cell: PrintCellLayout): CellPresentation {
-  return { cell: null, style: cell.style, text: cell.text, printable: cell.printable };
+  return Object.freeze({
+    address: Object.freeze({
+      sheetId: 'legacy-sheet' as import('../../document').DocumentSheetId,
+      row: cell.row,
+      column: cell.column,
+    }),
+    value: Object.freeze({ type: 'string' as const, value: cell.text }),
+    formattedText: cell.text,
+    style: resolveLegacyStyle(cell.style),
+    validation: Object.freeze(
+      cell.invalid
+        ? { status: 'error' as const, message: 'Cell validation failed' }
+        : { status: 'valid' as const },
+    ),
+    annotations: Object.freeze([]),
+    visibility: Object.freeze({ hidden: false, printable: cell.printable }),
+    accessibility: Object.freeze({
+      label: cell.text,
+      readOnly: !cell.editable,
+      invalid: cell.invalid,
+    }),
+  });
 }
 
 function printMarker(draw: DrawContext, rect: CssRect, color: string, scale: number): void {

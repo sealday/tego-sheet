@@ -216,6 +216,43 @@ export type {
   NumberFormatSection,
   NumberFormatToken,
 } from './format';
+export {
+  createFontMetrics,
+  createPresentationCache,
+  createPresentationResolver,
+} from './presentation';
+export type {
+  CellPresentation,
+  FontFaceMetrics,
+  FontMetrics,
+  FontMetricsOptions,
+  PresentationAnnotation,
+  PresentationCache,
+  PresentationCacheOptions,
+  PresentationCacheStats,
+  PresentationEnvironment,
+  PresentationProblem,
+  PresentationResolver,
+  PresentationResolverOptions,
+  PresentationRevisions,
+  PresentationValid,
+  PresentationValidation,
+  ResolvedFontMetrics,
+  ResolvedStyle,
+} from './presentation';
+export { createPrintDisplayList } from './print';
+export type {
+  DisplayRect,
+  PrintDisplayCell,
+  PrintDisplayCommand,
+  PrintDisplayList,
+  PrintDisplayListInput,
+  PrintDisplayPage,
+  PrintDisplayPageInput,
+  PrintFillRectCommand,
+  PrintStrokeRectCommand,
+  PrintTextCommand,
+} from './print';
 export { TegoSheet } from './react/tego-sheet';
 export type {
   SheetTabsRenderer,

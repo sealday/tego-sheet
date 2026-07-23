@@ -23,6 +23,10 @@ it('imports the library entry without browser globals', async () => {
     'createNumberFormatter',
     'parseNumberFormat',
     'renderNumberFormatToken',
+    'createFontMetrics',
+    'createPresentationCache',
+    'createPresentationResolver',
+    'createPrintDisplayList',
     'TegoSheet',
   ]);
 });
