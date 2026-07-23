@@ -21,8 +21,10 @@ it('maps every roadmap item to acceptance evidence without duplicate ids', () =>
   expect(roadmapAcceptance.map(({ id, phase }) => ({ id, phase }))).toEqual(
     allRoadmapItems.map(({ id, phase }) => ({ id, phase })),
   );
-  expect(roadmapAcceptance.every((entry) => entry.state === 'planned')).toBe(true);
-  expect(getRoadmapDeliveryState('workbook-2')).toBe('planned');
+  expect(
+    roadmapAcceptance.filter((entry) => entry.state === 'shipped').map((entry) => entry.id),
+  ).toEqual(['workbook-2']);
+  expect(getRoadmapDeliveryState('workbook-2')).toBe('shipped');
 });
 
 it('keeps canonical ids when an item moves out of the planned projection', () => {

@@ -35,12 +35,12 @@ const miniRfcs = {
 describe('product roadmap data', () => {
   it('contains the approved capabilities in dependency order', () => {
     expect(roadmapPhases.map((phase) => phase.id)).toEqual([0, 1, 2, 3, 4]);
-    expect(roadmapItems).toHaveLength(33);
-    expect(allRoadmapItems).toHaveLength(roadmapItems.length);
-    expect(shippedRoadmapItems).toEqual([]);
-    expect(new Set(roadmapItems.map((item) => item.id))).toHaveProperty('size', 33);
+    expect(roadmapItems).toHaveLength(32);
+    expect(allRoadmapItems).toHaveLength(roadmapItems.length + shippedRoadmapItems.length);
+    expect(shippedRoadmapItems.map((item) => item.id)).toEqual(['workbook-2']);
+    expect(new Set(roadmapItems.map((item) => item.id))).toHaveProperty('size', 32);
     expect(roadmapItems.every((item) => item.status === 'planned')).toBe(true);
-    expect(roadmapItems[0]?.title).toBe('Workbook 2.0 typed document model');
+    expect(roadmapItems[0]?.title).toBe('Atomic Command / Transaction');
     expect(
       roadmapItems.some(
         (item) => item.title === 'Safe scalar bindings, repeat rows and conditional ranges',
@@ -91,6 +91,33 @@ describe('product roadmap data', () => {
     );
   });
 
+  it('keeps the shipped record in exact parity with the typed shipped data', () => {
+    const tableRows = roadmapDocument('shipped.md')
+      .split('\n')
+      .filter((line) => /^\| [0-4] /.test(line))
+      .map((line) => {
+        const [phase, title, status, design] = line
+          .split('|')
+          .slice(1, -1)
+          .map((column) => column.trim());
+        return {
+          phase: Number(phase),
+          title,
+          status,
+          design: design?.match(/\(([^)]+)\)/)?.[1],
+        };
+      });
+
+    expect(tableRows).toEqual(
+      shippedRoadmapItems.map((item) => ({
+        phase: item.phase,
+        title: item.title,
+        status: item.status,
+        design: `${basename(item.designTo)}.md`,
+      })),
+    );
+  });
+
   it('publishes all 34 Mini-RFCs with the required product and technical sections', () => {
     const requiredSections = [
       /产品目标/,
@@ -121,7 +148,7 @@ describe('product roadmap data', () => {
           expect(miniRfc, `${file} ${id} must include ${section}`).toMatch(section);
         }
 
-        expect(miniRfc).toContain('planned');
+        expect(miniRfc).toContain(id === 'F1' ? 'shipped' : 'planned');
       }
     }
   });

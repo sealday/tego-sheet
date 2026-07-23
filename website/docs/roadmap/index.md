@@ -12,7 +12,6 @@
 
 | Phase | Capability                                                   | Status  | Design                                                  |
 | ----- | ------------------------------------------------------------ | ------- | ------------------------------------------------------- |
-| 0     | Workbook 2.0 typed document model                            | planned | [Foundation](foundation.md)                             |
 | 0     | Atomic Command / Transaction                                 | planned | [Foundation](foundation.md)                             |
 | 0     | Formula dependency and number-format core                    | planned | [Foundation](foundation.md)                             |
 | 0     | Shared render semantics and Canvas accessibility             | planned | [Foundation](foundation.md)                             |
@@ -45,6 +44,8 @@
 | 4     | Collaboration and remote selection adapters                  | planned | [Host integrations](host-integrations.md)               |
 | 4     | Permission and comment adapters                              | planned | [Host integrations](host-integrations.md)               |
 | 4     | Validated AI command proposals                               | planned | [Host integrations](host-integrations.md)               |
+
+已完成能力见 [Shipped Roadmap capabilities](shipped.md)。
 
 ## Maintenance rules
 

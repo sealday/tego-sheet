@@ -84,6 +84,7 @@ export const allRoadmapItems = [
     'Workbook 2.0 typed document model',
     'Stable IDs, typed cells and deterministic serialization.',
     '/docs/roadmap/foundation',
+    'shipped',
   ),
   item(
     'transactions',
