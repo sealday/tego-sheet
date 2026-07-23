@@ -16,7 +16,10 @@ export interface CalculationEnvironment {
   /** Workbook Excel serial-date system. */
   readonly dateSystem: 'excel-1900' | 'excel-1904';
   /** Injected clock; the engine samples it once per recalculation. */
-  readonly clock: { readonly now: () => number };
+  readonly clock: {
+    /** Returns the explicitly controlled Unix timestamp in milliseconds. */
+    readonly now: () => number;
+  };
   /** Host-controlled invalidation token for volatile functions. */
   readonly tick: number;
   /** Version expected for the supplied function registry. */

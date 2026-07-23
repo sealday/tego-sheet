@@ -17,7 +17,12 @@ export interface FormulaFunctionDefinition {
   /** Case-insensitive function name. */
   readonly name: string;
   /** Supported inclusive argument-count bounds. */
-  readonly parameters: { readonly minimum: number; readonly maximum?: number };
+  readonly parameters: {
+    /** Minimum accepted argument count. */
+    readonly minimum: number;
+    /** Optional maximum accepted argument count. */
+    readonly maximum?: number;
+  };
   /** Declared result category. */
   readonly returns: FormulaValue['type'];
   /** Whether an explicit tick invalidates the function. */
