@@ -108,6 +108,8 @@ export interface TemplateExpressionScope {
   readonly root: unknown;
   /** Current repeat item. */
   readonly item?: unknown;
+  /** Read-only immediately enclosing repeat item. */
+  readonly parent?: unknown;
   /** Zero-based repeat index. */
   readonly index?: number;
   /** Whether the item is first. */
@@ -501,6 +503,7 @@ export function evaluateTemplateExpression(
     ...(root !== null && typeof root === 'object' && !Array.isArray(root) ? root : {}),
     root,
     item: frozenValue(scope.item),
+    parent: frozenValue(scope.parent),
     $index: scope.index ?? 0,
     $first: scope.first ?? false,
     $last: scope.last ?? false,

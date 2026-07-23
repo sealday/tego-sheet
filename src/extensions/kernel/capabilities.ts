@@ -1,6 +1,7 @@
 import type { JsonValue } from '../../core/types/json';
 import type { Diagnostic } from '../../document/diagnostics';
 import type { FormulaFunctionDefinition } from '../../formula/function-registry';
+import type { ResourceResolver } from '../../template/resources';
 import type { ExtensionManifest, KernelEnvironment } from './manifest';
 
 /** Scalar value exposed to the formula evaluator by a custom cell type. */
@@ -39,6 +40,8 @@ export interface KernelCapabilities {
   'cell-type': BuiltInCellTypeDefinition<JsonValue>;
   /** One explicitly registered formula function definition. */
   'formula-function': FormulaFunctionDefinition;
+  /** Explicit host-owned template resource resolver. */
+  'resource-resolver': ResourceResolver;
 }
 
 /** Registered capability discriminator. */

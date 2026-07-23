@@ -28,14 +28,14 @@ export interface TemplateDesignerProps {
 
 function bindingExpression(binding: TemplateBinding): string {
   if (binding.type === 'value') return binding.expression;
-  return binding.type === 'repeat-rows' ? binding.source : binding.when;
+  return binding.type === 'conditional-range' ? binding.when : binding.source;
 }
 
 function updateBindingExpression(binding: TemplateBinding, value: string): TemplateBinding {
   if (binding.type === 'value') return { ...binding, expression: value };
-  return binding.type === 'repeat-rows'
-    ? { ...binding, source: value }
-    : { ...binding, when: value };
+  return binding.type === 'conditional-range'
+    ? { ...binding, when: value }
+    : { ...binding, source: value };
 }
 
 function firstTarget(template: SpreadsheetTemplate): DocumentCellRange {
@@ -105,6 +105,8 @@ export function TemplateDesigner({
       'binding',
       template.bindings.map(({ id: bindingId }) => bindingId),
     ) as BindingId;
+    // The TP1 designer exposes the TP1 creation palette; advanced kinds use the
+    // structure-tree editor and API rather than falling through to conditionals.
     const binding: TemplateBinding =
       type === 'value'
         ? {
@@ -122,7 +124,7 @@ export function TemplateDesigner({
               empty: 'remove',
               pageBreak: 'auto',
             }
-          : { id, type, range: selectedRange, when: 'visible' };
+          : { id, type: 'conditional-range', range: selectedRange, when: 'visible' };
     onChange({ ...template, bindings: [...template.bindings, binding] });
   };
   const updateProfile = (

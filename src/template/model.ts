@@ -12,8 +12,16 @@ import type { FontMetrics } from '../presentation';
 import type { PrintDisplayList } from '../print';
 import type { CompiledTemplateExpression, TemplateFormatterRegistry } from './expression';
 
-/** Binding kinds supported by the TP1 compiler. */
-export type TemplateBinding = ValueBinding | RepeatRowsBinding | ConditionalRangeBinding;
+/** Binding kinds supported by the template compiler. */
+export type TemplateBinding =
+  | ValueBinding
+  | RepeatRowsBinding
+  | RepeatColumnsBinding
+  | RepeatRangeBinding
+  | RepeatPageBinding
+  | RepeatSheetBinding
+  | ConditionalRangeBinding
+  | SubtemplateBinding;
 
 /** Writes one resolved scalar into one cell. */
 export interface ValueBinding {
@@ -43,6 +51,51 @@ export interface RepeatRowsBinding {
   readonly empty: 'remove' | 'keep-template-row';
   /** Per-item pagination preference. */
   readonly pageBreak: 'auto' | 'before-each-item';
+}
+
+export type ObjectRepeatPolicy = 'per-item' | 'shared' | 'forbidden';
+
+interface AdvancedRepeatBase {
+  readonly id: BindingId;
+  readonly range: DocumentCellRange;
+  readonly source: string;
+  readonly empty: 'remove' | 'keep-template-row';
+  readonly objectPolicy?: ObjectRepeatPolicy;
+  /** Compiler-visible object references intersecting this region. */
+  readonly objects?: readonly { readonly id: string }[];
+}
+
+/** Repeats a source range along the column axis. */
+export interface RepeatColumnsBinding extends AdvancedRepeatBase {
+  readonly type: 'repeat-columns';
+}
+
+/** Repeats a source rectangle along one or both axes. */
+export interface RepeatRangeBinding extends AdvancedRepeatBase {
+  readonly type: 'repeat-range';
+  readonly axis: 'vertical' | 'horizontal' | 'both';
+}
+
+/** Repeats one logical fragment with a hard boundary before every later item. */
+export interface RepeatPageBinding extends AdvancedRepeatBase {
+  readonly type: 'repeat-page';
+}
+
+/** Clones a source sheet once per item. */
+export interface RepeatSheetBinding extends AdvancedRepeatBase {
+  readonly type: 'repeat-sheet';
+  readonly name: string;
+}
+
+/** Inserts one explicitly registered compatible template. */
+export interface SubtemplateBinding {
+  readonly id: BindingId;
+  readonly type: 'subtemplate';
+  readonly range: DocumentCellRange;
+  readonly templateId: TemplateId;
+  readonly source: string;
+  readonly objectPolicy?: ObjectRepeatPolicy;
+  readonly objects?: readonly { readonly id: string }[];
 }
 
 /** Removes a range when its predicate resolves false. */
@@ -190,6 +243,22 @@ export type TemplateIRBinding =
       /** Parsed collection expression. */
       readonly source: CompiledTemplateExpression;
     })
+  | (Omit<RepeatColumnsBinding, 'source'> & {
+      readonly source: CompiledTemplateExpression;
+    })
+  | (Omit<RepeatRangeBinding, 'source'> & {
+      readonly source: CompiledTemplateExpression;
+    })
+  | (Omit<RepeatPageBinding, 'source'> & {
+      readonly source: CompiledTemplateExpression;
+    })
+  | (Omit<RepeatSheetBinding, 'source' | 'name'> & {
+      readonly source: CompiledTemplateExpression;
+      readonly name: CompiledTemplateExpression;
+    })
+  | (Omit<SubtemplateBinding, 'source'> & {
+      readonly source: CompiledTemplateExpression;
+    })
   | (Omit<ConditionalRangeBinding, 'when'> & {
       /** Parsed predicate expression. */
       readonly when: CompiledTemplateExpression;
@@ -203,6 +272,17 @@ export interface TemplateIR {
   readonly bindings: readonly TemplateIRBinding[];
   /** Validated print profiles. */
   readonly profiles: readonly TemplatePrintProfile[];
+  /** Ordered advanced structural containment forest. */
+  readonly regionTree?: readonly TemplateRegionNode[];
+  /** Explicit compile-time subtemplate registry snapshot. */
+  readonly subtemplates?: readonly SpreadsheetTemplate[];
+}
+
+export interface TemplateRegionNode {
+  readonly bindingId: BindingId;
+  readonly range: DocumentCellRange;
+  readonly depth: number;
+  readonly children: readonly TemplateRegionNode[];
 }
 
 /** Reusable compiler output bound to one canonical source document hash. */
@@ -237,10 +317,25 @@ export interface RenderLimits {
   readonly maxExpandedCells: number;
   /** Maximum expanded rows. */
   readonly maxExpandedRows: number;
+  /** Maximum expanded columns. */
+  readonly maxExpandedColumns?: number;
+  /** Maximum generated worksheets. */
+  readonly maxGeneratedSheets?: number;
   /** Maximum generated pages. */
   readonly maxPages: number;
   /** Maximum layout wall-clock duration. */
   readonly maxLayoutTimeMs: number;
+  /** Maximum structural nesting depth. */
+  readonly maxNestingDepth?: number;
+  readonly maxResources?: number;
+  readonly maxResourceBytes?: number;
+  readonly maxTotalResourceBytes?: number;
+  readonly maxResolveConcurrency?: number;
+}
+
+export interface AdvancedCompileOptions {
+  readonly subtemplates: ReadonlyMap<TemplateId, SpreadsheetTemplate>;
+  readonly limits: RenderLimits;
 }
 
 /** Explicit immutable input to one template render session. */

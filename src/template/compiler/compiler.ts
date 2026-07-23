@@ -4,10 +4,13 @@ import { hashSpreadsheetDocument } from '../hash';
 import type {
   CompilationResult,
   CompiledTemplate,
+  AdvancedCompileOptions,
   SpreadsheetTemplate,
   TemplateBinding,
   TemplateIRBinding,
   TemplatePrintProfile,
+  TemplateRegionNode,
+  ValueBinding,
 } from '../model';
 
 /** Version of the serialized template IR contract. */
@@ -67,7 +70,20 @@ function compileBinding(binding: TemplateBinding): TemplateIRBinding {
   if (binding.type === 'repeat-rows') {
     return immutableClone({ ...binding, source: compileTemplateExpression(binding.source) });
   }
-  return immutableClone({ ...binding, when: compileTemplateExpression(binding.when) });
+  if (binding.type === 'conditional-range') {
+    return immutableClone({ ...binding, when: compileTemplateExpression(binding.when) });
+  }
+  if (binding.type === 'repeat-sheet') {
+    return immutableClone({
+      ...binding,
+      source: compileTemplateExpression(binding.source),
+      name: compileTemplateExpression(binding.name),
+    }) as TemplateIRBinding;
+  }
+  return immutableClone({
+    ...binding,
+    source: compileTemplateExpression(binding.source),
+  }) as TemplateIRBinding;
 }
 
 function normalized(range: DocumentCellRange): boolean {
@@ -136,6 +152,7 @@ function validateStructuralBindings(
   document: SpreadsheetDocument,
   bindings: readonly TemplateBinding[],
   diagnostics: Diagnostic[],
+  advanced: boolean,
 ): void {
   const structural = bindings.filter(
     (binding): binding is Exclude<TemplateBinding, { readonly type: 'value' }> =>
@@ -146,9 +163,16 @@ function validateStructuralBindings(
       const left = structural[leftIndex]!;
       const right = structural[rightIndex]!;
       if (intersects(left.range, right.range)) {
+        const leftContainsRight =
+          contains(left.range, right.range.start.row, right.range.start.column) &&
+          contains(left.range, right.range.end.row, right.range.end.column);
+        const rightContainsLeft =
+          contains(right.range, left.range.start.row, left.range.start.column) &&
+          contains(right.range, left.range.end.row, left.range.end.column);
+        if (advanced && (leftContainsRight || rightContainsLeft)) continue;
         diagnostics.push(
           diagnostic(
-            'OVERLAPPING_REPEAT_REGION',
+            advanced ? 'PARTIALLY_OVERLAPPING_REGION' : 'OVERLAPPING_REPEAT_REGION',
             `Structural bindings ${left.id} and ${right.id} overlap`,
             right,
           ),
@@ -157,7 +181,26 @@ function validateStructuralBindings(
     }
   }
   for (const binding of structural) {
-    if (binding.type !== 'repeat-rows') continue;
+    if (
+      'objects' in binding &&
+      binding.objects !== undefined &&
+      binding.objects.length > 0 &&
+      binding.objectPolicy === undefined
+    ) {
+      diagnostics.push(
+        diagnostic(
+          'OBJECT_REPEAT_POLICY_REQUIRED',
+          `Binding ${binding.id} intersects floating objects but has no copy policy`,
+          binding,
+        ),
+      );
+    }
+    if (
+      binding.type !== 'repeat-rows' &&
+      binding.type !== 'repeat-range' &&
+      binding.type !== 'repeat-page'
+    )
+      continue;
     const sheet = document.workbook.sheets.find(({ id }) => id === binding.range.sheetId);
     if (sheet === undefined) continue;
     for (const merge of sheet.merges) {
@@ -174,6 +217,117 @@ function validateStructuralBindings(
       }
     }
   }
+}
+
+function buildRegionTree(
+  bindings: readonly TemplateBinding[],
+  maxDepth: number,
+  diagnostics: Diagnostic[],
+): readonly TemplateRegionNode[] {
+  const structural = bindings.filter(
+    (binding): binding is Exclude<TemplateBinding, ValueBinding> => binding.type !== 'value',
+  );
+  const nodes = new Map(
+    structural.map((binding) => [
+      binding.id,
+      {
+        bindingId: binding.id,
+        range: binding.range,
+        depth: 0,
+        children: [] as TemplateRegionNode[],
+      },
+    ]),
+  );
+  const roots: TemplateRegionNode[] = [];
+  for (const binding of structural) {
+    const parents = structural
+      .filter(
+        (candidate) =>
+          candidate.id !== binding.id &&
+          contains(candidate.range, binding.range.start.row, binding.range.start.column) &&
+          contains(candidate.range, binding.range.end.row, binding.range.end.column),
+      )
+      .sort((left, right) => {
+        const leftArea =
+          (left.range.end.row - left.range.start.row + 1) *
+          (left.range.end.column - left.range.start.column + 1);
+        const rightArea =
+          (right.range.end.row - right.range.start.row + 1) *
+          (right.range.end.column - right.range.start.column + 1);
+        return leftArea - rightArea || String(left.id).localeCompare(String(right.id));
+      });
+    const node = nodes.get(binding.id)!;
+    const parent = parents[0];
+    if (parent === undefined) roots.push(node);
+    else nodes.get(parent.id)!.children.push(node);
+  }
+  const finalize = (node: TemplateRegionNode, depth: number): TemplateRegionNode => {
+    if (depth > maxDepth) {
+      diagnostics.push(
+        diagnostic(
+          'INVALID_NESTING',
+          `Binding ${node.bindingId} exceeds nesting depth ${maxDepth}`,
+        ),
+      );
+    }
+    return immutableClone({
+      ...node,
+      depth,
+      children: [...node.children]
+        .sort(
+          (left, right) =>
+            left.range.start.row - right.range.start.row ||
+            left.range.start.column - right.range.start.column ||
+            String(left.bindingId).localeCompare(String(right.bindingId)),
+        )
+        .map((child) => finalize(child, depth + 1)),
+    });
+  };
+  return roots
+    .sort(
+      (left, right) =>
+        left.range.start.row - right.range.start.row ||
+        left.range.start.column - right.range.start.column ||
+        String(left.bindingId).localeCompare(String(right.bindingId)),
+    )
+    .map((root) => finalize(root, 1));
+}
+
+function subtemplateDiagnostics(
+  root: SpreadsheetTemplate,
+  subtemplates: ReadonlyMap<SpreadsheetTemplate['id'], SpreadsheetTemplate>,
+  diagnostics: Diagnostic[],
+): void {
+  const visiting: string[] = [];
+  const visited = new Set<string>();
+  const visit = (template: SpreadsheetTemplate): void => {
+    const cycleAt = visiting.indexOf(template.id);
+    if (cycleAt >= 0) {
+      const chain = [...visiting.slice(cycleAt), template.id].join(' -> ');
+      diagnostics.push(diagnostic('SUBTEMPLATE_CYCLE', `Subtemplate cycle: ${chain}`));
+      return;
+    }
+    if (visited.has(template.id)) return;
+    visiting.push(template.id);
+    for (const binding of template.bindings) {
+      if (binding.type !== 'subtemplate') continue;
+      const child = subtemplates.get(binding.templateId);
+      if (child === undefined) {
+        diagnostics.push(
+          diagnostic(
+            'SUBTEMPLATE_NOT_FOUND',
+            `Subtemplate ${binding.templateId} is not registered`,
+            binding,
+          ),
+        );
+      } else {
+        visit(child);
+      }
+    }
+    visiting.pop();
+    visited.add(template.id);
+  };
+  visit(root);
 }
 
 function rangesFromProfile(profile: TemplatePrintProfile): readonly DocumentCellRange[] {
@@ -371,6 +525,35 @@ function hasRuntimeTemplateShape(value: unknown): value is SpreadsheetTemplate {
         (binding.pageBreak === 'auto' || binding.pageBreak === 'before-each-item')
       );
     }
+    if (
+      binding.type === 'repeat-columns' ||
+      binding.type === 'repeat-range' ||
+      binding.type === 'repeat-page'
+    ) {
+      return (
+        hasRangeShape(binding.range) &&
+        typeof binding.source === 'string' &&
+        (binding.empty === 'remove' || binding.empty === 'keep-template-row') &&
+        (binding.type !== 'repeat-range' ||
+          binding.axis === 'vertical' ||
+          binding.axis === 'horizontal' ||
+          binding.axis === 'both')
+      );
+    }
+    if (binding.type === 'repeat-sheet') {
+      return (
+        hasRangeShape(binding.range) &&
+        typeof binding.source === 'string' &&
+        typeof binding.name === 'string'
+      );
+    }
+    if (binding.type === 'subtemplate') {
+      return (
+        hasRangeShape(binding.range) &&
+        typeof binding.templateId === 'string' &&
+        typeof binding.source === 'string'
+      );
+    }
     return (
       binding.type === 'conditional-range' &&
       hasRangeShape(binding.range) &&
@@ -518,6 +701,7 @@ function exceedsCompilationBudget(document: SpreadsheetDocument, template: Sprea
 export function compileSpreadsheetTemplate(
   document: SpreadsheetDocument,
   templateOrId: SpreadsheetTemplate | SpreadsheetTemplate['id'],
+  options?: AdvancedCompileOptions,
 ): CompilationResult {
   const diagnostics: Diagnostic[] = [];
   if (hasUnsafeCompilationGraph([document, templateOrId])) {
@@ -557,7 +741,17 @@ export function compileSpreadsheetTemplate(
     }
   }
   validateBindings(resolved.document, template.bindings, diagnostics);
-  validateStructuralBindings(resolved.document, template.bindings, diagnostics);
+  validateStructuralBindings(
+    resolved.document,
+    template.bindings,
+    diagnostics,
+    options !== undefined,
+  );
+  const regionTree =
+    options === undefined
+      ? undefined
+      : buildRegionTree(template.bindings, options.limits.maxNestingDepth ?? 8, diagnostics);
+  if (options !== undefined) subtemplateDiagnostics(template, options.subtemplates, diagnostics);
   validateProfiles(resolved.document, template.printProfiles, diagnostics);
   const frozenDiagnostics = immutableClone(diagnostics);
   if (diagnostics.some(({ severity }) => severity === 'error')) {
@@ -573,6 +767,14 @@ export function compileSpreadsheetTemplate(
       template: sourceTemplate,
       bindings,
       profiles: sourceTemplate.printProfiles,
+      ...(regionTree === undefined ? {} : { regionTree }),
+      ...(options === undefined
+        ? {}
+        : {
+            subtemplates: [...options.subtemplates.values()].sort((left, right) =>
+              String(left.id).localeCompare(String(right.id)),
+            ),
+          }),
     },
     diagnostics: frozenDiagnostics,
     compilerVersion: TEMPLATE_COMPILER_VERSION,
