@@ -100,6 +100,7 @@ export const allRoadmapItems = [
     'Formula dependency and number-format core',
     'Excel-aligned values, dependencies, errors and display text.',
     '/docs/roadmap/foundation',
+    'shipped',
   ),
   item(
     'render-semantics',

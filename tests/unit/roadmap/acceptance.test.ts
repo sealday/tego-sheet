@@ -23,9 +23,10 @@ it('maps every roadmap item to acceptance evidence without duplicate ids', () =>
   );
   expect(
     roadmapAcceptance.filter((entry) => entry.state === 'shipped').map((entry) => entry.id),
-  ).toEqual(['workbook-2', 'transactions', 'extension-kernel']);
+  ).toEqual(['workbook-2', 'transactions', 'formula-format-core', 'extension-kernel']);
   expect(getRoadmapDeliveryState('workbook-2')).toBe('shipped');
   expect(getRoadmapDeliveryState('transactions')).toBe('shipped');
+  expect(getRoadmapDeliveryState('formula-format-core')).toBe('shipped');
   expect(getRoadmapDeliveryState('extension-kernel')).toBe('shipped');
 });
 
@@ -41,6 +42,7 @@ it('keeps canonical ids when an item moves out of the planned projection', () =>
   expect(selectRoadmapItemsByStatus(deliveryFixture, 'shipped').map((item) => item.id)).toEqual([
     'workbook-2',
     'transactions',
+    'formula-format-core',
     'extension-kernel',
   ]);
 });
