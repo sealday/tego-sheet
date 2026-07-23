@@ -164,6 +164,42 @@ function transformRange(
   };
 }
 
+function generatedSheetIds(
+  sourceSheetId: string,
+  structuralMappings: readonly StructuralMapping[],
+): readonly string[] {
+  return [
+    ...new Set(
+      structuralMappings
+        .filter(
+          ({ source, generated }) =>
+            source.sheetId === sourceSheetId && generated.sheetId !== sourceSheetId,
+        )
+        .map(({ generated }) => String(generated.sheetId)),
+    ),
+  ];
+}
+
+function profileRangeForSheet(
+  range: DocumentCellRange,
+  sheetId: string,
+  insertions: ReadonlyMap<string, readonly RowInsertion[]>,
+  structuralMappings: readonly StructuralMapping[],
+): DocumentCellRange | undefined {
+  if (
+    range.sheetId !== sheetId &&
+    !structuralMappings.some(
+      ({ source, generated }) => source.sheetId === range.sheetId && generated.sheetId === sheetId,
+    )
+  ) {
+    return undefined;
+  }
+  return {
+    ...transformRange(range, insertions, structuralMappings),
+    sheetId: sheetId as DocumentCellRange['sheetId'],
+  };
+}
+
 function targets(
   document: SpreadsheetDocument,
   profile: TemplatePrintProfile,
@@ -181,16 +217,20 @@ function targets(
       range: transformed,
     });
   };
+  const appendGeneratedRanges = (range: DocumentCellRange): boolean => {
+    const generated = generatedSheetIds(range.sheetId, structuralMappings);
+    if (generated.length === 0) return false;
+    const transformed = transformRange(range, insertions, structuralMappings);
+    generated.forEach((sheetId) =>
+      append({ ...transformed, sheetId: sheetId as DocumentCellRange['sheetId'] }, false),
+    );
+    return true;
+  };
   for (const target of profile.targets) {
     if (target.type === 'sheet') {
-      const generatedSheetIds = structuralMappings
-        .filter(
-          ({ source, generated }) =>
-            source.sheetId === target.sheetId && generated.sheetId !== target.sheetId,
-        )
-        .map(({ generated }) => generated.sheetId);
-      if (generatedSheetIds.length > 0) {
-        for (const sheetId of generatedSheetIds) {
+      const generated = generatedSheetIds(target.sheetId, structuralMappings);
+      if (generated.length > 0) {
+        for (const sheetId of generated) {
           const generatedSheet = document.workbook.sheets.find(({ id }) => id === sheetId);
           if (generatedSheet !== undefined) append(usedRange(generatedSheet), false);
         }
@@ -199,9 +239,11 @@ function targets(
       const sheet = document.workbook.sheets.find(({ id }) => id === target.sheetId);
       if (sheet !== undefined) append(usedRange(sheet), false);
     } else if (target.type === 'range') {
-      append(target.range);
+      if (!appendGeneratedRanges(target.range)) append(target.range);
     } else {
-      target.ranges.forEach((range) => append(range));
+      target.ranges.forEach((range) => {
+        if (!appendGeneratedRanges(range)) append(range);
+      });
     }
   }
   return output;
@@ -231,33 +273,41 @@ function paginationTargets(
   insertions: ReadonlyMap<string, readonly RowInsertion[]>,
   structuralMappings: readonly StructuralMapping[] = [],
 ): readonly PaginationTarget[] {
-  return resolved.map(({ id, sheet, range }) => ({
-    id,
-    rows: Array.from({ length: range.end.row - range.start.row + 1 }, (_, index) =>
-      rowHeight(sheet, range.start.row + index),
-    ),
-    columns: Array.from({ length: range.end.column - range.start.column + 1 }, (_, index) =>
-      columnWidth(sheet, range.start.column + index),
-    ),
-    ...(profile.repeatRows?.sheetId === sheet.id
-      ? {
-          repeatRows: (() => {
-            const repeated = transformRange(profile.repeatRows, insertions, structuralMappings);
-            return Array.from({ length: repeated.end.row - repeated.start.row + 1 }, (_, index) =>
-              rowHeight(sheet, repeated.start.row + index),
-            );
-          })(),
-        }
-      : {}),
-    ...(profile.repeatColumns?.sheetId === sheet.id
-      ? {
-          repeatColumns: Array.from(
-            { length: profile.repeatColumns.end.column - profile.repeatColumns.start.column + 1 },
-            (_, index) => columnWidth(sheet, profile.repeatColumns!.start.column + index),
-          ),
-        }
-      : {}),
-  }));
+  return resolved.map(({ id, sheet, range }) => {
+    const repeatedRows =
+      profile.repeatRows === undefined
+        ? undefined
+        : profileRangeForSheet(profile.repeatRows, sheet.id, insertions, structuralMappings);
+    const repeatedColumns =
+      profile.repeatColumns === undefined
+        ? undefined
+        : profileRangeForSheet(profile.repeatColumns, sheet.id, insertions, structuralMappings);
+    return {
+      id,
+      rows: Array.from({ length: range.end.row - range.start.row + 1 }, (_, index) =>
+        rowHeight(sheet, range.start.row + index),
+      ),
+      columns: Array.from({ length: range.end.column - range.start.column + 1 }, (_, index) =>
+        columnWidth(sheet, range.start.column + index),
+      ),
+      ...(repeatedRows === undefined
+        ? {}
+        : {
+            repeatRows: Array.from(
+              { length: repeatedRows.end.row - repeatedRows.start.row + 1 },
+              (_, index) => rowHeight(sheet, repeatedRows.start.row + index),
+            ),
+          }),
+      ...(repeatedColumns === undefined
+        ? {}
+        : {
+            repeatColumns: Array.from(
+              { length: repeatedColumns.end.column - repeatedColumns.start.column + 1 },
+              (_, index) => columnWidth(sheet, repeatedColumns.start.column + index),
+            ),
+          }),
+    };
+  });
 }
 
 function columnLabel(column: number): string {
@@ -646,6 +696,7 @@ export async function renderSpreadsheetTemplate(
           insertedRows: new Map<string, readonly RowInsertion[]>(),
           repeatPageBreaks: advanced.forcedPageBreaks,
           structuralMappings: advanced.structuralMappings,
+          objectMappings: advanced.objectMappings,
         };
       } else {
         expansion = expandTemplate(
@@ -657,7 +708,7 @@ export async function renderSpreadsheetTemplate(
           limits,
           request.signal,
         );
-        expansion = { ...expansion, structuralMappings: [] };
+        expansion = { ...expansion, structuralMappings: [], objectMappings: [] };
       }
     } catch (cause) {
       if (!(cause instanceof TemplateExpressionError)) throw cause;
@@ -720,7 +771,14 @@ export async function renderSpreadsheetTemplate(
       manualBreaks: profile.manualBreaks
         .flatMap((pageBreak) =>
           resolvedTargets
-            .filter(({ sheet }) => sheet.id === pageBreak.sheetId)
+            .filter(
+              ({ sheet }) =>
+                sheet.id === pageBreak.sheetId ||
+                expansion.structuralMappings.some(
+                  ({ source, generated }) =>
+                    source.sheetId === pageBreak.sheetId && generated.sheetId === sheet.id,
+                ),
+            )
             .map((target) => {
               const beforeRow = mappedRow(
                 pageBreak.beforeRow,
@@ -831,6 +889,7 @@ export async function renderSpreadsheetTemplate(
         displayList,
       },
       resources,
+      objects: expansion.objectMappings,
       diagnostics,
       metadata: {
         templateId: request.template.templateId,

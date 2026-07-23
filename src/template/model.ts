@@ -67,6 +67,12 @@ export type ObjectRepeatPolicy = 'per-item' | 'shared' | 'forbidden';
 export interface RepeatedObjectRef {
   /** Stable object identity. */
   readonly id: string;
+  /** Source anchor transformed with the repeated region. */
+  readonly anchor: DocumentCellRange;
+  /** Whether the anchor follows structural mappings or remains absolute. */
+  readonly anchorMode: 'range' | 'absolute';
+  /** Optional content-addressed logical resource used by the object. */
+  readonly resourceId?: string;
 }
 
 /** Shared structural-repeat source and policy fields. */
@@ -488,6 +494,8 @@ export interface GeneratedDocument {
   readonly print: PrintDocument;
   /** Session-owned, content-addressed resolved resource store. */
   readonly resources: ResolvedResourceStore;
+  /** Generated floating-object anchors after structural expansion. */
+  readonly objects: readonly import('./expand').StructuralObjectMapping[];
   /** Ordered render diagnostics. */
   readonly diagnostics: readonly Diagnostic[];
   /** Deterministic render metadata. */

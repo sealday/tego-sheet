@@ -255,6 +255,7 @@ const expectedPublicExports = [
   'SpreadsheetTemplate',
   'StoredSpreadsheetTemplate',
   'StructuralMapping',
+  'StructuralObjectMapping',
   'StyleId',
   'StyleRegistry',
   'SubtemplateBinding',

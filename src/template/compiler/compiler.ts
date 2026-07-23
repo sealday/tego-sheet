@@ -223,6 +223,46 @@ function validateStructuralBindings(
           ),
         );
       }
+      const objectIds = new Set<string>();
+      for (const object of binding.objects) {
+        if (objectIds.has(object.id)) {
+          diagnostics.push(
+            diagnostic(
+              'INVALID_OBJECT_ANCHOR',
+              `Binding ${binding.id} repeats duplicate object ${object.id}`,
+              binding,
+            ),
+          );
+        }
+        objectIds.add(object.id);
+        if (
+          object.anchor === undefined ||
+          !normalized(object.anchor) ||
+          object.anchor.sheetId !== binding.range.sheetId ||
+          !intersects(binding.range, object.anchor) ||
+          (object.anchorMode !== 'range' && object.anchorMode !== 'absolute') ||
+          (object.resourceId !== undefined && typeof object.resourceId !== 'string')
+        ) {
+          diagnostics.push(
+            diagnostic(
+              'INVALID_OBJECT_ANCHOR',
+              `Object ${object.id} has an invalid repeat anchor`,
+              binding,
+            ),
+          );
+        } else if (
+          (binding.objectPolicy === 'per-item' && object.anchorMode !== 'range') ||
+          (binding.objectPolicy === 'shared' && object.anchorMode !== 'absolute')
+        ) {
+          diagnostics.push(
+            diagnostic(
+              'INVALID_OBJECT_ANCHOR',
+              `Object ${object.id} anchor mode does not match ${binding.objectPolicy}`,
+              binding,
+            ),
+          );
+        }
+      }
     }
     if (
       binding.type !== 'repeat-rows' &&

@@ -345,6 +345,7 @@ export type {
   TemplateIR,
   TemplateRegionNode,
   StructuralMapping,
+  StructuralObjectMapping,
   TemplateIRBinding,
   TemplatePrintProfile,
   TemplateResourceBinding,

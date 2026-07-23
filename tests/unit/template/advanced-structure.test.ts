@@ -790,6 +790,22 @@ describe('TP2 advanced template structures', () => {
           showGridlines: true,
           showHeadings: false,
         },
+        {
+          id: 'range-profile',
+          name: 'Generated sheet ranges',
+          targets: [{ type: 'range', range: range(0, 1, 0, 0) }],
+          page: {
+            paper: { type: 'custom', width: 240, height: 160 },
+            orientation: 'portrait',
+            margins: { top: 10, right: 10, bottom: 10, left: 10 },
+            scale: { type: 'fixed', value: 1 },
+          },
+          repeatRows: range(0, 0, 0, 0),
+          repeatColumns: range(0, 1, 0, 0),
+          manualBreaks: [{ sheetId: 'sheet-1', beforeRow: 1 }],
+          showGridlines: true,
+          showHeadings: false,
+        },
       ],
     } as unknown as SpreadsheetTemplate;
     const document = { ...fixture.document, templates: [printable] };
@@ -838,6 +854,35 @@ describe('TP2 advanced template structures', () => {
       expect.stringContaining('sheet-1~sheets~2'),
     ]);
     await result.document?.resources.dispose();
+
+    const rangeResult = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: { regions: [{ name: 'North' }, { name: 'South' }] },
+        profileId: 'range-profile',
+        missingValue: 'error',
+      },
+      {
+        locale: 'en-US',
+        timeZone: 'UTC',
+        dateSystem: 'excel-1900',
+        clock: new Date('2026-01-01T00:00:00.000Z'),
+        fontMetrics: createFontMetrics({
+          fonts: { Arial: { averageAdvance: 6, lineHeight: 12 } },
+          fallbackFont: 'Arial',
+          fallback: { averageAdvance: 6, lineHeight: 12 },
+        }),
+      },
+    );
+    expect(rangeResult.diagnostics).toEqual([]);
+    expect(rangeResult.document?.print.pages.map(({ targetId }) => targetId)).toEqual([
+      expect.stringContaining('sheet-1~sheets~1'),
+      expect.stringContaining('sheet-1~sheets~1'),
+      expect.stringContaining('sheet-1~sheets~2'),
+      expect.stringContaining('sheet-1~sheets~2'),
+    ]);
+    await rangeResult.document?.resources.dispose();
   });
 
   it.each([
@@ -980,7 +1025,14 @@ describe('TP2 advanced template structures', () => {
         source: 'rows',
         axis: 'vertical',
         empty: 'remove',
-        objects: [{ id: 'logo' }],
+        objects: [
+          {
+            id: 'logo',
+            anchor: range(0, 0, 0, 0),
+            anchorMode: 'range',
+            resourceId: 'logo-resource',
+          },
+        ],
       },
     ] as never);
     expect(compileSpreadsheetTemplate(document, template.id, options).diagnostics).toContainEqual(
@@ -1004,6 +1056,29 @@ describe('TP2 advanced template structures', () => {
       valid.id,
       options,
     ).template!;
+    const objectExpansion = expandAdvancedTemplate(
+      compiled,
+      { rows: ['north', 'south'] },
+      options.limits,
+    );
+    expect(objectExpansion.objectMappings).toEqual([
+      {
+        objectId: 'logo',
+        resourceId: 'logo-resource',
+        policy: 'per-item',
+        itemIndex: 0,
+        source: range(0, 0, 0, 0),
+        generated: range(0, 0, 0, 0),
+      },
+      {
+        objectId: 'logo',
+        resourceId: 'logo-resource',
+        policy: 'per-item',
+        itemIndex: 1,
+        source: range(0, 0, 0, 0),
+        generated: range(1, 1, 0, 0),
+      },
+    ]);
     expect(
       compileSpreadsheetTemplate(
         {
@@ -1011,14 +1086,27 @@ describe('TP2 advanced template structures', () => {
           templates: [
             {
               ...valid,
-              bindings: [{ ...(valid.bindings[0] as object), objectPolicy: 'shared' }],
+              bindings: [
+                {
+                  ...(valid.bindings[0] as object),
+                  objectPolicy: 'shared',
+                  objects: [
+                    {
+                      id: 'logo',
+                      anchor: range(0, 0, 0, 0),
+                      anchorMode: 'absolute',
+                      resourceId: 'logo-resource',
+                    },
+                  ],
+                },
+              ],
             } as unknown as SpreadsheetTemplate,
           ],
         },
         valid.id,
         options,
-      ).hasErrors,
-    ).toBe(false);
+      ),
+    ).toMatchObject({ hasErrors: false });
     const expanded = expandAdvancedTemplate(
       compiled,
       { rows: Array.from({ length: 100 }, () => 1) },

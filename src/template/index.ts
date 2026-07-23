@@ -22,7 +22,7 @@ export type {
   TemplateFormatter,
   TemplateFormatterRegistry,
 } from './expression';
-export type { AdvancedExpansionResult, StructuralMapping } from './expand';
+export type { AdvancedExpansionResult, StructuralMapping, StructuralObjectMapping } from './expand';
 export type {
   ResolvedResource,
   ResolvedResourceCache,

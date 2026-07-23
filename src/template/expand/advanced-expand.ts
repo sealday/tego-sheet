@@ -38,6 +38,22 @@ export interface StructuralMapping {
   readonly objectPolicy?: 'per-item' | 'shared' | 'forbidden';
 }
 
+/** One generated floating-object anchor produced by a structural policy. */
+export interface StructuralObjectMapping {
+  /** Stable source object identity. */
+  readonly objectId: string;
+  /** Optional logical resource retained by the object. */
+  readonly resourceId?: string;
+  /** Applied repeat policy. */
+  readonly policy: 'per-item' | 'shared';
+  /** Collection item owning this generated object. */
+  readonly itemIndex: number;
+  /** Original object anchor. */
+  readonly source: DocumentCellRange;
+  /** Generated object anchor. */
+  readonly generated: DocumentCellRange;
+}
+
 /** Atomic TP2 expansion result. */
 export interface AdvancedExpansionResult {
   /** Complete expanded snapshot, absent on any error. */
@@ -46,6 +62,8 @@ export interface AdvancedExpansionResult {
   readonly diagnostics: readonly Diagnostic[];
   /** Deterministic structural coordinate mappings. */
   readonly structuralMappings: readonly StructuralMapping[];
+  /** Deterministic floating-object anchor mappings. */
+  readonly objectMappings: readonly StructuralObjectMapping[];
   /** Hard page boundaries keyed by generated sheet. */
   readonly forcedPageBreaks: ReadonlyMap<string, readonly number[]>;
 }
@@ -983,6 +1001,7 @@ export function expandAdvancedTemplate(
     return freeze({
       diagnostics: [error('RENDER_ABORTED', 'Template rendering was aborted')],
       structuralMappings: [],
+      objectMappings: [],
       forcedPageBreaks: new Map(),
     });
   }
@@ -1000,6 +1019,7 @@ export function expandAdvancedTemplate(
     return freeze({
       diagnostics: base.diagnostics,
       structuralMappings: [],
+      objectMappings: [],
       forcedPageBreaks: new Map(),
     });
   }
@@ -1008,6 +1028,7 @@ export function expandAdvancedTemplate(
     return freeze({
       diagnostics: nested.diagnostics,
       structuralMappings: [],
+      objectMappings: [],
       forcedPageBreaks: new Map(),
     });
   }
@@ -1023,6 +1044,7 @@ export function expandAdvancedTemplate(
     return freeze({
       diagnostics: nestedColumns.diagnostics,
       structuralMappings: [],
+      objectMappings: [],
       forcedPageBreaks: new Map(),
     });
   }
@@ -1044,6 +1066,7 @@ export function expandAdvancedTemplate(
         error('EXPANSION_LIMIT_EXCEEDED', 'Advanced expansion exceeds configured limits'),
       ],
       structuralMappings: [],
+      objectMappings: [],
       forcedPageBreaks: new Map(),
     });
   }
@@ -1063,6 +1086,7 @@ export function expandAdvancedTemplate(
       return freeze({
         diagnostics: [error('RENDER_ABORTED', 'Template rendering was aborted')],
         structuralMappings: [],
+        objectMappings: [],
         forcedPageBreaks: new Map(),
       });
     }
@@ -1105,6 +1129,7 @@ export function expandAdvancedTemplate(
               ),
             ],
             structuralMappings: [],
+            objectMappings: [],
             forcedPageBreaks: new Map(),
           });
         }
@@ -1175,6 +1200,7 @@ export function expandAdvancedTemplate(
             ),
           ],
           structuralMappings: [],
+          objectMappings: [],
           forcedPageBreaks: new Map(),
         });
       }
@@ -1190,6 +1216,7 @@ export function expandAdvancedTemplate(
         return freeze({
           diagnostics: childCompilation.diagnostics,
           structuralMappings: [],
+          objectMappings: [],
           forcedPageBreaks: new Map(),
         });
       }
@@ -1204,6 +1231,7 @@ export function expandAdvancedTemplate(
         return freeze({
           diagnostics: childExpansion.diagnostics,
           structuralMappings: [],
+          objectMappings: [],
           forcedPageBreaks: new Map(),
         });
       }
@@ -1316,13 +1344,64 @@ export function expandAdvancedTemplate(
     return freeze({
       diagnostics: [error('EXPANSION_LIMIT_EXCEEDED', 'Advanced expansion exceeds page limits')],
       structuralMappings: [],
+      objectMappings: [],
       forcedPageBreaks: new Map(),
     });
+  }
+  const objectMappings: StructuralObjectMapping[] = [];
+  for (const binding of compiled.ir.bindings) {
+    if (
+      !('objects' in binding) ||
+      binding.objects === undefined ||
+      binding.objects.length === 0 ||
+      binding.objectPolicy === undefined ||
+      binding.objectPolicy === 'forbidden'
+    ) {
+      continue;
+    }
+    if (binding.objectPolicy === 'shared') {
+      for (const object of binding.objects) {
+        objectMappings.push({
+          objectId: object.id,
+          ...(object.resourceId === undefined ? {} : { resourceId: object.resourceId }),
+          policy: 'shared',
+          itemIndex: 0,
+          source: object.anchor,
+          generated: object.anchor,
+        });
+      }
+      continue;
+    }
+    for (const mapping of mappings.filter(({ bindingId }) => bindingId === binding.id)) {
+      const rowDelta = mapping.generated.start.row - mapping.source.start.row;
+      const columnDelta = mapping.generated.start.column - mapping.source.start.column;
+      for (const object of binding.objects) {
+        objectMappings.push({
+          objectId: object.id,
+          ...(object.resourceId === undefined ? {} : { resourceId: object.resourceId }),
+          policy: 'per-item',
+          itemIndex: mapping.itemIndex,
+          source: object.anchor,
+          generated: {
+            sheetId: mapping.generated.sheetId,
+            start: {
+              row: object.anchor.start.row + rowDelta,
+              column: object.anchor.start.column + columnDelta,
+            },
+            end: {
+              row: object.anchor.end.row + rowDelta,
+              column: object.anchor.end.column + columnDelta,
+            },
+          },
+        });
+      }
+    }
   }
   return freeze({
     document,
     diagnostics: base.diagnostics,
     structuralMappings: mappings,
+    objectMappings,
     forcedPageBreaks,
   });
 }

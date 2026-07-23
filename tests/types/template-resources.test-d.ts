@@ -4,6 +4,7 @@ import type {
   RenderRequest,
   ResourceResolver,
   ResolvedResourceStore,
+  StructuralObjectMapping,
   TemplateBinding,
   TemplateResourceBinding,
 } from '../../src';
@@ -14,6 +15,7 @@ declare const store: ResolvedResourceStore;
 declare const environment: RenderEnvironment;
 declare const request: RenderRequest;
 declare const advanced: AdvancedCompileOptions;
+declare const objectMapping: StructuralObjectMapping;
 
 const capability: KernelCapabilities['resource-resolver'] = resolver;
 const binding: TemplateBinding = {
@@ -45,3 +47,4 @@ void store.byHash;
 void environment.resourceRegistry;
 void request.resourceRefs;
 void advanced.subtemplates;
+void objectMapping.generated;
