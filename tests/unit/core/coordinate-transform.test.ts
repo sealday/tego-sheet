@@ -118,6 +118,17 @@ describe('CoordinateTransform', () => {
     });
   });
 
+  it('does not materialize absent optional filter fields during a column transform', () => {
+    const source = sheet();
+    source.filter = {
+      range: source.filter?.range,
+      filters: [],
+    };
+    const next = transformSheetCoordinates(source, CoordinateTransform.insert('column', 1));
+
+    expect(next.filter).not.toHaveProperty('sort');
+  });
+
   it('transforms template and print ranges through the same range primitive', () => {
     const transform = CoordinateTransform.delete('row', 2, 2);
     expect(

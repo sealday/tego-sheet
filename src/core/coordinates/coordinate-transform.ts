@@ -270,24 +270,25 @@ export function transformSheetCoordinates(
     sheet.filter === undefined
       ? undefined
       : {
-          ...sheet.filter,
           ...(filterRange === undefined || filterRange === null ? {} : { range: filterRange }),
-          ...(filterRange === null ? { range: undefined } : {}),
-          ...(transform.axis === 'column'
-            ? {
-                filters: sheet.filter.filters.flatMap((item) => {
+          filters:
+            transform.axis === 'column'
+              ? sheet.filter.filters.flatMap((item) => {
                   const column = transform.scalar(item.column);
                   return column === null ? [] : [{ ...item, column }];
-                }),
+                })
+              : sheet.filter.filters,
+          ...(sheet.filter.sort === undefined
+            ? {}
+            : {
                 sort:
-                  sheet.filter.sort == null
+                  transform.axis === 'row' || sheet.filter.sort === null
                     ? sheet.filter.sort
                     : (() => {
                         const column = transform.scalar(sheet.filter!.sort!.column);
                         return column === null ? null : { ...sheet.filter!.sort!, column };
                       })(),
-              }
-            : {}),
+              }),
         };
   return {
     ...sheet,
