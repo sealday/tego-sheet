@@ -230,6 +230,10 @@ export type {
   SetValidationCommand,
   SortCommand,
   RemoveValidationCommand,
+  RemoveFilterViewCommand,
+  RemoveSheetObjectCommand,
+  SetFilterViewCommand,
+  SetSheetObjectCommand,
   UndoCommand,
   WorkbookCommand,
 } from './commands/workbook-command';

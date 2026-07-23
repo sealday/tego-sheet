@@ -99,6 +99,10 @@ export function remapWorkbookCommand(
     case 'rename-sheet':
     case 'clear-filter':
     case 'sort':
+    case 'set-filter-view':
+    case 'remove-filter-view':
+    case 'set-sheet-object':
+    case 'remove-sheet-object':
       return { ...command, sheet: remapSheet(command.sheet, mapping) };
     case 'add-sheet':
     case 'undo':

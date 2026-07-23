@@ -30,9 +30,9 @@ export interface SchemaCommandPlan {
 
 export interface SchemaProjectionCommit {
   readonly result: unknown;
-  readonly kind: Extract<WorkbookChangeKind, 'clipboard' | 'autofill'>;
+  readonly kind: Extract<WorkbookChangeKind, 'clipboard' | 'autofill' | 'view' | 'object'>;
   readonly sheet: SheetId;
-  readonly range: CellRange;
+  readonly range?: CellRange;
 }
 
 function cellKey(row: number, column: number): string {
@@ -216,6 +216,54 @@ function setCell(sheet: SheetInput, row: number, column: number, cell: Cell | un
   else sheet.cells[index] = next;
 }
 
+function setFilterView(
+  input: SpreadsheetDocumentInput,
+  sheetIds: readonly SheetId[],
+  command: Extract<WorkbookCommand, { readonly type: 'set-filter-view' }>,
+): void {
+  const sheet = input.workbook.sheets[sheetIndex(sheetIds, command.sheet)];
+  if (sheet === undefined) return;
+  const views = [...(sheet.filterViews ?? [])];
+  const index = views.findIndex((view) => view.id === command.view.id);
+  if (index < 0) views.push(structuredClone(command.view));
+  else views[index] = structuredClone(command.view);
+  sheet.filterViews = views;
+}
+
+function removeFilterView(
+  input: SpreadsheetDocumentInput,
+  sheetIds: readonly SheetId[],
+  command: Extract<WorkbookCommand, { readonly type: 'remove-filter-view' }>,
+): void {
+  const sheet = input.workbook.sheets[sheetIndex(sheetIds, command.sheet)];
+  if (sheet === undefined) return;
+  sheet.filterViews = (sheet.filterViews ?? []).filter((view) => view.id !== command.viewId);
+}
+
+function setSheetObject(
+  input: SpreadsheetDocumentInput,
+  sheetIds: readonly SheetId[],
+  command: Extract<WorkbookCommand, { readonly type: 'set-sheet-object' }>,
+): void {
+  const sheet = input.workbook.sheets[sheetIndex(sheetIds, command.sheet)];
+  if (sheet === undefined) return;
+  const objects = [...(sheet.objects ?? [])];
+  const index = objects.findIndex((object) => object.id === command.object.id);
+  if (index < 0) objects.push(structuredClone(command.object));
+  else objects[index] = structuredClone(command.object);
+  sheet.objects = objects;
+}
+
+function removeSheetObject(
+  input: SpreadsheetDocumentInput,
+  sheetIds: readonly SheetId[],
+  command: Extract<WorkbookCommand, { readonly type: 'remove-sheet-object' }>,
+): void {
+  const sheet = input.workbook.sheets[sheetIndex(sheetIds, command.sheet)];
+  if (sheet === undefined) return;
+  sheet.objects = (sheet.objects ?? []).filter((object) => object.id !== command.objectId);
+}
+
 function mapPasteCell(
   target: Cell | undefined,
   source: Cell | undefined,
@@ -305,11 +353,28 @@ function transformInternalPaste(
 }
 
 export function prepareSchemaProjectionCommit(
-  command: Extract<WorkbookCommand, { readonly type: 'paste-internal' | 'autofill' }>,
+  command: Extract<
+    WorkbookCommand,
+    {
+      readonly type:
+        | 'paste-internal'
+        | 'autofill'
+        | 'set-filter-view'
+        | 'remove-filter-view'
+        | 'set-sheet-object'
+        | 'remove-sheet-object';
+    }
+  >,
   projection: WorkbookData,
   sheetIds: readonly SheetId[],
   capturePasteValues: boolean,
 ): SchemaProjectionCommit {
+  if (command.type === 'set-filter-view' || command.type === 'remove-filter-view') {
+    return { result: undefined, kind: 'view', sheet: command.sheet };
+  }
+  if (command.type === 'set-sheet-object' || command.type === 'remove-sheet-object') {
+    return { result: undefined, kind: 'object', sheet: command.sheet };
+  }
   const range = internalPasteRange(
     command.source.range,
     command.target.range,
@@ -371,6 +436,18 @@ export function prepareSchemaCommand(
         authoritativeInputs,
         authoritativeValidations,
       );
+      break;
+    case 'set-filter-view':
+      setFilterView(input, sheetIds, command);
+      break;
+    case 'remove-filter-view':
+      removeFilterView(input, sheetIds, command);
+      break;
+    case 'set-sheet-object':
+      setSheetObject(input, sheetIds, command);
+      break;
+    case 'remove-sheet-object':
+      removeSheetObject(input, sheetIds, command);
       break;
   }
   const parsed = parseSpreadsheetDocument(input);

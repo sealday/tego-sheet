@@ -334,6 +334,11 @@ export function applyCommand(
           undoable: true,
         };
       }
+      case 'set-filter-view':
+      case 'remove-filter-view':
+      case 'set-sheet-object':
+      case 'remove-sheet-object':
+        return null;
       default:
         return assertNeverCommand(command);
     }

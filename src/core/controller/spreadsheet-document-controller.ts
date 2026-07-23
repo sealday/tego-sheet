@@ -561,6 +561,7 @@ export class SpreadsheetDocumentController {
           sheet: lastCommit.change.sheet,
           aggregate,
         },
+        !sameJson(checkpoint.document, candidate),
       );
       if (finalized.status === 'noop') {
         this.restore(checkpoint);
@@ -720,7 +721,14 @@ export class SpreadsheetDocumentController {
     try {
       outcome = this.legacy.dispatch(command, source, legacyOptions);
       if (outcome.status === 'noop' && !sameJson(plan.document, this.currentDocument)) {
-        if (command.type !== 'paste-internal' && command.type !== 'autofill') {
+        if (
+          command.type !== 'paste-internal' &&
+          command.type !== 'autofill' &&
+          command.type !== 'set-filter-view' &&
+          command.type !== 'remove-filter-view' &&
+          command.type !== 'set-sheet-object' &&
+          command.type !== 'remove-sheet-object'
+        ) {
           throw new Error(`Schema-only commit is not supported for ${command.type}`);
         }
         const projectionCommit = prepareSchemaProjectionCommit(
@@ -738,7 +746,7 @@ export class SpreadsheetDocumentController {
             result: projectionCommit.result as CommandResult<Command>,
             kind: projectionCommit.kind,
             sheet: projectionCommit.sheet,
-            range: projectionCommit.range,
+            ...(projectionCommit.range === undefined ? {} : { range: projectionCommit.range }),
           },
           legacyOptions,
         );

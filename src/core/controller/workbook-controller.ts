@@ -376,6 +376,7 @@ export class WorkbookController {
     command: WorkbookCommand,
     source: ChangeSource,
     summary: TransactionChangeSummary,
+    forceChanged = false,
   ): CommandOutcome<void, WorkbookCommand> {
     this.ensureMutable();
     if (!this.isOwnedCheckpoint(checkpoint)) {
@@ -387,7 +388,7 @@ export class WorkbookController {
     this.history.restore(checkpoint.history);
     this.revision = checkpoint.revision;
     this.changeSequence = checkpoint.changeSequence;
-    if (!changed) {
+    if (!changed && !forceChanged) {
       this.state = checkpoint.state;
       return { status: 'noop' };
     }

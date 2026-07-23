@@ -4,6 +4,7 @@ import type { BorderLine, CellStyle } from '../types/workbook';
 import type { FilterDefinition } from '../types/options';
 import type { ValidationRule } from '../types/validation';
 import type { PasteMode } from '../operations/clipboard';
+import type { FilterView, SheetObject } from '../../document/model/document';
 
 /** Sets the user-facing text of one cell. */
 export interface SetCellTextCommand {
@@ -273,6 +274,46 @@ export interface RemoveValidationCommand {
   readonly selection: Selection;
 }
 
+/** Creates or replaces one persistent worksheet filter view. */
+export interface SetFilterViewCommand {
+  /** Command discriminator. */
+  readonly type: 'set-filter-view';
+  /** Worksheet owning the view. */
+  readonly sheet: SheetId;
+  /** Complete persistent view definition. */
+  readonly view: FilterView;
+}
+
+/** Removes one persistent worksheet filter view. */
+export interface RemoveFilterViewCommand {
+  /** Command discriminator. */
+  readonly type: 'remove-filter-view';
+  /** Worksheet owning the view. */
+  readonly sheet: SheetId;
+  /** Stable identifier of the view to remove. */
+  readonly viewId: string;
+}
+
+/** Creates or replaces one persistent floating worksheet object. */
+export interface SetSheetObjectCommand {
+  /** Command discriminator. */
+  readonly type: 'set-sheet-object';
+  /** Worksheet owning the object. */
+  readonly sheet: SheetId;
+  /** Complete persistent object definition. */
+  readonly object: SheetObject;
+}
+
+/** Removes one persistent floating worksheet object. */
+export interface RemoveSheetObjectCommand {
+  /** Command discriminator. */
+  readonly type: 'remove-sheet-object';
+  /** Worksheet owning the object. */
+  readonly sheet: SheetId;
+  /** Stable identifier of the object to remove. */
+  readonly objectId: string;
+}
+
 /** Traverses one step backward through controller history. */
 export interface UndoCommand {
   /** Command discriminator. */
@@ -319,6 +360,10 @@ export type WorkbookCommand =
   | SortCommand
   | SetValidationCommand
   | RemoveValidationCommand
+  | SetFilterViewCommand
+  | RemoveFilterViewCommand
+  | SetSheetObjectCommand
+  | RemoveSheetObjectCommand
   | UndoCommand
   | RedoCommand;
 

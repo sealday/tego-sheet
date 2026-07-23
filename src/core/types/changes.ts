@@ -10,6 +10,8 @@ export type WorkbookChangeKind =
   | 'autofill'
   | 'filter'
   | 'validation'
+  | 'view'
+  | 'object'
   | 'sheet'
   | 'transaction'
   | 'history';

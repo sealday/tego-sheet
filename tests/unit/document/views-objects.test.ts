@@ -129,4 +129,97 @@ describe('saved views and objects in Workbook 2.0', () => {
       diagnostics: [expect.objectContaining({ code: 'DANGLING_REFERENCE' })],
     });
   });
+
+  it('adds and removes views and objects only through undoable document commands', () => {
+    const controller = createDocumentController(fixture());
+    const sheet = 'sheet-1' as SheetId;
+    expect(
+      controller.transact({
+        schemaVersion: 1,
+        id: 'phase-three-definitions',
+        baseRevision: 0,
+        commands: [
+          {
+            schemaVersion: 1,
+            id: 'set-view',
+            command: {
+              type: 'set-filter-view',
+              sheet,
+              view: {
+                id: 'view-2',
+                name: 'Second',
+                range: {
+                  sheetId: 'sheet-1' as never,
+                  start: { row: 0, column: 0 },
+                  end: { row: 2, column: 2 },
+                },
+                sorts: [],
+                filters: [],
+                visibility: 'document',
+              },
+            },
+          },
+          {
+            schemaVersion: 1,
+            id: 'set-object',
+            command: {
+              type: 'set-sheet-object',
+              sheet,
+              object: {
+                id: 'object-2' as never,
+                kind: 'text-box',
+                anchor: {
+                  type: 'absolute',
+                  rect: { x: 1, y: 2, width: 30, height: 20 },
+                },
+                zIndex: 2,
+                locked: false,
+                templateRepeat: 'shared',
+                text: 'Added',
+                style: { color: '#000000', fontFamily: 'Arial', fontSize: 10 },
+                accessibility: { name: 'Added' },
+              },
+            },
+          },
+        ],
+      }),
+    ).toMatchObject({ status: 'committed' });
+    expect(controller.getSnapshot().document.workbook.sheets[0]).toMatchObject({
+      filterViews: [{ id: 'view-1' }, { id: 'view-2' }],
+      objects: [{ id: 'object-1' }, { id: 'object-2' }],
+    });
+    expect(
+      controller.transact({
+        schemaVersion: 1,
+        id: 'phase-three-definition-removal',
+        baseRevision: 1,
+        commands: [
+          {
+            schemaVersion: 1,
+            id: 'remove-view',
+            command: { type: 'remove-filter-view', sheet, viewId: 'view-2' },
+          },
+          {
+            schemaVersion: 1,
+            id: 'remove-object',
+            command: { type: 'remove-sheet-object', sheet, objectId: 'object-2' },
+          },
+        ],
+      }),
+    ).toMatchObject({ status: 'committed' });
+    expect(controller.getSnapshot().document.workbook.sheets[0]).toMatchObject({
+      filterViews: [{ id: 'view-1' }],
+      objects: [{ id: 'object-1' }],
+    });
+    expect(controller.undo()).toMatchObject({ status: 'committed' });
+    expect(controller.getSnapshot().document.workbook.sheets[0]).toMatchObject({
+      filterViews: [{ id: 'view-1' }, { id: 'view-2' }],
+      objects: [{ id: 'object-1' }, { id: 'object-2' }],
+    });
+    expect(controller.undo()).toMatchObject({ status: 'committed' });
+    expect(controller.getSnapshot().document.workbook.sheets[0]).toMatchObject({
+      filterViews: [{ id: 'view-1' }],
+      objects: [{ id: 'object-1' }],
+    });
+  });
 });

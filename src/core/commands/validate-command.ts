@@ -499,6 +499,40 @@ export function validateCommand(state: WorkbookState, command: WorkbookCommand):
     case 'remove-validation':
       validateSelection(state, command.selection);
       return;
+    case 'set-filter-view':
+      validateSheet(state, command.sheet);
+      if (
+        command.view === null ||
+        typeof command.view !== 'object' ||
+        typeof command.view.id !== 'string' ||
+        command.view.id.trim().length === 0
+      ) {
+        throw invalidCommand('filter view must have a non-empty ID');
+      }
+      return;
+    case 'remove-filter-view':
+      validateSheet(state, command.sheet);
+      if (typeof command.viewId !== 'string' || command.viewId.trim().length === 0) {
+        throw invalidCommand('filter view ID must be a non-empty string');
+      }
+      return;
+    case 'set-sheet-object':
+      validateSheet(state, command.sheet);
+      if (
+        command.object === null ||
+        typeof command.object !== 'object' ||
+        typeof command.object.id !== 'string' ||
+        command.object.id.trim().length === 0
+      ) {
+        throw invalidCommand('sheet object must have a non-empty ID');
+      }
+      return;
+    case 'remove-sheet-object':
+      validateSheet(state, command.sheet);
+      if (typeof command.objectId !== 'string' || command.objectId.trim().length === 0) {
+        throw invalidCommand('sheet object ID must be a non-empty string');
+      }
+      return;
     case 'undo':
     case 'redo':
       return;
