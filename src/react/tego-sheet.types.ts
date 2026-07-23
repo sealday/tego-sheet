@@ -13,9 +13,8 @@ import type {
   TegoSheetError,
   ValidationResult,
   WorkbookChange,
-  WorkbookData,
-  WorkbookInput,
 } from '../core';
+import type { SpreadsheetDocument } from '../document';
 import type { SheetTabsRenderer, ToolbarRenderer } from '../ui/slot-types';
 
 export type { SheetTabsRenderer, ToolbarRenderer } from '../ui/slot-types';
@@ -27,14 +26,14 @@ export interface TegoSheetCallbacks {
    * `value` is the complete workbook snapshot and `change` is its {@link WorkbookChange} metadata.
    * External controlled-value replacements do not emit this callback.
    */
-  readonly onChange?: (value: WorkbookData, change: WorkbookChange) => void;
+  readonly onDocumentChange?: (document: SpreadsheetDocument, change: WorkbookChange) => void;
   /** Runs after a worksheet is activated and reports its identifier, index, and source. */
   readonly onActiveSheetChange?: (event: ActiveSheetChangeEvent) => void;
   /** Runs after the active selection changes, including selection changes caused by a commit. */
   readonly onSelectionChange?: (selection: Selection) => void;
-  /** Runs after `onChange` when a cell text edit commits. */
+  /** Runs after `onDocumentChange` when a cell text edit commits. */
   readonly onCellEdit?: (event: CellEditEvent) => void;
-  /** Runs after `onChange` when an internal or external paste commits. */
+  /** Runs after `onDocumentChange` when an internal or external paste commits. */
   readonly onPaste?: (event: PasteEvent) => void;
   /** Runs when the component handles an operation failure and exposes its structured payload. */
   readonly onError?: (error: TegoSheetError) => void;
@@ -44,17 +43,14 @@ export interface TegoSheetCallbacks {
  * Props for the `TegoSheet` React component.
  *
  * @remarks
- * Choose controlled `value` or uncontrolled `defaultValue` when mounting. Supplying both, or
+ * Choose controlled `document` or uncontrolled `defaultDocument` when mounting. Supplying both, or
  * switching a mounted instance between those ownership modes, throws a `TegoSheetException`.
  */
-export interface TegoSheetProps extends TegoSheetCallbacks {
+interface TegoSheetBaseProps extends TegoSheetCallbacks {
   /**
    * Controlled workbook input owned by the parent.
-   * Apply `onChange` snapshots to this prop to accept user and imperative mutations.
+   * Apply `onDocumentChange` snapshots to this prop to accept user and imperative mutations.
    */
-  readonly value?: WorkbookInput;
-  /** Initial workbook input for an uncontrolled component that owns subsequent mutations. */
-  readonly defaultValue?: WorkbookInput;
   /** Zero-based worksheet index selected on mount. */
   readonly initialActiveSheetIndex?: number;
   /** Disables workbook mutations while preserving navigation, selection, copy, and printing. */
@@ -72,6 +68,20 @@ export interface TegoSheetProps extends TegoSheetCallbacks {
   /** Inline styles applied to the root spreadsheet element. */
   readonly style?: CSSProperties;
 }
+
+/** Controlled props whose schema 2 document is owned by the parent. */
+export interface ControlledTegoSheetProps extends TegoSheetBaseProps {
+  readonly document: SpreadsheetDocument;
+  readonly defaultDocument?: never;
+}
+
+/** Uncontrolled props initialized from one schema 2 document snapshot. */
+export interface UncontrolledTegoSheetProps extends TegoSheetBaseProps {
+  readonly document?: never;
+  readonly defaultDocument: SpreadsheetDocument;
+}
+
+export type TegoSheetProps = ControlledTegoSheetProps | UncontrolledTegoSheetProps;
 
 /**
  * Imperative API exposed through a React ref while `TegoSheet` is mounted.
@@ -93,7 +103,7 @@ export interface TegoSheetProps extends TegoSheetCallbacks {
  *   return (
  *     <>
  *       <button onClick={addBudgetSheet}>Add budget</button>
- *       <TegoSheet ref={sheetRef} defaultValue={[]} />
+ *       <TegoSheet ref={sheetRef} defaultDocument={createSpreadsheetDocument()} />
  *     </>
  *   );
  * }
@@ -103,7 +113,7 @@ export interface TegoSheetHandle {
   /** Moves DOM focus to the spreadsheet root. */
   focus(): void;
   /** Returns an isolated snapshot of the current complete workbook. */
-  getValue(): WorkbookData;
+  getDocument(): SpreadsheetDocument;
   /** Returns cell data at an address, or `null` when the sparse cell is empty. */
   getCell(address: CellAddress): CellData | null;
   /** Returns the effective style at an address, including inherited defaults. */

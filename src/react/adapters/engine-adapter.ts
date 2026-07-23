@@ -1,12 +1,12 @@
 import {
   assertClipboardResourceLimit,
   parseA1,
-  type ControllerSnapshot,
   type LocaleDefinition,
   type Selection,
   type SheetId,
   type SheetOptions,
 } from '../../core';
+import type { SpreadsheetControllerSnapshot } from '../../core/controller/spreadsheet-document-controller';
 import {
   CanvasEngine,
   clampScroll,
@@ -48,8 +48,8 @@ export interface EngineAdapter {
   }> | null;
   readonly publicSelection: () => Selection | null;
   readonly readSelection: (selection: Selection) => readonly (readonly string[])[];
-  readonly refresh: (snapshot: ControllerSnapshot) => void;
-  readonly render: (snapshot: ControllerSnapshot, activeSheet: SheetId | null) => void;
+  readonly refresh: (snapshot: SpreadsheetControllerSnapshot) => void;
+  readonly render: (snapshot: SpreadsheetControllerSnapshot, activeSheet: SheetId | null) => void;
   readonly recalculateLayout: () => void;
   readonly setScroll: (scroll: ScrollState) => void;
   readonly setSelection: (selection: SelectionState) => void;
@@ -88,8 +88,8 @@ function clippedFreeze(value: string | undefined): {
 }
 
 export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapter {
-  let latestSnapshot: ControllerSnapshot | null = null;
-  let failedSnapshot: ControllerSnapshot | null = null;
+  let latestSnapshot: SpreadsheetControllerSnapshot | null = null;
+  let failedSnapshot: SpreadsheetControllerSnapshot | null = null;
   const engine = new CanvasEngine(options.canvas, {
     defaultStyle: options.sheetOptions?.defaultStyle,
     ...(options.onRenderError === undefined
@@ -123,7 +123,7 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
     )
       return;
     const index = activeIndex();
-    const sheet = index < 0 ? undefined : latestSnapshot.value[index];
+    const sheet = index < 0 ? undefined : latestSnapshot.projection[index];
     if (sheet === undefined) return;
     const renderSnapshot: CanvasRenderSnapshot = {
       sheet,
@@ -137,7 +137,7 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
   const rebuild = (paintNow = true) => {
     if (disposed || latestSnapshot === null) return;
     const index = activeIndex();
-    const sheet = index < 0 ? undefined : latestSnapshot.value[index];
+    const sheet = index < 0 ? undefined : latestSnapshot.projection[index];
     if (sheet === undefined) {
       viewport = null;
       selection = null;
@@ -261,7 +261,7 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
     readSelection(requested) {
       if (latestSnapshot === null) return [];
       const index = latestSnapshot.sheets.findIndex((sheet) => sheet.id === requested.sheet);
-      const sheet = index < 0 ? undefined : latestSnapshot.value[index];
+      const sheet = index < 0 ? undefined : latestSnapshot.projection[index];
       if (sheet === undefined) return [];
       assertClipboardResourceLimit(requested.range);
       const output: string[][] = [];

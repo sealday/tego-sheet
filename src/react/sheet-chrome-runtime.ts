@@ -1,13 +1,14 @@
-import type { CellStyle, ControllerSnapshot, Selection, SheetData, SheetId } from '../core';
+import type { CellStyle, Selection, SheetData, SheetId } from '../core';
+import type { SpreadsheetControllerSnapshot } from '../core/controller/spreadsheet-document-controller';
 import { filterItems, parseA1Range } from '../core';
 import { mountPrintPages, type PrintWorkbookOptions } from '../ui/print-workbook';
 
 export function activeSheetData(
-  snapshot: ControllerSnapshot,
+  snapshot: SpreadsheetControllerSnapshot,
   activeSheet: SheetId | null,
 ): SheetData | null {
   const index = snapshot.sheets.findIndex((sheet) => sheet.id === activeSheet);
-  return index < 0 ? null : (snapshot.value[index] ?? null);
+  return index < 0 ? null : (snapshot.projection[index] ?? null);
 }
 
 export function filterValuesForSelection(
@@ -47,7 +48,7 @@ export function filterCommandSelection(sheet: SheetData, selection: Selection): 
 }
 
 export function mountActiveSheetPrint(
-  snapshot: ControllerSnapshot,
+  snapshot: SpreadsheetControllerSnapshot,
   activeSheet: SheetId | null,
   options: PrintWorkbookOptions,
   defaultStyle?: CellStyle,

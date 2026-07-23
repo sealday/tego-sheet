@@ -1,23 +1,26 @@
-import type { CommandCommit } from '../../core/commands/command-result';
 import type { WorkbookCommand } from '../../core/commands/workbook-command';
-import type { ControllerCheckpoint } from '../../core/controller/controller-checkpoint';
-import type { WorkbookController } from '../../core/controller/workbook-controller';
-import type { ChangeSource, SheetId, WorkbookData } from '../../core';
+import type {
+  SpreadsheetControllerCheckpoint,
+  SpreadsheetControllerCommit,
+  SpreadsheetDocumentController,
+} from '../../core/controller/spreadsheet-document-controller';
+import type { ChangeSource, SheetId } from '../../core';
+import type { SpreadsheetDocument } from '../../document';
 
 export interface PendingCheckpoint {
   readonly command: WorkbookCommand;
   readonly source: ChangeSource;
   readonly changeId: string;
-  readonly projected: WorkbookData;
+  readonly projected: SpreadsheetDocument;
   readonly projectedKey: string;
-  readonly checkpoint: ControllerCheckpoint;
+  readonly checkpoint: SpreadsheetControllerCheckpoint;
   readonly runtimeSheetIds: readonly SheetId[];
   readonly addedSheetId?: SheetId;
 }
 
 export function createPendingCheckpoint(
-  controller: WorkbookController,
-  commit: CommandCommit<unknown, WorkbookCommand>,
+  controller: SpreadsheetDocumentController,
+  commit: SpreadsheetControllerCommit<unknown, WorkbookCommand>,
   original?: PendingCheckpoint,
 ): PendingCheckpoint {
   const addedSheetId =
@@ -29,8 +32,8 @@ export function createPendingCheckpoint(
     command: original?.command ?? commit.command,
     source: original?.source ?? commit.change.source,
     changeId: original?.changeId ?? commit.change.id,
-    projected: original?.projected ?? commit.value,
-    projectedKey: original?.projectedKey ?? JSON.stringify(commit.value),
+    projected: original?.projected ?? commit.document,
+    projectedKey: original?.projectedKey ?? JSON.stringify(commit.document),
     checkpoint: controller.checkpoint(),
     runtimeSheetIds: original?.runtimeSheetIds ?? controller.getSheetIds(),
     ...(addedSheetId === undefined ? {} : { addedSheetId }),

@@ -1,6 +1,8 @@
-import type { CommandCommit, CommandOutcome } from '../../core/commands/command-result';
 import type { WorkbookCommand } from '../../core/commands/workbook-command';
-import type { WorkbookController } from '../../core/controller/workbook-controller';
+import type {
+  SpreadsheetControllerCommit,
+  SpreadsheetDocumentController,
+} from '../../core/controller/spreadsheet-document-controller';
 import {
   TegoSheetException,
   type ActiveSheetChangeEvent,
@@ -20,16 +22,26 @@ export interface DispatchNotificationOptions {
 }
 
 export type UiDispatchOutcome =
-  | CommandOutcome<unknown, WorkbookCommand>
+  | {
+      readonly status: 'noop';
+    }
+  | {
+      readonly status: 'committed';
+      readonly commit: SpreadsheetControllerCommit<unknown, WorkbookCommand>;
+    }
   | { readonly status: 'rejected'; readonly error: TegoSheetError };
 
+type RefDispatchOutcome = Exclude<UiDispatchOutcome, { readonly status: 'rejected' }>;
+
 export interface EventDispatcherOptions {
-  readonly controller: WorkbookController;
+  readonly controller: SpreadsheetDocumentController;
   readonly getControlledNotificationVersion?: () => number;
   readonly getCallbacks: () => TegoSheetCallbacks;
   readonly isActive?: () => boolean;
   readonly onUiError?: (error: TegoSheetError) => void;
-  readonly recordControlledCheckpoint?: (commit: CommandCommit<unknown, WorkbookCommand>) => void;
+  readonly recordControlledCheckpoint?: (
+    commit: SpreadsheetControllerCommit<unknown, WorkbookCommand>,
+  ) => void;
   readonly schedulePaint?: () => void;
 }
 
@@ -43,7 +55,7 @@ export interface EventDispatcher {
     command: WorkbookCommand,
     source?: ChangeSource,
     options?: DispatchNotificationOptions,
-  ) => CommandOutcome<unknown, WorkbookCommand>;
+  ) => RefDispatchOutcome;
   readonly emitSelectionChange: (selection: Selection) => void;
   readonly emitActiveSheetChange: (event: ActiveSheetChangeEvent) => void;
   readonly reportUiError: (error: TegoSheetError) => void;
@@ -134,6 +146,14 @@ function clone<T>(value: T, seen = new WeakMap<object, unknown>()): T {
   return output as T;
 }
 
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const item of Object.values(value)) deepFreeze(item);
+    Object.freeze(value);
+  }
+  return value;
+}
+
 function inactiveException(): TegoSheetException {
   return new TegoSheetException({
     code: 'INVALID_COMMAND',
@@ -151,7 +171,7 @@ function clipPoint(point: CellPoint, range: CellRange): CellPoint {
 
 function committedTarget(
   target: Selection,
-  commit: CommandCommit<unknown, WorkbookCommand>,
+  commit: SpreadsheetControllerCommit<unknown, WorkbookCommand>,
 ): Selection {
   const range = commit.change.range ?? target.range;
   return {
@@ -181,7 +201,7 @@ export function createEventDispatcher(options: EventDispatcherOptions): EventDis
   };
 
   const notifyCommit = (
-    commit: CommandCommit<unknown, WorkbookCommand>,
+    commit: SpreadsheetControllerCommit<unknown, WorkbookCommand>,
     previousText: string | undefined,
     controlledNotificationVersion: number | undefined,
     notificationOptions: DispatchNotificationOptions,
@@ -192,7 +212,10 @@ export function createEventDispatcher(options: EventDispatcherOptions): EventDis
       controlledNotificationVersion === undefined ||
       options.getControlledNotificationVersion?.() === controlledNotificationVersion;
     if (!decisionIsCurrent()) return;
-    callbacks.onChange?.(clone(commit.value), clone(commit.change));
+    callbacks.onDocumentChange?.(
+      deepFreeze(clone(commit.document)),
+      deepFreeze(clone(commit.change)),
+    );
     if (!isActive() || !decisionIsCurrent()) return;
 
     if (commit.command.type === 'set-cell-text') {
@@ -238,7 +261,12 @@ export function createEventDispatcher(options: EventDispatcherOptions): EventDis
     source: ChangeSource,
   ): {
     readonly controlledNotificationVersion: number | undefined;
-    readonly outcome: CommandOutcome<unknown, WorkbookCommand>;
+    readonly outcome:
+      | { readonly status: 'noop' }
+      | {
+          readonly status: 'committed';
+          readonly commit: SpreadsheetControllerCommit<unknown, WorkbookCommand>;
+        };
     readonly previousText: string | undefined;
   } => {
     ensureActive();
@@ -254,14 +282,14 @@ export function createEventDispatcher(options: EventDispatcherOptions): EventDis
         options.recordControlledCheckpoint?.(commit);
         controlledNotificationVersion = options.getControlledNotificationVersion?.();
       },
-    }) as CommandOutcome<unknown, WorkbookCommand>;
+    });
     return { controlledNotificationVersion, outcome, previousText };
   };
 
   const notify = (
     dispatched: ReturnType<typeof dispatchCore>,
     notificationOptions: DispatchNotificationOptions = {},
-  ): CommandOutcome<unknown, WorkbookCommand> => {
+  ): RefDispatchOutcome => {
     if (dispatched.outcome.status === 'committed' && isActive()) {
       notifyCommit(
         dispatched.outcome.commit,

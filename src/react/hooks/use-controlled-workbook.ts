@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useRef } from 'react';
-import type { CommandCommit } from '../../core/commands/command-result';
 import type { WorkbookCommand } from '../../core/commands/workbook-command';
-import type { WorkbookInput } from '../../core';
+import type { SpreadsheetControllerCommit } from '../../core/controller/spreadsheet-document-controller';
+import type { SpreadsheetDocument } from '../../document';
 import {
   createControlledReconciler,
   type ControlledReconciler,
@@ -16,23 +16,25 @@ interface ControlledSlot {
 
 export interface ControlledWorkbookRuntime {
   readonly getNotificationVersion: () => number;
-  readonly recordCheckpoint: (commit: CommandCommit<unknown, WorkbookCommand>) => void;
+  readonly recordCheckpoint: (
+    commit: SpreadsheetControllerCommit<unknown, WorkbookCommand>,
+  ) => void;
 }
 
 export interface UseControlledWorkbookOptions {
   readonly epoch: ControllerEpoch | null;
-  readonly value: WorkbookInput | undefined;
+  readonly document: SpreadsheetDocument | undefined;
   readonly onError: TegoSheetCallbacks['onError'];
 }
 
 export function useControlledWorkbook(
   options: UseControlledWorkbookOptions,
 ): ControlledWorkbookRuntime {
-  const { epoch, onError, value } = options;
+  const { document, epoch, onError } = options;
   const slot = useRef<ControlledSlot | null>(null);
 
   useLayoutEffect(() => {
-    if (epoch === null || epoch.mode !== 'controlled' || value === undefined) return;
+    if (epoch === null || epoch.mode !== 'controlled' || document === undefined) return;
     let current = slot.current;
     if (current === null || current.controller !== epoch.controller) {
       current = {
@@ -41,10 +43,10 @@ export function useControlledWorkbook(
       };
       slot.current = current;
     }
-    const result = current.reconciler.reconcile(value);
+    const result = current.reconciler.reconcile(document);
     if (result.refresh) epoch.store.refresh();
     if (result.error !== undefined) onError?.(result.error);
-  }, [epoch, onError, value]);
+  }, [document, epoch, onError]);
 
   useLayoutEffect(() => {
     const controller = epoch?.controller;
@@ -53,9 +55,12 @@ export function useControlledWorkbook(
     };
   }, [epoch?.controller]);
 
-  const recordCheckpoint = useCallback((commit: CommandCommit<unknown, WorkbookCommand>) => {
-    slot.current?.reconciler.record(commit);
-  }, []);
+  const recordCheckpoint = useCallback(
+    (commit: SpreadsheetControllerCommit<unknown, WorkbookCommand>) => {
+      slot.current?.reconciler.record(commit);
+    },
+    [],
+  );
   const getNotificationVersion = useCallback(
     () => slot.current?.reconciler.getNotificationVersion() ?? 0,
     [],

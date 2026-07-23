@@ -1,11 +1,11 @@
 import type {
-  ControllerSnapshot,
-  WorkbookController,
-} from '../../core/controller/workbook-controller';
+  SpreadsheetControllerSnapshot,
+  SpreadsheetDocumentController,
+} from '../../core/controller/spreadsheet-document-controller';
 
 export interface ControllerExternalStore {
-  readonly getSnapshot: () => ControllerSnapshot;
-  readonly getServerSnapshot: () => ControllerSnapshot;
+  readonly getSnapshot: () => SpreadsheetControllerSnapshot;
+  readonly getServerSnapshot: () => SpreadsheetControllerSnapshot;
   readonly subscribe: (listener: () => void) => () => void;
   readonly refresh: () => void;
   readonly dispose: () => void;
@@ -21,14 +21,14 @@ interface ControllerConnection {
 }
 
 export function createControllerExternalStore(
-  controller: WorkbookController,
+  controller: SpreadsheetDocumentController,
 ): ControllerExternalStore {
   let snapshot = controller.getSnapshot();
   let controllerConnection: ControllerConnection | null = null;
   let disposed = false;
   const listeners = new Set<() => void>();
 
-  const publish = (next: ControllerSnapshot) => {
+  const publish = (next: SpreadsheetControllerSnapshot) => {
     if (disposed) return;
     snapshot = next;
     let firstError: unknown;

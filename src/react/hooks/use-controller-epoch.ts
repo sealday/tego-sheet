@@ -1,11 +1,11 @@
 import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';
-import { canonicalizeWorkbook, TegoSheetException } from '../../core';
-import type { WorkbookData, WorkbookInput } from '../../core';
+import { TegoSheetException } from '../../core';
+import type { SpreadsheetDocument } from '../../document';
 import {
-  WorkbookController,
-  type ControllerSnapshot,
-  type WorkbookControllerOptions,
-} from '../../core/controller/workbook-controller';
+  SpreadsheetDocumentController,
+  type SpreadsheetControllerSnapshot,
+} from '../../core/controller/spreadsheet-document-controller';
+import type { WorkbookControllerOptions } from '../../core/controller/workbook-controller';
 import {
   createControllerExternalStore,
   type ControllerExternalStore,
@@ -15,23 +15,23 @@ import type { TegoSheetProps } from '../tego-sheet.types';
 export type ControlMode = 'controlled' | 'uncontrolled';
 
 export interface ControllerEpoch {
-  readonly controller: WorkbookController;
+  readonly controller: SpreadsheetDocumentController;
   readonly store: ControllerExternalStore;
-  readonly snapshot: ControllerSnapshot;
+  readonly snapshot: SpreadsheetControllerSnapshot;
   readonly mode: ControlMode;
   readonly isActive: () => boolean;
 }
 
 export interface ControllerEpochRuntime {
   readonly createController?: (
-    input: WorkbookInput,
+    input: SpreadsheetDocument,
     options: WorkbookControllerOptions,
-  ) => WorkbookController;
+  ) => SpreadsheetDocumentController;
   readonly createEpochSlot?: () => ControllerEpochSlot;
 }
 
 interface InitialEpoch {
-  readonly input: WorkbookData;
+  readonly input: SpreadsheetDocument;
   readonly mode: ControlMode;
   readonly readOnly: boolean;
   readonly initialRowCount: number | undefined;
@@ -39,7 +39,7 @@ interface InitialEpoch {
 }
 
 interface ActiveEpoch {
-  readonly controller: WorkbookController;
+  readonly controller: SpreadsheetDocumentController;
   readonly store: ControllerExternalStore;
   readonly mode: ControlMode;
   readonly isActive: () => boolean;
@@ -54,8 +54,8 @@ export interface ControllerEpochSlot {
 
 const pendingSubscribe = () => () => undefined;
 const pendingSnapshot = () => null;
-const defaultCreateController = (input: WorkbookInput, options: WorkbookControllerOptions) =>
-  new WorkbookController(input, options);
+const defaultCreateController = (input: SpreadsheetDocument, options: WorkbookControllerOptions) =>
+  new SpreadsheetDocumentController(input, options);
 
 export function createControllerEpochSlot(): ControllerEpochSlot {
   let snapshot: ActiveEpoch | null = null;
@@ -115,21 +115,26 @@ function contractViolation(message: string): TegoSheetException {
   });
 }
 
-function controlMode(props: Pick<TegoSheetProps, 'value' | 'defaultValue'>): ControlMode {
-  if (props.value !== undefined && props.defaultValue !== undefined) {
-    throw contractViolation('value and defaultValue cannot be used together');
+function controlMode(props: Pick<TegoSheetProps, 'document' | 'defaultDocument'>): ControlMode {
+  if (props.document !== undefined && props.defaultDocument !== undefined) {
+    throw contractViolation('document and defaultDocument cannot be used together');
   }
-  return props.value === undefined ? 'uncontrolled' : 'controlled';
+  if (props.document === undefined && props.defaultDocument === undefined) {
+    throw contractViolation('document or defaultDocument is required');
+  }
+  return props.document === undefined ? 'uncontrolled' : 'controlled';
 }
 
-function initialInput(props: Pick<TegoSheetProps, 'value' | 'defaultValue'>): WorkbookInput {
-  if (props.value !== undefined) return props.value;
-  if (props.defaultValue !== undefined) return props.defaultValue;
-  return {};
+function initialInput(
+  props: Pick<TegoSheetProps, 'document' | 'defaultDocument'>,
+): SpreadsheetDocument {
+  const input = props.document ?? props.defaultDocument;
+  if (input === undefined) throw contractViolation('document or defaultDocument is required');
+  return input;
 }
 
 export function useControllerEpoch(
-  props: Pick<TegoSheetProps, 'value' | 'defaultValue' | 'readOnly' | 'options'>,
+  props: Pick<TegoSheetProps, 'document' | 'defaultDocument' | 'readOnly' | 'options'>,
   runtime: ControllerEpochRuntime = {},
 ): ControllerEpoch | null {
   const currentMode = controlMode(props);
@@ -137,10 +142,7 @@ export function useControllerEpoch(
     const initialRowCount = props.options?.rows?.initialCount;
     const initialColumnCount = props.options?.columns?.initialCount;
     return {
-      input: canonicalizeWorkbook(initialInput(props), {
-        rowCount: initialRowCount,
-        columnCount: initialColumnCount,
-      }),
+      input: initialInput(props),
       mode: currentMode,
       readOnly: props.readOnly ?? false,
       initialRowCount,
@@ -159,7 +161,7 @@ export function useControllerEpoch(
 
   useEffect(() => {
     let activeFlag = true;
-    let controller: WorkbookController | null = null;
+    let controller: SpreadsheetDocumentController | null = null;
     let store: ControllerExternalStore | null = null;
     let epoch: ActiveEpoch | null = null;
     try {
@@ -208,7 +210,7 @@ export function useControllerEpoch(
     }
   }, [createController, initial, slot]);
 
-  const snapshot = useSyncExternalStore<ControllerSnapshot | null>(
+  const snapshot = useSyncExternalStore<SpreadsheetControllerSnapshot | null>(
     active?.store.subscribe ?? pendingSubscribe,
     active?.store.getSnapshot ?? pendingSnapshot,
     active?.store.getServerSnapshot ?? pendingSnapshot,

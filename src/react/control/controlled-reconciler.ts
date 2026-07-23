@@ -1,20 +1,17 @@
-import {
-  canonicalizeWorkbook,
-  type Selection,
-  type SheetId,
-  type TegoSheetError,
-  type WorkbookInput,
-} from '../../core';
-import type { CommandCommit, CommandOutcome } from '../../core/commands/command-result';
+import { type Selection, type SheetId, type TegoSheetError } from '../../core';
 import type { WorkbookCommand } from '../../core/commands/workbook-command';
-import type { ControllerCheckpoint } from '../../core/controller/controller-checkpoint';
-import type { WorkbookController } from '../../core/controller/workbook-controller';
+import type {
+  SpreadsheetControllerCheckpoint,
+  SpreadsheetControllerCommit,
+  SpreadsheetDocumentController,
+} from '../../core/controller/spreadsheet-document-controller';
+import type { SpreadsheetDocument } from '../../document';
 import { classifyValueUpdate } from './classify-value-update';
 import { createPendingCheckpoint, type PendingCheckpoint } from './pending-checkpoint';
 
 interface AcknowledgedBase {
   readonly key: string;
-  readonly checkpoint: ControllerCheckpoint;
+  readonly checkpoint: SpreadsheetControllerCheckpoint;
   readonly runtimeSheetIds: readonly SheetId[];
 }
 
@@ -25,8 +22,8 @@ export interface ReconciliationResult {
 
 export interface ControlledReconciler {
   readonly getNotificationVersion: () => number;
-  readonly record: (commit: CommandCommit<unknown, WorkbookCommand>) => void;
-  readonly reconcile: (value: WorkbookInput) => ReconciliationResult;
+  readonly record: (commit: SpreadsheetControllerCommit<unknown, WorkbookCommand>) => void;
+  readonly reconcile: (value: SpreadsheetDocument) => ReconciliationResult;
 }
 
 function replayError(cause?: unknown): TegoSheetError {
@@ -144,14 +141,15 @@ function reportedReference(
   return false;
 }
 
-export function createControlledReconciler(controller: WorkbookController): ControlledReconciler {
-  const defaults = controller.getInitializationDefaults();
-  const initialWorkbook = canonicalizeWorkbook(controller.getValue(), defaults);
+export function createControlledReconciler(
+  controller: SpreadsheetDocumentController,
+): ControlledReconciler {
+  const initialDocument = controller.getDocument();
   const neverObserved = Symbol('controlled-value-not-observed');
   let observedValue: unknown = neverObserved;
   let pending: PendingCheckpoint[] = [];
   let base: AcknowledgedBase = {
-    key: JSON.stringify(initialWorkbook),
+    key: JSON.stringify(initialDocument),
     checkpoint: controller.checkpoint(),
     runtimeSheetIds: controller.getSheetIds(),
   };
@@ -173,7 +171,12 @@ export function createControlledReconciler(controller: WorkbookController): Cont
     try {
       for (const original of tail) {
         const before = controller.checkpoint();
-        let outcome: CommandOutcome<unknown, WorkbookCommand>;
+        let outcome:
+          | { readonly status: 'noop' }
+          | {
+              readonly status: 'committed';
+              readonly commit: SpreadsheetControllerCommit<unknown, WorkbookCommand>;
+            };
         try {
           outcome = controller.dispatch(
             remapWorkbookCommand(original.command, mapping),
@@ -182,7 +185,7 @@ export function createControlledReconciler(controller: WorkbookController): Cont
               notify: false,
               replayAddSheetId: original.addedSheetId,
             },
-          ) as CommandOutcome<unknown, WorkbookCommand>;
+          );
         } catch (cause) {
           controller.restore(before);
           return { pending: replayed, error: replayError(cause) };
@@ -190,7 +193,7 @@ export function createControlledReconciler(controller: WorkbookController): Cont
         const replayedSheetIds = controller.getSheetIds();
         if (
           outcome.status !== 'committed' ||
-          JSON.stringify(outcome.commit.value) !== original.projectedKey ||
+          JSON.stringify(outcome.commit.document) !== original.projectedKey ||
           !sameSheetIds(replayedSheetIds, original.runtimeSheetIds)
         ) {
           controller.restore(before);
@@ -218,7 +221,6 @@ export function createControlledReconciler(controller: WorkbookController): Cont
           pending,
         },
         value,
-        defaults,
       );
       if (update.kind === 'same-reference') {
         return { refresh: false };
@@ -232,9 +234,9 @@ export function createControlledReconciler(controller: WorkbookController): Cont
         };
       }
       if (update.kind === 'replace') {
-        controller.replace(update.workbook);
+        controller.replace(update.document);
         base = {
-          key: JSON.stringify(update.workbook),
+          key: JSON.stringify(update.document),
           checkpoint: controller.checkpoint(),
           runtimeSheetIds: controller.getSheetIds(),
         };

@@ -62,7 +62,7 @@ function callbacksFromProps(props: TegoSheetProps): TegoSheetCallbacks {
   return {
     onActiveSheetChange: props.onActiveSheetChange,
     onCellEdit: props.onCellEdit,
-    onChange: props.onChange,
+    onDocumentChange: props.onDocumentChange,
     onError: props.onError,
     onPaste: props.onPaste,
     onSelectionChange: props.onSelectionChange,
@@ -479,12 +479,12 @@ function CommitAuthority(props: { readonly commit: () => void }) {
   return null;
 }
 
-interface RuntimeProps extends TegoSheetProps {
+type RuntimeProps = TegoSheetProps & {
   readonly controlled: ControlledWorkbookRuntime;
   readonly epoch: ControllerEpoch;
   readonly mountOptions: TegoSheetMountOptions;
   readonly mountActiveSheetIndex: number | undefined;
-}
+};
 
 function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle>) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -1072,17 +1072,19 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
 const ForwardedRuntime = forwardRef(Runtime);
 
 /**
- * Renders an interactive spreadsheet with controlled or uncontrolled workbook ownership.
+ * Renders an interactive spreadsheet with controlled or uncontrolled document ownership.
  * Use a {@link TegoSheetHandle} ref for cell, sheet, validation, print, and layout operations.
  *
  * @example
  * ```tsx
  * import { useState } from 'react';
- * import { TegoSheet, type WorkbookData } from 'tego-sheet';
+ * import { createSpreadsheetDocument, TegoSheet, type SpreadsheetDocument } from 'tego-sheet';
  *
  * function BudgetSheet() {
- *   const [value, setValue] = useState<WorkbookData>([{ name: 'Budget' }]);
- *   return <TegoSheet value={value} onChange={(next) => setValue(next)} />;
+ *   const [document, setDocument] = useState<SpreadsheetDocument>(
+ *     createSpreadsheetDocument({ sheetName: 'Budget' }),
+ *   );
+ *   return <TegoSheet document={document} onDocumentChange={setDocument} />;
  * }
  * ```
  */
@@ -1093,7 +1095,7 @@ export const TegoSheet = forwardRef<TegoSheetHandle, TegoSheetProps>(
     const epoch = useControllerEpoch(props);
     const controlled = useControlledWorkbook({
       epoch,
-      value: props.value,
+      document: props.document,
       onError: props.onError,
     });
     if (epoch === null) {

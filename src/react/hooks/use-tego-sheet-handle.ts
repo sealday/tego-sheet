@@ -128,7 +128,7 @@ function runtimeSheet(runtime: TegoSheetHandleRuntime, address: CellAddress) {
   const snapshot = runtime.controller.getSnapshot();
   const index = snapshot.sheets.findIndex((sheet) => sheet.id === address.sheet);
   if (index < 0) throw invalid(`Unknown sheet ID: ${address.sheet}`);
-  return snapshot.value[index]!;
+  return snapshot.projection[index]!;
 }
 
 function createStableHandle<Runtime extends TegoSheetHandleRuntime>(
@@ -138,7 +138,7 @@ function createStableHandle<Runtime extends TegoSheetHandleRuntime>(
     focus() {
       authority.require().root?.focus();
     },
-    getValue: () => authority.require().controller.getValue(),
+    getDocument: () => authority.require().controller.getDocument(),
     getCell(address) {
       const runtime = authority.require();
       runtime.controller.getCellText(address);

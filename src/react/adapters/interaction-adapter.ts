@@ -1,4 +1,4 @@
-import type { WorkbookController } from '../../core/controller/workbook-controller';
+import type { SpreadsheetDocumentController } from '../../core/controller/spreadsheet-document-controller';
 import type { WorkbookCommand } from '../../core/commands/workbook-command';
 import { TegoSheetException, type CellPoint, type ChangeSource, type Selection } from '../../core';
 import {
@@ -13,7 +13,7 @@ import type { EventDispatcher } from './event-dispatcher';
 import type { EngineAdapter } from './engine-adapter';
 
 export interface InteractionAdapterOptions {
-  readonly controller: WorkbookController;
+  readonly controller: SpreadsheetDocumentController;
   readonly dispatcher: EventDispatcher;
   readonly engine: EngineAdapter;
   readonly root: HTMLElement;

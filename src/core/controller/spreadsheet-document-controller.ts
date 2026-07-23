@@ -36,6 +36,15 @@ export interface SpreadsheetControllerEvent {
   readonly commit: SpreadsheetControllerCommit<unknown, WorkbookCommand>;
 }
 
+export interface SpreadsheetDispatchOptions extends Omit<DispatchOptions, 'beforeNotify'> {
+  readonly beforeNotify?: (commit: SpreadsheetControllerCommit<unknown, WorkbookCommand>) => void;
+}
+
+export interface SpreadsheetControllerCheckpoint {
+  readonly legacy: ReturnType<WorkbookController['checkpoint']>;
+  readonly document: SpreadsheetDocument;
+}
+
 function cloneFrozen<T>(value: T): T {
   if (value === null || typeof value !== 'object') return value;
   const output = (Array.isArray(value) ? [] : {}) as Record<string, unknown>;
@@ -95,12 +104,12 @@ export class SpreadsheetDocumentController {
 
   getSnapshot(): SpreadsheetControllerSnapshot {
     const snapshot = this.legacy.getSnapshot();
+    const { value: projection, ...metadata } = snapshot;
     return cloneFrozen({
-      ...snapshot,
+      ...metadata,
       document: this.document,
-      projection: snapshot.value,
-      value: undefined,
-    }) as SpreadsheetControllerSnapshot;
+      projection,
+    });
   }
 
   validate(): ValidationResult {
@@ -115,7 +124,7 @@ export class SpreadsheetDocumentController {
   dispatch<Command extends WorkbookCommand>(
     command: Command,
     source: ChangeSource,
-    options: DispatchOptions = {},
+    options: SpreadsheetDispatchOptions = {},
   ):
     | { readonly status: 'noop' }
     | {
@@ -152,22 +161,22 @@ export class SpreadsheetDocumentController {
     return { status: 'committed', commit };
   }
 
-  undo(source: ChangeSource = 'ref', options: DispatchOptions = {}) {
+  undo(source: ChangeSource = 'ref', options: SpreadsheetDispatchOptions = {}) {
     return this.dispatch({ type: 'undo' }, source, options);
   }
 
-  redo(source: ChangeSource = 'ref', options: DispatchOptions = {}) {
+  redo(source: ChangeSource = 'ref', options: SpreadsheetDispatchOptions = {}) {
     return this.dispatch({ type: 'redo' }, source, options);
   }
 
-  checkpoint() {
+  checkpoint(): SpreadsheetControllerCheckpoint {
     return {
       legacy: this.legacy.checkpoint(),
       document: this.document,
     };
   }
 
-  restore(checkpoint: ReturnType<SpreadsheetDocumentController['checkpoint']>): void {
+  restore(checkpoint: SpreadsheetControllerCheckpoint): void {
     this.legacy.restore(checkpoint.legacy);
     this.document = checkpoint.document;
   }

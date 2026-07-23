@@ -44,7 +44,7 @@ function sameSelection(left: Selection, right: Selection): boolean {
 function dateEditorFor(runtime: CellEditorRuntime, address: CellAddress): boolean {
   const snapshot = runtime.controller.getSnapshot();
   const index = snapshot.sheets.findIndex((sheet) => sheet.id === runtime.activeSheet);
-  const sheet = index < 0 ? undefined : snapshot.value[index];
+  const sheet = index < 0 ? undefined : snapshot.projection[index];
   if (sheet === undefined) return false;
   return (sheet.validations ?? []).some((data) => {
     const rule = validationDataToRule(data);
