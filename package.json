@@ -79,6 +79,7 @@
     "test:visual": "playwright test --config playwright.visual.config.ts",
     "test:ssr": "node scripts/test-ssr.mjs",
     "test:package": "node scripts/test-package.mjs",
+    "test:output-interop": "npm run build && node scripts/verify-output-interoperability.mjs",
     "test:parity-gate": "node scripts/test-parity-gate.mjs",
     "test:parity-release": "node scripts/run-parity-release.mjs",
     "typecheck": "tsc --noEmit --project tsconfig.json",

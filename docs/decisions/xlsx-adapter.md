@@ -61,7 +61,7 @@ smaller and safer than exposing those read and round-trip capabilities.
 The serializer emits only these project-owned part families when needed:
 
 - `[Content_Types].xml`, root relationships, workbook, workbook relationships,
-  workbook properties, shared strings, styles, and ordered worksheets;
+  workbook properties, styles, and ordered worksheets;
 - worksheet cells with explicit types, formulas and cached values, merges,
   row/column dimensions and hidden state, data validation, supported
   conditional-format rules, print area/titles, page margins/setup, row/column
@@ -73,6 +73,13 @@ code constants. User strings pass through XML escaping; relationship targets
 are generated identifiers, never user-provided paths. No arbitrary XML,
 external relationship, macro, OLE, script, connection, or unknown imported
 part can enter the package.
+
+Strings use inline-string cells. Formula cells and conditional-format formulas
+must parse through the restricted formula grammar; functions are limited to the
+built-in Excel compatibility manifest, and referenced sheets must resolve
+inside the generated workbook. Conditional cell operators and differential
+style fields are also runtime allowlists, so structurally typed callers cannot
+inject unsupported OOXML through unchecked strings.
 
 ## Determinism, browser, Worker, and tree-shaking
 
@@ -90,11 +97,12 @@ part can enter the package.
 
 ## Unsupported-feature policy
 
-Workbook 2.0 currently has no first-class conditional-formatting or full
-header/footer schema. The adapter never invents those semantics. Recognized
-future metadata is serialized only after its schema is promoted into the
-document contract; otherwise a located `XLSX_UNSUPPORTED_FEATURE` diagnostic
-blocks export when omission would violate a declared feature.
+Generated output has first-class worksheet visibility plus color-scale and
+formula-backed cell-is conditional formatting. Full header/footer semantics
+remain unsupported. Recognized future metadata is serialized only after its
+schema is promoted into the document contract; otherwise a located
+`XLSX_UNSUPPORTED_FEATURE` diagnostic blocks export when omission would violate
+a declared feature.
 
 Custom cells, unsupported validation/style JSON, unsupported image MIME,
 invalid sheet names, formulas that cannot map to Excel syntax, and limit
