@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { createSpreadsheetDocument } from '../../../src/document';
 import type { SpreadsheetDocument } from '../../../src/document';
+import { createFontMetrics } from '../../../src/presentation';
 import {
   compileSpreadsheetTemplate,
   expandAdvancedTemplate,
+  renderSpreadsheetTemplate,
   type AdvancedCompileOptions,
   type SpreadsheetTemplate,
 } from '../../../src/template';
@@ -144,6 +146,190 @@ describe('TP2 advanced template structures', () => {
     expect(values).toEqual(expect.arrayContaining(['A:a1', 'A:a2', 'B:b1']));
   });
 
+  it('binds nested horizontal repeats to their parent item scope', () => {
+    const { document, template } = source([
+      {
+        id: 'outer',
+        type: 'repeat-columns',
+        range: range(0, 0, 0, 3),
+        source: 'groups',
+        empty: 'remove',
+      },
+      {
+        id: 'inner',
+        type: 'repeat-columns',
+        range: range(0, 0, 1, 1),
+        source: 'item.values',
+        empty: 'remove',
+      },
+      {
+        id: 'value',
+        type: 'value',
+        target: { sheetId: 'sheet-1', row: 0, column: 1 },
+        expression: 'parent.name + ":" + item',
+      },
+    ] as never);
+    const compiled = compileSpreadsheetTemplate(document, template.id, options).template!;
+    const expanded = expandAdvancedTemplate(
+      compiled,
+      {
+        groups: [
+          { name: 'A', values: ['a1', 'a2'] },
+          { name: 'B', values: ['b1'] },
+        ],
+      },
+      options.limits,
+    );
+    const values = expanded.document?.workbook.sheets[0]?.cells
+      .filter(({ row, cell }) => row === 0 && cell.input.type === 'string')
+      .map(({ cell }) => (cell.input.type === 'string' ? cell.input.value : ''));
+    expect(values).toEqual(expect.arrayContaining(['A:a1', 'A:a2', 'B:b1']));
+  });
+
+  it('preserves immediate parent scopes through a three-level mixed-axis tree', () => {
+    const { document, template } = source([
+      {
+        id: 'outer',
+        type: 'repeat-rows',
+        range: range(0, 4, 0, 5),
+        source: 'groups',
+        empty: 'remove',
+        pageBreak: 'auto',
+      },
+      {
+        id: 'middle',
+        type: 'repeat-columns',
+        range: range(1, 3, 1, 4),
+        source: 'item.columns',
+        empty: 'remove',
+      },
+      {
+        id: 'inner',
+        type: 'repeat-rows',
+        range: range(2, 2, 2, 2),
+        source: 'item.values',
+        empty: 'remove',
+        pageBreak: 'auto',
+      },
+      {
+        id: 'outer-value',
+        type: 'value',
+        target: { sheetId: 'sheet-1', row: 0, column: 0 },
+        expression: 'item.name',
+      },
+      {
+        id: 'middle-value',
+        type: 'value',
+        target: { sheetId: 'sheet-1', row: 1, column: 1 },
+        expression: 'parent.name + ":" + item.name',
+      },
+      {
+        id: 'inner-value',
+        type: 'value',
+        target: { sheetId: 'sheet-1', row: 2, column: 2 },
+        expression: 'parent.name + ":" + item',
+      },
+    ] as never);
+    const compiled = compileSpreadsheetTemplate(document, template.id, options).template!;
+    const expanded = expandAdvancedTemplate(
+      compiled,
+      {
+        groups: [
+          {
+            name: 'A',
+            columns: [
+              { name: 'X', values: [1, 2] },
+              { name: 'Y', values: [3] },
+            ],
+          },
+          { name: 'B', columns: [{ name: 'Z', values: [4] }] },
+        ],
+      },
+      options.limits,
+    );
+    const values = new Map(
+      expanded.document?.workbook.sheets[0]?.cells
+        .filter(({ cell }) => cell.input.type === 'string')
+        .map(({ row, column, cell }) => [
+          `${row}:${column}`,
+          cell.input.type === 'string' ? cell.input.value : '',
+        ]),
+    );
+    expect(values).toMatchObject(
+      new Map([
+        ['0:0', 'A'],
+        ['1:1', 'A:X'],
+        ['2:2', 'X:1'],
+        ['3:2', 'X:2'],
+        ['1:5', 'A:Y'],
+        ['2:6', 'Y:3'],
+        ['6:0', 'B'],
+        ['7:1', 'B:Z'],
+        ['8:2', 'Z:4'],
+      ]),
+    );
+  });
+
+  it('applies same-level regions bottom-right to top-left with final mappings', () => {
+    const bindings = [
+      {
+        id: 'top',
+        type: 'repeat-range',
+        range: range(0, 0, 0, 0),
+        source: 'top',
+        axis: 'vertical',
+        empty: 'remove',
+      },
+      {
+        id: 'bottom',
+        type: 'repeat-range',
+        range: range(2, 2, 0, 0),
+        source: 'bottom',
+        axis: 'vertical',
+        empty: 'remove',
+      },
+      {
+        id: 'top-value',
+        type: 'value',
+        target: { sheetId: 'sheet-1', row: 0, column: 0 },
+        expression: 'item',
+      },
+      {
+        id: 'bottom-value',
+        type: 'value',
+        target: { sheetId: 'sheet-1', row: 2, column: 0 },
+        expression: 'item',
+      },
+    ] as never;
+    const run = (ordered: SpreadsheetTemplate['bindings']) => {
+      const fixture = source(ordered);
+      const expanded = expandAdvancedTemplate(
+        compileSpreadsheetTemplate(fixture.document, fixture.template.id, options).template!,
+        { top: ['T1', 'T2'], bottom: ['B1', 'B2'] },
+        options.limits,
+      );
+      return {
+        values: expanded.document?.workbook.sheets[0]?.cells
+          .filter(({ column, cell }) => column === 0 && cell.input.type === 'string')
+          .map(({ row, cell }) => [row, cell.input.type === 'string' ? cell.input.value : '']),
+        bottomMappings: expanded.structuralMappings
+          .filter(({ bindingId }) => bindingId === 'bottom')
+          .map(({ generated }) => generated.start.row),
+      };
+    };
+    const expected = {
+      values: [
+        [0, 'T1'],
+        [1, 'T2'],
+        [3, 'B1'],
+        [4, 'B2'],
+      ],
+      bottomMappings: [3, 4],
+    };
+    expect(run(bindings)).toEqual(expected);
+    expect(run([...bindings].reverse())).toEqual(expected);
+  });
+
   it('rejects partial overlap and reports a complete subtemplate cycle', () => {
     const { document, template } = source([
       {
@@ -214,11 +400,11 @@ describe('TP2 advanced template structures', () => {
           id: 'child-name' as never,
           type: 'value',
           target: { sheetId: 'sheet-1' as never, row: 0, column: 0 },
-          expression: 'item.name',
+          expression: 'name',
         },
       ],
       printProfiles: [],
-    } as SpreadsheetTemplate;
+    } as unknown as SpreadsheetTemplate;
     const advancedOptions = {
       ...options,
       subtemplates: new Map([['child' as never, child]]),
@@ -235,6 +421,114 @@ describe('TP2 advanced template structures', () => {
         column: 0,
         cell: { input: { type: 'string', value: 'Ada' } },
       }),
+    );
+  });
+
+  it('pastes expanded subtemplate cells, formulas, merges, styles and validations', () => {
+    const fixture = source([
+      {
+        id: 'child-slot',
+        type: 'subtemplate',
+        range: range(2, 2, 0, 1),
+        templateId: 'child',
+        source: 'customer',
+      },
+    ] as never);
+    const child = {
+      id: 'child' as never,
+      name: 'Child',
+      bindings: [
+        {
+          id: 'child-rows',
+          type: 'repeat-rows',
+          range: range(0, 0, 0, 1),
+          source: 'items',
+          empty: 'remove',
+          pageBreak: 'auto',
+        },
+        {
+          id: 'child-value',
+          type: 'value',
+          target: { sheetId: 'sheet-1', row: 0, column: 0 },
+          expression: 'item',
+        },
+      ],
+      printProfiles: [],
+    } as unknown as SpreadsheetTemplate;
+    const document = {
+      ...fixture.document,
+      workbook: {
+        ...fixture.document.workbook,
+        sheets: [
+          {
+            ...fixture.document.workbook.sheets[0]!,
+            cells: [
+              {
+                row: 0,
+                column: 0,
+                cell: {
+                  input: { type: 'string', value: 'seed' },
+                  styleId: 'style-1',
+                  validationId: 'validation-1',
+                  metadata: { source: 'child' },
+                },
+              },
+              { row: 0, column: 1, cell: { input: { type: 'formula', source: '=A1' } } },
+            ],
+            merges: [{ start: { row: 0, column: 0 }, end: { row: 0, column: 1 } }],
+          },
+        ],
+      },
+    } as unknown as SpreadsheetDocument;
+    const advancedOptions = {
+      ...options,
+      subtemplates: new Map([['child' as never, child]]),
+    };
+    const compiled = compileSpreadsheetTemplate(
+      document,
+      fixture.template.id,
+      advancedOptions,
+    ).template!;
+    const expanded = expandAdvancedTemplate(
+      compiled,
+      { customer: { items: ['Ada', 'Lin'] } },
+      options.limits,
+    );
+    const sheet = expanded.document?.workbook.sheets[0];
+    expect(sheet?.cells).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          row: 2,
+          column: 0,
+          cell: expect.objectContaining({
+            input: { type: 'string', value: 'Ada' },
+            styleId: 'style-1',
+            validationId: 'validation-1',
+            metadata: { source: 'child' },
+          }),
+        }),
+        expect.objectContaining({
+          row: 2,
+          column: 1,
+          cell: { input: { type: 'formula', source: '=A3' } },
+        }),
+        expect.objectContaining({
+          row: 3,
+          column: 0,
+          cell: expect.objectContaining({ input: { type: 'string', value: 'Lin' } }),
+        }),
+        expect.objectContaining({
+          row: 3,
+          column: 1,
+          cell: { input: { type: 'formula', source: '=A4' } },
+        }),
+      ]),
+    );
+    expect(sheet?.merges).toEqual(
+      expect.arrayContaining([
+        { start: { row: 2, column: 0 }, end: { row: 2, column: 1 } },
+        { start: { row: 3, column: 0 }, end: { row: 3, column: 1 } },
+      ]),
     );
   });
 
@@ -287,7 +581,220 @@ describe('TP2 advanced template structures', () => {
     expect(expanded.structuralMappings.length).toBeGreaterThan(0);
   });
 
-  it('requires an explicit floating-object copy policy and stops before partial output', () => {
+  it('routes a sheet print target to each generated repeat-sheet boundary', async () => {
+    const fixture = source([
+      {
+        id: 'sheets',
+        type: 'repeat-sheet',
+        range: range(0, 0, 0, 0),
+        source: 'regions',
+        name: 'item.name',
+      },
+      {
+        id: 'region-name',
+        type: 'value',
+        target: { sheetId: 'sheet-1', row: 0, column: 0 },
+        expression: 'item.name',
+      },
+    ] as never);
+    const printable = {
+      ...fixture.template,
+      printProfiles: [
+        {
+          id: 'profile',
+          name: 'Generated sheets',
+          targets: [{ type: 'sheet', sheetId: 'sheet-1' }],
+          page: {
+            paper: { type: 'custom', width: 240, height: 160 },
+            orientation: 'portrait',
+            margins: { top: 10, right: 10, bottom: 10, left: 10 },
+            scale: { type: 'fixed', value: 1 },
+          },
+          manualBreaks: [],
+          showGridlines: true,
+          showHeadings: false,
+        },
+      ],
+    } as unknown as SpreadsheetTemplate;
+    const document = { ...fixture.document, templates: [printable] };
+    const compiled = compileSpreadsheetTemplate(document, printable.id, options).template!;
+    const result = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: { regions: [{ name: 'North' }, { name: 'South' }] },
+        profileId: 'profile',
+        missingValue: 'error',
+      },
+      {
+        locale: 'en-US',
+        timeZone: 'UTC',
+        dateSystem: 'excel-1900',
+        clock: new Date('2026-01-01T00:00:00.000Z'),
+        fontMetrics: createFontMetrics({
+          fonts: { Arial: { averageAdvance: 6, lineHeight: 12 } },
+          fallbackFont: 'Arial',
+          fallback: { averageAdvance: 6, lineHeight: 12 },
+        }),
+      },
+    );
+    expect(
+      result.document?.workbook.sheets.slice(1).map(({ id, name, cells }) => ({
+        id,
+        name,
+        value: cells[0]?.cell.input,
+      })),
+    ).toEqual([
+      {
+        id: 'sheet-1~sheets~1',
+        name: 'North',
+        value: { type: 'string', value: 'North' },
+      },
+      {
+        id: 'sheet-1~sheets~2',
+        name: 'South',
+        value: { type: 'string', value: 'South' },
+      },
+    ]);
+    expect(result.document?.print.pages.map(({ targetId }) => targetId)).toEqual([
+      expect.stringContaining('sheet-1~sheets~1'),
+      expect.stringContaining('sheet-1~sheets~2'),
+    ]);
+    await result.document?.resources.dispose();
+  });
+
+  it.each([
+    {
+      label: 'horizontal',
+      binding: {
+        id: 'repeat',
+        type: 'repeat-columns',
+        range: range(0, 0, 0, 0),
+        source: 'items',
+        empty: 'remove',
+      },
+      data: { items: ['A', 'B', 'C'] },
+      expected: [
+        [0, 0, 'A'],
+        [0, 1, 'B'],
+        [0, 2, 'C'],
+      ],
+    },
+    {
+      label: 'two-dimensional',
+      binding: {
+        id: 'repeat',
+        type: 'repeat-range',
+        range: range(0, 0, 0, 0),
+        source: 'items',
+        axis: 'both',
+        empty: 'remove',
+      },
+      data: {
+        items: [
+          ['A', 'B'],
+          ['C', 'D'],
+        ],
+      },
+      expected: [
+        [0, 0, 'A'],
+        [0, 1, 'B'],
+        [1, 0, 'C'],
+        [1, 1, 'D'],
+      ],
+    },
+    {
+      label: 'per-page',
+      binding: {
+        id: 'repeat',
+        type: 'repeat-page',
+        range: range(0, 0, 0, 0),
+        source: 'items',
+        empty: 'remove',
+      },
+      data: { items: ['A', 'B', 'C'] },
+      expected: [
+        [0, 0, 'A'],
+        [1, 0, 'B'],
+        [2, 0, 'C'],
+      ],
+    },
+  ])('binds each $label copy in its own item scope', ({ binding, data, expected }) => {
+    const { document, template } = source([
+      binding,
+      {
+        id: 'value',
+        type: 'value',
+        target: { sheetId: 'sheet-1', row: 0, column: 0 },
+        expression: 'item',
+      },
+    ] as never);
+    const compiled = compileSpreadsheetTemplate(document, template.id, options).template!;
+    const result = expandAdvancedTemplate(compiled, data, options.limits);
+    const cells = result.document?.workbook.sheets[0]?.cells.map(({ row, column, cell }) => [
+      row,
+      column,
+      cell.input.type === 'string' ? cell.input.value : '',
+    ]);
+    expect(cells).toEqual(expect.arrayContaining(expected));
+    if (binding.type === 'repeat-page') {
+      expect(result.forcedPageBreaks.get('sheet-1')).toEqual([1, 2]);
+    }
+  });
+
+  it('removes empty advanced regions and preserves repeated merges', () => {
+    const { document, template } = source([
+      {
+        id: 'repeat',
+        type: 'repeat-columns',
+        range: range(0, 0, 0, 0),
+        source: 'items',
+        empty: 'remove',
+      },
+    ] as never);
+    const empty = expandAdvancedTemplate(
+      compileSpreadsheetTemplate(document, template.id, options).template!,
+      { items: [] },
+      options.limits,
+    );
+    expect(empty.document?.workbook.sheets[0]?.cells).not.toContainEqual(
+      expect.objectContaining({ row: 0, column: 0 }),
+    );
+
+    const nested = source([
+      {
+        id: 'outer',
+        type: 'repeat-rows',
+        range: range(0, 1),
+        source: 'items',
+        empty: 'remove',
+        pageBreak: 'auto',
+      },
+    ] as never);
+    const mergedDocument = {
+      ...nested.document,
+      workbook: {
+        ...nested.document.workbook,
+        sheets: [
+          {
+            ...nested.document.workbook.sheets[0]!,
+            merges: [{ start: { row: 0, column: 0 }, end: { row: 0, column: 1 } }],
+          },
+        ],
+      },
+    };
+    const merged = expandAdvancedTemplate(
+      compileSpreadsheetTemplate(mergedDocument, nested.template.id, options).template!,
+      { items: [{}, {}] },
+      options.limits,
+    );
+    expect(merged.document?.workbook.sheets[0]?.merges).toEqual([
+      { start: { row: 0, column: 0 }, end: { row: 0, column: 1 } },
+      { start: { row: 2, column: 0 }, end: { row: 2, column: 1 } },
+    ]);
+  });
+
+  it('requires an explicit object policy and rejects estimated allocation before cloning', () => {
     const { document, template } = source([
       {
         id: 'objects',
@@ -344,6 +851,9 @@ describe('TP2 advanced template structures', () => {
       },
     );
     expect(expanded.document).toBeUndefined();
+    expect(expanded.structuralMappings).toEqual([]);
+    expect(expanded.forcedPageBreaks.size).toBe(0);
+    expect(document.workbook.sheets[0]?.cells).toHaveLength(2);
     expect(expanded.diagnostics).toContainEqual(
       expect.objectContaining({ code: 'EXPANSION_LIMIT_EXCEEDED' }),
     );

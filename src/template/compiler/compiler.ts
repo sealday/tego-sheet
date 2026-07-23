@@ -709,7 +709,14 @@ export function compileSpreadsheetTemplate(
   options?: AdvancedCompileOptions,
 ): CompilationResult {
   const diagnostics: Diagnostic[] = [];
-  if (hasUnsafeCompilationGraph([document, templateOrId])) {
+  if (
+    hasUnsafeCompilationGraph([
+      document,
+      templateOrId,
+      options?.limits,
+      ...(options === undefined ? [] : [...options.subtemplates.values()]),
+    ])
+  ) {
     const frozenDiagnostics = immutableClone([
       diagnostic('COMPILATION_RESOURCE_LIMIT', 'Template source exceeds compilation limits'),
     ]);
@@ -743,6 +750,34 @@ export function compileSpreadsheetTemplate(
       const message =
         cause instanceof TemplateExpressionError ? cause.message : 'Expression compilation failed';
       diagnostics.push(diagnostic('INVALID_EXPRESSION', message, binding));
+    }
+  }
+  if (options !== undefined) {
+    for (const child of options.subtemplates.values()) {
+      if (!hasRuntimeTemplateShape(child)) {
+        diagnostics.push(
+          diagnostic(
+            'INVALID_TEMPLATE_STRUCTURE',
+            `Subtemplate ${String((child as unknown as { readonly id?: unknown }).id)} is malformed`,
+          ),
+        );
+        continue;
+      }
+      for (const childBinding of child.bindings) {
+        try {
+          compileBinding(childBinding);
+        } catch (cause) {
+          diagnostics.push(
+            diagnostic(
+              'INVALID_EXPRESSION',
+              cause instanceof TemplateExpressionError
+                ? `Subtemplate ${String(child.id)}: ${cause.message}`
+                : `Subtemplate ${String(child.id)} expression compilation failed`,
+              childBinding,
+            ),
+          );
+        }
+      }
     }
   }
   validateBindings(resolved.document, template.bindings, diagnostics);
