@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Diagnostic } from '../../src/document';
 import { createSpreadsheetDocument } from '../../src/document';
 import { TegoSheet } from '../../src/react/tego-sheet';
@@ -7,6 +7,23 @@ import { createFontMetrics } from '../../src/presentation';
 import { TemplateDesigner } from '../../src/react/template-designer';
 import { TemplatePreview } from '../../src/react/preview';
 import type { GeneratedDocument, SpreadsheetTemplate } from '../../src/template';
+import { createCanvasHarness } from '../helpers/canvas-harness';
+
+beforeEach(() => {
+  const context = createCanvasHarness().canvas.getContext('2d');
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => context);
+  vi.stubGlobal(
+    'requestAnimationFrame',
+    vi.fn(() => 1),
+  );
+  vi.stubGlobal('cancelAnimationFrame', vi.fn());
+});
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 const template: SpreadsheetTemplate = {
   id: 'template-1' as never,
@@ -129,6 +146,122 @@ describe('TemplateDesigner', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete binding-1' }));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ bindings: [] }));
   });
+
+  it('edits complete profile settings and manages profile lifecycle', () => {
+    const onChange = vi.fn();
+    const rendered = render(
+      <TemplateDesigner
+        template={template}
+        diagnostics={[]}
+        onChange={onChange}
+        selection={{
+          sheetId: 'sheet-1' as never,
+          start: { row: 3, column: 1 },
+          end: { row: 4, column: 2 },
+        }}
+      />,
+    );
+    const view = within(rendered.container);
+
+    fireEvent.change(view.getByLabelText('Scale for profile-1'), {
+      target: { value: 'fit-width' },
+    });
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        printProfiles: [
+          expect.objectContaining({
+            page: expect.objectContaining({ scale: { type: 'fit-width', pages: 1 } }),
+          }),
+        ],
+      }),
+    );
+    fireEvent.change(view.getByLabelText('header center for profile-1'), {
+      target: { value: 'Invoice {page}' },
+    });
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        printProfiles: [expect.objectContaining({ header: { center: 'Invoice {page}' } })],
+      }),
+    );
+    fireEvent.click(view.getByRole('button', { name: 'Use selection as repeat rows' }));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        printProfiles: [
+          expect.objectContaining({
+            repeatRows: expect.objectContaining({ start: { row: 3, column: 1 } }),
+          }),
+        ],
+      }),
+    );
+    fireEvent.click(view.getByRole('button', { name: 'Add page break at selection' }));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        printProfiles: [
+          expect.objectContaining({
+            manualBreaks: [expect.objectContaining({ beforeRow: 3 })],
+          }),
+        ],
+      }),
+    );
+    fireEvent.click(view.getByRole('button', { name: 'Add print profile' }));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        printProfiles: expect.arrayContaining([expect.objectContaining({ id: 'profile-2' })]),
+      }),
+    );
+    fireEvent.click(view.getByRole('button', { name: 'Delete profile profile-1' }));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ printProfiles: [] }));
+  });
+
+  it('bridges template binding decorations to the live grid selection', async () => {
+    const onSelectionChange = vi.fn();
+    const onTemplateChange = vi.fn();
+    const locatedTemplate: SpreadsheetTemplate = {
+      ...template,
+      bindings: [
+        {
+          id: 'binding-1' as never,
+          type: 'value',
+          target: { sheetId: 'sheet-1' as never, row: 2, column: 1 },
+          expression: 'customer.name',
+        },
+      ],
+    };
+    const rendered = render(
+      <TegoSheet
+        defaultDocument={createSpreadsheetDocument({
+          id: 'template-document',
+          sheetId: 'sheet-1',
+          sheetName: 'Invoice',
+        })}
+        mode="template"
+        template={locatedTemplate}
+        onTemplateChange={onTemplateChange}
+        onSelectionChange={onSelectionChange}
+      />,
+    );
+    const view = within(rendered.container);
+
+    await waitFor(() => expect(view.getByLabelText('Template canvas decorations')).toBeTruthy());
+    fireEvent.click(view.getByRole('button', { name: 'binding-1' }));
+    expect(onSelectionChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        active: { row: 2, column: 1 },
+        range: { start: { row: 2, column: 1 }, end: { row: 2, column: 1 } },
+      }),
+    );
+    fireEvent.click(view.getByRole('button', { name: 'Add repeat rows' }));
+    expect(onTemplateChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindings: expect.arrayContaining([
+          expect.objectContaining({
+            type: 'repeat-rows',
+            range: expect.objectContaining({ start: { row: 2, column: 1 } }),
+          }),
+        ]),
+      }),
+    );
+  });
 });
 
 describe('TemplatePreview', () => {
@@ -188,7 +321,7 @@ describe('TemplatePreview', () => {
       sheetName: 'Invoice',
     });
     const onDiagnostics = vi.fn();
-    render(
+    const rendered = render(
       <TegoSheet
         document={document}
         mode="preview"
@@ -208,8 +341,44 @@ describe('TemplatePreview', () => {
         }}
       />,
     );
+    const view = within(rendered.container);
 
-    await waitFor(() => expect(screen.getByRole('img')).toBeTruthy());
+    await waitFor(() => expect(view.getByRole('img')).toBeTruthy());
+    expect(view.getByLabelText('Template preview metadata').textContent).toContain(
+      '1 page(s) · A4 · portrait · Fixed 1',
+    );
     expect(onDiagnostics).toHaveBeenCalled();
+  });
+
+  it('keeps non-fatal diagnostics visible beside a successful preview', async () => {
+    const rendered = render(
+      <TegoSheet
+        document={createSpreadsheetDocument({
+          id: 'preview-warning-document',
+          sheetId: 'sheet-1',
+          sheetName: 'Invoice',
+        })}
+        mode="preview"
+        template={template}
+        sampleData={{}}
+        renderEnvironment={{
+          locale: 'en-US',
+          timeZone: 'UTC',
+          dateSystem: 'excel-1900',
+          clock: new Date('2026-01-01T00:00:00.000Z'),
+          fontMetrics: createFontMetrics({
+            fonts: { Arial: { averageAdvance: 6, lineHeight: 12 } },
+            fallbackFont: 'Arial',
+            fallback: { averageAdvance: 6, lineHeight: 12 },
+          }),
+        }}
+      />,
+    );
+    const view = within(rendered.container);
+
+    await waitFor(() => expect(view.getByRole('img')).toBeTruthy());
+    expect(view.getByLabelText('Template preview diagnostics').textContent).toContain(
+      'resolved to a missing value',
+    );
   });
 });

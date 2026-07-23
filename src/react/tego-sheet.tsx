@@ -1040,6 +1040,38 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
   const filterValues = filterAuthority?.values ?? [];
   const t = createTranslator(props.locale);
   const accessibilityIdPrefix = useId();
+  const templateSelection =
+    selection === null
+      ? undefined
+      : {
+          sheetId: selection.sheet as unknown as import('../document').DocumentSheetId,
+          start: selection.range.start,
+          end: selection.range.end,
+        };
+  const locateTemplateBinding = useCallback(
+    (bindingId: import('../document').BindingId) => {
+      const binding = props.template?.bindings.find(({ id }) => id === bindingId);
+      if (binding === undefined) return;
+      const range =
+        binding.type === 'value'
+          ? {
+              sheetId: binding.target.sheetId,
+              start: { row: binding.target.row, column: binding.target.column },
+              end: { row: binding.target.row, column: binding.target.column },
+            }
+          : binding.range;
+      const sheet = range.sheetId as unknown as SheetId;
+      const state = createSelectionState(range.start, range.end);
+      const target: Selection = { sheet, range: state.range, active: state.active };
+      setActiveSheet(sheet);
+      engineSlot.get()?.render(controller.getSnapshot(), sheet);
+      engineSlot.get()?.stageSelection(state);
+      setSelection(target);
+      dispatcher.emitSelectionChange(target);
+      engineSlot.get()?.render(controller.getSnapshot(), sheet);
+    },
+    [controller, dispatcher, engineSlot, props.template, setActiveSheet],
+  );
   return (
     <div
       ref={rootCallback}
@@ -1146,7 +1178,44 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
           <EmptyWorkbook readOnly={renderRuntime.readOnly} onAddSheet={addFirstSheet} t={t} />
         ) : (
           <>
-            <canvas ref={canvasRef} className="tego-sheet__canvas" />
+            <canvas
+              ref={canvasRef}
+              className="tego-sheet__canvas"
+              data-template-binding-count={
+                props.mode === 'template' ? props.template?.bindings.length : undefined
+              }
+            />
+            {props.mode === 'template' && props.template !== undefined ? (
+              <div
+                className="tego-sheet__template-decorations"
+                aria-label="Template canvas decorations"
+              >
+                {props.template.bindings.map((binding) => {
+                  const range =
+                    binding.type === 'value'
+                      ? {
+                          sheetId: binding.target.sheetId,
+                          start: { row: binding.target.row, column: binding.target.column },
+                          end: { row: binding.target.row, column: binding.target.column },
+                        }
+                      : binding.range;
+                  return range.sheetId !== activeDocumentSheet?.id ? null : (
+                    <button
+                      key={binding.id}
+                      type="button"
+                      data-binding-id={binding.id}
+                      data-start-row={range.start.row}
+                      data-start-column={range.start.column}
+                      data-end-row={range.end.row}
+                      data-end-column={range.end.column}
+                      onClick={() => locateTemplateBinding(binding.id)}
+                    >
+                      {binding.id}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
             {selection === null ||
             activeData === null ||
             activeDocumentSheet === undefined ||
@@ -1201,6 +1270,16 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
           </>
         )}
       </SheetChrome>
+      {props.mode === 'template' && props.template !== undefined ? (
+        <TemplateDesignerSurface
+          document={props.epoch.snapshot.document}
+          template={props.template}
+          onChange={props.onTemplateChange ?? (() => undefined)}
+          onDiagnostics={props.onDiagnostics}
+          selection={templateSelection}
+          onLocateBinding={locateTemplateBinding}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1209,7 +1288,7 @@ const ForwardedRuntime = forwardRef(Runtime);
 
 function PreviewRenderSession(props: {
   readonly compiled: NonNullable<ReturnType<typeof compileSpreadsheetTemplate>['template']>;
-  readonly profileId: string;
+  readonly profile: NonNullable<TegoSheetProps['template']>['printProfiles'][number];
   readonly sampleData: unknown;
   readonly environment: NonNullable<TegoSheetProps['renderEnvironment']>;
   readonly onDiagnostics: TegoSheetProps['onDiagnostics'];
@@ -1217,7 +1296,7 @@ function PreviewRenderSession(props: {
   const [result, setResult] = useState<Awaited<
     ReturnType<typeof renderSpreadsheetTemplate>
   > | null>(null);
-  const { compiled, environment, onDiagnostics, profileId, sampleData } = props;
+  const { compiled, environment, onDiagnostics, profile, sampleData } = props;
   useEffect(() => {
     const controller = new AbortController();
     void renderSpreadsheetTemplate(
@@ -1225,7 +1304,7 @@ function PreviewRenderSession(props: {
         template: compiled,
         currentDocumentHash: compiled.sourceDocumentHash,
         data: sampleData,
-        profileId,
+        profileId: profile.id,
         missingValue: 'warning-and-blank',
         signal: controller.signal,
       },
@@ -1236,8 +1315,29 @@ function PreviewRenderSession(props: {
       setResult(next);
     });
     return () => controller.abort();
-  }, [compiled, environment, onDiagnostics, profileId, sampleData]);
-  if (result?.document !== undefined) return <TemplatePreview document={result.document} />;
+  }, [compiled, environment, onDiagnostics, profile.id, sampleData]);
+  if (result?.document !== undefined) {
+    const scale =
+      profile.page.scale.type === 'fixed'
+        ? `Fixed ${profile.page.scale.value}`
+        : profile.page.scale.type === 'fit-width'
+          ? `Fit width ${profile.page.scale.pages}`
+          : 'Fit page';
+    return (
+      <section aria-label="Template preview">
+        <p aria-label="Template preview metadata">
+          {result.document.print.pages.length} page(s) · {profile.page.paper.type} ·{' '}
+          {profile.page.orientation} · {scale}
+        </p>
+        <TemplatePreview document={result.document} />
+        <section aria-label="Template preview diagnostics" aria-live="polite">
+          {result.diagnostics.map((diagnostic, index) => (
+            <p key={`${diagnostic.code}-${index}`}>{diagnostic.message}</p>
+          ))}
+        </section>
+      </section>
+    );
+  }
   return (
     <section aria-label="Template preview diagnostics" aria-live="polite">
       {result?.diagnostics.map((diagnostic, index) => (
@@ -1268,7 +1368,7 @@ function TemplateSurface(props: {
       <PreviewRenderSession
         key={`${compilation.template.sourceDocumentHash}:${template.id}:${profile.id}`}
         compiled={compilation.template}
-        profileId={profile.id}
+        profile={profile}
         sampleData={sampleData}
         environment={environment}
         onDiagnostics={onDiagnostics}
@@ -1289,14 +1389,24 @@ function TemplateDesignerSurface(props: {
   readonly template: NonNullable<TegoSheetProps['template']>;
   readonly onChange: NonNullable<TegoSheetProps['onTemplateChange']>;
   readonly onDiagnostics: TegoSheetProps['onDiagnostics'];
+  readonly selection?: import('../document').DocumentCellRange;
+  readonly onLocateBinding?: (bindingId: import('../document').BindingId) => void;
 }) {
-  const { document, onChange, onDiagnostics, template } = props;
+  const { document, onChange, onDiagnostics, onLocateBinding, selection, template } = props;
   const diagnostics = useMemo(
     () => compileSpreadsheetTemplate(document, template).diagnostics,
     [document, template],
   );
   useEffect(() => onDiagnostics?.(diagnostics), [diagnostics, onDiagnostics]);
-  return <TemplateDesigner template={template} diagnostics={diagnostics} onChange={onChange} />;
+  return (
+    <TemplateDesigner
+      template={template}
+      diagnostics={diagnostics}
+      onChange={onChange}
+      selection={selection}
+      onLocateBinding={onLocateBinding}
+    />
+  );
 }
 
 /**
@@ -1354,7 +1464,7 @@ export const TegoSheet = forwardRef<TegoSheetHandle, TegoSheetProps>(
         />
       );
     }
-    const runtime = (
+    return (
       <ForwardedRuntime
         {...props}
         controlled={controlled}
@@ -1364,20 +1474,6 @@ export const TegoSheet = forwardRef<TegoSheetHandle, TegoSheetProps>(
         ref={ref}
       />
     );
-    if (props.mode === 'template' && props.template !== undefined) {
-      return (
-        <div data-tego-template-mode="">
-          {runtime}
-          <TemplateDesignerSurface
-            document={epoch.snapshot.document}
-            template={props.template}
-            onChange={props.onTemplateChange ?? (() => undefined)}
-            onDiagnostics={props.onDiagnostics}
-          />
-        </div>
-      );
-    }
-    return runtime;
   },
 );
 

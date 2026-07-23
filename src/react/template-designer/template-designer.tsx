@@ -6,7 +6,7 @@ import type {
   DocumentCellRange,
   DocumentSheetId,
 } from '../../document';
-import type { SpreadsheetTemplate, TemplateBinding } from '../../template';
+import type { SpreadsheetTemplate, TemplateBinding, TemplatePrintProfile } from '../../template';
 
 /** Inputs for the SDK-model template property panel. */
 export interface TemplateDesignerProps {
@@ -109,18 +109,33 @@ export function TemplateDesigner({
           : { id, type, range: selectedRange, when: 'visible' };
     onChange({ ...template, bindings: [...template.bindings, binding] });
   };
-  const updateFirstProfile = (
-    update: (
-      profile: SpreadsheetTemplate['printProfiles'][number],
-    ) => SpreadsheetTemplate['printProfiles'][number],
+  const updateProfile = (
+    profileId: string,
+    update: (profile: TemplatePrintProfile) => TemplatePrintProfile,
   ): void => {
-    if (template.printProfiles[0] === undefined) return;
     onChange({
       ...template,
-      printProfiles: template.printProfiles.map((profile, index) =>
-        index === 0 ? update(profile) : profile,
+      printProfiles: template.printProfiles.map((profile) =>
+        profile.id === profileId ? update(profile) : profile,
       ),
     });
+  };
+  const addProfile = (): void => {
+    const profile: TemplatePrintProfile = {
+      id: `profile-${template.printProfiles.length + 1}`,
+      name: `Print profile ${template.printProfiles.length + 1}`,
+      targets: [{ type: 'range', range: selectedRange }],
+      page: {
+        paper: { type: 'A4' },
+        orientation: 'portrait',
+        margins: { top: 20, right: 20, bottom: 20, left: 20 },
+        scale: { type: 'fixed', value: 1 },
+      },
+      manualBreaks: [],
+      showGridlines: true,
+      showHeadings: false,
+    };
+    onChange({ ...template, printProfiles: [...template.printProfiles, profile] });
   };
   return (
     <aside aria-label="Template designer">
@@ -227,22 +242,42 @@ export function TemplateDesigner({
         ))}
       </section>
       <section aria-label="Print profiles">
-        {template.printProfiles[0] === undefined ? (
-          <p>No print profile</p>
-        ) : (
-          <>
-            <h3>{template.printProfiles[0].name}</h3>
+        <button type="button" onClick={addProfile}>
+          Add print profile
+        </button>
+        {template.printProfiles.length === 0 ? <p>No print profile</p> : null}
+        {template.printProfiles.map((profile, profileIndex) => (
+          <fieldset key={profile.id}>
+            <legend>{profile.name}</legend>
+            <label>
+              Profile name
+              <input
+                aria-label={`Profile name for ${profile.id}`}
+                value={profile.name}
+                onChange={(event) =>
+                  updateProfile(profile.id, (current) => ({
+                    ...current,
+                    name: event.currentTarget.value,
+                  }))
+                }
+              />
+            </label>
             <label>
               Paper
               <select
-                aria-label="Paper"
-                value={template.printProfiles[0].page.paper.type}
+                aria-label={profileIndex === 0 ? 'Paper' : `Paper for ${profile.id}`}
+                value={profile.page.paper.type}
                 onChange={(event) =>
-                  updateFirstProfile((profile) => ({
-                    ...profile,
+                  updateProfile(profile.id, (current) => ({
+                    ...current,
                     page: {
-                      ...profile.page,
-                      paper: { type: event.currentTarget.value as 'A4' | 'A5' | 'Letter' },
+                      ...current.page,
+                      paper:
+                        event.currentTarget.value === 'custom'
+                          ? { type: 'custom', width: 210, height: 297 }
+                          : {
+                              type: event.currentTarget.value as 'A4' | 'A5' | 'Letter',
+                            },
                     },
                   }))
                 }
@@ -250,18 +285,69 @@ export function TemplateDesigner({
                 <option value="A4">A4</option>
                 <option value="A5">A5</option>
                 <option value="Letter">Letter</option>
+                <option value="custom">Custom</option>
               </select>
             </label>
+            {profile.page.paper.type === 'custom' ? (
+              <>
+                <label>
+                  Paper width
+                  <input
+                    type="number"
+                    aria-label={`Paper width for ${profile.id}`}
+                    value={profile.page.paper.width}
+                    onChange={(event) =>
+                      updateProfile(profile.id, (current) => ({
+                        ...current,
+                        page: {
+                          ...current.page,
+                          paper: {
+                            type: 'custom',
+                            width: Number(event.currentTarget.value),
+                            height:
+                              current.page.paper.type === 'custom'
+                                ? current.page.paper.height
+                                : 297,
+                          },
+                        },
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  Paper height
+                  <input
+                    type="number"
+                    aria-label={`Paper height for ${profile.id}`}
+                    value={profile.page.paper.height}
+                    onChange={(event) =>
+                      updateProfile(profile.id, (current) => ({
+                        ...current,
+                        page: {
+                          ...current.page,
+                          paper: {
+                            type: 'custom',
+                            width:
+                              current.page.paper.type === 'custom' ? current.page.paper.width : 210,
+                            height: Number(event.currentTarget.value),
+                          },
+                        },
+                      }))
+                    }
+                  />
+                </label>
+              </>
+            ) : null}
             <label>
               Orientation
               <select
-                aria-label="Orientation"
-                value={template.printProfiles[0].page.orientation}
+                aria-label={`Orientation for ${profile.id}`}
+                value={profile.page.orientation}
                 onChange={(event) =>
-                  updateFirstProfile((profile) => ({
-                    ...profile,
+                  updateProfile(profile.id, (current) => ({
+                    ...current,
                     page: {
-                      ...profile.page,
+                      ...current.page,
                       orientation: event.currentTarget.value as 'portrait' | 'landscape',
                     },
                   }))
@@ -271,14 +357,98 @@ export function TemplateDesigner({
                 <option value="landscape">Landscape</option>
               </select>
             </label>
+            {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
+              <label key={side}>
+                {side} margin
+                <input
+                  type="number"
+                  aria-label={`${side} margin for ${profile.id}`}
+                  value={profile.page.margins[side]}
+                  onChange={(event) =>
+                    updateProfile(profile.id, (current) => ({
+                      ...current,
+                      page: {
+                        ...current.page,
+                        margins: {
+                          ...current.page.margins,
+                          [side]: Number(event.currentTarget.value),
+                        },
+                      },
+                    }))
+                  }
+                />
+              </label>
+            ))}
+            <label>
+              Scale
+              <select
+                aria-label={`Scale for ${profile.id}`}
+                value={profile.page.scale.type}
+                onChange={(event) =>
+                  updateProfile(profile.id, (current) => ({
+                    ...current,
+                    page: {
+                      ...current.page,
+                      scale:
+                        event.currentTarget.value === 'fit-page'
+                          ? { type: 'fit-page' }
+                          : event.currentTarget.value === 'fit-width'
+                            ? { type: 'fit-width', pages: 1 }
+                            : { type: 'fixed', value: 1 },
+                    },
+                  }))
+                }
+              >
+                <option value="fixed">Fixed</option>
+                <option value="fit-width">Fit width</option>
+                <option value="fit-page">Fit page</option>
+              </select>
+            </label>
+            {profile.page.scale.type === 'fixed' ? (
+              <label>
+                Scale value
+                <input
+                  type="number"
+                  aria-label={`Scale value for ${profile.id}`}
+                  value={profile.page.scale.value}
+                  onChange={(event) =>
+                    updateProfile(profile.id, (current) => ({
+                      ...current,
+                      page: {
+                        ...current.page,
+                        scale: { type: 'fixed', value: Number(event.currentTarget.value) },
+                      },
+                    }))
+                  }
+                />
+              </label>
+            ) : profile.page.scale.type === 'fit-width' ? (
+              <label>
+                Fit width pages
+                <input
+                  type="number"
+                  aria-label={`Fit width pages for ${profile.id}`}
+                  value={profile.page.scale.pages}
+                  onChange={(event) =>
+                    updateProfile(profile.id, (current) => ({
+                      ...current,
+                      page: {
+                        ...current.page,
+                        scale: { type: 'fit-width', pages: Number(event.currentTarget.value) },
+                      },
+                    }))
+                  }
+                />
+              </label>
+            ) : null}
             <label>
               <input
                 type="checkbox"
-                aria-label="Show gridlines"
-                checked={template.printProfiles[0].showGridlines}
+                aria-label={`Show gridlines for ${profile.id}`}
+                checked={profile.showGridlines}
                 onChange={(event) =>
-                  updateFirstProfile((profile) => ({
-                    ...profile,
+                  updateProfile(profile.id, (current) => ({
+                    ...current,
                     showGridlines: event.currentTarget.checked,
                   }))
                 }
@@ -288,11 +458,11 @@ export function TemplateDesigner({
             <label>
               <input
                 type="checkbox"
-                aria-label="Show headings"
-                checked={template.printProfiles[0].showHeadings}
+                aria-label={`Show headings for ${profile.id}`}
+                checked={profile.showHeadings}
                 onChange={(event) =>
-                  updateFirstProfile((profile) => ({
-                    ...profile,
+                  updateProfile(profile.id, (current) => ({
+                    ...current,
                     showHeadings: event.currentTarget.checked,
                   }))
                 }
@@ -302,16 +472,111 @@ export function TemplateDesigner({
             <button
               type="button"
               onClick={() =>
-                updateFirstProfile((profile) => ({
-                  ...profile,
+                updateProfile(profile.id, (current) => ({
+                  ...current,
                   targets: [{ type: 'range', range: selectedRange }],
                 }))
               }
             >
               Use selection as print range
             </button>
-          </>
-        )}
+            <button
+              type="button"
+              onClick={() =>
+                updateProfile(profile.id, (current) => ({
+                  ...current,
+                  repeatRows: selectedRange,
+                }))
+              }
+            >
+              Use selection as repeat rows
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                updateProfile(profile.id, (current) => ({
+                  ...current,
+                  repeatColumns: selectedRange,
+                }))
+              }
+            >
+              Use selection as repeat columns
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                updateProfile(profile.id, (current) => ({
+                  ...current,
+                  repeatRows: undefined,
+                  repeatColumns: undefined,
+                }))
+              }
+            >
+              Clear repeat titles
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                updateProfile(profile.id, (current) => ({
+                  ...current,
+                  manualBreaks: [
+                    ...current.manualBreaks,
+                    { sheetId: selectedRange.sheetId, beforeRow: selectedRange.start.row },
+                  ],
+                }))
+              }
+            >
+              Add page break at selection
+            </button>
+            {profile.manualBreaks.map((pageBreak, index) => (
+              <button
+                key={`${pageBreak.sheetId}-${pageBreak.beforeRow}-${index}`}
+                type="button"
+                onClick={() =>
+                  updateProfile(profile.id, (current) => ({
+                    ...current,
+                    manualBreaks: current.manualBreaks.filter(
+                      (_pageBreak, candidateIndex) => candidateIndex !== index,
+                    ),
+                  }))
+                }
+              >
+                Remove page break {pageBreak.beforeRow}
+              </button>
+            ))}
+            {(['header', 'footer'] as const).flatMap((band) =>
+              (['left', 'center', 'right'] as const).map((slot) => (
+                <label key={`${band}-${slot}`}>
+                  {band} {slot}
+                  <input
+                    aria-label={`${band} ${slot} for ${profile.id}`}
+                    value={profile[band]?.[slot] ?? ''}
+                    onChange={(event) =>
+                      updateProfile(profile.id, (current) => ({
+                        ...current,
+                        [band]: {
+                          ...current[band],
+                          [slot]: event.currentTarget.value,
+                        },
+                      }))
+                    }
+                  />
+                </label>
+              )),
+            )}
+            <button
+              type="button"
+              onClick={() =>
+                onChange({
+                  ...template,
+                  printProfiles: template.printProfiles.filter(({ id }) => id !== profile.id),
+                })
+              }
+            >
+              Delete profile {profile.id}
+            </button>
+          </fieldset>
+        ))}
       </section>
       <section aria-label="Template diagnostics" aria-live="polite">
         {diagnostics.map((diagnostic, index) => {
