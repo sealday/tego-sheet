@@ -212,4 +212,84 @@ describe('template render pipeline', () => {
       expect.objectContaining({ code: 'EXPANSION_LIMIT_EXCEEDED' }),
     ]);
   });
+
+  it('returns an atomic diagnostic when a formatter is not registered', async () => {
+    const formatterTemplate: SpreadsheetTemplate = {
+      ...template,
+      bindings: [
+        {
+          id: 'formatted-name' as never,
+          type: 'value',
+          target: { sheetId: 'sheet-1' as never, row: 0, column: 1 },
+          expression: 'missingFormatter(customer.name)',
+        },
+      ],
+    };
+    const compiled = compileSpreadsheetTemplate(source, formatterTemplate).template!;
+
+    await expect(
+      renderSpreadsheetTemplate(
+        {
+          template: compiled,
+          currentDocumentHash: compiled.sourceDocumentHash,
+          data: { customer: { name: 'Ada' } },
+          profileId: 'profile-1',
+          missingValue: 'error',
+        },
+        environment,
+      ),
+    ).resolves.toEqual({
+      diagnostics: [
+        expect.objectContaining({
+          code: 'UNKNOWN_FORMATTER',
+          severity: 'error',
+          stage: 'render',
+        }),
+      ],
+    });
+  });
+
+  it('returns an atomic diagnostic when a registered formatter throws', async () => {
+    const formatterTemplate: SpreadsheetTemplate = {
+      ...template,
+      bindings: [
+        {
+          id: 'formatted-name' as never,
+          type: 'value',
+          target: { sheetId: 'sheet-1' as never, row: 0, column: 1 },
+          expression: 'explode(customer.name)',
+        },
+      ],
+    };
+    const compiled = compileSpreadsheetTemplate(source, formatterTemplate).template!;
+
+    await expect(
+      renderSpreadsheetTemplate(
+        {
+          template: compiled,
+          currentDocumentHash: compiled.sourceDocumentHash,
+          data: { customer: { name: 'Ada' } },
+          profileId: 'profile-1',
+          missingValue: 'error',
+        },
+        {
+          ...environment,
+          formatters: {
+            explode() {
+              throw new Error('formatter implementation detail');
+            },
+          },
+        },
+      ),
+    ).resolves.toEqual({
+      diagnostics: [
+        expect.objectContaining({
+          code: 'FORMATTER_FAILED',
+          severity: 'error',
+          stage: 'render',
+          message: 'A template formatter failed during rendering',
+        }),
+      ],
+    });
+  });
 });

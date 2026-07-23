@@ -1,11 +1,19 @@
 /** Stable failure raised by the restricted template expression language. */
 export class TemplateExpressionError extends SyntaxError {
   /** Stable expression failure code. */
-  readonly code: 'INVALID_EXPRESSION' | 'TEMPLATE_EXPRESSION_UNSAFE' | 'UNKNOWN_FORMATTER';
+  readonly code:
+    | 'INVALID_EXPRESSION'
+    | 'TEMPLATE_EXPRESSION_UNSAFE'
+    | 'UNKNOWN_FORMATTER'
+    | 'FORMATTER_FAILED';
 
   /** Creates a restricted-expression failure. */
   constructor(
-    code: 'INVALID_EXPRESSION' | 'TEMPLATE_EXPRESSION_UNSAFE' | 'UNKNOWN_FORMATTER',
+    code:
+      | 'INVALID_EXPRESSION'
+      | 'TEMPLATE_EXPRESSION_UNSAFE'
+      | 'UNKNOWN_FORMATTER'
+      | 'FORMATTER_FAILED',
     message: string,
   ) {
     super(message);
@@ -429,16 +437,27 @@ function evaluate(
       : evaluate(node.alternate, variables, formatters);
   }
   if (node.kind === 'call') {
-    const formatter = formatters[node.formatter];
-    if (formatter === undefined) {
+    if (!Object.prototype.hasOwnProperty.call(formatters, node.formatter)) {
       throw new TemplateExpressionError(
         'UNKNOWN_FORMATTER',
         `Unknown formatter: ${node.formatter}`,
       );
     }
-    return formatter(
-      ...node.arguments.map((argument) => frozenValue(evaluate(argument, variables, formatters))),
+    const formatter = formatters[node.formatter];
+    if (typeof formatter !== 'function') {
+      throw new TemplateExpressionError(
+        'UNKNOWN_FORMATTER',
+        `Unknown formatter: ${node.formatter}`,
+      );
+    }
+    const values = node.arguments.map((argument) =>
+      frozenValue(evaluate(argument, variables, formatters)),
     );
+    try {
+      return formatter(...values);
+    } catch {
+      throw new TemplateExpressionError('FORMATTER_FAILED', `Formatter ${node.formatter} failed`);
+    }
   }
   const left = evaluate(node.left, variables, formatters);
   if (node.operator === '??') return left ?? evaluate(node.right, variables, formatters);
@@ -486,5 +505,19 @@ export function evaluateTemplateExpression(
     $first: scope.first ?? false,
     $last: scope.last ?? false,
   });
-  return frozenValue(evaluate(expression.ast, variables, Object.freeze({ ...formatters })));
+  const formatterAllowlist = Object.create(null) as Record<string, TemplateFormatter>;
+  for (const name of Object.keys(formatters)) {
+    const descriptor = Object.getOwnPropertyDescriptor(formatters, name);
+    if (
+      descriptor !== undefined &&
+      'value' in descriptor &&
+      typeof descriptor.value === 'function'
+    ) {
+      Object.defineProperty(formatterAllowlist, name, {
+        enumerable: true,
+        value: descriptor.value,
+      });
+    }
+  }
+  return frozenValue(evaluate(expression.ast, variables, Object.freeze(formatterAllowlist)));
 }

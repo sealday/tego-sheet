@@ -18,6 +18,7 @@ import {
   type PaginationTarget,
 } from '../print/layout';
 import { expandTemplate, type RowInsertion } from './expand';
+import { TemplateExpressionError } from './expression';
 import type {
   GeneratedDocument,
   RenderEnvironment,
@@ -272,14 +273,29 @@ export async function renderSpreadsheetTemplate(
       ],
     });
   }
-  const expansion = expandTemplate(
-    request.template.sourceDocument,
-    request.template.ir.template,
-    request.template.ir.bindings,
-    request.data,
-    environment.formatters ?? {},
-    limits,
-  );
+  let expansion;
+  try {
+    expansion = expandTemplate(
+      request.template.sourceDocument,
+      request.template.ir.template,
+      request.template.ir.bindings,
+      request.data,
+      environment.formatters ?? {},
+      limits,
+    );
+  } catch (cause) {
+    if (!(cause instanceof TemplateExpressionError)) throw cause;
+    return freeze({
+      diagnostics: [
+        renderDiagnostic(
+          cause.code,
+          cause.code === 'FORMATTER_FAILED'
+            ? 'A template formatter failed during rendering'
+            : cause.message,
+        ),
+      ],
+    });
+  }
   if (isAborted(request.signal)) return abortResult();
   if (expansion.document === undefined) return freeze({ diagnostics: expansion.diagnostics });
   const expansionDiagnostics = expansion.diagnostics.map((diagnostic) =>

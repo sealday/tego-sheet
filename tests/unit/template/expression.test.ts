@@ -52,6 +52,38 @@ describe('template expression DSL', () => {
     );
   });
 
+  it('does not resolve unregistered formatters from Object.prototype', () => {
+    const expression = compileTemplateExpression('toString(order.total)');
+
+    expect(() =>
+      evaluateTemplateExpression(expression, {
+        root: { order: { total: 12.5 } },
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'UNKNOWN_FORMATTER' }));
+  });
+
+  it('does not resolve formatters injected through Object.prototype pollution', () => {
+    const formatterName = '__tegoPollutedFormatterForTest';
+    const expression = compileTemplateExpression(`${formatterName}(order.total)`);
+    const previous = Object.getOwnPropertyDescriptor(Object.prototype, formatterName);
+    Object.defineProperty(Object.prototype, formatterName, {
+      configurable: true,
+      value: () => 'compromised',
+    });
+
+    try {
+      expect(() =>
+        evaluateTemplateExpression(expression, {
+          root: { order: { total: 12.5 } },
+        }),
+      ).toThrowError(expect.objectContaining({ code: 'UNKNOWN_FORMATTER' }));
+    } finally {
+      if (previous === undefined)
+        delete (Object.prototype as Record<string, unknown>)[formatterName];
+      else Object.defineProperty(Object.prototype, formatterName, previous);
+    }
+  });
+
   it('exposes immutable repeat scope values', () => {
     const expression = compileTemplateExpression(
       'item.name + ":" + $index + ":" + $first + ":" + $last',
