@@ -1,6 +1,6 @@
 # Foundation Mini-RFC
 
-**Status:** planned
+**Status:** shipped
 **Owner:** tego-sheet core team
 **Product boundary:** 可嵌入业务系统的组件与 TypeScript SDK
 **Priority:** Template Printing 的阻塞依赖
@@ -18,7 +18,7 @@ Foundation 建立下一代文档状态、修改边界、公式/格式语义和�
 - 所有结构性修改必须经过 Command/Transaction；任何 UI、插件和 adapter 都不能直接修改文档对象。
 - Excel/XLSX 是 A1 引用、错误值、日期序列、数字格式代码和函数名称的主要兼容基准，但每项能力单独声明支持范围。
 - 相同 snapshot、locale、时区、日期系统和字体度量必须产生相同公式结果、显示文本和打印几何。
-- Roadmap 中 F1、F2、F3 与 F5 已交付，其余 Foundation 项目仍为 `planned`。
+- Roadmap 中 F1、F2、F3、F4 与 F5 已全部交付。
 
 ### 1.2 共享标识和坐标
 
@@ -498,7 +498,7 @@ changes -> DirtySet -> topological scheduler -> evaluator
 
 ## F4. Render Semantics & Accessibility
 
-**Status:** planned
+**Status:** shipped
 **Delivery:** Foundation Phase 4
 
 ### 产品目标与场景

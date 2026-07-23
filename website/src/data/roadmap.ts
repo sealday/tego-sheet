@@ -108,6 +108,7 @@ export const allRoadmapItems = [
     'Shared render semantics and Canvas accessibility',
     'One presentation model for screen, accessibility and print.',
     '/docs/roadmap/foundation',
+    'shipped',
   ),
   item(
     'extension-kernel',

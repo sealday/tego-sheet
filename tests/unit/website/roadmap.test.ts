@@ -35,17 +35,18 @@ const miniRfcs = {
 describe('product roadmap data', () => {
   it('contains the approved capabilities in dependency order', () => {
     expect(roadmapPhases.map((phase) => phase.id)).toEqual([0, 1, 2, 3, 4]);
-    expect(roadmapItems).toHaveLength(29);
+    expect(roadmapItems).toHaveLength(28);
     expect(allRoadmapItems).toHaveLength(roadmapItems.length + shippedRoadmapItems.length);
     expect(shippedRoadmapItems.map((item) => item.id)).toEqual([
       'workbook-2',
       'transactions',
       'formula-format-core',
+      'render-semantics',
       'extension-kernel',
     ]);
-    expect(new Set(roadmapItems.map((item) => item.id))).toHaveProperty('size', 29);
+    expect(new Set(roadmapItems.map((item) => item.id))).toHaveProperty('size', 28);
     expect(roadmapItems.every((item) => item.status === 'planned')).toBe(true);
-    expect(roadmapItems[0]?.title).toBe('Shared render semantics and Canvas accessibility');
+    expect(roadmapItems[0]?.title).toBe('Sheet, selection and range print targets');
     expect(
       roadmapItems.some(
         (item) => item.title === 'Safe scalar bindings, repeat rows and conditional ranges',
@@ -154,7 +155,9 @@ describe('product roadmap data', () => {
         }
 
         expect(miniRfc).toContain(
-          id === 'F1' || id === 'F2' || id === 'F3' || id === 'F5' ? 'shipped' : 'planned',
+          id === 'F1' || id === 'F2' || id === 'F3' || id === 'F4' || id === 'F5'
+            ? 'shipped'
+            : 'planned',
         );
       }
     }
