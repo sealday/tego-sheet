@@ -307,7 +307,7 @@ TemplateEditor commands
 
 ## TP2. Advanced Template Structure
 
-**Status:** planned
+**Status:** shipped
 **Delivery:** Phase 2
 
 ### 产品目标与场景
@@ -392,7 +392,7 @@ TP1 绑定 schema 使用带 `type` 的判别联合，为高级绑定直接扩展
 
 ## TP3. Resource Pipeline
 
-**Status:** planned
+**Status:** shipped
 **Delivery:** Phase 2
 
 ### 产品目标与场景

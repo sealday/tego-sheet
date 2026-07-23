@@ -14,6 +14,8 @@ verification commands pass.
 | 1     | Safe scalar bindings, repeat rows and conditional ranges | shipped | [Template printing](template-printing.md) |
 | 1     | Deterministic pagination and print profiles              | shipped | [Template printing](template-printing.md) |
 | 1     | Page preview and isolated browser printing               | shipped | [Template printing](template-printing.md) |
+| 2     | Nested, horizontal, range and page repeats               | shipped | [Template printing](template-printing.md) |
+| 2     | Image, font, QR code and async resource pipeline         | shipped | [Template printing](template-printing.md) |
 
 Workbook 2.0 completed its schema boundary, legacy migration, runtime-controller integration,
 React ingress migration, and command-based rich-cell transforms on 2026-07-23. Its acceptance
@@ -46,3 +48,9 @@ bindings; ordered sheet and range targets; deterministic pagination and print pr
 SVG preview and isolated browser printing; and template-mode Canvas decorations. Compiler,
 resource-budget, component, package, SSR, docs, and cross-browser print gates passed before
 shipment.
+
+Advanced template structures and the resource pipeline shipped on 2026-07-23 with nested row,
+column, two-dimensional, page, sheet, and subtemplate expansion; stable structural and object
+mappings; clone-before-allocation limits; bounded image, font, SVG, and standard QR resolution;
+session-owned cleanup; and resolved-resource display-list output. Their adversarial axis,
+resource-safety, package, TypeDoc, and print regression gates passed before shipment.

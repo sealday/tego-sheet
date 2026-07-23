@@ -156,6 +156,7 @@ export const allRoadmapItems = [
     'Nested, horizontal, range and page repeats',
     'Generate complex reports without arbitrary template code.',
     '/docs/roadmap/template-printing',
+    'shipped',
   ),
   item(
     'resource-pipeline',
@@ -163,6 +164,7 @@ export const allRoadmapItems = [
     'Image, font, QR code and async resource pipeline',
     'Resolve bounded external resources before deterministic layout.',
     '/docs/roadmap/template-printing',
+    'shipped',
   ),
   item(
     'pdf-output',

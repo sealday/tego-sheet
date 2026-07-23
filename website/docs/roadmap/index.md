@@ -12,8 +12,6 @@
 
 | Phase | Capability                                                   | Status  | Design                                                  |
 | ----- | ------------------------------------------------------------ | ------- | ------------------------------------------------------- |
-| 2     | Nested, horizontal, range and page repeats                   | planned | [Template printing](template-printing.md)               |
-| 2     | Image, font, QR code and async resource pipeline             | planned | [Template printing](template-printing.md)               |
 | 2     | PDF Blob output                                              | planned | [Template printing](template-printing.md)               |
 | 2     | XLSX template output                                         | planned | [Template printing](template-printing.md)               |
 | 2     | SVG and PNG page output                                      | planned | [Template printing](template-printing.md)               |

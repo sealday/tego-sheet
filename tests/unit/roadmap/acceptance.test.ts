@@ -33,6 +33,8 @@ it('maps every roadmap item to acceptance evidence without duplicate ids', () =>
     'template-bindings',
     'pagination',
     'print-preview',
+    'advanced-repeats',
+    'resource-pipeline',
   ]);
   expect(getRoadmapDeliveryState('workbook-2')).toBe('shipped');
   expect(getRoadmapDeliveryState('transactions')).toBe('shipped');
@@ -43,6 +45,8 @@ it('maps every roadmap item to acceptance evidence without duplicate ids', () =>
   expect(getRoadmapDeliveryState('template-bindings')).toBe('shipped');
   expect(getRoadmapDeliveryState('pagination')).toBe('shipped');
   expect(getRoadmapDeliveryState('print-preview')).toBe('shipped');
+  expect(getRoadmapDeliveryState('advanced-repeats')).toBe('shipped');
+  expect(getRoadmapDeliveryState('resource-pipeline')).toBe('shipped');
 });
 
 it('keeps canonical ids when an item moves out of the planned projection', () => {
@@ -64,6 +68,8 @@ it('keeps canonical ids when an item moves out of the planned projection', () =>
     'template-bindings',
     'pagination',
     'print-preview',
+    'advanced-repeats',
+    'resource-pipeline',
   ]);
 });
 
