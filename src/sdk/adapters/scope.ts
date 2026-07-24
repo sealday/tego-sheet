@@ -46,6 +46,13 @@ interface ActiveInvocation {
   readonly completion: Promise<void>;
 }
 
+interface ScopeConfiguration {
+  readonly documentId?: string;
+  readonly signal: AbortSignal;
+  readonly grant: CapabilityGrant;
+  readonly limits: AdapterScopeLimits;
+}
+
 function limitsSnapshot(overrides: Partial<AdapterScopeLimits> | undefined): AdapterScopeLimits {
   let limits: AdapterScopeLimits;
   try {
@@ -97,6 +104,42 @@ function grantSnapshot(grant: CapabilityGrant): CapabilityGrant {
   }
 }
 
+function optionsSnapshot(options: AdapterScopeOptions): Readonly<ScopeConfiguration> {
+  try {
+    if (options === null || typeof options !== 'object') {
+      throw new TypeError('Adapter scope options must be an object');
+    }
+    const documentId = options.documentId;
+    const signal = options.signal;
+    const grant = options.grant;
+    const limits = options.limits;
+    if (documentId !== undefined && typeof documentId !== 'string') {
+      throw new TypeError('Adapter scope documentId must be a string');
+    }
+    if (!(signal instanceof AbortSignal)) {
+      throw new TypeError('Adapter scope signal must be an AbortSignal');
+    }
+    return Object.freeze({
+      ...(documentId === undefined ? {} : { documentId }),
+      signal,
+      grant: grantSnapshot(grant),
+      limits: limitsSnapshot(limits),
+    });
+  } catch (cause) {
+    if (cause instanceof AdapterSdkError && cause.code === 'ADAPTER_OPTIONS_INVALID') {
+      throw cause;
+    }
+    throw new AdapterSdkError([
+      adapterDiagnostic(
+        'ADAPTER_OPTIONS_INVALID',
+        'validate',
+        'Adapter scope options could not be snapshotted',
+        { cause },
+      ),
+    ]);
+  }
+}
+
 function callable(value: unknown): value is CallableAdapter {
   return (
     value !== null &&
@@ -106,16 +149,20 @@ function callable(value: unknown): value is CallableAdapter {
 }
 
 export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): AdapterScope {
-  const limits = limitsSnapshot(runtime.options.limits);
-  const grant = grantSnapshot(runtime.options.grant);
+  const configuration = optionsSnapshot(runtime.options);
+  const { grant, limits } = configuration;
   const controller = new AbortController();
   const active = new Set<ActiveInvocation>();
   let disposed = false;
   let disposePromise: Promise<readonly AdapterDiagnostic[]> | undefined;
+  let parentListenerAttached = false;
 
-  const abortFromParent = (): void => controller.abort(runtime.options.signal.reason);
-  if (runtime.options.signal.aborted) abortFromParent();
-  else runtime.options.signal.addEventListener('abort', abortFromParent, { once: true });
+  const abortFromParent = (): void => controller.abort(configuration.signal.reason);
+  if (configuration.signal.aborted) abortFromParent();
+  else {
+    configuration.signal.addEventListener('abort', abortFromParent, { once: true });
+    parentListenerAttached = true;
+  }
 
   const fail = (
     code: AdapterDiagnostic['code'],
@@ -217,9 +264,9 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
               kind: binding.manifest.kind,
               capability: invocation.capability,
               input: inputSnapshot,
-              ...(runtime.options.documentId === undefined
+              ...(configuration.documentId === undefined
                 ? {}
-                : { documentId: runtime.options.documentId }),
+                : { documentId: configuration.documentId }),
             }),
             invocationController.signal,
           );
@@ -230,9 +277,9 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
         return binding.implementation.invoke(
           Object.freeze({ capability: invocation.capability, input: inputSnapshot }),
           Object.freeze({
-            ...(runtime.options.documentId === undefined
+            ...(configuration.documentId === undefined
               ? {}
-              : { documentId: runtime.options.documentId }),
+              : { documentId: configuration.documentId }),
             signal: invocationController.signal,
           }),
         );
@@ -310,7 +357,10 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
     dispose(): Promise<readonly AdapterDiagnostic[]> {
       if (disposePromise !== undefined) return disposePromise;
       disposed = true;
-      runtime.options.signal.removeEventListener('abort', abortFromParent);
+      if (parentListenerAttached) {
+        configuration.signal.removeEventListener('abort', abortFromParent);
+        parentListenerAttached = false;
+      }
       controller.abort(disposedMarker);
       disposePromise = (async () => {
         const diagnostics: AdapterDiagnostic[] = [];

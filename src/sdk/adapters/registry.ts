@@ -24,6 +24,8 @@ import type {
   AdapterScope,
   AdapterScopeOptions,
   IsolatedWorkerAdapterDescriptor,
+  IsolatedWorkerInvocation,
+  IsolatedWorkerTransport,
   TrustedMainAdapterRegistration,
 } from './types';
 
@@ -33,6 +35,16 @@ interface PublicRecord<K extends AdapterKind = AdapterKind> {
   readonly descriptor?: IsolatedWorkerAdapterDescriptor;
   readonly unregister: () => Promise<readonly AdapterDiagnostic[]>;
 }
+
+interface RegistryConfiguration {
+  readonly apiVersion: AdapterRegistryOptions['apiVersion'];
+  readonly environment: AdapterRegistryOptions['environment'];
+  readonly defaults: Readonly<Partial<Record<AdapterKind, string>>>;
+  readonly diagnostics?: AdapterRegistryOptions['diagnostics'];
+  readonly isolatedWorkerTransport?: AdapterRegistryOptions['isolatedWorkerTransport'];
+}
+
+const apiVersionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 function keyOf(kind: string, id: string): string {
   return `${kind}\u0000${id}`;
@@ -52,11 +64,30 @@ function compareManifest(left: AdapterManifest, right: AdapterManifest): number 
 
 /** Creates a public registry facade backed by the existing F5 registry kernel. */
 export function createAdapterRegistry(options: AdapterRegistryOptions): AdapterRegistry {
-  let configuration: AdapterRegistryOptions;
+  let configuration: Readonly<RegistryConfiguration>;
   try {
+    if (options === null || typeof options !== 'object') {
+      throw new TypeError('Adapter registry options must be an object');
+    }
+    const apiVersion = options.apiVersion;
+    const environment = options.environment;
     const defaultsSource = options.defaults;
+    const diagnostics = options.diagnostics;
+    const transportSource = options.isolatedWorkerTransport;
+    if (typeof apiVersion !== 'string' || !apiVersionPattern.test(apiVersion)) {
+      throw new TypeError('Adapter API version must use major.minor syntax');
+    }
+    if (environment !== 'browser' && environment !== 'worker' && environment !== 'node') {
+      throw new TypeError('Adapter environment is invalid');
+    }
+    if (diagnostics !== undefined && typeof diagnostics !== 'function') {
+      throw new TypeError('Adapter diagnostics observer must be callable');
+    }
     const defaults: Partial<Record<AdapterKind, string>> = {};
     if (defaultsSource !== undefined) {
+      if (defaultsSource === null || typeof defaultsSource !== 'object') {
+        throw new TypeError('Adapter defaults must be an object');
+      }
       for (const kind of ADAPTER_KINDS) {
         const id = defaultsSource[kind];
         if (id !== undefined) {
@@ -67,14 +98,29 @@ export function createAdapterRegistry(options: AdapterRegistryOptions): AdapterR
         }
       }
     }
+    let isolatedWorkerTransport: IsolatedWorkerTransport | undefined;
+    if (transportSource !== undefined) {
+      if (transportSource === null || typeof transportSource !== 'object') {
+        throw new TypeError('Isolated worker transport must be an object');
+      }
+      const invoke = transportSource.invoke;
+      const terminate = transportSource.terminate;
+      if (typeof invoke !== 'function' || typeof terminate !== 'function') {
+        throw new TypeError('Isolated worker transport methods must be callable');
+      }
+      isolatedWorkerTransport = Object.freeze({
+        invoke: (request: IsolatedWorkerInvocation, signal: AbortSignal) =>
+          Reflect.apply(invoke, transportSource, [request, signal]) as Promise<unknown>,
+        terminate: (workerId: string) =>
+          Reflect.apply(terminate, transportSource, [workerId]) as Promise<void>,
+      });
+    }
     configuration = Object.freeze({
-      apiVersion: options.apiVersion,
-      environment: options.environment,
+      apiVersion,
+      environment,
       defaults: Object.freeze(defaults),
-      ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
-      ...(options.isolatedWorkerTransport === undefined
-        ? {}
-        : { isolatedWorkerTransport: options.isolatedWorkerTransport }),
+      ...(diagnostics === undefined ? {} : { diagnostics }),
+      ...(isolatedWorkerTransport === undefined ? {} : { isolatedWorkerTransport }),
     });
   } catch (cause) {
     throw new AdapterSdkError([
@@ -362,24 +408,41 @@ export function createAdapterRegistry(options: AdapterRegistryOptions): AdapterR
       if (disposed) {
         fail('ADAPTER_REGISTRY_DISPOSED', 'Cannot create an adapter scope after disposal');
       }
-      const scope = createAdapterScopeRuntime({
-        options: scopeOptions,
-        ...(configuration.isolatedWorkerTransport === undefined
-          ? {}
-          : { transport: configuration.isolatedWorkerTransport }),
-        publish,
-        onDispose: () => scopes.delete(scope),
-        lookupResolution: (resolution): AdapterScopeResolution | undefined => {
-          const record = resolutionRecords.get(resolution);
-          if (
-            record === undefined ||
-            records.get(keyOf(record.manifest.kind, record.manifest.id)) !== record
-          ) {
-            return undefined;
-          }
-          return record;
-        },
-      });
+      let scope: AdapterScope;
+      try {
+        scope = createAdapterScopeRuntime({
+          options: scopeOptions,
+          ...(configuration.isolatedWorkerTransport === undefined
+            ? {}
+            : { transport: configuration.isolatedWorkerTransport }),
+          publish,
+          onDispose: () => scopes.delete(scope),
+          lookupResolution: (resolution): AdapterScopeResolution | undefined => {
+            const record = resolutionRecords.get(resolution);
+            if (
+              record === undefined ||
+              records.get(keyOf(record.manifest.kind, record.manifest.id)) !== record
+            ) {
+              return undefined;
+            }
+            return record;
+          },
+        });
+      } catch (cause) {
+        const normalized =
+          cause instanceof AdapterSdkError
+            ? cause
+            : new AdapterSdkError([
+                adapterDiagnostic(
+                  'ADAPTER_OPTIONS_INVALID',
+                  'validate',
+                  'Adapter scope could not be created',
+                  { cause },
+                ),
+              ]);
+        normalized.diagnostics.forEach(publish);
+        throw normalized;
+      }
       scopes.add(scope);
       return scope;
     },

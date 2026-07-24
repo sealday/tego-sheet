@@ -5,7 +5,7 @@ import {
   type IsolatedWorkerTransport,
   type SolverAdapter,
 } from '../../../src/sdk/adapters';
-import { createCapabilityGrant } from '../../../src/sdk/trust';
+import { createCapabilityGrant, type CapabilityGrant } from '../../../src/sdk/trust';
 
 function trustedSolver(
   invoke: SolverAdapter['invoke'],
@@ -125,6 +125,102 @@ describe('AdapterScope invocation boundary', () => {
       }),
     ).rejects.toMatchObject({ code: 'CAPABILITY_DENIED' });
     expect(direct).not.toHaveBeenCalled();
+  });
+
+  it('reads scope options once and uses one parent signal identity through listener cleanup', async () => {
+    const firstParent = new AbortController();
+    const secondParent = new AbortController();
+    const addListener = vi.spyOn(firstParent.signal, 'addEventListener');
+    const removeListener = vi.spyOn(firstParent.signal, 'removeEventListener');
+    const reads = { signal: 0, documentId: 0, grant: 0, limits: 0 };
+    const direct = vi.fn(async (_request, context) => ({
+      documentId: context.documentId,
+    }));
+    const registry = createAdapterRegistry({
+      apiVersion: '1.0',
+      environment: 'browser',
+    });
+    await registry.register(trustedSolver(direct));
+    const scope = registry.createScope({
+      get signal() {
+        reads.signal += 1;
+        return reads.signal === 1 ? firstParent.signal : secondParent.signal;
+      },
+      get documentId() {
+        reads.documentId += 1;
+        return reads.documentId === 1 ? 'first-document' : 'changed-document';
+      },
+      get grant() {
+        reads.grant += 1;
+        return createCapabilityGrant(['solve']);
+      },
+      get limits() {
+        reads.limits += 1;
+        return undefined;
+      },
+    });
+
+    await expect(
+      scope.invoke(registry.resolve('solver'), {
+        capability: 'solve',
+        input: null,
+        validateResult: (value): value is { readonly documentId: string } =>
+          typeof value === 'object' &&
+          value !== null &&
+          'documentId' in value &&
+          typeof value.documentId === 'string',
+      }),
+    ).resolves.toEqual({ documentId: 'first-document' });
+    expect(reads).toEqual({ signal: 1, documentId: 1, grant: 1, limits: 1 });
+    expect(addListener).toHaveBeenCalledTimes(1);
+
+    await scope.dispose();
+    expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function));
+    expect(reads).toEqual({ signal: 1, documentId: 1, grant: 1, limits: 1 });
+  });
+
+  it('normalizes hostile scope options and binds cancellation to the first signal snapshot', async () => {
+    const firstParent = new AbortController();
+    const secondParent = new AbortController();
+    let signalReads = 0;
+    const direct = vi.fn(async () => null);
+    const diagnostics = vi.fn();
+    const registry = createAdapterRegistry({
+      apiVersion: '1.0',
+      environment: 'browser',
+      diagnostics,
+    });
+    await registry.register(trustedSolver(direct));
+    const scope = registry.createScope({
+      get signal() {
+        signalReads += 1;
+        return signalReads === 1 ? firstParent.signal : secondParent.signal;
+      },
+      grant: createCapabilityGrant(['solve']),
+    });
+    firstParent.abort(new Error('first parent cancelled'));
+
+    await expect(
+      scope.invoke(registry.resolve('solver'), {
+        capability: 'solve',
+        input: null,
+        validateResult: () => true,
+      }),
+    ).rejects.toMatchObject({ code: 'ADAPTER_INVOCATION_ABORTED' });
+    expect(signalReads).toBe(1);
+    expect(direct).not.toHaveBeenCalled();
+
+    expect(() =>
+      registry.createScope({
+        signal: new AbortController().signal,
+        get grant(): CapabilityGrant {
+          throw new Error('hostile grant');
+        },
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'ADAPTER_OPTIONS_INVALID' }));
+    expect(diagnostics).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'ADAPTER_OPTIONS_INVALID' }),
+    );
   });
 
   it.each([

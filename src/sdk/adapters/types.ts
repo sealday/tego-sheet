@@ -23,7 +23,12 @@ export interface AdapterInvocationRequest {
 export interface AdapterInvocationContext {
   /** Optional document identity for operation scoping, never a controller reference. */
   readonly documentId?: string;
-  /** Invocation-local cancellation signal. */
+  /**
+   * Invocation-local cooperative cancellation signal.
+   *
+   * A trusted-main adapter must observe this signal and settle its own work; cancellation cannot
+   * forcibly terminate same-realm code.
+   */
   readonly signal: AbortSignal;
 }
 
@@ -242,6 +247,10 @@ export interface AdapterScope {
     resolution: AdapterResolution<K>,
     invocation: ScopedAdapterInvocation<Result>,
   ): Promise<Result>;
+  /**
+   * Cancels active work and waits for real trusted-main settlement or isolated-worker termination
+   * acknowledgement before resolving.
+   */
   dispose(): Promise<readonly AdapterDiagnostic[]>;
 }
 

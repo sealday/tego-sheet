@@ -211,6 +211,73 @@ describe('public AdapterRegistry facade', () => {
     ).toBe(true);
   });
 
+  it('reads every registry option once and retains the frozen option snapshot', async () => {
+    const reads = {
+      apiVersion: 0,
+      environment: 0,
+      defaults: 0,
+      diagnostics: 0,
+      transport: 0,
+    };
+    const diagnostics = vi.fn();
+    const transport = {
+      invoke: vi.fn(async () => null),
+      terminate: vi.fn(async () => undefined),
+    };
+    const defaults = { solver: 'alpha' };
+    const registry = createAdapterRegistry({
+      get apiVersion() {
+        reads.apiVersion += 1;
+        return '1.0' as const;
+      },
+      get environment() {
+        reads.environment += 1;
+        return 'browser' as const;
+      },
+      get defaults() {
+        reads.defaults += 1;
+        return defaults;
+      },
+      get diagnostics() {
+        reads.diagnostics += 1;
+        return diagnostics;
+      },
+      get isolatedWorkerTransport() {
+        reads.transport += 1;
+        return transport;
+      },
+    });
+    defaults.solver = 'changed';
+    await registry.register(solver('alpha'));
+
+    expect(registry.resolve('solver')).toMatchObject({ manifest: { id: 'alpha' } });
+    expect(reads).toEqual({
+      apiVersion: 1,
+      environment: 1,
+      defaults: 1,
+      diagnostics: 1,
+      transport: 1,
+    });
+  });
+
+  it('normalizes hostile or invalid registry option access', () => {
+    expect(() =>
+      createAdapterRegistry({
+        get apiVersion(): '1.0' {
+          throw new Error('hostile options');
+        },
+        environment: 'browser',
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'ADAPTER_OPTIONS_INVALID' }));
+    expect(() =>
+      createAdapterRegistry({
+        apiVersion: 'invalid' as '1.0',
+        environment: 'browser',
+        diagnostics: 'not callable' as never,
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'ADAPTER_OPTIONS_INVALID' }));
+  });
+
   it('reads manifest fields once and rejects accessor-backed manifest arrays without invoking them', async () => {
     const reads = { id: 0, apiVersion: 0, kind: 0 };
     const capabilityGetter = vi.fn(() => 'solve');
