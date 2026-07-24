@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { parseSpreadsheetDocument } from '../../../src/document';
 import {
+  checkpointDocumentVersion,
   createRestoreVersionProposal,
   diffDocumentVersions,
+  diffDocumentVersionsAsync,
+  loadHistoryPreview,
+  restoreDocumentVersion,
 } from '../../../src/integrations/history';
 import { createPermissionSnapshot } from '../../../src/integrations/permission';
 
@@ -157,5 +161,86 @@ describe('version history integration contract', () => {
 
     expect(result.summary.templatesChanged).toBe(1);
     expect(result.summary.printProfilesChanged).toBe(1);
+  });
+
+  it('loads isolated readonly previews and checkpoints through host adapters', async () => {
+    const source = document('Old', 1);
+    const preview = await loadHistoryPreview(
+      {
+        load: async () => ({
+          id: 'version-1',
+          documentId: source.id,
+          revision: 'revision-1',
+          document: source,
+        }),
+      },
+      source.id,
+      'version-1',
+      new AbortController().signal,
+    );
+    expect(preview.readOnly).toBe(true);
+    expect(Object.isFrozen(preview.document)).toBe(true);
+
+    const checkpoint = await checkpointDocumentVersion(
+      {
+        checkpoint: async (request) => ({
+          versionId: 'version-2',
+          revision: request.revision,
+        }),
+      },
+      {
+        documentId: source.id,
+        revision: 'revision-2',
+        document: source,
+      },
+      new AbortController().signal,
+    );
+    expect(checkpoint).toEqual({ versionId: 'version-2', revision: 'revision-2' });
+  });
+
+  it('provides cancellable async structural summaries when cell budgets are exceeded', async () => {
+    const result = await diffDocumentVersionsAsync(
+      { id: 'version-1', document: document('Old', 1) },
+      { id: 'version-2', document: document('New', 2) },
+      {
+        signal: new AbortController().signal,
+        maximumUsedCells: 1,
+        onCellBudgetExceeded: 'structural-summary',
+      },
+    );
+    expect(result.degraded).toBe('structural-summary');
+    expect(result.sheets[0]).toMatchObject({ nameChanged: true });
+  });
+
+  it('restores through one host checkpoint operation', async () => {
+    const replacement = document('Old', 1);
+    const permissions = createPermissionSnapshot({
+      revision: 'permission-1',
+      actorId: 'actor-1',
+      grants: [
+        {
+          action: 'history:restore',
+          target: { type: 'document', documentId: replacement.id },
+        },
+      ],
+    });
+    const commitRestore = vi.fn(async () => ({
+      versionId: 'version-3',
+      revision: 'revision-3',
+    }));
+    const result = await restoreDocumentVersion(
+      { commitRestore },
+      {
+        sourceVersionId: 'version-1',
+        expectedCurrentRevision: 'revision-2',
+        currentRevision: 'revision-2',
+        replacement,
+        documentId: replacement.id,
+        permissions,
+      },
+      new AbortController().signal,
+    );
+    expect(result).toEqual({ versionId: 'version-3', revision: 'revision-3' });
+    expect(commitRestore).toHaveBeenCalledTimes(1);
   });
 });
