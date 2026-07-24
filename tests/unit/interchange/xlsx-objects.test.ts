@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { createXlsxReader, createXlsxWriter } from '../../../src/interchange';
+import {
+  createXlsxDrawingResourcePool,
+  parseWorksheetDrawing,
+} from '../../../src/interchange/xlsx-drawing';
+import { resolveLimits } from '../../../src/interchange/contracts';
 import { XlsxAdapter } from '../../../src/output/xlsx';
 import { outputGeneratedDocument } from '../../fixtures/output/generated-document';
 
@@ -351,6 +356,66 @@ describe('OBJ-01 standard XLSX DrawingML interchange', () => {
       new Set(images.map((object) => (object.kind === 'image' ? object.resourceId : ''))).size,
     ).toBe(1);
     expect(imported.document.resources.items).toHaveLength(1);
+  });
+
+  it('indexes many equal-length resources by one-pass digest before byte comparison', async () => {
+    const blob = await new XlsxAdapter().render(objectDocument() as never, {
+      formulaMode: 'values-only',
+      compatibility: 'excel',
+    });
+    const original = await archiveParts(blob);
+    const count = 1_024;
+    const anchor = /<xdr:absoluteAnchor>[\s\S]*?<\/xdr:absoluteAnchor>/.exec(
+      strFromU8(original['xl/drawings/drawing1.xml']!),
+    )?.[0];
+    expect(anchor).toBeDefined();
+    const drawingXml =
+      '<xdr:wsDr>' +
+      Array.from({ length: count }, (_, index) =>
+        anchor!.replace('r:embed="rId1"', `r:embed="rId${index + 1}"`),
+      ).join('') +
+      '</xdr:wsDr>';
+    const relationshipsXml =
+      '<Relationships>' +
+      Array.from(
+        { length: count },
+        (_, index) =>
+          `<Relationship Id="rId${index + 1}" Type="image" Target="../media/distinct-${index}.png"/>`,
+      ).join('') +
+      '</Relationships>';
+    const media = Object.fromEntries(
+      Array.from({ length: count }, (_, index) => {
+        const bytes = Uint8Array.from(imageBytes);
+        bytes[bytes.length - 2] = index >>> 8;
+        bytes[bytes.length - 1] = index & 0xff;
+        return [`xl/media/distinct-${index}.png`, bytes];
+      }),
+    );
+    const entries = {
+      ...original,
+      ...media,
+      'xl/drawings/drawing1.xml': strToU8(drawingXml),
+      'xl/drawings/_rels/drawing1.xml.rels': strToU8(relationshipsXml),
+    };
+    const pool = createXlsxDrawingResourcePool({
+      maxObjects: count,
+      maxResources: count,
+      maxResourceBytes: count * imageBytes.length,
+    });
+
+    const parsed = await parseWorksheetDrawing(
+      entries,
+      'xl/worksheets/sheet1.xml',
+      strFromU8(entries['xl/worksheets/sheet1.xml']!),
+      'sheet' as never,
+      resolveLimits(),
+      pool,
+    );
+
+    expect(parsed.objects).toHaveLength(count);
+    expect(parsed.resources).toHaveLength(count);
+    expect(pool.contentByDigest.size).toBe(count);
+    expect(pool.collisionComparisons).toBe(0);
   });
 
   it.each([

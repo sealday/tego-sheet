@@ -19,11 +19,14 @@ export interface ParsedWorksheetDrawing {
 
 export interface XlsxDrawingResourcePool {
   readonly byMediaPath: Map<string, ResourceMetadata>;
-  readonly content: {
-    readonly bytes: Uint8Array;
-    readonly mimeType: 'image/png' | 'image/jpeg';
-    readonly resource: ResourceMetadata;
-  }[];
+  readonly contentByDigest: Map<
+    string,
+    {
+      readonly bytes: Uint8Array;
+      readonly resource: ResourceMetadata;
+    }[]
+  >;
+  collisionComparisons: number;
   objectCount: number;
   resourceCount: number;
   resourceBytes: number;
@@ -44,7 +47,8 @@ export function createXlsxDrawingResourcePool(
 ): XlsxDrawingResourcePool {
   return {
     byMediaPath: new Map(),
-    content: [],
+    contentByDigest: new Map(),
+    collisionComparisons: 0,
     objectCount: 0,
     resourceCount: 0,
     resourceBytes: 0,
@@ -212,6 +216,17 @@ function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
   return true;
 }
 
+async function contentDigest(
+  mimeType: 'image/png' | 'image/jpeg',
+  bytes: Uint8Array,
+): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  const hex = [...new Uint8Array(digest)]
+    .map((value) => value.toString(16).padStart(2, '0'))
+    .join('');
+  return `${mimeType}:sha256:${hex}`;
+}
+
 function limitExceeded(message: string): never {
   throw new InterchangeError('ARCHIVE_LIMIT_EXCEEDED', message);
 }
@@ -344,14 +359,14 @@ function reserveDrawingObjects(xml: string, resourcePool: XlsxDrawingResourcePoo
   resourcePool.objectCount += count;
 }
 
-export function parseWorksheetDrawing(
+export async function parseWorksheetDrawing(
   entries: Readonly<Record<string, Uint8Array>>,
   worksheetPart: string,
   worksheetXml: string,
   sheetId: DocumentSheetId,
   limits: ResolvedInterchangeLimits,
   resourcePool: XlsxDrawingResourcePool = createXlsxDrawingResourcePool(),
-): ParsedWorksheetDrawing {
+): Promise<ParsedWorksheetDrawing> {
   const unsupported: string[] = [];
   const drawingReference = attributes(
     /<(?:[\w.-]+:)?drawing\b([^>]*?)(?:\/>|>)/i.exec(worksheetXml)?.[1] ?? '',
@@ -439,10 +454,22 @@ export function parseWorksheetDrawing(
         continue;
       }
       let resource = resourcePool.byMediaPath.get(mediaPath);
+      let digest: string | undefined;
       if (resource === undefined) {
-        resource = resourcePool.content.find(
-          (candidate) => candidate.mimeType === mimeType && sameBytes(candidate.bytes, bytes),
-        )?.resource;
+        const encodedBytes =
+          (`data:${mimeType};base64,`.length + base64Length(bytes.byteLength)) * 2;
+        if (
+          resourcePool.maxResources === 0 ||
+          bytes.byteLength > resourcePool.maxResourceBytes ||
+          encodedBytes > resourcePool.maxMaterializedBytes
+        ) {
+          limitExceeded('XLSX drawing resource exceeds its workbook budget');
+        }
+        digest = await contentDigest(mimeType, bytes);
+        resource = resourcePool.contentByDigest.get(digest)?.find((candidate) => {
+          resourcePool.collisionComparisons += 1;
+          return sameBytes(candidate.bytes, bytes);
+        })?.resource;
       }
       if (resource === undefined) {
         const prefix = `data:${mimeType};base64,`;
@@ -470,7 +497,12 @@ export function parseWorksheetDrawing(
           byteLength: bytes.byteLength,
           url,
         };
-        resourcePool.content.push({ bytes, mimeType, resource });
+        const bucket = resourcePool.contentByDigest.get(digest!);
+        if (bucket === undefined) {
+          resourcePool.contentByDigest.set(digest!, [{ bytes, resource }]);
+        } else {
+          bucket.push({ bytes, resource });
+        }
         resourcePool.resourceCount += 1;
         resourcePool.resourceBytes += bytes.byteLength;
         resourcePool.materializedBytes += materializedBytes;

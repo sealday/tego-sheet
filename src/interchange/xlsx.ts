@@ -650,7 +650,7 @@ export function createXlsxReader(configuredLimits: InterchangeLimits = {}): Work
           visibility,
           options.signal,
         );
-        const drawing = parseWorksheetDrawing(
+        const drawing = await parseWorksheetDrawing(
           entries,
           worksheetName,
           worksheetXml,
