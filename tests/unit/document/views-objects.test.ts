@@ -249,6 +249,67 @@ describe('saved views and objects in Workbook 2.0', () => {
     expect(parseSpreadsheetDocument(controller.getSnapshot().document)).toMatchObject({ ok: true });
   });
 
+  it('normalizes collapsed column offsets through delete, undo, and redo', () => {
+    const serialized = JSON.parse(
+      serializeSpreadsheetDocument(fixture()),
+    ) as SpreadsheetDocumentInput;
+    const sheet = serialized.workbook.sheets[0]!;
+    const anchor = {
+      type: 'two-cell',
+      from: {
+        sheetId: 'sheet-1',
+        row: 1,
+        column: 1,
+        offset: { x: 10, y: 10 },
+      },
+      to: {
+        sheetId: 'sheet-1',
+        row: 2,
+        column: 2,
+        offset: { x: 0, y: 20 },
+      },
+    } as const;
+    sheet.objects = [{ ...sheet.objects![0]!, anchor }] as never;
+    const parsed = parseSpreadsheetDocument(serialized);
+    if (!parsed.ok) throw new Error(JSON.stringify(parsed.diagnostics));
+    const controller = createDocumentController(parsed.document);
+
+    expect(
+      controller.execute({
+        schemaVersion: 1,
+        id: 'collapse-object-columns',
+        command: {
+          type: 'delete-column',
+          sheet: 'sheet-1' as SheetId,
+          index: 1,
+          count: 2,
+        },
+      }),
+    ).toMatchObject({ status: 'committed' });
+    expect(controller.getSnapshot().document.workbook.sheets[0]!.objects[0]!.anchor).toEqual({
+      type: 'two-cell',
+      from: {
+        sheetId: 'sheet-1',
+        row: 1,
+        column: 1,
+        offset: { x: 0, y: 10 },
+      },
+      to: {
+        sheetId: 'sheet-1',
+        row: 2,
+        column: 1,
+        offset: { x: 0, y: 20 },
+      },
+    });
+    expect(parseSpreadsheetDocument(controller.getSnapshot().document)).toMatchObject({ ok: true });
+    expect(controller.undo()).toMatchObject({ status: 'committed' });
+    expect(controller.getSnapshot().document.workbook.sheets[0]!.objects[0]!.anchor).toEqual(
+      anchor,
+    );
+    expect(controller.redo()).toMatchObject({ status: 'committed' });
+    expect(parseSpreadsheetDocument(controller.getSnapshot().document)).toMatchObject({ ok: true });
+  });
+
   it('rejects view/object limit overflow and dangling resources atomically', () => {
     const serialized = JSON.parse(
       serializeSpreadsheetDocument(fixture()),

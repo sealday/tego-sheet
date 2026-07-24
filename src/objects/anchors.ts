@@ -67,14 +67,22 @@ export function transformObjectAnchor(
       column: transformIndex(anchor.to.column, operation, 'column'),
     },
   };
-  if (operation.type === 'delete-row' && transformed.from.row === transformed.to.row) {
+  if (
+    operation.type === 'delete-row' &&
+    anchor.from.row !== anchor.to.row &&
+    transformed.from.row === transformed.to.row
+  ) {
     return {
       ...transformed,
       from: { ...transformed.from, offset: { ...transformed.from.offset, y: 0 } },
       to: { ...transformed.to, offset: { ...transformed.to.offset, y: 0 } },
     };
   }
-  if (operation.type === 'delete-column' && transformed.from.column === transformed.to.column) {
+  if (
+    operation.type === 'delete-column' &&
+    anchor.from.column !== anchor.to.column &&
+    transformed.from.column === transformed.to.column
+  ) {
     return {
       ...transformed,
       from: { ...transformed.from, offset: { ...transformed.from.offset, x: 0 } },

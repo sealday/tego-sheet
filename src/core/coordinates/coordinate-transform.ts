@@ -284,6 +284,7 @@ function transformObjectAnchor(anchor: ObjectAnchor, transform: CoordinateTransf
   if (
     transform.kind === 'delete' &&
     transform.axis === 'row' &&
+    anchor.from.row !== anchor.to.row &&
     transformed.from.row === transformed.to.row
   ) {
     return {
@@ -295,6 +296,7 @@ function transformObjectAnchor(anchor: ObjectAnchor, transform: CoordinateTransf
   if (
     transform.kind === 'delete' &&
     transform.axis === 'column' &&
+    anchor.from.column !== anchor.to.column &&
     transformed.from.column === transformed.to.column
   ) {
     return {

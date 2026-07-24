@@ -188,6 +188,34 @@ describe('OBJ-01 shared object anchors', () => {
         to: { sheetId, row: 1, column: 4, offset: { x: 3, y: 0 } },
       },
     ],
+    [
+      'preserves offsets when deletion moves an already same-row anchor',
+      {
+        type: 'two-cell',
+        from: { sheetId, row: 5, column: 1, offset: { x: 1, y: 2 } },
+        to: { sheetId, row: 5, column: 4, offset: { x: 3, y: 12 } },
+      },
+      { type: 'delete-row', sheetId, index: 1, count: 1 },
+      {
+        type: 'two-cell',
+        from: { sheetId, row: 4, column: 1, offset: { x: 1, y: 2 } },
+        to: { sheetId, row: 4, column: 4, offset: { x: 3, y: 12 } },
+      },
+    ],
+    [
+      'preserves offsets when deletion moves an already same-column anchor',
+      {
+        type: 'two-cell',
+        from: { sheetId, row: 1, column: 5, offset: { x: 2, y: 1 } },
+        to: { sheetId, row: 4, column: 5, offset: { x: 12, y: 3 } },
+      },
+      { type: 'delete-column', sheetId, index: 1, count: 1 },
+      {
+        type: 'two-cell',
+        from: { sheetId, row: 1, column: 4, offset: { x: 2, y: 1 } },
+        to: { sheetId, row: 4, column: 4, offset: { x: 12, y: 3 } },
+      },
+    ],
   ])('%s', (_name, anchor, operation, expected) => {
     expect(transformObjectAnchor(anchor, operation)).toEqual(expected);
   });
