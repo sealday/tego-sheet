@@ -284,11 +284,14 @@ export type {
   FilterViewPredicate,
   FilterViewSession,
 } from './views';
-export { createDataTransformPlanner } from './data-tools';
+export { createDataTransformPlanner, DataTransformError } from './data-tools';
 export type {
+  DataTransform,
   DataTransformCommitResult,
   DataTransformPreview,
   FindReplaceTransform,
+  RemoveDuplicatesTransform,
+  SplitTextTransform,
 } from './data-tools';
 export {
   createCsvReader,

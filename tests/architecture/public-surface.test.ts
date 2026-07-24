@@ -94,6 +94,7 @@ it('[ARCH-1] exposes only the approved React and Workbook 2.0 runtime API', () =
     'BUILTIN_NUMBER_FORMAT_COMPATIBILITY',
     'BrowserPrintError',
     'ConditionalFormatError',
+    'DataTransformError',
     'FormulaNameConflictError',
     'FormulaSyntaxError',
     'InterchangeError',
