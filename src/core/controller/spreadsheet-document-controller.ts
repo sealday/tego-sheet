@@ -8,7 +8,9 @@ import {
   type CalculationEnvironment,
   type FormulaEngine,
   type FormulaFunctionRegistry,
+  type FormulaNameRegistry,
   type FormulaProgram,
+  type FormulaTableBindingResolver,
   type FormulaValue,
 } from '../../formula';
 import type { CommandResult, WorkbookCommand } from '../commands/workbook-command';
@@ -268,6 +270,10 @@ export interface SpreadsheetCalculationOptions {
   readonly clock?: CalculationEnvironment['clock'];
   /** Formula registry, including any functions bridged from the F5 kernel. */
   readonly functions: FormulaFunctionRegistry;
+  /** Named ranges available to the production formula compiler. */
+  readonly names?: FormulaNameRegistry;
+  /** Structured-table binding provider available to the production formula compiler. */
+  readonly tables?: FormulaTableBindingResolver;
   /** @internal Whether both volatile inputs were explicitly supplied by the host. */
   readonly resolveVolatile: boolean;
 }
@@ -493,13 +499,19 @@ export class SpreadsheetDocumentController {
     const functions = options.calculation?.functions ?? createFormulaFunctionRegistry();
     this.calculationOptions = {
       functions,
+      names: options.calculation?.names,
+      tables: options.calculation?.tables,
       locale: options.calculation?.locale,
       timeZone: options.calculation?.timeZone ?? 'UTC',
       clock: options.calculation?.clock ?? { now: () => 0 },
       resolveVolatile:
         options.calculation?.clock !== undefined && options.calculation.timeZone !== undefined,
     };
-    this.formulaEngine = createFormulaEngine({ functions });
+    this.formulaEngine = createFormulaEngine({
+      functions,
+      names: this.calculationOptions.names,
+      tables: this.calculationOptions.tables,
+    });
     this.formulaProgram = this.formulaEngine.compile(this.currentDocument);
     this.formulaValues = this.formulaEngine.recalculate(
       this.formulaProgram,
@@ -1340,7 +1352,8 @@ export class SpreadsheetDocumentController {
   }
 
   private assertNoSpillChildEdits(command: WorkbookCommand): void {
-    if (this.formulaProgram.spillAnchors.size === 0) return;
+    const spillAnchors = this.formulaProgram.spillAnchors;
+    if (spillAnchors.size === 0) return;
     const ranges: Array<{
       readonly sheet: SheetId;
       readonly start: { readonly row: number; readonly column: number };
@@ -1353,6 +1366,8 @@ export class SpreadsheetDocumentController {
         end: command.address,
       });
     } else if (command.type === 'clear-contents') {
+      ranges.push({ sheet: command.selection.sheet, ...command.selection.range });
+    } else if (command.type === 'merge') {
       ranges.push({ sheet: command.selection.sheet, ...command.selection.range });
     } else if (command.type === 'paste-external') {
       const height = command.values.length;
@@ -1382,7 +1397,7 @@ export class SpreadsheetDocumentController {
       for (let row = range.start.row; row <= range.end.row; row += 1) {
         for (let column = range.start.column; column <= range.end.column; column += 1) {
           const address = formulaAddressKey({ sheetId: range.sheet as string, row, column });
-          const anchor = this.formulaProgram.spillAnchors.get(address);
+          const anchor = spillAnchors.get(address);
           if (anchor === undefined) continue;
           throw new ValidationBoundaryError(
             'SPILL_CELL_READ_ONLY',

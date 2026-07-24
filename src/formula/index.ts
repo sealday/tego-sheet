@@ -22,6 +22,7 @@ export type {
   DependencyChange,
   FormulaEngine,
   FormulaEngineOptions,
+  FormulaBoundReference,
   FormulaProgram,
 } from './evaluator';
 export { createFormulaEngine } from './evaluator';

@@ -214,6 +214,22 @@ describe('formula dependency graph', () => {
     const diagnostics = invalid.diagnostics.get('sheet-1!A1') as unknown[];
     diagnostics.push({ code: 'poison' });
     expect(program.diagnostics.get('sheet-1!A1')).toHaveLength(1);
+
+    const replaced = engine.recalculate(
+      program,
+      [
+        {
+          sheetId: 'sheet-1',
+          row: 0,
+          column: 0,
+          input: { type: 'string', value: 'plain' },
+        },
+      ],
+      environment,
+    );
+    expect(replaced.values.has('sheet-1!A1')).toBe(false);
+    expect(replaced.diagnostics.get('sheet-1!A1')).toBeUndefined();
+    expect(replaced.values.get('sheet-1!B1')).toEqual({ type: 'error', value: '#VALUE!' });
   });
 
   it('validates IF arity before selecting a branch', () => {
@@ -249,6 +265,31 @@ describe('formula dependency graph', () => {
     expect(first.values.get('sheet-1!A1')).toEqual(unchanged.values.get('sheet-1!A1'));
     expect(unchanged.evaluatedAddresses).toEqual([]);
     expect(next.evaluatedAddresses).toEqual(['sheet-1!A1']);
+  });
+
+  it('invalidates transitive dependents when a volatile root advances to a new tick', () => {
+    const document = formulaDocument([
+      {
+        id: 'sheet-1',
+        name: 'Sheet1',
+        cells: [
+          { row: 0, column: 0, input: { type: 'formula', source: '=NOW()' } },
+          { row: 0, column: 1, input: { type: 'formula', source: '=A1+1' } },
+        ],
+      },
+    ]);
+    const engine = createFormulaEngine();
+    const program = engine.compile(document);
+    engine.recalculate(program, [], environment);
+
+    const next = engine.recalculate(program, [], {
+      ...environment,
+      tick: 2,
+      clock: { now: () => Date.UTC(2024, 0, 3) },
+    });
+
+    expect(next.evaluatedAddresses).toEqual(['sheet-1!A1', 'sheet-1!B1']);
+    expect(next.values.get('sheet-1!B1')).toEqual({ type: 'number', value: 45295 });
   });
 
   it('invalidates stable formula caches when the function registry version changes', () => {

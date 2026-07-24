@@ -57,7 +57,15 @@ export function createFormulaNameRegistry(): FormulaNameRegistry {
       if (definitions.has(nameKey)) throw new FormulaNameConflictError(definition.name);
       const snapshot = Object.freeze({
         ...definition,
-        refersTo: Object.freeze(definition.refersTo),
+        scope:
+          definition.scope === 'workbook'
+            ? definition.scope
+            : Object.freeze({ sheetId: definition.scope.sheetId }),
+        refersTo: Object.freeze({
+          sheetId: definition.refersTo.sheetId,
+          start: Object.freeze({ ...definition.refersTo.start }),
+          end: Object.freeze({ ...definition.refersTo.end }),
+        }),
       });
       definitions.set(nameKey, snapshot);
       return () => {
@@ -166,8 +174,9 @@ export function bindAdvancedFormula(
       | { kind: 'table-column'; tableId: string; columnId: string };
   }[] = [];
   const diagnostics: { code: 'FORMULA_REFERENCE_INVALID'; message: string }[] = [];
+  const quotedMask = maskQuotedFormulaText(source);
   const structured = /\b([A-Za-z_][A-Za-z0-9_.]*)\[([^\]]+)\]/gu;
-  const masked = source.replace(
+  const masked = quotedMask.replace(
     structured,
     (match, tableName: string, columnName: string, offset: number) => {
       const table = context.tables.find(
@@ -211,6 +220,35 @@ export function bindAdvancedFormula(
     ),
     diagnostics: Object.freeze(diagnostics),
   };
+}
+
+function maskQuotedFormulaText(source: string): string {
+  const output = source.split('');
+  let index = 0;
+  while (index < source.length) {
+    const quote = source[index];
+    if (quote !== '"' && quote !== "'") {
+      index += 1;
+      continue;
+    }
+    output[index] = ' ';
+    index += 1;
+    while (index < source.length) {
+      output[index] = ' ';
+      if (source[index] !== quote) {
+        index += 1;
+        continue;
+      }
+      if (source[index + 1] === quote) {
+        output[index + 1] = ' ';
+        index += 2;
+        continue;
+      }
+      index += 1;
+      break;
+    }
+  }
+  return output.join('');
 }
 
 function columnName(column: number): string {

@@ -178,6 +178,7 @@ export type {
 export type { CellPoint as DocumentCellPoint } from './document';
 export {
   BUILTIN_FORMULA_COMPATIBILITY,
+  FormulaNameConflictError,
   FormulaSyntaxError,
   bindAdvancedFormula,
   createFormulaEngine,
@@ -196,6 +197,7 @@ export type {
   DependencyChange,
   FormulaAddress,
   FormulaAst,
+  FormulaBoundReference,
   FormulaDependencyGraph,
   FormulaDiagnostic,
   FormulaEngine,

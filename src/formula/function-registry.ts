@@ -110,7 +110,10 @@ function dateSerial(
   dateSystem: 'excel-1900' | 'excel-1904',
 ): number {
   if (![year, month, day].every(Number.isFinite)) return Number.NaN;
-  const timestamp = Date.UTC(Math.trunc(year), Math.trunc(month) - 1, Math.trunc(day));
+  const truncatedYear = Math.trunc(year);
+  const excelYear =
+    truncatedYear >= 0 && truncatedYear <= 1899 ? truncatedYear + 1900 : truncatedYear;
+  const timestamp = Date.UTC(excelYear, Math.trunc(month) - 1, Math.trunc(day));
   const epoch = dateSystem === 'excel-1900' ? Date.UTC(1899, 11, 31) : Date.UTC(1904, 0, 1);
   let serial = Math.floor((timestamp - epoch) / 86_400_000);
   if (dateSystem === 'excel-1900' && serial >= 60) serial += 1;

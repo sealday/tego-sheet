@@ -4,6 +4,7 @@ import { sheetId } from '../../../src/core';
 import {
   createFormulaEngine,
   createFormulaFunctionRegistry,
+  createFormulaNameRegistry,
   formulaAddressKey,
 } from '../../../src/formula';
 import { formulaDocument } from './helpers';
@@ -112,5 +113,103 @@ describe('FRM-01 spill production integration', () => {
             value.value === 3,
         ),
     ).toBe(true);
+  });
+
+  it('rejects merges that intersect an active spill child', () => {
+    const controller = new SpreadsheetDocumentController(spillDocument(), {
+      calculation: { functions: createFormulaFunctionRegistry() },
+    });
+    const sheet = sheetId('sheet-1');
+    const result = controller.execute({
+      schemaVersion: 1,
+      id: 'merge-spill-child',
+      command: {
+        type: 'merge',
+        selection: {
+          sheet,
+          range: { start: { row: 0, column: 1 }, end: { row: 1, column: 1 } },
+          active: { row: 0, column: 1 },
+        },
+      },
+    });
+
+    expect(result).toMatchObject({ status: 'rejected', code: 'SPILL_CELL_READ_ONLY' });
+  });
+
+  it('passes names and structured-table providers through the production controller', () => {
+    const names = createFormulaNameRegistry();
+    names.register({
+      id: 'tax',
+      name: 'TaxRate',
+      scope: 'workbook',
+      refersTo: {
+        sheetId: 'sheet-1' as never,
+        start: { row: 0, column: 0 },
+        end: { row: 0, column: 0 },
+      },
+    });
+    const document = formulaDocument([
+      {
+        id: 'sheet-1',
+        name: 'Sheet1',
+        cells: [
+          { row: 0, column: 0, input: { type: 'number', value: 4 } },
+          { row: 0, column: 1, input: { type: 'formula', source: '=TaxRate*2' } },
+          { row: 0, column: 2, input: { type: 'formula', source: '=SUM(Sales[Amount])' } },
+        ],
+      },
+    ]);
+    const controller = new SpreadsheetDocumentController(document, {
+      calculation: {
+        functions: createFormulaFunctionRegistry(),
+        names,
+        tables: {
+          resolve: () => ({
+            status: 'resolved',
+            tableId: 'sales',
+            columnId: 'amount',
+            range: {
+              sheetId: 'sheet-1' as never,
+              start: { row: 0, column: 0 },
+              end: { row: 0, column: 0 },
+            },
+          }),
+        },
+      },
+    });
+    const values = new Map(
+      controller.getSnapshot().calculation.values.map(({ address, value }) => [address, value]),
+    );
+
+    expect(values.get('sheet-1!B1')).toEqual({ type: 'number', value: 8 });
+    expect(values.get('sheet-1!C1')).toEqual({ type: 'number', value: 4 });
+  });
+
+  it('clears stale parse errors and diagnostics when a formula becomes text', () => {
+    const document = formulaDocument([
+      {
+        id: 'sheet-1',
+        name: 'Sheet1',
+        cells: [{ row: 0, column: 0, input: { type: 'formula', source: '=1+' } }],
+      },
+    ]);
+    const controller = new SpreadsheetDocumentController(document, {
+      calculation: { functions: createFormulaFunctionRegistry() },
+    });
+    const sheet = sheetId('sheet-1');
+    expect(
+      controller.getSnapshot().calculation.values.find(({ address }) => address === 'sheet-1!A1')
+        ?.value,
+    ).toEqual({ type: 'error', value: '#VALUE!' });
+
+    controller.dispatch(
+      { type: 'set-cell-text', address: { sheet, row: 0, column: 0 }, text: 'plain' },
+      'ref',
+    );
+
+    expect(
+      controller.getSnapshot().calculation.values.some(({ address }) => address === 'sheet-1!A1'),
+    ).toBe(false);
+    expect(controller.getCellText({ sheet, row: 0, column: 0 })).toBe('plain');
   });
 });

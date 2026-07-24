@@ -186,4 +186,22 @@ describe('Excel compatibility manifest', () => {
         .values.get('sheet-1!A1'),
     ).toEqual({ type: 'number', value: 45293 });
   });
+
+  it('applies the Excel DATE rule that treats years 0 through 1899 as 1900-based', () => {
+    const document = formulaDocument([
+      {
+        id: 'sheet-1',
+        name: 'Sheet1',
+        cells: [
+          { row: 0, column: 0, input: { type: 'formula', source: '=YEAR(DATE(100,1,1))' } },
+          { row: 0, column: 1, input: { type: 'formula', source: '=YEAR(DATE(0,1,1))' } },
+        ],
+      },
+    ]);
+    const engine = createFormulaEngine();
+    const result = engine.recalculate(engine.compile(document), [], environment);
+
+    expect(result.values.get('sheet-1!A1')).toEqual({ type: 'number', value: 2000 });
+    expect(result.values.get('sheet-1!B1')).toEqual({ type: 'number', value: 1900 });
+  });
 });
