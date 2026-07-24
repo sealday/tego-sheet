@@ -61,6 +61,11 @@
       "import": "./dist/interchange.js",
       "require": "./dist/interchange.cjs"
     },
+    "./analysis": {
+      "types": "./dist/analysis/index.d.ts",
+      "import": "./dist/analysis.js",
+      "require": "./dist/analysis.cjs"
+    },
     "./sdk": {
       "types": "./dist/sdk/index.d.ts",
       "import": "./dist/sdk.js",

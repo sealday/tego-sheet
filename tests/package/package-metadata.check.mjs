@@ -24,7 +24,11 @@ test('metadata describes React peers and explicit output dependencies and export
     pdfkit: '0.19.1',
   });
   assert.deepEqual(pkg.peerDependencies, { react: '^19.2.7', 'react-dom': '^19.2.7' });
-  assert.deepEqual(pkg.files, ['dist', 'docs/migration-from-x-data-spreadsheet.md']);
+  assert.deepEqual(pkg.files, [
+    'dist',
+    'docs/migration-from-x-data-spreadsheet.md',
+    'docs/migration-to-workbook-2.md',
+  ]);
   assert.deepEqual(pkg.sideEffects, ['**/*.css']);
   assert.deepEqual(Object.keys(pkg.exports), [
     '.',
@@ -34,6 +38,7 @@ test('metadata describes React peers and explicit output dependencies and export
     './locales/nl',
     './locales/zh-cn',
     './interchange',
+    './analysis',
     './sdk',
     './integrations',
     './output/pdf',

@@ -186,8 +186,8 @@ export type {
   WorkbookSettings,
   WorksheetVisibility,
 } from './document';
-export { createStructuredTableResolver } from './analysis';
-export type { StructuredTableDocumentProvider } from './analysis';
+export { createStructuredTableResolver, planStructuredTableAutoExpand } from './analysis';
+export type { StructuredTableAutoExpandResult, StructuredTableDocumentProvider } from './analysis';
 /** A zero-based Workbook 2.0 cell coordinate. */
 export type { CellPoint as DocumentCellPoint } from './document';
 export {

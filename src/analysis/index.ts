@@ -1,5 +1,9 @@
-export type { FormulaGoalSeekOptions, FormulaGoalSeekResult } from './goal-seek';
-export { solveFormulaGoalSeek } from './goal-seek';
+export type {
+  FormulaGoalSeekApplyProposal,
+  FormulaGoalSeekOptions,
+  FormulaGoalSeekResult,
+} from './goal-seek';
+export { createFormulaGoalSeekApplyProposal, solveFormulaGoalSeek } from './goal-seek';
 export type {
   PivotAggregate,
   PivotDefinition,
@@ -33,8 +37,8 @@ export type {
   SolverVariable,
 } from './solver';
 export { compileSolverModel, runSolver } from './solver';
-export { createStructuredTableResolver } from './tables';
-export type { StructuredTableDocumentProvider } from './tables';
+export { createStructuredTableResolver, planStructuredTableAutoExpand } from './tables';
+export type { StructuredTableAutoExpandResult, StructuredTableDocumentProvider } from './tables';
 export { chartAffectedByChanges, chartToDisplayCommands, resolveChart } from './charts';
 export type {
   ChartDefinition,

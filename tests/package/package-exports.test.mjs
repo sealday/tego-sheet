@@ -14,6 +14,7 @@ const expectedExports = [
   './locales/nl',
   './locales/zh-cn',
   './interchange',
+  './analysis',
   './sdk',
   './integrations',
   './output/pdf',
@@ -21,6 +22,41 @@ const expectedExports = [
   './output/image',
   './package.json',
 ];
+
+test('the analysis subpath exposes Worker-safe analysis protocols', () => {
+  execFileSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '--eval',
+      `
+      const analysis = await import('tego-sheet/analysis');
+      const expected = [
+        'buildSlicerValueIndex',
+        'chartAffectedByChanges',
+        'chartToDisplayCommands',
+        'compileSlicerFilterContext',
+        'compileSolverModel',
+        'createFormulaGoalSeekApplyProposal',
+        'createStructuredTableResolver',
+        'planStructuredTableAutoExpand',
+        'refreshPivot',
+        'resolveChart',
+        'resolveSparkline',
+        'runSolver',
+        'solveFormulaGoalSeek',
+        'sparklineAffectedByChanges',
+        'sparklineToDisplayCommands'
+      ];
+      if (JSON.stringify(Object.keys(analysis)) !== JSON.stringify(expected)) {
+        throw new Error('Unexpected analysis exports: ' + Object.keys(analysis).join(','));
+      }
+      if ('document' in globalThis) throw new Error('analysis created a DOM global');
+      `,
+    ],
+    { cwd: consumer },
+  );
+});
 
 test('the package exposes only the approved root and locale entry points', () => {
   const packageJson = JSON.parse(
@@ -101,6 +137,7 @@ test('the built root has only the approved runtime exports and internal subpaths
         'parseNumberFormat',
         'parseSpreadsheetDocument',
         'planFormulaSpill',
+        'planStructuredTableAutoExpand',
         'renderFormula',
         'renderNumberFormatToken',
         'renderSpreadsheetTemplate',
@@ -287,6 +324,7 @@ test('the integrations subpath exposes only host-owned protocol runtimes', () =>
       const integrations = await import('tego-sheet/integrations');
       const expected = [
         'createAiProposalSession',
+        'createCollaborationOutboxCoordinator',
         'createCommentAnchorOutboxCoordinator',
         'createPermissionSnapshot',
         'createPermissionStore',

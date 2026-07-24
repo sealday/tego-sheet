@@ -152,6 +152,7 @@ it('[ARCH-1] exposes only the approved React and Workbook 2.0 runtime API', () =
     'parseNumberFormat',
     'parseSpreadsheetDocument',
     'planFormulaSpill',
+    'planStructuredTableAutoExpand',
     'renderFormula',
     'renderNumberFormatToken',
     'renderSpreadsheetTemplate',
@@ -180,6 +181,7 @@ it('[ARCH-1] publishes only the approved package entry points', () => {
 
   expect(Object.keys(packageJson.exports ?? {}).sort()).toEqual([
     '.',
+    './analysis',
     './integrations',
     './interchange',
     './locales/de',
@@ -193,7 +195,11 @@ it('[ARCH-1] publishes only the approved package entry points', () => {
     './sdk',
     './styles.css',
   ]);
-  expect(packageJson.files).toEqual(['dist', 'docs/migration-from-x-data-spreadsheet.md']);
+  expect(packageJson.files).toEqual([
+    'dist',
+    'docs/migration-from-x-data-spreadsheet.md',
+    'docs/migration-to-workbook-2.md',
+  ]);
 });
 
 it('keeps the removed root legacy tree visible to filesystem and ignore guards', () => {
