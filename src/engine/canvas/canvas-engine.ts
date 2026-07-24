@@ -10,7 +10,8 @@ import { createSparseCellScanBudget, paintGrid, paneCells, paneGridIndexes } fro
 import { paintHeaders } from './header-painter';
 import { RenderScheduler } from './render-scheduler';
 import type { AnimationFramePort } from './render-scheduler';
-import { paintObjects } from './object-painter';
+import { paintCommands, paintObjects } from './object-painter';
+import type { PrintDisplayCommand } from '../../print';
 import { paintSelection } from './selection-painter';
 import { paintTemplateDecorations } from './template-decoration-painter';
 import type { ScreenObjectProjection } from '../../objects';
@@ -32,6 +33,8 @@ export interface CanvasRenderSnapshot {
   readonly selection?: CellRange;
   readonly invalidCells?: readonly CellPoint[];
   readonly templateDecorations?: readonly TemplateCanvasDecoration[];
+  /** Revision-bound persisted chart and sparkline commands in worksheet coordinates. */
+  readonly visualizationCommands?: readonly PrintDisplayCommand[];
   readonly showGrid?: boolean;
   /** Visible persistent objects already projected through shared display geometry. */
   readonly objects?: readonly ScreenObjectProjection[];
@@ -135,6 +138,7 @@ export class CanvasEngine {
           if (snapshot.showGrid !== false) paintGrid(this.draw, indexes, viewport);
           paintCells(this.draw, snapshot, cells, presentations);
           paintFilterOverlays(this.draw, snapshot, indexes.rows, indexes.columns);
+          paintCommands(this.draw.context, snapshot.visualizationCommands ?? []);
           paintSelection(this.draw, snapshot.selection, viewport, pane.kind);
           paintTemplateDecorations(
             this.draw,

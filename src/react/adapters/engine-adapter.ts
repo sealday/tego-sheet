@@ -40,6 +40,11 @@ import {
   type ResourceRef,
 } from '../../template';
 import type { ResolvedScreenResource } from '../../objects';
+import {
+  createPersistedVisualizationValueSource,
+  createVisualizationPlacement,
+  projectPersistedVisualizations,
+} from '../../analysis';
 
 export interface EngineAdapterOptions {
   readonly root: HTMLElement;
@@ -197,6 +202,31 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
       viewport,
       resolvedObjectResources,
     );
+    const visualizationSource = createPersistedVisualizationValueSource(
+      latestSnapshot.document,
+      `${latestSnapshot.revision}:${latestSnapshot.calculation.revision}`,
+      new Map(latestSnapshot.calculation.values.map(({ address, value }) => [address, value])),
+    );
+    const visualizations = projectPersistedVisualizations(
+      documentSheet,
+      visualizationSource,
+      createVisualizationPlacement({
+        rowOffset: viewport.model.rowOffset,
+        columnOffset: viewport.model.columnOffset,
+      }),
+    );
+    if (visualizations.length === 0) {
+      options.canvas.removeAttribute('role');
+      options.canvas.removeAttribute('aria-label');
+      options.canvas.removeAttribute('data-visualization-revision');
+    } else {
+      options.canvas.setAttribute('role', 'img');
+      options.canvas.setAttribute(
+        'aria-label',
+        visualizations.map(({ summary }) => summary).join('. '),
+      );
+      options.canvas.setAttribute('data-visualization-revision', visualizationSource.revision);
+    }
     reportObjectDiagnostics(
       options.onObjectDiagnostics,
       documentSheet.id,
@@ -210,6 +240,7 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
       sheet,
       viewport,
       objectPanes,
+      visualizationCommands: visualizations.flatMap(({ commands }) => commands),
       presentations: {
         resolve: ({ row, column }) =>
           resolver.resolve({

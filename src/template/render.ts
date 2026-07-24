@@ -45,6 +45,11 @@ import type {
 } from './model';
 import { objectToDisplayCommands, resolveObjectAnchor } from '../objects';
 import { applyDocumentFilterView } from '../views';
+import {
+  createPersistedVisualizationValueSource,
+  projectPersistedVisualizations,
+  type ChartValueSource,
+} from '../analysis';
 
 const DEFAULT_LIMITS: RenderLimits = Object.freeze({
   maxExpandedCells: 250_000,
@@ -499,6 +504,7 @@ function displayPages(
   viewProjections: ReadonlyMap<string, ViewProjection>,
   data: unknown,
   date: Date,
+  visualizationSource: ChartValueSource,
 ): readonly PrintDisplayPageInput[] {
   const projectedGeometry = new Map(
     resolved.map((target) => [
@@ -784,12 +790,60 @@ function displayPages(
           resources: resources.byReference,
         });
       });
+    const visualizationOverlays = projectPersistedVisualizations(
+      target.sheet,
+      visualizationSource,
+      {
+        chart(definition) {
+          if (definition.anchor === undefined) return null;
+          const rect = resolveObjectAnchor(definition.anchor, {
+            rowOffset: (row) => rowGeometry.markerOffset(row) ?? physicalRowOffset(row),
+            columnOffset,
+          });
+          const bodyRight = columnOffset(endColumn + 1);
+          if (
+            rect.x + rect.width <= bodyOriginX ||
+            rect.y + rect.height <= bodyOriginY ||
+            rect.x >= bodyRight ||
+            rect.y >= bodyBottom
+          )
+            return null;
+          return {
+            x: profile.page.margins.left + headingSize + (rect.x - bodyOriginX) * page.scale,
+            y: profile.page.margins.top + headingSize + (rect.y - bodyOriginY) * page.scale,
+            width: rect.width * page.scale,
+            height: rect.height * page.scale,
+          };
+        },
+        sparkline(definition) {
+          const rowIndex = rows.indexOf(definition.target.row);
+          const columnIndex = columns.indexOf(definition.target.column);
+          if (rowIndex < 0 || columnIndex < 0) return null;
+          return {
+            x:
+              profile.page.margins.left +
+              headingSize +
+              columns
+                .slice(0, columnIndex)
+                .reduce((sum, column) => sum + columnWidth(target.sheet, column), 0) *
+                page.scale,
+            y:
+              profile.page.margins.top +
+              headingSize +
+              rows.slice(0, rowIndex).reduce((sum, row) => sum + rowHeight(target.sheet, row), 0) *
+                page.scale,
+            width: columnWidth(target.sheet, definition.target.column) * page.scale,
+            height: rowHeight(target.sheet, definition.target.row) * page.scale,
+          };
+        },
+      },
+    ).flatMap(({ commands }) => commands);
     return {
       width: page.width,
       height: page.height,
       cells,
       decorations,
-      overlays: [...overlays, ...objectOverlays],
+      overlays: [...overlays, ...objectOverlays, ...visualizationOverlays],
       showGridlines: profile.showGridlines,
     };
   });
@@ -1176,6 +1230,11 @@ export async function renderSpreadsheetTemplate(
       viewProjections,
       request.data,
       environment.clock,
+      createPersistedVisualizationValueSource(
+        expansion.document,
+        `${request.currentDocumentHash}:print`,
+        calculation.values,
+      ),
     );
     const displayList = createPrintDisplayList({
       pages: pageInputs,

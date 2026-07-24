@@ -1661,6 +1661,28 @@ function structuredTablesAt(
         'Structured table filters inherit the table range',
       );
     }
+    tableFilter?.filters.forEach((filter, filterIndex) => {
+      if (filter.column < range.start.column || filter.column > range.end.column) {
+        addDiagnostic(
+          context,
+          'INVALID_RANGE',
+          `${entryPath}.filter.filters[${filterIndex}].column`,
+          'Structured table filter column must be within the table range',
+        );
+      }
+    });
+    if (
+      tableFilter?.sort !== undefined &&
+      tableFilter.sort !== null &&
+      (tableFilter.sort.column < range.start.column || tableFilter.sort.column > range.end.column)
+    ) {
+      addDiagnostic(
+        context,
+        'INVALID_RANGE',
+        `${entryPath}.filter.sort.column`,
+        'Structured table sort column must be within the table range',
+      );
+    }
     return {
       id: stringAt(source?.id, `${entryPath}.id`, context) as TableId,
       name,
@@ -2128,6 +2150,38 @@ function validateReferences(document: SpreadsheetDocument, context: ParseContext
           'DANGLING_REFERENCE',
           `${base}.resourceId`,
           'Referenced object resourceId does not exist',
+        );
+      }
+    });
+    sheet.charts.forEach((chart, chartIndex) => {
+      if (chart.anchor === undefined || chart.anchor.type === 'absolute') return;
+      const base = `$.workbook.sheets[${sheetIndex}].charts[${chartIndex}].anchor`;
+      const markers =
+        chart.anchor.type === 'one-cell'
+          ? [chart.anchor.cell]
+          : [chart.anchor.from, chart.anchor.to];
+      if (markers.some(({ sheetId }) => sheetId !== sheet.id || !sheetIds.has(sheetId))) {
+        addDiagnostic(
+          context,
+          'DOCUMENT_SCHEMA_INVALID',
+          base,
+          'Chart anchors must reference their owning sheet',
+        );
+      }
+      if (
+        chart.anchor.type === 'two-cell' &&
+        (chart.anchor.from.row > chart.anchor.to.row ||
+          (chart.anchor.from.row === chart.anchor.to.row &&
+            chart.anchor.from.offset.y > chart.anchor.to.offset.y) ||
+          chart.anchor.from.column > chart.anchor.to.column ||
+          (chart.anchor.from.column === chart.anchor.to.column &&
+            chart.anchor.from.offset.x > chart.anchor.to.offset.x))
+      ) {
+        addDiagnostic(
+          context,
+          'OBJECT_ANCHOR_INVALID',
+          base,
+          'Two-cell chart markers must not cross',
         );
       }
     });

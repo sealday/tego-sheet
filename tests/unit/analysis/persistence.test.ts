@@ -90,6 +90,54 @@ describe('persistent analysis visualizations', () => {
     );
   });
 
+  it('rejects chart anchors that leave the owning sheet or cross two-cell markers', () => {
+    const input = structuredClone(
+      createSpreadsheetDocument({ id: 'invalid-chart-anchors', sheetId: 'sheet-1' }),
+    ) as unknown as SpreadsheetDocumentInput;
+    input.workbook.sheets.push({
+      id: 'sheet-2' as DocumentSheetId,
+      name: 'Other',
+      cells: [],
+      merges: [],
+    });
+    input.workbook.sheets[0]!.charts = [
+      {
+        ...chart,
+        anchor: {
+          type: 'two-cell',
+          from: {
+            sheetId: 'sheet-2' as DocumentSheetId,
+            row: 4,
+            column: 3,
+            offset: { x: 10, y: 10 },
+          },
+          to: {
+            sheetId: documentSheetId,
+            row: 2,
+            column: 1,
+            offset: { x: 0, y: 0 },
+          },
+        },
+      },
+    ];
+
+    const parsed = parseSpreadsheetDocument(input);
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) throw new Error('invalid chart anchor must fail');
+    expect(parsed.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'DOCUMENT_SCHEMA_INVALID',
+          details: { path: '$.workbook.sheets[0].charts[0].anchor' },
+        }),
+        expect.objectContaining({
+          code: 'OBJECT_ANCHOR_INVALID',
+          details: { path: '$.workbook.sheets[0].charts[0].anchor' },
+        }),
+      ]),
+    );
+  });
+
   it('persists, commands, undoes, and structurally transforms chart and sparkline references', () => {
     const controller = new SpreadsheetDocumentController(
       createSpreadsheetDocument({ id: 'analysis-document', sheetId: 'sheet-1' }),

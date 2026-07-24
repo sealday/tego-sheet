@@ -25,7 +25,7 @@ export function paintObjects(
   }
 }
 
-function paintCommands(
+export function paintCommands(
   context: CanvasRenderingContext2D,
   commands: readonly PrintDisplayCommand[],
   imageResources?: ScreenObjectProjection['imageResources'],

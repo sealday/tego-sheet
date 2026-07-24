@@ -73,3 +73,9 @@ export type {
   SparklineType,
   SparklineValueSource,
 } from './sparklines';
+export {
+  createPersistedVisualizationValueSource,
+  createVisualizationPlacement,
+  projectPersistedVisualizations,
+} from './visualizations';
+export type { PersistedVisualizationProjection, VisualizationPlacement } from './visualizations';
