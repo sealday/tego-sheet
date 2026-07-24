@@ -391,7 +391,7 @@ describe('OBJ-01 standard XLSX DrawingML interchange', () => {
         return [`xl/media/distinct-${index}.png`, bytes];
       }),
     );
-    const entries = {
+    const entries: Record<string, Uint8Array> = {
       ...original,
       ...media,
       'xl/drawings/drawing1.xml': strToU8(drawingXml),

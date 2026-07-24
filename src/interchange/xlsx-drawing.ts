@@ -220,7 +220,7 @@ async function contentDigest(
   mimeType: 'image/png' | 'image/jpeg',
   bytes: Uint8Array,
 ): Promise<string> {
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', Uint8Array.from(bytes).buffer);
   const hex = [...new Uint8Array(digest)]
     .map((value) => value.toString(16).padStart(2, '0'))
     .join('');
