@@ -300,3 +300,199 @@ it('requires print permission before entering preview rendering', async () => {
     /requires a template and deterministic render environment/u,
   );
 });
+
+it('requires sheet:view for every preview binding and active print-profile target', async () => {
+  const source = testDocument([
+    { name: 'Visible' },
+    { name: 'Referenced' },
+    { name: 'Inactive profile' },
+  ]);
+  const [visibleSheet, referencedSheet, inactiveSheet] = source.workbook.sheets.map(({ id }) => id);
+  const store = createPermissionStore();
+  const template: SpreadsheetTemplate = {
+    id: 'template-preview-sheets' as never,
+    name: 'Preview',
+    bindings: [
+      {
+        id: 'binding-referenced' as never,
+        type: 'value',
+        target: { sheetId: referencedSheet! as never, row: 0, column: 0 },
+        expression: 'value',
+      },
+    ],
+    printProfiles: [
+      {
+        id: 'profile-referenced',
+        name: 'Referenced',
+        targets: [{ type: 'sheet', sheetId: referencedSheet! as never }],
+        page: {
+          paper: { type: 'A4' },
+          orientation: 'portrait',
+          margins: { top: 20, right: 20, bottom: 20, left: 20 },
+          scale: { type: 'fixed', value: 1 },
+        },
+        manualBreaks: [],
+        showGridlines: true,
+        showHeadings: false,
+      },
+      {
+        id: 'profile-inactive',
+        name: 'Inactive',
+        targets: [{ type: 'sheet', sheetId: inactiveSheet! as never }],
+        page: {
+          paper: { type: 'A4' },
+          orientation: 'portrait',
+          margins: { top: 20, right: 20, bottom: 20, left: 20 },
+          scale: { type: 'fixed', value: 1 },
+        },
+        manualBreaks: [],
+        showGridlines: true,
+        showHeadings: false,
+      },
+    ],
+  };
+  store.replace(
+    createPermissionSnapshot({
+      revision: 'permission-preview-partial',
+      actorId: 'actor-1',
+      grants: [
+        {
+          action: 'document:view',
+          target: { type: 'document', documentId: source.id },
+        },
+        {
+          action: 'sheet:view',
+          target: { type: 'sheet', sheetId: visibleSheet! },
+        },
+        {
+          action: 'print',
+          target: { type: 'document', documentId: source.id },
+        },
+      ],
+    }),
+  );
+  render(
+    <TegoSheet
+      document={source}
+      mode="preview"
+      template={template}
+      activePrintProfileId="profile-referenced"
+      permissionStore={store}
+    />,
+  );
+
+  expect(screen.queryByLabelText('Template preview diagnostics')).toBeNull();
+
+  act(() => {
+    store.replace(
+      createPermissionSnapshot({
+        revision: 'permission-preview-complete',
+        actorId: 'actor-1',
+        grants: [
+          {
+            action: 'document:view',
+            target: { type: 'document', documentId: source.id },
+          },
+          {
+            action: 'sheet:view',
+            target: { type: 'sheet', sheetId: visibleSheet! },
+          },
+          {
+            action: 'sheet:view',
+            target: { type: 'sheet', sheetId: referencedSheet! },
+          },
+          {
+            action: 'print',
+            target: { type: 'document', documentId: source.id },
+          },
+        ],
+      }),
+    );
+  });
+  expect(await screen.findByLabelText('Template preview diagnostics')).toBeTruthy();
+});
+
+it('requires template:bind for targets in both the previous and next template', async () => {
+  const source = testDocument([{ name: 'Active' }, { name: 'Existing target' }]);
+  const [activeSheet, existingTargetSheet] = source.workbook.sheets.map(({ id }) => id);
+  const template: SpreadsheetTemplate = {
+    id: 'template-existing-target' as never,
+    name: 'Invoice',
+    bindings: [],
+    printProfiles: [
+      {
+        id: 'profile-existing',
+        name: 'Existing',
+        targets: [{ type: 'sheet', sheetId: existingTargetSheet! as never }],
+        page: {
+          paper: { type: 'A4' },
+          orientation: 'portrait',
+          margins: { top: 20, right: 20, bottom: 20, left: 20 },
+          scale: { type: 'fixed', value: 1 },
+        },
+        manualBreaks: [],
+        showGridlines: true,
+        showHeadings: false,
+      },
+    ],
+  };
+  const store = createPermissionStore();
+  const onTemplateChange = vi.fn();
+  const viewGrants = [
+    {
+      action: 'document:view' as const,
+      target: { type: 'document' as const, documentId: source.id },
+    },
+    {
+      action: 'sheet:view' as const,
+      target: { type: 'sheet' as const, sheetId: activeSheet! },
+    },
+  ];
+  store.replace(
+    createPermissionSnapshot({
+      revision: 'permission-template-partial',
+      actorId: 'actor-1',
+      grants: [
+        ...viewGrants,
+        {
+          action: 'template:bind',
+          target: { type: 'sheet', sheetId: activeSheet! },
+        },
+      ],
+    }),
+  );
+  render(
+    <TegoSheet
+      defaultDocument={source}
+      mode="template"
+      template={template}
+      permissionStore={store}
+      onTemplateChange={onTemplateChange}
+    />,
+  );
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Add value' }));
+  expect(onTemplateChange).not.toHaveBeenCalled();
+
+  act(() => {
+    store.replace(
+      createPermissionSnapshot({
+        revision: 'permission-template-complete',
+        actorId: 'actor-1',
+        grants: [
+          ...viewGrants,
+          {
+            action: 'template:bind',
+            target: { type: 'sheet', sheetId: activeSheet! },
+          },
+          {
+            action: 'template:bind',
+            target: { type: 'sheet', sheetId: existingTargetSheet! },
+          },
+        ],
+      }),
+    );
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Add value' }));
+  expect(onTemplateChange).toHaveBeenCalledTimes(1);
+});

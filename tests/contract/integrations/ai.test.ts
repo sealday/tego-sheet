@@ -148,7 +148,7 @@ describe('AI command integration contract', () => {
     expect(summarizeAiContext(context)).toEqual({
       sheetCount: 1,
       cellCount: 2,
-      omittedCellCount: 1,
+      omittedCellCount: 0,
       serializedBytes: new TextEncoder().encode(JSON.stringify(context)).byteLength,
     });
     expect(JSON.stringify(summarizeAiContext(context))).not.toContain('secret');
@@ -322,6 +322,131 @@ describe('AI command integration contract', () => {
       }),
     ).rejects.toThrow(/schema|command/u);
     expect(dryRun).not.toHaveBeenCalled();
+  });
+
+  it('validates required command fields against the workbook before controller dry-run', async () => {
+    const source = document();
+    const controller = createDocumentController(source);
+    const dryRun = vi.spyOn(controller, 'dryRun');
+    const permissionStore = createPermissionStore();
+    permissionStore.replace(permissions);
+
+    await expect(
+      createControllerAiProposalSession({
+        controller,
+        permissions: permissionStore,
+        adapter: {
+          propose: async () => ({
+            id: 'proposal-invalid-fields',
+            summary: 'Missing input',
+            assumptions: [],
+            commands: [
+              {
+                type: 'set-cell-input',
+                address: { sheet: 'sheet-1', row: 0, column: 0 },
+              },
+            ],
+          }),
+        },
+        signal: new AbortController().signal,
+        request: {
+          instruction: 'set A1',
+          locale: 'en-US',
+          allowedCommandTypes: ['set-cell-input'],
+        },
+        context: {
+          ranges: [],
+          include: [],
+          redactions: [],
+        },
+        transactionId: 'ai-invalid-fields',
+      }),
+    ).rejects.toThrow(/command|input/u);
+    expect(dryRun).not.toHaveBeenCalled();
+    controller.dispose();
+  });
+
+  it('validates command ranges against the workbook before controller dry-run', async () => {
+    const source = document();
+    const controller = createDocumentController(source);
+    const dryRun = vi.spyOn(controller, 'dryRun');
+    const permissionStore = createPermissionStore();
+    permissionStore.replace(permissions);
+
+    await expect(
+      createControllerAiProposalSession({
+        controller,
+        permissions: permissionStore,
+        adapter: {
+          propose: async () => ({
+            id: 'proposal-invalid-range',
+            summary: 'Outside the sheet',
+            assumptions: [],
+            commands: [
+              {
+                type: 'set-cell-input',
+                address: { sheet: 'sheet-1', row: -1, column: 0 },
+                input: { type: 'string', value: 'outside' },
+              },
+            ],
+          }),
+        },
+        signal: new AbortController().signal,
+        request: {
+          instruction: 'set a distant cell',
+          locale: 'en-US',
+          allowedCommandTypes: ['set-cell-input'],
+        },
+        context: {
+          ranges: [],
+          include: [],
+          redactions: [],
+        },
+        transactionId: 'ai-invalid-range',
+      }),
+    ).rejects.toThrow(/command|range/u);
+    expect(dryRun).not.toHaveBeenCalled();
+    controller.dispose();
+  });
+
+  it('does not count cells from unselected sheets in omission metadata', () => {
+    const source = document();
+    const context = projectAiContext(
+      {
+        ...source,
+        workbook: {
+          ...source.workbook,
+          sheets: [
+            ...source.workbook.sheets,
+            {
+              ...source.workbook.sheets[0]!,
+              id: 'sheet-private' as never,
+              name: 'Private',
+              cells: Array.from({ length: 25 }, (_, column) => ({
+                row: 0,
+                column,
+                cell: { input: { type: 'number' as const, value: column } },
+              })),
+            },
+          ],
+        },
+      },
+      {
+        documentRevision: 'revision-1',
+        ranges: [
+          {
+            sheetId: 'sheet-1',
+            start: { row: 0, column: 0 },
+            end: { row: 0, column: 0 },
+          },
+        ],
+        include: ['values'],
+        redactions: [],
+      },
+    );
+
+    expect(context.sheets.map(({ id }) => id)).toEqual(['sheet-1']);
+    expect(context.omittedCellCount).toBe(0);
   });
 
   it('requires explicit accept and expires on document revision change', async () => {

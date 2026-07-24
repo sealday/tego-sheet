@@ -6,7 +6,10 @@ import type {
   DocumentTransactionEnvelope,
   DocumentTransactionResult,
 } from '../../document-controller';
-import { snapshotSerializableTransaction } from '../../core/controller/spreadsheet-document-controller';
+import {
+  snapshotSerializableTransaction,
+  SpreadsheetDocumentController,
+} from '../../core/controller/spreadsheet-document-controller';
 import type { PermissionSnapshot, PermissionStore } from '../permission';
 import { deriveWorkbookCommandPermissionRequests } from '../permission';
 
@@ -156,12 +159,10 @@ export function projectAiContext(
       rule.kind === 'mask-strings',
   );
   let selectedCount = 0;
-  let omittedCellCount = 0;
   const sheets = document.workbook.sheets.flatMap((sheet) => {
     const ranges = options.ranges.filter(({ sheetId }) => sheetId === sheet.id);
     const cells = sheet.cells.flatMap(({ row, column, cell }) => {
       if (!ranges.some((range) => inRange(row, column, range))) {
-        omittedCellCount += 1;
         return [];
       }
       selectedCount += 1;
@@ -201,7 +202,7 @@ export function projectAiContext(
     schemaVersion: 1,
     documentRevision: identifier(options.documentRevision, 'AI document revision'),
     sheets: Object.freeze(sheets),
-    omittedCellCount,
+    omittedCellCount: 0,
   });
   const bytes = new TextEncoder().encode(JSON.stringify(context)).byteLength;
   if (bytes > maximumBytes) throw new RangeError(`AI context exceeds ${maximumBytes} bytes`);
@@ -292,6 +293,20 @@ function deepFreeze<Value>(value: Value): Value {
   Object.freeze(value);
   for (const child of Object.values(value)) deepFreeze(child);
   return value;
+}
+
+function validateProposalCommands(
+  document: SpreadsheetDocument,
+  commands: readonly WorkbookCommand[],
+): void {
+  const validator = new SpreadsheetDocumentController(document);
+  try {
+    for (const command of commands) validator.dispatch(command, 'ref');
+  } catch (cause) {
+    throw new TypeError('AI command schema or workbook range is invalid', { cause });
+  } finally {
+    validator.dispose();
+  }
 }
 
 /** Creates a dry-run proposal session that cannot apply without a fresh explicit accept call. */
@@ -389,6 +404,7 @@ export async function createControllerAiProposalSession(
     context,
     adapter: options.adapter,
     dryRun(commands): AiTransactionPreview {
+      validateProposalCommands(snapshot.document, commands);
       transaction = Object.freeze({
         schemaVersion: 1,
         id: transactionId,

@@ -130,6 +130,29 @@ function PermissionDeniedSurface(props: Pick<TegoSheetProps, 'className' | 'styl
   );
 }
 
+function templateTargetSheetIds(
+  template: NonNullable<TegoSheetProps['template']>,
+  profileIds?: ReadonlySet<string>,
+): Set<string> {
+  const sheetIds = new Set<string>();
+  for (const binding of template.bindings) {
+    sheetIds.add(binding.type === 'value' ? binding.target.sheetId : binding.range.sheetId);
+  }
+  for (const profile of template.printProfiles) {
+    if (profileIds !== undefined && !profileIds.has(profile.id)) continue;
+    for (const target of profile.targets) {
+      if (target.type === 'sheet') {
+        sheetIds.add(target.sheetId);
+      } else if (target.type === 'range') {
+        sheetIds.add(target.range.sheetId);
+      } else {
+        for (const range of target.ranges) sheetIds.add(range.sheetId);
+      }
+    }
+  }
+  return sheetIds;
+}
+
 function contractViolation(message: string): TegoSheetException {
   return new TegoSheetException({
     code: 'INVALID_COMMAND',
@@ -1415,15 +1438,16 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
         callback(template);
         return;
       }
-      const targetSheets = new Set<string>();
-      for (const binding of template.bindings) {
-        targetSheets.add(binding.type === 'value' ? binding.target.sheetId : binding.range.sheetId);
+      const targetSheets = templateTargetSheetIds(template);
+      if (props.template !== undefined) {
+        for (const sheetId of templateTargetSheetIds(props.template)) targetSheets.add(sheetId);
       }
       if (targetSheets.size === 0 && activeSheet !== null) targetSheets.add(activeSheet);
+      const permissionStore = props.permissionStore;
       if (
         [...targetSheets].some(
           (sheetId) =>
-            !props.permissionStore!.can('template:bind', {
+            !permissionStore.can('template:bind', {
               type: 'sheet',
               sheetId,
             }),
@@ -1433,7 +1457,7 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
       }
       callback(template);
     },
-    [activeSheet, props.onTemplateChange, props.permissionStore],
+    [activeSheet, props.onTemplateChange, props.permissionStore, props.template],
   );
   const canViewActiveDocument =
     props.permissionStore === undefined ||
@@ -1885,7 +1909,28 @@ export const TegoSheet = forwardRef<TegoSheetHandle, TegoSheetProps>(
         type: 'document',
         documentId: epoch.snapshot.document.id,
       }) === true;
-    if (!canViewInitialDocument || !canPrint) {
+    const previewTargetSheets =
+      props.mode !== 'preview' || props.template === undefined
+        ? new Set<string>()
+        : templateTargetSheetIds(
+            props.template,
+            new Set([
+              props.template.printProfiles.find(({ id }) => id === props.activePrintProfileId)
+                ?.id ??
+                props.template.printProfiles[0]?.id ??
+                '',
+            ]),
+          );
+    const canViewPreviewTargets =
+      props.permissionStore === undefined ||
+      [...previewTargetSheets].every(
+        (sheetId) =>
+          permissionSnapshot?.can('sheet:view', {
+            type: 'sheet',
+            sheetId,
+          }) === true,
+      );
+    if (!canViewInitialDocument || !canPrint || !canViewPreviewTargets) {
       return <PermissionDeniedSurface className={props.className} style={props.style} />;
     }
     if (props.mode === 'preview') {
