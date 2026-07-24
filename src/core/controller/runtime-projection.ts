@@ -514,6 +514,7 @@ function mergeSheet(
     conditionalFormatting: previous.conditionalFormatting.map((format) => structuredClone(format)),
     filterViews: previous.filterViews.map((view) => structuredClone(view)),
     objects: previous.objects.map((object) => structuredClone(object)),
+    tables: previous.tables.map((table) => structuredClone(table)),
     groups: previous.groups.map((group) => ({ ...group })),
     cells,
     merges: sameJson(beforeLegacy?.merges, afterLegacy?.merges)

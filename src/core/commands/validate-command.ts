@@ -667,6 +667,23 @@ export function validateCommand(state: WorkbookState, command: WorkbookCommand):
         throw invalidCommand('sheet object ID must be a non-empty string');
       }
       return;
+    case 'set-table':
+      validateSheet(state, command.sheet);
+      if (
+        command.table === null ||
+        typeof command.table !== 'object' ||
+        typeof command.table.id !== 'string' ||
+        command.table.id.trim().length === 0
+      ) {
+        throw invalidCommand('structured table must have a non-empty ID');
+      }
+      return;
+    case 'remove-table':
+      validateSheet(state, command.sheet);
+      if (typeof command.tableId !== 'string' || command.tableId.trim().length === 0) {
+        throw invalidCommand('structured table ID must be a non-empty string');
+      }
+      return;
     case 'undo':
     case 'redo':
       return;

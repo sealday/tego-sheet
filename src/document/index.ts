@@ -44,6 +44,8 @@ export type {
   SpreadsheetDocument,
   SpreadsheetDocumentInput,
   StoredSpreadsheetTemplate,
+  StructuredTable,
+  StructuredTableColumn,
   StyleRegistry,
   ValidationRegistry,
   Workbook,
@@ -58,6 +60,8 @@ export type {
   ObjectId,
   ResourceId,
   StyleId,
+  TableColumnId,
+  TableId,
   TemplateId,
   ValidationId,
 } from './model/ids';

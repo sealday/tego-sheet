@@ -9,6 +9,7 @@ import type {
   ConditionalFormat,
   FilterView,
   SheetObject,
+  StructuredTable,
 } from '../../document/model/document';
 import type { GroupId } from '../../document/model/ids';
 
@@ -388,6 +389,26 @@ export interface RemoveSheetObjectCommand {
   readonly objectId: string;
 }
 
+/** Creates or replaces one persistent structured worksheet table. */
+export interface SetTableCommand {
+  /** Command discriminator. */
+  readonly type: 'set-table';
+  /** Worksheet owning the table. */
+  readonly sheet: SheetId;
+  /** Complete persistent table definition. */
+  readonly table: StructuredTable;
+}
+
+/** Removes one persistent structured worksheet table. */
+export interface RemoveTableCommand {
+  /** Command discriminator. */
+  readonly type: 'remove-table';
+  /** Worksheet owning the table. */
+  readonly sheet: SheetId;
+  /** Stable identifier of the table to remove. */
+  readonly tableId: string;
+}
+
 /** Traverses one step backward through controller history. */
 export interface UndoCommand {
   /** Command discriminator. */
@@ -444,6 +465,8 @@ export type WorkbookCommand =
   | RemoveFilterViewCommand
   | SetSheetObjectCommand
   | RemoveSheetObjectCommand
+  | SetTableCommand
+  | RemoveTableCommand
   | UndoCommand
   | RedoCommand;
 

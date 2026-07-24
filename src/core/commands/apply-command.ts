@@ -376,6 +376,8 @@ export function applyCommand(
       case 'remove-conditional-format':
       case 'set-sheet-object':
       case 'remove-sheet-object':
+      case 'set-table':
+      case 'remove-table':
         return null;
       default:
         return assertNeverCommand(command);

@@ -6,6 +6,8 @@ import type {
   ObjectId,
   ResourceId,
   StyleId,
+  TableColumnId,
+  TableId,
   TemplateId,
   ValidationId,
 } from './ids';
@@ -169,6 +171,26 @@ export interface SheetFilter {
     /** Sort direction. */
     readonly direction: 'asc' | 'desc';
   } | null;
+}
+
+/** One stable named column in a structured worksheet table. */
+export interface StructuredTableColumn {
+  /** Stable identity retained when the display name changes. */
+  readonly id: TableColumnId;
+  /** Case-insensitive formula-facing column name. */
+  readonly name: string;
+}
+
+/** Persistent header-inclusive structured worksheet table. */
+export interface StructuredTable {
+  /** Stable identity retained when the table name or range changes. */
+  readonly id: TableId;
+  /** Workbook-unique, case-insensitive formula-facing name. */
+  readonly name: string;
+  /** Header-inclusive rectangular table range. */
+  readonly range: DocumentCellRange;
+  /** Ordered columns whose count exactly matches the table range width. */
+  readonly columns: readonly StructuredTableColumn[];
 }
 
 /** One saved-view comparison over an absolute worksheet column. */
@@ -445,6 +467,8 @@ export interface Sheet {
   readonly filterViews: readonly FilterView[];
   /** Canonically ordered floating worksheet objects. */
   readonly objects: readonly SheetObject[];
+  /** Canonically ordered persistent structured tables. */
+  readonly tables: readonly StructuredTable[];
 }
 
 /** One stable-ID entry in a JSON-valued registry. */
@@ -591,6 +615,16 @@ export interface SheetInput {
   conditionalFormatting?: ConditionalFormat[];
   filterViews?: FilterView[];
   objects?: SheetObject[];
+  tables?: {
+    id: string;
+    name: string;
+    range: {
+      sheetId: string;
+      start: CellPoint;
+      end: CellPoint;
+    };
+    columns: { id: string; name: string }[];
+  }[];
 }
 
 export interface SpreadsheetDocumentInput {

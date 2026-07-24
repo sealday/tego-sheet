@@ -50,6 +50,7 @@ export type {
   RemoveConditionalFormatCommand,
   RemoveFilterViewCommand,
   RemoveSheetObjectCommand,
+  RemoveTableCommand,
   RemoveValidationCommand,
   RenameSheetCommand,
   ResizeColumnCommand,
@@ -67,6 +68,7 @@ export type {
   SetFreezeCommand,
   SetStyleCommand,
   SetSheetObjectCommand,
+  SetTableCommand,
   SetValidationCommand,
   SheetColumnOptions,
   SheetData,
@@ -171,8 +173,12 @@ export type {
   SparseCell,
   SpreadsheetDocument,
   StoredSpreadsheetTemplate,
+  StructuredTable,
+  StructuredTableColumn,
   StyleId,
   StyleRegistry,
+  TableColumnId,
+  TableId,
   TemplateId,
   ValidationId,
   ValidationRegistry,
@@ -180,6 +186,8 @@ export type {
   WorkbookSettings,
   WorksheetVisibility,
 } from './document';
+export { createStructuredTableResolver } from './analysis';
+export type { StructuredTableDocumentProvider } from './analysis';
 /** A zero-based Workbook 2.0 cell coordinate. */
 export type { CellPoint as DocumentCellPoint } from './document';
 export {

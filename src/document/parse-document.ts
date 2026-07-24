@@ -24,6 +24,7 @@ import type {
   SheetRange,
   SheetRow,
   SheetObject,
+  StructuredTable,
   SpreadsheetDocument,
   StoredSpreadsheetTemplate,
 } from './model/document';
@@ -36,6 +37,8 @@ import type {
   ObjectId,
   ResourceId,
   StyleId,
+  TableColumnId,
+  TableId,
   TemplateId,
   ValidationId,
 } from './model/ids';
@@ -60,6 +63,10 @@ export interface DocumentLimits {
   readonly maxObjects?: number;
   /** Maximum total number of outline groups. */
   readonly maxGroups?: number;
+  /** Maximum total number of structured tables. */
+  readonly maxTables?: number;
+  /** Maximum total number of structured table columns. */
+  readonly maxTableColumns?: number;
   /** Maximum UTF-8 byte size of the input document. */
   readonly maxBytes?: number;
 }
@@ -96,6 +103,8 @@ const DEFAULT_LIMITS = {
   maxViews: 10_000,
   maxObjects: 100_000,
   maxGroups: 10_000,
+  maxTables: 10_000,
+  maxTableColumns: 100_000,
   maxBytes: 64 * 1024 * 1024,
 } as const;
 const NAMESPACE_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)+$/i;
@@ -138,6 +147,8 @@ interface ResolvedDocumentLimits {
   readonly maxViews: number;
   readonly maxObjects: number;
   readonly maxGroups: number;
+  readonly maxTables: number;
+  readonly maxTableColumns: number;
   readonly maxBytes: number;
 }
 
@@ -150,6 +161,8 @@ const LIMIT_NAMES = [
   'maxViews',
   'maxObjects',
   'maxGroups',
+  'maxTables',
+  'maxTableColumns',
   'maxBytes',
 ] as const;
 
@@ -181,6 +194,7 @@ class InputCaptureError extends Error {
       | 'DOCUMENT_SCHEMA_INVALID'
       | 'DOCUMENT_LIMIT_EXCEEDED'
       | 'GROUP_LIMIT_EXCEEDED'
+      | 'TABLE_LIMIT_EXCEEDED'
       | 'INVALID_EXTENSION_DATA',
     readonly path: string,
     message: string,
@@ -201,6 +215,8 @@ interface InputCaptureContext {
   views: number;
   objects: number;
   groups: number;
+  tables: number;
+  tableColumns: number;
 }
 
 function captureInput(input: unknown, limits: ResolvedDocumentLimits): unknown {
@@ -216,6 +232,8 @@ function captureInput(input: unknown, limits: ResolvedDocumentLimits): unknown {
     views: 0,
     objects: 0,
     groups: 0,
+    tables: 0,
+    tableColumns: 0,
   };
 
   const consume = (text: string): void => {
@@ -344,6 +362,26 @@ function captureInput(input: unknown, limits: ResolvedDocumentLimits): unknown {
               'GROUP_LIMIT_EXCEEDED',
               '$.workbook.sheets',
               '$.workbook.sheets exceeds its configured outline group limit',
+            );
+          }
+        }
+        if (/^\$\.workbook\.sheets\[\d+\]\.tables$/.test(path)) {
+          context.tables += length;
+          if (context.tables > context.limits.maxTables) {
+            throw new InputCaptureError(
+              'TABLE_LIMIT_EXCEEDED',
+              '$.workbook.sheets',
+              '$.workbook.sheets exceeds its configured structured table limit',
+            );
+          }
+        }
+        if (/^\$\.workbook\.sheets\[\d+\]\.tables\[\d+\]\.columns$/.test(path)) {
+          context.tableColumns += length;
+          if (context.tableColumns > context.limits.maxTableColumns) {
+            throw new InputCaptureError(
+              'TABLE_LIMIT_EXCEEDED',
+              '$.workbook.sheets',
+              '$.workbook.sheets exceeds its configured structured table column limit',
             );
           }
         }
@@ -1503,6 +1541,114 @@ function sheetObjectsAt(value: unknown, path: string, context: ParseContext): Sh
   });
 }
 
+const TABLE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_.]*$/u;
+
+function structuredTablesAt(
+  value: unknown,
+  path: string,
+  context: ParseContext,
+  ownerSheetId: DocumentSheetId,
+  rowCount: number | undefined,
+  columnCount: number | undefined,
+): StructuredTable[] {
+  if (value === undefined) return [];
+  const tables = arrayAt(value, path, context).map((entry, index): StructuredTable => {
+    const entryPath = `${path}[${index}]`;
+    const source = recordAt(entry, entryPath, context);
+    const rangeRecord = recordAt(source?.range, `${entryPath}.range`, context);
+    const range = rangeAt(source?.range, `${entryPath}.range`, context);
+    const sheetId = stringAt(
+      rangeRecord?.sheetId,
+      `${entryPath}.range.sheetId`,
+      context,
+    ) as DocumentSheetId;
+    const name = stringAt(source?.name, `${entryPath}.name`, context);
+    if (!TABLE_NAME_PATTERN.test(name)) {
+      addDiagnostic(
+        context,
+        'DOCUMENT_SCHEMA_INVALID',
+        `${entryPath}.name`,
+        'Structured table names must start with a letter or underscore and contain only letters, digits, underscores, or periods',
+      );
+    }
+    if (sheetId !== ownerSheetId) {
+      addDiagnostic(
+        context,
+        'DANGLING_REFERENCE',
+        `${entryPath}.range.sheetId`,
+        'Structured table range must belong to its owning worksheet',
+      );
+    }
+    if (
+      !isNormalized(range) ||
+      range.end.row <= range.start.row ||
+      (rowCount !== undefined && range.end.row >= rowCount) ||
+      (columnCount !== undefined && range.end.column >= columnCount)
+    ) {
+      addDiagnostic(
+        context,
+        'INVALID_RANGE',
+        `${entryPath}.range`,
+        'Structured table range must include a header and data row and remain inside the logical worksheet size',
+      );
+    }
+    const columns = arrayAt(source?.columns, `${entryPath}.columns`, context).map(
+      (column, columnIndex) => {
+        const columnPath = `${entryPath}.columns[${columnIndex}]`;
+        const item = recordAt(column, columnPath, context);
+        return {
+          id: stringAt(item?.id, `${columnPath}.id`, context) as TableColumnId,
+          name: stringAt(item?.name, `${columnPath}.name`, context),
+        };
+      },
+    );
+    if (columns.length !== range.end.column - range.start.column + 1) {
+      addDiagnostic(
+        context,
+        'INVALID_RANGE',
+        `${entryPath}.columns`,
+        'Structured table column count must match its range width',
+      );
+    }
+    duplicateDiagnostics(context, columns, `${entryPath}.columns`);
+    const columnNames = new Set<string>();
+    columns.forEach((column, columnIndex) => {
+      const key = column.name.toLocaleLowerCase('en-US');
+      if (columnNames.has(key)) {
+        addDiagnostic(
+          context,
+          'DUPLICATE_ID',
+          `${entryPath}.columns[${columnIndex}].name`,
+          `Duplicate structured table column name ${column.name}`,
+        );
+      }
+      columnNames.add(key);
+    });
+    return {
+      id: stringAt(source?.id, `${entryPath}.id`, context) as TableId,
+      name,
+      range: { sheetId, ...range },
+      columns,
+    };
+  });
+  duplicateDiagnostics(context, tables, path);
+  tables.forEach((table, index) => {
+    const conflict = tables.findIndex(
+      (candidate, candidateIndex) =>
+        candidateIndex < index && rangesOverlap(candidate.range, table.range),
+    );
+    if (conflict >= 0) {
+      addDiagnostic(
+        context,
+        'INVALID_RANGE',
+        `${path}[${index}].range`,
+        `Structured table range overlaps ${tables[conflict]!.name}`,
+      );
+    }
+  });
+  return tables;
+}
+
 function sheetAt(value: unknown, path: string, context: ParseContext): Sheet {
   const record = recordAt(value, path, context);
   const merges = arrayAt(record?.merges, `${path}.merges`, context).map((merge, index) =>
@@ -1553,6 +1699,15 @@ function sheetAt(value: unknown, path: string, context: ParseContext): Sheet {
   );
   const filterViews = filterViewsAt(record?.filterViews, `${path}.filterViews`, context);
   const objects = sheetObjectsAt(record?.objects, `${path}.objects`, context);
+  const sheetId = stringAt(record?.id, `${path}.id`, context) as DocumentSheetId;
+  const tables = structuredTablesAt(
+    record?.tables,
+    `${path}.tables`,
+    context,
+    sheetId,
+    rowCount,
+    columnCount,
+  );
 
   for (const [index, merge] of merges.entries()) {
     if (!isNormalized(merge)) {
@@ -1579,7 +1734,7 @@ function sheetAt(value: unknown, path: string, context: ParseContext): Sheet {
   });
 
   return {
-    id: stringAt(record?.id, `${path}.id`, context) as DocumentSheetId,
+    id: sheetId,
     name: displayStringAt(record?.name, `${path}.name`, context),
     cells,
     merges,
@@ -1594,6 +1749,7 @@ function sheetAt(value: unknown, path: string, context: ParseContext): Sheet {
     conditionalFormatting,
     filterViews,
     objects,
+    tables,
   };
 }
 
@@ -1687,8 +1843,44 @@ function validateReferences(document: SpreadsheetDocument, context: ParseContext
   const validationIds = new Set(document.workbook.validations.map(({ id }) => id));
   const resourceIds = new Set(document.resources.items.map(({ id }) => id));
   const templateIds = new Set(document.templates.map(({ id }) => id));
+  const tableIds = new Set<string>();
+  const tableColumnIds = new Set<string>();
+  const tableNames = new Set<string>();
 
   document.workbook.sheets.forEach((sheet, sheetIndex) => {
+    sheet.tables.forEach((table, tableIndex) => {
+      const tablePath = `$.workbook.sheets[${sheetIndex}].tables[${tableIndex}]`;
+      if (tableIds.has(table.id)) {
+        addDiagnostic(
+          context,
+          'DUPLICATE_ID',
+          `${tablePath}.id`,
+          `Duplicate stable ID ${table.id}`,
+        );
+      }
+      tableIds.add(table.id);
+      table.columns.forEach((column, columnIndex) => {
+        if (tableColumnIds.has(column.id)) {
+          addDiagnostic(
+            context,
+            'DUPLICATE_ID',
+            `${tablePath}.columns[${columnIndex}].id`,
+            `Duplicate stable ID ${column.id}`,
+          );
+        }
+        tableColumnIds.add(column.id);
+      });
+      const nameKey = table.name.toLocaleLowerCase('en-US');
+      if (tableNames.has(nameKey)) {
+        addDiagnostic(
+          context,
+          'DUPLICATE_ID',
+          `${tablePath}.name`,
+          `Duplicate structured table name ${table.name}`,
+        );
+      }
+      tableNames.add(nameKey);
+    });
     duplicateDiagnostics(
       context,
       sheet.filterViews,
@@ -2024,6 +2216,7 @@ function canonicalizeDocument(document: SpreadsheetDocument): SpreadsheetDocumen
         objects: [...sheet.objects].sort(
           (left, right) => left.zIndex - right.zIndex || compareCodeUnits(left.id, right.id),
         ),
+        tables: [...sheet.tables].sort((left, right) => compareCodeUnits(left.id, right.id)),
       })),
       styles: [...document.workbook.styles].sort((left, right) =>
         compareCodeUnits(left.id, right.id),

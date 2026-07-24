@@ -385,6 +385,34 @@ function removeSheetObject(
   sheet.objects = (sheet.objects ?? []).filter((object) => object.id !== command.objectId);
 }
 
+function setStructuredTable(
+  input: SpreadsheetDocumentInput,
+  sheetIds: readonly SheetId[],
+  command: Extract<WorkbookCommand, { readonly type: 'set-table' }>,
+): void {
+  const sheet = input.workbook.sheets[sheetIndex(sheetIds, command.sheet)];
+  if (sheet === undefined) return;
+  const tables = [...(sheet.tables ?? [])];
+  const index = tables.findIndex((table) => table.id === command.table.id);
+  const snapshot = {
+    ...structuredClone(command.table),
+    columns: command.table.columns.map((column) => ({ ...column })),
+  };
+  if (index < 0) tables.push(snapshot);
+  else tables[index] = snapshot;
+  sheet.tables = tables;
+}
+
+function removeStructuredTable(
+  input: SpreadsheetDocumentInput,
+  sheetIds: readonly SheetId[],
+  command: Extract<WorkbookCommand, { readonly type: 'remove-table' }>,
+): void {
+  const sheet = input.workbook.sheets[sheetIndex(sheetIds, command.sheet)];
+  if (sheet === undefined) return;
+  sheet.tables = (sheet.tables ?? []).filter((table) => table.id !== command.tableId);
+}
+
 function mapPasteCell(
   target: Cell | undefined,
   source: Cell | undefined,
@@ -570,6 +598,8 @@ export function prepareSchemaProjectionCommit(
         | 'remove-conditional-format'
         | 'set-sheet-object'
         | 'remove-sheet-object'
+        | 'set-table'
+        | 'remove-table'
         | 'set-cell-input'
         | 'group'
         | 'ungroup'
@@ -605,6 +635,16 @@ export function prepareSchemaProjectionCommit(
   }
   if (command.type === 'set-sheet-object' || command.type === 'remove-sheet-object') {
     return { result: undefined, kind: 'object', sheet: command.sheet };
+  }
+  if (command.type === 'set-table' || command.type === 'remove-table') {
+    return {
+      result: undefined,
+      kind: 'structure',
+      sheet: command.sheet,
+      ...(command.type === 'remove-table'
+        ? {}
+        : { range: { start: command.table.range.start, end: command.table.range.end } }),
+    };
   }
   const range = plannedPasteTargetRange(command);
   if (command.type === 'autofill') {
@@ -693,6 +733,12 @@ export function prepareSchemaCommand(
       break;
     case 'remove-sheet-object':
       removeSheetObject(input, sheetIds, command);
+      break;
+    case 'set-table':
+      setStructuredTable(input, sheetIds, command);
+      break;
+    case 'remove-table':
+      removeStructuredTable(input, sheetIds, command);
       break;
   }
   const parsed = parseSpreadsheetDocument(input);

@@ -41,6 +41,7 @@ import {
 } from '../commands/schema-command-plan';
 import { resolveDocumentValidation } from '../../validation/document-rule';
 import { validateValidationRequestSync } from '../../validation/synchronous';
+import { createStructuredTableResolver } from '../../analysis/tables';
 
 function sameJson(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
@@ -499,10 +500,12 @@ export class SpreadsheetDocumentController {
     const { ['document']: parsedDocument } = parsed;
     this.currentDocument = parsedDocument;
     const functions = options.calculation?.functions ?? createFormulaFunctionRegistry();
+    const tables =
+      options.calculation?.tables ?? createStructuredTableResolver(() => this.currentDocument);
     this.calculationOptions = {
       functions,
       names: options.calculation?.names,
-      tables: options.calculation?.tables,
+      tables,
       locale: options.calculation?.locale,
       timeZone: options.calculation?.timeZone ?? 'UTC',
       clock: options.calculation?.clock ?? { now: () => 0 },
@@ -512,7 +515,7 @@ export class SpreadsheetDocumentController {
     this.formulaEngine = createFormulaEngine({
       functions,
       names: this.calculationOptions.names,
-      tables: this.calculationOptions.tables,
+      tables,
     });
     this.formulaProgram = this.formulaEngine.compile(this.currentDocument);
     this.formulaValues = this.formulaEngine.recalculate(
@@ -916,6 +919,8 @@ export class SpreadsheetDocumentController {
           command.type !== 'remove-conditional-format' &&
           command.type !== 'set-sheet-object' &&
           command.type !== 'remove-sheet-object' &&
+          command.type !== 'set-table' &&
+          command.type !== 'remove-table' &&
           command.type !== 'set-cell-input' &&
           command.type !== 'group' &&
           command.type !== 'ungroup' &&
@@ -957,13 +962,13 @@ export class SpreadsheetDocumentController {
     }
     const commit = preparedCommit;
     try {
+      this.currentDocument = preparedDocument;
       this.refreshFormulaCalculation(preparedDocument, commit.change);
       this.legacy.reconcileProjection(
         projectDocumentToLegacy(preparedDocument, this.formulaValues),
         this.legacy.getSheetIds(),
         command.type === 'undo' ? 'undo' : command.type === 'redo' ? 'redo' : 'commit',
       );
-      this.currentDocument = preparedDocument;
     } catch (error) {
       this.restore(rollbackCheckpoint);
       throw error;

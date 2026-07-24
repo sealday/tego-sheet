@@ -7,6 +7,8 @@ declare const resourceIdBrand: unique symbol;
 declare const bindingIdBrand: unique symbol;
 declare const objectIdBrand: unique symbol;
 declare const groupIdBrand: unique symbol;
+declare const tableIdBrand: unique symbol;
+declare const tableColumnIdBrand: unique symbol;
 
 /** Stable opaque identifier for a spreadsheet document. */
 export type DocumentId = string & {
@@ -52,4 +54,14 @@ export type ObjectId = string & {
 export type GroupId = string & {
   /** Type-only brand that distinguishes outline group identifiers. */
   readonly [groupIdBrand]: true;
+};
+/** Stable opaque identifier for a worksheet structured table. */
+export type TableId = string & {
+  /** Type-only brand that distinguishes structured table identifiers. */
+  readonly [tableIdBrand]: true;
+};
+/** Stable opaque identifier for a column within a structured table. */
+export type TableColumnId = string & {
+  /** Type-only brand that distinguishes structured table column identifiers. */
+  readonly [tableColumnIdBrand]: true;
 };

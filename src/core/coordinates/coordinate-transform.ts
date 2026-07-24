@@ -430,6 +430,20 @@ export function transformSheetCoordinates(
     ...object,
     anchor: transformObjectAnchor(object.anchor, transform),
   }));
+  const tables = (sheet.tables ?? []).map((table) => {
+    const range = transform.range(table.range);
+    if (range === null) {
+      throw new RangeError(`Structural edit would remove structured table ${table.name}`);
+    }
+    const previousWidth = table.range.end.column - table.range.start.column + 1;
+    const nextWidth = range.end.column - range.start.column + 1;
+    if (nextWidth !== previousWidth) {
+      throw new RangeError(
+        `Structural edit would require new structured table column identities for ${table.name}`,
+      );
+    }
+    return { ...table, range: { ...table.range, ...range } };
+  });
   return {
     ...sheet,
     ...(transform.axis === 'row' && sheet.rowCount !== undefined
@@ -468,6 +482,7 @@ export function transformSheetCoordinates(
     conditionalFormatting,
     filterViews,
     objects,
+    tables,
   };
 }
 

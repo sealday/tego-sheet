@@ -168,7 +168,20 @@ export function remapWorkbookCommand(
     case 'group':
     case 'ungroup':
     case 'toggle-group':
+    case 'remove-table':
       return { ...command, sheet: remapSheet(command.sheet, mapping) };
+    case 'set-table':
+      return {
+        ...command,
+        sheet: remapSheet(command.sheet, mapping),
+        table: {
+          ...command.table,
+          range: {
+            ...command.table.range,
+            sheetId: remapDocumentSheet(command.table.range.sheetId, mapping),
+          },
+        },
+      };
     case 'add-sheet':
     case 'undo':
     case 'redo':
