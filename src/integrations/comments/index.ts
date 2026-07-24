@@ -320,7 +320,7 @@ export function createCommentStore(options: {
   };
   const refresh = (): void => {
     snapshot = Object.freeze(
-      [...threads.values()].filter((thread) => {
+      Array.from(threads.values()).filter((thread) => {
         try {
           permission('comment:view', thread.id);
           return true;

@@ -887,14 +887,14 @@ function migrateSheet(
   const sheetCells = cells(source.rows, localStyles, `${path}.rows`, context, merges, rows);
   const sheetColumns = columns(source.cols, localStyles, `${path}.cols`, context);
   validations(source.validations, `${path}.validations`, context, sheetCells);
-  const uniqueMerges = [
-    ...new Map(
+  const uniqueMerges = Array.from(
+    new Map(
       merges.map((merge) => [
         `${merge.start.row}:${merge.start.column}:${merge.end.row}:${merge.end.column}`,
         merge,
       ]),
     ).values(),
-  ];
+  );
   const rowSource =
     source.rows === undefined ? undefined : record(source.rows, `${path}.rows`, context);
   const columnSource =
@@ -902,7 +902,7 @@ function migrateSheet(
   return {
     id: ids.sheetId(index, name),
     name,
-    cells: [...sheetCells.values()].sort(
+    cells: Array.from(sheetCells.values()).sort(
       (left, right) => left.row - right.row || left.column - right.column,
     ),
     merges: uniqueMerges,

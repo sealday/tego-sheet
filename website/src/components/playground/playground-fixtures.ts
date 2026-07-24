@@ -166,7 +166,17 @@ export const PLAYGROUND_PRESETS = {
 Object.freeze(PLAYGROUND_PRESETS);
 
 export function createFixture(mode: PlaygroundMode): SpreadsheetDocument {
-  const result = migrateLegacyWorkbook(PLAYGROUND_PRESETS[mode].createFixture());
-  if (!result.ok) throw new TypeError('Playground fixture migration failed');
+  const result = migrateLegacyWorkbook(PLAYGROUND_PRESETS[mode].createFixture(), {
+    ids: {
+      documentId: () => `playground-document-${mode}`,
+      sheetId: (index) => `playground-sheet-${mode}-${index}`,
+    },
+  });
+  if (!result.ok) {
+    const summary = result.diagnostics
+      .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`)
+      .join(', ');
+    throw new TypeError(`Playground fixture migration failed: ${summary}`);
+  }
   return result.document;
 }

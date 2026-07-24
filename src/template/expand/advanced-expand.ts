@@ -1963,7 +1963,7 @@ export function expandAdvancedTemplate(
       forcedPageBreaks.set(binding.range.sheetId, breaks);
     }
   }
-  const pageCount = [...forcedPageBreaks.values()].reduce(
+  const pageCount = Array.from(forcedPageBreaks.values()).reduce(
     (count, breaks) => count + breaks.length + 1,
     0,
   );

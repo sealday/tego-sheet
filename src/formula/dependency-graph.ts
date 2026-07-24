@@ -112,9 +112,9 @@ export function createDependencyGraph(
   return {
     dependencies,
     dependents: new Map(
-      [...mutableDependents].map(([address, dependents]) => [
+      Array.from(mutableDependents).map(([address, dependents]) => [
         address,
-        new Set([...dependents].sort()),
+        new Set(Array.from(dependents).sort()),
       ]),
     ),
   };

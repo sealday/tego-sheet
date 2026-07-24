@@ -115,6 +115,7 @@
     "docs:start": "npm run build && docusaurus start website",
     "docs:build": "npm run build && docusaurus build website",
     "docs:serve": "docusaurus serve website",
+    "docs:serve-static": "node scripts/serve-docs.mjs",
     "typecheck:docs": "npm run build && tsc --noEmit --project website/tsconfig.json",
     "test:docs": "playwright test --config playwright.docs.config.ts",
     "test:docs-visual": "playwright test --config playwright.docs-visual.config.ts"

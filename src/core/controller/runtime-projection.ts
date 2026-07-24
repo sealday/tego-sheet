@@ -247,7 +247,7 @@ export function projectDocumentToLegacy(
       ...(Object.keys(rows).length === 0 ? {} : { rows: rows as RowsData }),
       ...(Object.keys(cols).length === 0 ? {} : { cols: cols as ColsData }),
       merges: sheet.merges.map(rangeA1),
-      validations: [...validations.values()],
+      validations: Array.from(validations.values()),
       ...(sheet.freeze === undefined ? {} : { freeze: a1(sheet.freeze) }),
       ...(filter === undefined ? {} : { autofilter: filter }),
       ...(structuredTableRows.length === 0 ? {} : { structuredTableRows }),
@@ -374,8 +374,11 @@ function mergeSheet(
   const operationalCells = new Map(
     operational.cells.map((item) => [`${item.row}:${item.column}`, item] as const),
   );
-  const coordinates = new Set([...previousCells.keys(), ...operationalCells.keys()]);
-  const cells = [...coordinates]
+  const coordinates = new Set([
+    ...Array.from(previousCells.keys()),
+    ...Array.from(operationalCells.keys()),
+  ]);
+  const cells = Array.from(coordinates)
     .map((key) => {
       const previousCell = previousCells.get(key);
       const operationalCell = operationalCells.get(key);
@@ -458,8 +461,11 @@ function mergeSheet(
 
   const previousRows = new Map(previous.rows.map((row) => [row.index, row]));
   const operationalRows = new Map((operational.rows ?? []).map((row) => [row.index, row]));
-  const rowIndexes = new Set([...previousRows.keys(), ...operationalRows.keys()]);
-  const rows = [...rowIndexes]
+  const rowIndexes = new Set([
+    ...Array.from(previousRows.keys()),
+    ...Array.from(operationalRows.keys()),
+  ]);
+  const rows = Array.from(rowIndexes)
     .map((index) => {
       const beforeRow = legacyRow(beforeLegacy, index);
       const afterRow = legacyRow(afterLegacy, index);
@@ -479,8 +485,11 @@ function mergeSheet(
   const operationalColumns = new Map(
     (operational.columns ?? []).map((column) => [column.index, column]),
   );
-  const columnIndexes = new Set([...previousColumns.keys(), ...operationalColumns.keys()]);
-  const columns = [...columnIndexes]
+  const columnIndexes = new Set([
+    ...Array.from(previousColumns.keys()),
+    ...Array.from(operationalColumns.keys()),
+  ]);
+  const columns = Array.from(columnIndexes)
     .map((index) => {
       const beforeColumn = legacyColumn(beforeLegacy, index);
       const afterColumn = legacyColumn(afterLegacy, index);

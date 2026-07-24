@@ -1,3 +1,4 @@
+import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import { parseSpreadsheetDocument } from '../../../src/document';
 import type {
@@ -86,6 +87,21 @@ function documentWithWorkbookGetter(
 }
 
 describe('Workbook 2.0 validation', () => {
+  it('accepts inert JSON objects created in another JavaScript realm', () => {
+    const foreignDocument = runInNewContext(`(${JSON.stringify(validDocument())})`) as unknown;
+
+    const result = parseSpreadsheetDocument(foreignDocument);
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('still rejects objects with application-defined prototypes', () => {
+    const fixture = validDocument();
+    Object.setPrototypeOf(fixture, { applicationState: true });
+
+    expect(codesOf(fixture)).toContain('DOCUMENT_SCHEMA_INVALID');
+  });
+
   it('rejects unsupported schema versions atomically', () => {
     expect(codesOf({ ...validDocument(), schemaVersion: 3 })).toContain(
       'UNSUPPORTED_SCHEMA_VERSION',

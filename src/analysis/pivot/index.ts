@@ -363,7 +363,7 @@ export async function refreshPivot(
     steps: 0,
   };
   const sortedGroups = await stableBudgetedSort(
-    [...groups.values()],
+    Array.from(groups.values()),
     (left, right) =>
       compareKey(left.rowKey, right.rowKey) || compareKey(left.columnKey, right.columnKey),
     budget,
@@ -393,9 +393,13 @@ export async function refreshPivot(
       }),
     );
   }
-  const sortedRowKeys = await stableBudgetedSort([...rowKeys.values()], compareKey, budget);
+  const sortedRowKeys = await stableBudgetedSort(Array.from(rowKeys.values()), compareKey, budget);
   if (sortedRowKeys === undefined) return cancelled(previous);
-  const sortedColumnKeys = await stableBudgetedSort([...columnKeys.values()], compareKey, budget);
+  const sortedColumnKeys = await stableBudgetedSort(
+    Array.from(columnKeys.values()),
+    compareKey,
+    budget,
+  );
   if (sortedColumnKeys === undefined) return cancelled(previous);
   const result: PivotResult = Object.freeze({
     definitionId: definition.id,

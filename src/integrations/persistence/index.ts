@@ -261,7 +261,7 @@ export function createPersistenceController(
       state = Object.freeze({
         ...state,
         pending: frozenIds(
-          [...pending.values()].filter(
+          Array.from(pending.values()).filter(
             ({ id }) => !(state.status === 'saving' && state.inFlight.includes(id)),
           ),
         ),
@@ -291,7 +291,9 @@ export function createPersistenceController(
       revision: request.baseRevision,
       requestId: request.requestId,
       inFlight: Object.freeze(inFlightIds),
-      pending: frozenIds([...pending.values()].filter(({ id }) => !inFlightIds.includes(id))),
+      pending: frozenIds(
+        Array.from(pending.values()).filter(({ id }) => !inFlightIds.includes(id)),
+      ),
     });
     retryRequest = request;
     const promise = options.adapter
@@ -413,7 +415,7 @@ export function createPersistenceController(
         });
       }
       const requestId = identifier(options.requestId(), 'Persistence requestId');
-      const candidates = [...pending.values()].slice(0, maximumTransactions);
+      const candidates = Array.from(pending.values()).slice(0, maximumTransactions);
       let transactions: readonly SerializableTransactionEnvelope[] = [];
       for (const candidate of candidates) {
         const prefix = [...transactions, candidate];

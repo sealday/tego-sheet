@@ -112,6 +112,17 @@ const DEFAULT_LIMITS = {
   maxBytes: 64 * 1024 * 1024,
 } as const;
 const NAMESPACE_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)+$/i;
+const nativeObjectConstructorSource = Function.prototype.toString.call(Object);
+
+function isPlainObjectPrototype(prototype: object | null): boolean {
+  if (prototype === null || prototype === Object.prototype) return true;
+  if (Object.getPrototypeOf(prototype) !== null) return false;
+  const constructor = Object.getOwnPropertyDescriptor(prototype, 'constructor')?.value;
+  return (
+    typeof constructor === 'function' &&
+    Function.prototype.toString.call(constructor) === nativeObjectConstructorSource
+  );
+}
 
 function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
   if (value === null || typeof value !== 'object' || seen.has(value)) return value;
@@ -422,7 +433,7 @@ function captureInput(input: unknown, limits: ResolvedDocumentLimits): unknown {
       }
 
       const prototype = Object.getPrototypeOf(value);
-      if (prototype !== Object.prototype && prototype !== null) {
+      if (!isPlainObjectPrototype(prototype)) {
         throw new InputCaptureError(
           'DOCUMENT_SCHEMA_INVALID',
           path,
@@ -511,8 +522,7 @@ function exceedsCollectionLimits(
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
+  return isPlainObjectPrototype(Object.getPrototypeOf(value));
 };
 
 function addDiagnostic(

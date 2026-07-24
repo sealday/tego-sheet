@@ -35,7 +35,7 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: 'npm run docs:build && npm run docs:serve -- --host 127.0.0.1 --port 4175',
+    command: 'npm run docs:build && npm run docs:serve-static -- --host 127.0.0.1 --port 4175',
     url: 'http://127.0.0.1:4175/tego-sheet/',
     timeout: 180_000,
     reuseExistingServer: !process.env.CI,

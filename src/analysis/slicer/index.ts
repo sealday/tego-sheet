@@ -172,7 +172,7 @@ export function buildSlicerValueIndex(
     }
   }
   return Object.freeze(
-    [...entries.values()]
+    Array.from(entries.values())
       .sort((left, right) => compareScalar(left.value, right.value))
       .map((entry) => Object.freeze({ ...entry })),
   );

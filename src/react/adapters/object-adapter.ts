@@ -40,7 +40,7 @@ export function projectSheetObjectsToViewport(
       );
     }
   }
-  return [...visible.values()].sort(
+  return Array.from(visible.values()).sort(
     (left, right) =>
       left.object.zIndex - right.object.zIndex || compareCodeUnits(left.object.id, right.object.id),
   );

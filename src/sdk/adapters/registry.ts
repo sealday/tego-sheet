@@ -332,7 +332,7 @@ export function createAdapterRegistry(options: AdapterRegistryOptions): AdapterR
 
     list(query: AdapterQuery = {}): readonly AdapterManifest[] {
       return Object.freeze(
-        [...records.values()]
+        Array.from(records.values())
           .map(({ manifest }) => manifest)
           .filter(
             (manifest) =>
@@ -453,7 +453,7 @@ export function createAdapterRegistry(options: AdapterRegistryOptions): AdapterR
       disposePromise = (async () => {
         const diagnostics: AdapterDiagnostic[] = [];
         for (const scope of scopes) diagnostics.push(...(await scope.dispose()));
-        const registrations = [...records.values()].reverse();
+        const registrations = Array.from(records.values()).reverse();
         for (const record of registrations) diagnostics.push(...(await record.unregister()));
         const kernelDiagnostics = await kernel.dispose();
         for (const diagnostic of kernelDiagnostics) {

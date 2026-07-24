@@ -326,10 +326,13 @@ function cellInputs(document: SpreadsheetDocument): Map<string, CellInput> {
 function snapshotGraph(graph: FormulaDependencyGraph): FormulaDependencyGraph {
   return {
     dependencies: new Map(
-      [...graph.dependencies].map(([address, dependencies]) => [address, new Set(dependencies)]),
+      Array.from(graph.dependencies).map(([address, dependencies]) => [
+        address,
+        new Set(dependencies),
+      ]),
     ),
     dependents: new Map(
-      [...graph.dependents].map(([address, dependents]) => [address, new Set(dependents)]),
+      Array.from(graph.dependents).map(([address, dependents]) => [address, new Set(dependents)]),
     ),
   };
 }
@@ -356,7 +359,7 @@ function remapSpillDependencies(
   const dependents = new Map<string, Set<string>>();
   for (const [formula, references] of graph.dependencies) {
     const remapped = new Set(
-      [...references].map((reference) => anchors.get(reference) ?? reference),
+      Array.from(references).map((reference) => anchors.get(reference) ?? reference),
     );
     dependencies.set(formula, remapped);
     for (const reference of remapped) {
@@ -372,7 +375,7 @@ function snapshotDiagnostics(
   diagnostics: ReadonlyMap<string, readonly FormulaDiagnostic[]>,
 ): ReadonlyMap<string, readonly FormulaDiagnostic[]> {
   return new Map(
-    [...diagnostics].map(([address, values]) => [
+    Array.from(diagnostics).map(([address, values]) => [
       address,
       values.map((diagnostic) => ({
         ...diagnostic,
@@ -386,7 +389,7 @@ function snapshotBindings(
   bindings: ReadonlyMap<string, readonly FormulaBoundReference[]>,
 ): ReadonlyMap<string, readonly FormulaBoundReference[]> {
   return new Map(
-    [...bindings].map(([address, references]) => [
+    Array.from(bindings).map(([address, references]) => [
       address,
       Object.freeze(references.map((reference) => Object.freeze({ ...reference }))),
     ]),
@@ -499,7 +502,7 @@ function findCycles(
     const selfLoop = component.length === 1 && graph.dependencies.get(node)?.has(node);
     if (component.length > 1 || selfLoop) cycles.push(component.sort());
   };
-  for (const node of [...formulas.keys()].sort()) if (!indexes.has(node)) connect(node);
+  for (const node of Array.from(formulas.keys()).sort()) if (!indexes.has(node)) connect(node);
   return cycles.sort((left, right) => (left[0] as string).localeCompare(right[0] as string));
 }
 
@@ -723,7 +726,10 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
         for (const address of transitiveDependents(program.graph, [anchor])) dirty.add(address);
       }
       for (const [anchor, projected] of program.spills) {
-        if (!dirty.has(anchor) && ![...projected].some((address) => changedKeySet.has(address))) {
+        if (
+          !dirty.has(anchor) &&
+          !Array.from(projected).some((address) => changedKeySet.has(address))
+        ) {
           continue;
         }
         for (const address of projected) program.values.delete(address);
@@ -807,7 +813,7 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
             snapshot = { type: 'error', value: '#SPILL!' };
           } else {
             const occupied = new Set(
-              [...program.inputs]
+              Array.from(program.inputs)
                 .filter(
                   ([key, input]) =>
                     key !== address &&
@@ -862,7 +868,7 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
       const evaluateAst = (ast: FormulaAst): FormulaValue => {
         calculationSteps += 1;
         if (calculationSteps > maximumCalculationSteps) {
-          const address = [...evaluating].at(-1);
+          const address = Array.from(evaluating).at(-1);
           if (address !== undefined) {
             program.diagnostics.set(address, [
               {
@@ -898,7 +904,7 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
             ) {
               calculationSteps += 1;
               if (calculationSteps > maximumCalculationSteps) {
-                const address = [...evaluating].at(-1);
+                const address = Array.from(evaluating).at(-1);
                 if (address !== undefined) {
                   program.diagnostics.set(address, [
                     {
@@ -933,7 +939,7 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
         }
         const definition = registry.resolve(ast.name);
         if (definition === undefined) {
-          const address = [...evaluating].at(-1);
+          const address = Array.from(evaluating).at(-1);
           if (address !== undefined) {
             program.diagnostics.set(address, [
               {
@@ -953,7 +959,7 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
           return { type: 'error', value: '#VALUE!' };
         }
         if (definition.volatility === 'volatile' && environment.resolveVolatile === false) {
-          const address = [...evaluating].at(-1);
+          const address = Array.from(evaluating).at(-1);
           if (address !== undefined) {
             program.diagnostics.set(address, [
               {
@@ -966,7 +972,7 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
           return { type: 'error', value: '#N/A' };
         }
         if (definition.mode === 'async') {
-          const address = [...evaluating].at(-1);
+          const address = Array.from(evaluating).at(-1);
           if (address !== undefined) {
             program.diagnostics.set(address, [
               {
@@ -1022,11 +1028,11 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
         return result instanceof Promise ? { type: 'error', value: '#N/A' } : result;
       };
 
-      for (const address of [...dirty].sort()) {
+      for (const address of Array.from(dirty).sort()) {
         if (program.formulas.get(address)?.kind === 'range') resolveAddress(address);
       }
       program.graph = remapSpillDependencies(program.baseGraph, program.spills);
-      for (const address of [...dirty].sort()) resolveAddress(address);
+      for (const address of Array.from(dirty).sort()) resolveAddress(address);
       program.graph = remapSpillDependencies(program.baseGraph, program.spills);
       program.initialized = true;
       program.lastTick = environment.tick;
@@ -1046,7 +1052,7 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
       storedProgram.lastFunctionRegistryVersion = program.lastFunctionRegistryVersion;
       return {
         values: new Map(values),
-        evaluatedAddresses: Object.freeze([...new Set(evaluated)]),
+        evaluatedAddresses: Object.freeze(Array.from(new Set(evaluated))),
         cycles,
         diagnostics: snapshotDiagnostics(program.diagnostics),
       };

@@ -265,7 +265,7 @@ export function createResolvedResourceCache(maximumBytes: number): ResolvedResou
       await evict();
     },
     async clear() {
-      const releases = [...entries.values()].map(({ release }) => release?.());
+      const releases = Array.from(entries.values()).map(({ release }) => release?.());
       entries.clear();
       bytes = 0;
       await Promise.allSettled(releases);

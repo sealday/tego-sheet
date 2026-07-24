@@ -603,10 +603,10 @@ export class SpreadsheetDocumentController {
       ['document']: this.currentDocument,
       calculation: {
         revision: snapshot.revision,
-        values: [...this.formulaValues]
+        values: Array.from(this.formulaValues)
           .sort(([left], [right]) => left.localeCompare(right))
           .map(([address, value]) => ({ address, value })),
-        spillAnchors: [...this.formulaProgram.spillAnchors]
+        spillAnchors: Array.from(this.formulaProgram.spillAnchors)
           .sort(([left], [right]) => left.localeCompare(right))
           .map(([address, anchor]) => ({ address, anchor })),
       },

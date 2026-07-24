@@ -315,12 +315,12 @@ export function createTemplateModuleRegistry(
       };
     },
     list(): readonly TemplateModule[] {
-      return Object.freeze([...state.records.values()].sort(compareModules));
+      return Object.freeze(Array.from(state.records.values()).sort(compareModules));
     },
     dispose(): Promise<readonly TemplateModuleDiagnostic[]> {
       if (state.disposePromise !== undefined) return state.disposePromise;
       state.disposed = true;
-      const modules = [...state.records.values()].sort(compareModules);
+      const modules = Array.from(state.records.values()).sort(compareModules);
       state.records.clear();
       state.disposePromise = (async () => {
         await waitForIdle();

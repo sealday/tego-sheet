@@ -47,7 +47,7 @@ async function editCell(page: Page, text: string): Promise<void> {
   await expect(editor).toBeFocused();
   await editor.fill(text);
   await page.keyboard.press('Enter');
-  await expect(page.getByLabel('Workbook JSON')).toContainText(text);
+  await expect(page.getByLabel('Document JSON')).toContainText(text);
   const inspector = page.getByRole('complementary', { name: 'Playground inspector' });
   await expect(inspector.locator('li').filter({ hasText: 'onChange' }).first()).toBeVisible();
   await expect(inspector.locator('li').filter({ hasText: 'onCellEdit' }).first()).toBeVisible();
@@ -91,19 +91,23 @@ test('project-subpath navigation loads Docs, API, Playground, and Roadmap assets
   expect(missingAssets).toEqual([]);
 });
 
-test('Roadmap exposes five dependency phases and 33 non-interactive planned items', async ({
+test('Roadmap exposes five dependency phases and two non-interactive planned items', async ({
   page,
 }) => {
   await page.goto('roadmap');
 
   await expect(page.getByRole('heading', { level: 1, name: 'Product roadmap' })).toBeVisible();
   await expect(page.locator('[data-roadmap-phase]')).toHaveCount(5);
-  await expect(page.locator('[data-roadmap-item]')).toHaveCount(33);
-  await expect(page.getByText('Planned', { exact: true })).toHaveCount(33);
+  await expect(page.locator('[data-roadmap-item]')).toHaveCount(2);
+  await expect(page.getByText('Planned', { exact: true })).toHaveCount(2);
   await expect(page.getByRole('checkbox')).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'XLSX template output' })).toHaveAttribute(
+    'href',
+    `${PROJECT_PATH}docs/roadmap/template-printing`,
+  );
   await expect(
-    page.getByRole('link', { name: 'Sheet, selection and range print targets' }),
-  ).toHaveAttribute('href', `${PROJECT_PATH}docs/roadmap/template-printing`);
+    page.getByRole('link', { name: 'CSV/TSV, XLSX and ODS interchange' }),
+  ).toHaveAttribute('href', `${PROJECT_PATH}docs/roadmap/formulas-data`);
 
   const viewport = page.viewportSize();
   expect(viewport).not.toBeNull();
@@ -139,7 +143,7 @@ test('real Canvas edits update and reset uncontrolled and controlled public insp
   await editCell(page, 'Uncontrolled browser edit');
 
   await page.getByRole('button', { name: 'Reset mode' }).click();
-  await expect(page.getByLabel('Workbook JSON')).not.toContainText('Uncontrolled browser edit');
+  await expect(page.getByLabel('Document JSON')).not.toContainText('Uncontrolled browser edit');
   await expect(page.getByText('Interact with the sheet to inspect callbacks.')).toBeVisible();
 
   await page.getByRole('radio', { name: 'Controlled', exact: true }).check();
@@ -147,8 +151,8 @@ test('real Canvas edits update and reset uncontrolled and controlled public insp
   await editCell(page, 'Controlled browser edit');
   await page.reload();
   await waitForSheet(page, 'controlled');
-  await expect(page.getByLabel('Workbook JSON')).not.toContainText('Controlled browser edit');
-  await expect(page.getByLabel('Workbook JSON')).toContainText('Keyboard');
+  await expect(page.getByLabel('Document JSON')).not.toContainText('Controlled browser edit');
+  await expect(page.getByLabel('Document JSON')).toContainText('Keyboard');
 });
 
 test('narrow consumers stack the inspector below the spreadsheet', async ({ page }) => {

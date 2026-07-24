@@ -1244,7 +1244,7 @@ export class XlsxAdapter {
       throw outputError('XLSX_PACKAGE_LIMIT_EXCEEDED', 'XLSX semantic limits were exceeded');
     }
     const parts = packageParts(document, options);
-    const uncompressedBytes = [...parts.values()].reduce(
+    const uncompressedBytes = Array.from(parts.values()).reduce(
       (total, bytes) => total + bytes.byteLength,
       0,
     );

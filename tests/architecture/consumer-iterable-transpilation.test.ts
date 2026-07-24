@@ -95,4 +95,34 @@ globalThis.result = ${expression};`);
       [2, 'second'],
     ]);
   });
+
+  it('preserves migrated cells from the real legacy migration expression', () => {
+    const source = read('src/document/migrate-legacy.ts');
+    const expression = expressionAfter(source, '    cells: ', ',\n    merges:');
+
+    const result = executeClientTransform<unknown>(`const sheetCells = new Map([
+  ['0:0', { row: 0, column: 0, cell: { input: { type: 'string', value: 'Item' } } }],
+  ['0:1', { row: 0, column: 1, cell: { input: { type: 'string', value: 'Amount' } } }],
+]);
+globalThis.result = ${expression};`);
+
+    expect(result).toEqual([
+      { row: 0, column: 0, cell: { input: { type: 'string', value: 'Item' } } },
+      { row: 0, column: 1, cell: { input: { type: 'string', value: 'Amount' } } },
+    ]);
+  });
+
+  it('preserves formula diagnostic maps from the real snapshot function', () => {
+    const source = read('src/formula/evaluator.ts');
+    const start = source.indexOf('function snapshotDiagnostics(');
+    const end = source.indexOf('\n\nfunction snapshotBindings(', start);
+    if (start < 0 || end < 0) throw new Error('formula diagnostic snapshot function not found');
+    const snapshotFunction = source.slice(start, end);
+
+    const result = executeClientTransform<unknown>(`${snapshotFunction}
+const diagnostics = new Map([['sheet-1!A1', [{ code: 'FORMULA_PARSE_ERROR', message: 'bad' }]]]);
+globalThis.result = Array.from(snapshotDiagnostics(diagnostics));`);
+
+    expect(result).toEqual([['sheet-1!A1', [{ code: 'FORMULA_PARSE_ERROR', message: 'bad' }]]]);
+  });
 });

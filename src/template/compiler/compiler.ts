@@ -1000,7 +1000,7 @@ export function compileSpreadsheetTemplate(
       document,
       templateOrId,
       options?.limits,
-      ...(options === undefined ? [] : [...options.subtemplates.values()]),
+      ...(options === undefined ? [] : Array.from(options.subtemplates.values())),
     ])
   ) {
     const frozenDiagnostics = immutableClone([
@@ -1104,7 +1104,7 @@ export function compileSpreadsheetTemplate(
       ...(options === undefined
         ? {}
         : {
-            subtemplates: [...options.subtemplates.values()].sort((left, right) =>
+            subtemplates: Array.from(options.subtemplates.values()).sort((left, right) =>
               String(left.id).localeCompare(String(right.id)),
             ),
           }),

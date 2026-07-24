@@ -330,7 +330,7 @@ export function solveFormulaGoalSeek(options: FormulaGoalSeekOptions): FormulaGo
     iterations += 1;
     for (const address of calculation.evaluatedAddresses) evaluated.add(address);
     if (
-      [...calculation.diagnostics.values()].some((diagnostics) =>
+      Array.from(calculation.diagnostics.values()).some((diagnostics) =>
         diagnostics.some(({ code }) => code === 'FORMULA_EVALUATION_LIMIT_EXCEEDED'),
       )
     ) {

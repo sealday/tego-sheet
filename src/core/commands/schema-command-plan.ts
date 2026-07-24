@@ -760,7 +760,7 @@ function mutateExplicitHidden(
       const index = command.row + offset;
       rows.set(index, { ...rows.get(index), index, hidden: command.hidden });
     }
-    sheet.rows = [...rows.values()].sort((left, right) => left.index - right.index);
+    sheet.rows = Array.from(rows.values()).sort((left, right) => left.index - right.index);
     return;
   }
   const columns = new Map((sheet.columns ?? []).map((column) => [column.index, column]));
@@ -768,7 +768,7 @@ function mutateExplicitHidden(
     const index = command.column + offset;
     columns.set(index, { ...columns.get(index), index, hidden: command.hidden });
   }
-  sheet.columns = [...columns.values()].sort((left, right) => left.index - right.index);
+  sheet.columns = Array.from(columns.values()).sort((left, right) => left.index - right.index);
 }
 
 export function prepareSchemaProjectionCommit(

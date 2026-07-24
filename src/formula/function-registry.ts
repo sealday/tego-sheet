@@ -548,7 +548,7 @@ export function createFormulaFunctionRegistry(): FormulaFunctionRegistry {
     },
     list() {
       return Object.freeze(
-        [...definitions.values()].sort((left, right) =>
+        Array.from(definitions.values()).sort((left, right) =>
           left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
         ),
       );

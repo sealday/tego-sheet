@@ -161,7 +161,7 @@ export function createCellTypeRegistry(options: CellTypeRegistryOptions): CellTy
     },
     list(): readonly CellTypePlugin[] {
       return Object.freeze(
-        [...records.values()].sort((left, right) => left.type.localeCompare(right.type)),
+        Array.from(records.values()).sort((left, right) => left.type.localeCompare(right.type)),
       );
     },
   });

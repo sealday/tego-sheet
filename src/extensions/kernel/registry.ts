@@ -256,7 +256,9 @@ export function createAdapterRegistryKernel(
     list(kind?: KernelExtensionKind): readonly ExtensionManifest[] {
       if (listCache === undefined) {
         listCache = Object.freeze(
-          [...records.values()].sort(compareRecords).map(({ manifest }) => manifest),
+          Array.from(records.values())
+            .sort(compareRecords)
+            .map(({ manifest }) => manifest),
         );
       }
       if (kind === undefined) return listCache;
@@ -304,7 +306,7 @@ export function createAdapterRegistryKernel(
         return record.implementation as KernelCapabilities[K];
       }
 
-      const sameKind = [...records.values()]
+      const sameKind = Array.from(records.values())
         .filter(({ manifest }) => manifest.kind === kind)
         .sort(compareRecords);
       const candidates = sameKind.filter(({ manifest }) =>
@@ -342,10 +344,10 @@ export function createAdapterRegistryKernel(
         return disposeComplete ? Promise.resolve(Object.freeze([])) : disposePromise;
       }
       disposed = true;
-      const initializing = [...pending.values()].sort((left, right) =>
+      const initializing = Array.from(pending.values()).sort((left, right) =>
         compareAscii(left.key, right.key),
       );
-      const activeRecords = [...records.values()].sort(compareRecords);
+      const activeRecords = Array.from(records.values()).sort(compareRecords);
       for (const record of activeRecords) unpublish(record);
       for (const registration of initializing) registration.controller.abort();
       for (const record of activeRecords) record.controller.abort();
