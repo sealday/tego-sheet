@@ -148,7 +148,7 @@ describe('OBJ-01 standard XLSX DrawingML interchange', () => {
     expect(strFromU8(entries['xl/drawings/_rels/drawing1.xml.rels']!)).toContain(
       'relationships/image',
     );
-    expect(entries['xl/media/image1-1.png']).toEqual(new Uint8Array(imageBytes));
+    expect(entries['xl/media/image1.png']).toEqual(new Uint8Array(imageBytes));
     expect(Object.keys(entries)).not.toEqual(
       expect.arrayContaining([expect.stringMatching(/customXml|tego-sheet/i)]),
     );
@@ -199,7 +199,7 @@ describe('OBJ-01 standard XLSX DrawingML interchange', () => {
     const exportedAgain = await createXlsxWriter().writeResult(imported.document);
     const secondEntries = await archiveParts(exportedAgain.blob);
     expect(secondEntries['xl/drawings/drawing1.xml']).toBeDefined();
-    expect(secondEntries['xl/media/image1-1.png']).toEqual(new Uint8Array(imageBytes));
+    expect(secondEntries['xl/media/image1.png']).toEqual(new Uint8Array(imageBytes));
     expect(exportedAgain.diagnostics).toEqual([]);
   });
 
@@ -209,7 +209,7 @@ describe('OBJ-01 standard XLSX DrawingML interchange', () => {
       feature: 'xlsx:drawing-external-relationship',
       mutate: (xml: string) =>
         xml.replace(
-          'Target="../media/image1-1.png"',
+          'Target="../media/image1.png"',
           'Target="https://example.com/image.png" TargetMode="External"',
         ),
     },
@@ -217,7 +217,7 @@ describe('OBJ-01 standard XLSX DrawingML interchange', () => {
       name: 'package-escaping image relationship',
       feature: 'xlsx:drawing-resource-unsafe',
       mutate: (xml: string) =>
-        xml.replace('Target="../media/image1-1.png"', 'Target="../../../image.png"'),
+        xml.replace('Target="../media/image1.png"', 'Target="../../../image.png"'),
     },
   ])('degrades $name without fetching or exposing bytes', async ({ feature, mutate }) => {
     const blob = await new XlsxAdapter().render(objectDocument() as never, {
@@ -278,5 +278,100 @@ describe('OBJ-01 standard XLSX DrawingML interchange', () => {
         compatibility: 'excel',
       }),
     ).rejects.toMatchObject({ code: 'XLSX_PACKAGE_LIMIT_EXCEEDED' });
+  });
+
+  it('deduplicates repeated media references and charges materialized data URLs to the read budget', async () => {
+    const blob = await new XlsxAdapter().render(objectDocument() as never, {
+      formulaMode: 'values-only',
+      compatibility: 'excel',
+    });
+    const entries = await archiveParts(blob);
+    const drawingPath = 'xl/drawings/drawing1.xml';
+    const drawing = strFromU8(entries[drawingPath]!);
+    const imageAnchor = /<xdr:absoluteAnchor>[\s\S]*?<\/xdr:absoluteAnchor>/.exec(drawing)?.[0];
+    expect(imageAnchor).toBeDefined();
+    const repeated = repack(entries, {
+      [drawingPath]: drawing.replace('</xdr:wsDr>', `${imageAnchor}</xdr:wsDr>`),
+    });
+
+    const imported = await createXlsxReader().read(repeated);
+    const images = imported.document.workbook.sheets[0]!.objects.filter(
+      (object) => object.kind === 'image',
+    );
+    expect(images).toHaveLength(2);
+    expect(
+      new Set(images.map((object) => (object.kind === 'image' ? object.resourceId : ''))).size,
+    ).toBe(1);
+    expect(imported.document.resources.items).toHaveLength(1);
+
+    const totalUncompressedBytes = Object.values(entries).reduce(
+      (total, bytes) => total + bytes.byteLength,
+      0,
+    );
+    await expect(
+      createXlsxReader({ maxUncompressedBytes: totalUncompressedBytes }).read(blob),
+    ).rejects.toMatchObject({ code: 'ARCHIVE_LIMIT_EXCEEDED' });
+  });
+
+  it('degrades two-cell editAs modes instead of inventing geometry from hardcoded grid sizes', async () => {
+    const blob = await new XlsxAdapter().render(objectDocument() as never, {
+      formulaMode: 'values-only',
+      compatibility: 'excel',
+    });
+    const entries = await archiveParts(blob);
+    const drawingPath = 'xl/drawings/drawing1.xml';
+    const drawing = strFromU8(entries[drawingPath]!);
+    const edited = repack(entries, {
+      [drawingPath]: drawing.replace(
+        '<xdr:twoCellAnchor editAs="twoCell">',
+        '<xdr:twoCellAnchor editAs="absolute">',
+      ),
+    });
+
+    const imported = await createXlsxReader().read(edited);
+    expect(imported.security.unsupportedFeatures).toContain('xlsx:drawing-editas-unsupported');
+    expect(imported.document.workbook.sheets[0]!.objects).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ shape: 'ellipse' })]),
+    );
+  });
+
+  it('deduplicates identical media across worksheet drawing parts', async () => {
+    const document = objectDocument();
+    const first = document.workbook.sheets[0]!;
+    const image = first.objects.find((object) => object.kind === 'image')!;
+    const second = {
+      ...first,
+      id: 'second-sheet',
+      name: 'Second',
+      objects: [{ ...image, id: 'second-image' }],
+    };
+    const blob = await new XlsxAdapter().render(
+      {
+        ...document,
+        workbook: {
+          ...document.workbook,
+          sheets: [first, second],
+        },
+        worksheets: [
+          ...document.worksheets,
+          {
+            ...document.worksheets[0]!,
+            sheetId: second.id,
+          },
+        ],
+      } as never,
+      { formulaMode: 'values-only', compatibility: 'excel' },
+    );
+    const entries = await archiveParts(blob);
+
+    expect(Object.keys(entries).filter((path) => path.startsWith('xl/media/'))).toEqual([
+      'xl/media/image1.png',
+    ]);
+    expect(strFromU8(entries['xl/drawings/_rels/drawing1.xml.rels']!)).toContain(
+      'Target="../media/image1.png"',
+    );
+    expect(strFromU8(entries['xl/drawings/_rels/drawing2.xml.rels']!)).toContain(
+      'Target="../media/image1.png"',
+    );
   });
 });

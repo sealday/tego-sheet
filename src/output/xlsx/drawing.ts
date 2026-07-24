@@ -16,6 +16,21 @@ export interface DrawingPart {
   }[];
 }
 
+export interface DrawingMediaPool {
+  readonly byHash: Map<
+    string,
+    {
+      readonly path: string;
+      readonly bytes: Uint8Array;
+      readonly mimeType: 'image/png' | 'image/jpeg';
+    }
+  >;
+}
+
+export function createDrawingMediaPool(): DrawingMediaPool {
+  return { byHash: new Map() };
+}
+
 function xml(value: string): string {
   return value
     .replaceAll('&', '&amp;')
@@ -154,6 +169,7 @@ export function createDrawingPart(
   sheet: Sheet,
   sheetIndex: number,
   document: GeneratedDocument,
+  mediaPool: DrawingMediaPool = createDrawingMediaPool(),
 ): DrawingPart | undefined {
   const objects = [...(sheet.objects ?? []), ...legacyObjects(sheet, document)].sort(
     (left, right) =>
@@ -161,29 +177,23 @@ export function createDrawingPart(
       (String(left.id) < String(right.id) ? -1 : String(left.id) > String(right.id) ? 1 : 0),
   );
   if (objects.length === 0) return undefined;
-  const mediaByHash = new Map<
-    string,
-    {
-      readonly path: string;
-      readonly bytes: Uint8Array;
-      readonly mimeType: 'image/png' | 'image/jpeg';
-    }
-  >();
+  const createdMedia: DrawingPart['media'][number][] = [];
   const relationships: string[] = [];
   const anchors = objects.map((object, index) => {
     if (object.kind === 'image') {
       const resource = resourceFor(document, object);
-      let media = mediaByHash.get(resource.contentHash);
+      let media = mediaPool.byHash.get(resource.contentHash);
       if (media === undefined) {
         const mimeType: 'image/png' | 'image/jpeg' =
           resource.mimeType === 'image/png' ? 'image/png' : 'image/jpeg';
         const extension = mimeType === 'image/png' ? 'png' : 'jpeg';
         const created = {
-          path: `xl/media/image${sheetIndex + 1}-${mediaByHash.size + 1}.${extension}`,
+          path: `xl/media/image${mediaPool.byHash.size + 1}.${extension}`,
           bytes: new Uint8Array(resource.bytes),
           mimeType,
         };
-        mediaByHash.set(resource.contentHash, created);
+        mediaPool.byHash.set(resource.contentHash, created);
+        createdMedia.push(created);
         media = created;
       }
       const relationshipId = `rId${relationships.length + 1}`;
@@ -214,6 +224,6 @@ export function createDrawingPart(
     relationshipsXml:
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
       `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${relationships.join('')}</Relationships>`,
-    media: [...mediaByHash.values()],
+    media: createdMedia,
   };
 }

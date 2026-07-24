@@ -20,7 +20,7 @@ import {
 } from './contracts';
 import { buildDocument, type ImportedSheet } from './document-builder';
 import { attributes, decodeXml, textContent } from './xml';
-import { parseWorksheetDrawing } from './xlsx-drawing';
+import { createXlsxDrawingResourcePool, parseWorksheetDrawing } from './xlsx-drawing';
 
 function columnIndex(reference: string): number {
   const letters = /^([A-Z]+)\d+$/i.exec(reference)?.[1];
@@ -606,6 +606,13 @@ export function createXlsxReader(configuredLimits: InterchangeLimits = {}): Work
       const sheets: ImportedSheet[] = [];
       const validations: { id: string; value: JsonValue }[] = [];
       const resources: ResourceMetadata[] = [];
+      const archiveUncompressedBytes = Object.values(entries).reduce(
+        (total, bytes) => total + bytes.byteLength,
+        0,
+      );
+      const drawingResourcePool = createXlsxDrawingResourcePool(
+        limits.maxUncompressedBytes - archiveUncompressedBytes,
+      );
       const printProfiles: SpreadsheetDocumentInput['templates'][number]['printProfiles'][number][] =
         [];
       let totalCells = 0;
@@ -646,6 +653,7 @@ export function createXlsxReader(configuredLimits: InterchangeLimits = {}): Work
           worksheetXml,
           id as DocumentSheetId,
           limits,
+          drawingResourcePool,
         );
         if (!drawing.unsupported.includes('xlsx:drawing-objects')) {
           const genericDrawing = unsupported.lastIndexOf('xlsx:drawing-objects');

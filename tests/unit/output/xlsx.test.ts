@@ -428,7 +428,7 @@ describe('XlsxAdapter', () => {
     expect(xmlParts['xl/worksheets/sheet1.xml']).toContain('&lt;unsafe &amp; =literal&gt;');
     expect(xmlParts['xl/drawings/drawing1.xml']).toContain('r:embed="rId1"');
     expect(xmlParts['xl/drawings/_rels/drawing1.xml.rels']).toContain(
-      'Target="../media/image1-1.png"',
+      'Target="../media/image1.png"',
     );
     expect(Object.values(xmlParts).join('')).not.toContain('TargetMode="External"');
   });

@@ -1,11 +1,9 @@
 import type { DocumentSheetId, ResourceId, ResourceMetadata, SheetObject } from '../document';
 import { archiveXml } from './archive';
-import type { ResolvedInterchangeLimits } from './contracts';
+import { InterchangeError, type ResolvedInterchangeLimits } from './contracts';
 import { attributes, textContent } from './xml';
 
 const EMU_PER_DIP = 9_525;
-const DEFAULT_COLUMN_WIDTH = 64;
-const DEFAULT_ROW_HEIGHT = 20;
 
 interface DrawingRelationship {
   readonly target: string;
@@ -17,6 +15,22 @@ export interface ParsedWorksheetDrawing {
   readonly objects: readonly SheetObject[];
   readonly resources: readonly ResourceMetadata[];
   readonly unsupported: readonly string[];
+}
+
+export interface XlsxDrawingResourcePool {
+  readonly byMediaPath: Map<string, ResourceMetadata>;
+  materializedBytes: number;
+  readonly maxMaterializedBytes: number;
+}
+
+export function createXlsxDrawingResourcePool(
+  maxMaterializedBytes = Number.MAX_SAFE_INTEGER,
+): XlsxDrawingResourcePool {
+  return {
+    byMediaPath: new Map(),
+    materializedBytes: 0,
+    maxMaterializedBytes,
+  };
 }
 
 function relationships(xml: string): ReadonlyMap<string, DrawingRelationship> {
@@ -148,22 +162,6 @@ function anchor(
   }
   const to = marker(body, 'to');
   if (to === undefined) return undefined;
-  const editAs = anchorAttributes.editAs ?? 'twoCell';
-  if (editAs === 'oneCell' || editAs === 'absolute') {
-    const x = from.column * DEFAULT_COLUMN_WIDTH + from.offset.x;
-    const y = from.row * DEFAULT_ROW_HEIGHT + from.offset.y;
-    const right = to.column * DEFAULT_COLUMN_WIDTH + to.offset.x;
-    const bottom = to.row * DEFAULT_ROW_HEIGHT + to.offset.y;
-    const size = { width: Math.max(0, right - x), height: Math.max(0, bottom - y) };
-    return editAs === 'absolute'
-      ? { type: 'absolute', rect: { x, y, ...size } }
-      : {
-          type: 'one-cell',
-          cell: { sheetId, row: from.row, column: from.column },
-          offset: from.offset,
-          size,
-        };
-  }
   return {
     type: 'two-cell',
     from: { sheetId, ...from },
@@ -298,6 +296,7 @@ export function parseWorksheetDrawing(
   worksheetXml: string,
   sheetId: DocumentSheetId,
   limits: ResolvedInterchangeLimits,
+  resourcePool: XlsxDrawingResourcePool = createXlsxDrawingResourcePool(),
 ): ParsedWorksheetDrawing {
   const unsupported: string[] = [];
   const drawingReference = attributes(
@@ -332,6 +331,14 @@ export function parseWorksheetDrawing(
   const objects: SheetObject[] = [];
   const resources: ResourceMetadata[] = [];
   for (const [zIndex, entry] of anchorEntries(drawingXml).entries()) {
+    if (
+      entry.type === 'twoCellAnchor' &&
+      entry.attributes.editAs !== undefined &&
+      entry.attributes.editAs !== 'twoCell'
+    ) {
+      unsupported.push('xlsx:drawing-editas-unsupported');
+      continue;
+    }
     const objectAnchor = anchor(entry.type, entry.attributes, entry.body, sheetId);
     if (objectAnchor === undefined) {
       unsupported.push('xlsx:drawing-object-invalid');
@@ -375,14 +382,31 @@ export function parseWorksheetDrawing(
         unsupported.push('xlsx:drawing-resource-unsupported');
         continue;
       }
-      const resourceId = `${sheetId}-xlsx-resource-${resources.length + 1}` as ResourceId;
-      resources.push({
-        id: resourceId,
-        kind: 'image',
-        mimeType,
-        byteLength: bytes.byteLength,
-        url: `data:${mimeType};base64,${base64(bytes)}`,
-      });
+      let resource = resourcePool.byMediaPath.get(mediaPath);
+      if (resource === undefined) {
+        const url = `data:${mimeType};base64,${base64(bytes)}`;
+        const materializedBytes = url.length * 2;
+        if (
+          !Number.isSafeInteger(resourcePool.materializedBytes + materializedBytes) ||
+          resourcePool.materializedBytes + materializedBytes > resourcePool.maxMaterializedBytes
+        ) {
+          throw new InterchangeError(
+            'ARCHIVE_LIMIT_EXCEEDED',
+            'XLSX image materialization exceeds its memory budget',
+          );
+        }
+        resource = {
+          id: `xlsx-resource-${resourcePool.byMediaPath.size + 1}` as ResourceId,
+          kind: 'image',
+          mimeType,
+          byteLength: bytes.byteLength,
+          url,
+        };
+        resourcePool.byMediaPath.set(mediaPath, resource);
+        resourcePool.materializedBytes += materializedBytes;
+        resources.push(resource);
+      }
+      const resourceId = resource.id;
       objects.push({ ...common, kind: 'image', resourceId, fit: 'fill' } as SheetObject);
       continue;
     }

@@ -13,7 +13,7 @@ import type {
   TemplatePrintProfile,
 } from '../../template';
 import { outputError, throwIfAborted } from '../output-error';
-import { createDrawingPart, type DrawingPart } from './drawing';
+import { createDrawingMediaPool, createDrawingPart, type DrawingPart } from './drawing';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const FIXED_ZIP_DATE = new Date(1980, 0, 1, 0, 0, 0, 0);
@@ -1054,7 +1054,10 @@ function packageParts(
   const calculated = calculatedValueMap(document);
   const profile = document.print.profile;
   const worksheetById = worksheetSettings(document);
-  const drawings = workbook.sheets.map((sheet, index) => createDrawingPart(sheet, index, document));
+  const drawingMediaPool = createDrawingMediaPool();
+  const drawings = workbook.sheets.map((sheet, index) =>
+    createDrawingPart(sheet, index, document, drawingMediaPool),
+  );
   const parts = new Map<string, Uint8Array>();
   const add = (path: string, value: string | Uint8Array): void => {
     parts.set(path, typeof value === 'string' ? strToU8(value) : value);
