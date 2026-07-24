@@ -12,6 +12,7 @@ import {
   createStructuredTableResolver,
   executeStructuredTableView,
   planStructuredTableAutoExpand,
+  projectStructuredTableRows,
 } from '../../../src/analysis/tables';
 import { SpreadsheetDocumentController } from '../../../src/core/controller/spreadsheet-document-controller';
 import { sheetId } from '../../../src/core';
@@ -380,6 +381,39 @@ describe('TBL-01 persistent structured tables', () => {
     );
     expect(model.rowHeight(1)).toBe(0);
     expect(model.rowHeight(2)).toBeGreaterThan(0);
+  });
+
+  it('skips no-op table filters when projecting overlapping row spans', () => {
+    const base = parseOk(fixture()).workbook.sheets[0]!.tables[0]!;
+    const noOp = {
+      ...base,
+      filter: { filters: [], sort: null },
+    };
+    const active = {
+      ...base,
+      range: {
+        sheetId: base.range.sheetId,
+        start: { row: 0, column: 2 },
+        end: { row: 2, column: 3 },
+      },
+      filter: {
+        filters: [{ column: 2, operator: 'in' as const, values: ['South'] }],
+        sort: null,
+      },
+    };
+    const values = new Map<string, unknown>([
+      ['1:2', 'South'],
+      ['2:2', 'North'],
+    ]);
+    const source = {
+      revision: 'projection-r1',
+      read: (row: number, column: number) => values.get(`${row}:${column}`),
+    };
+
+    expect(projectStructuredTableRows([noOp, active], source)).toMatchObject([
+      { startRow: 1, endRow: 2, rowOrder: [1, 2], hiddenRows: [2] },
+    ]);
+    expect(projectStructuredTableRows([noOp, noOp], source)).toEqual([]);
   });
 
   it('rejects parallel active table row projections during parsing', () => {

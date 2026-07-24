@@ -47,6 +47,7 @@ import type {
 } from './model/ids';
 import { compareSparseCells } from './model/sparse-cells';
 import type { SparseCell } from './model/sparse-cells';
+import { hasActiveStructuredTableProjection } from './model/structured-table-projection';
 
 /** Configurable safety limits enforced before deep document decoding. */
 export interface DocumentLimits {
@@ -1723,19 +1724,15 @@ function structuredTablesAt(
       );
     }
   });
-  const hasActiveProjection = (table: StructuredTable): boolean =>
-    table.filter !== undefined &&
-    (table.filter.filters.some(({ operator }) => operator !== 'all') ||
-      (table.filter.sort !== undefined && table.filter.sort !== null));
   const dataRows = (table: StructuredTable): { start: number; end: number } => ({
     start: table.range.start.row + (table.headerRows ?? 1),
     end: table.range.end.row - (table.totalsRow === true ? 1 : 0),
   });
   tables.forEach((table, index) => {
-    if (!hasActiveProjection(table)) return;
+    if (!hasActiveStructuredTableProjection(table)) return;
     const rows = dataRows(table);
     const conflict = tables.findIndex((candidate, candidateIndex) => {
-      if (candidateIndex >= index || !hasActiveProjection(candidate)) return false;
+      if (candidateIndex >= index || !hasActiveStructuredTableProjection(candidate)) return false;
       const candidateRows = dataRows(candidate);
       return rows.start <= candidateRows.end && candidateRows.start <= rows.end;
     });

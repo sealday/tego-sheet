@@ -1,5 +1,6 @@
 import type { SpreadsheetDocument } from '../../document';
 import type { DocumentCellAddress, DocumentCellRange, StructuredTable } from '../../document';
+import { hasActiveStructuredTableProjection } from '../../document/model/structured-table-projection';
 import type {
   FormulaTableBindingRequest,
   FormulaTableBindingResolver,
@@ -222,7 +223,7 @@ export function projectStructuredTableRows(
 ): readonly StructuredTableRowProjection[] {
   return Object.freeze(
     (tables ?? []).flatMap((table) => {
-      if (table.filter === undefined) return [];
+      if (!hasActiveStructuredTableProjection(table)) return [];
       const startRow = table.range.start.row + (table.headerRows ?? 1);
       const endRow = table.range.end.row - (table.totalsRow === true ? 1 : 0);
       if (startRow > endRow) return [];
