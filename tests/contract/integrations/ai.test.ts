@@ -56,6 +56,10 @@ const permissions = createPermissionSnapshot({
       target: { type: 'document', documentId: 'document-1' },
     },
     {
+      action: 'sheet:view',
+      target: { type: 'sheet', sheetId: 'sheet-1' },
+    },
+    {
       action: 'document:edit',
       target: { type: 'document', documentId: 'document-1' },
     },
@@ -74,6 +78,53 @@ const permissions = createPermissionSnapshot({
 });
 
 describe('AI command integration contract', () => {
+  it('requires view permission for every selected context sheet before calling the adapter', async () => {
+    const source = document();
+    const controller = createDocumentController(source);
+    const permissionStore = createPermissionStore();
+    permissionStore.replace(
+      createPermissionSnapshot({
+        revision: 'permission-1',
+        actorId: 'actor-1',
+        grants: [
+          {
+            action: 'ai:propose',
+            target: { type: 'document', documentId: source.id },
+          },
+        ],
+      }),
+    );
+    const propose = vi.fn();
+
+    await expect(
+      createControllerAiProposalSession({
+        controller,
+        permissions: permissionStore,
+        adapter: { propose },
+        signal: new AbortController().signal,
+        request: {
+          instruction: 'inspect A1',
+          locale: 'en-US',
+          allowedCommandTypes: ['set-cell-input'],
+        },
+        context: {
+          ranges: [
+            {
+              sheetId: 'sheet-1',
+              start: { row: 0, column: 0 },
+              end: { row: 0, column: 0 },
+            },
+          ],
+          include: ['values'],
+          redactions: [],
+        },
+        transactionId: 'ai-transaction-1',
+      }),
+    ).rejects.toThrow(/sheet.*permission|permission.*sheet/u);
+    expect(propose).not.toHaveBeenCalled();
+    controller.dispose();
+  });
+
   it('projects only selected cells and applies explicit redaction', () => {
     const context = projectAiContext(document(), {
       documentRevision: 'revision-1',
@@ -119,6 +170,10 @@ describe('AI command integration contract', () => {
           {
             action: 'ai:apply',
             target: { type: 'document', documentId: source.id },
+          },
+          {
+            action: 'sheet:view',
+            target: { type: 'sheet', sheetId: 'sheet-1' },
           },
           {
             action: 'document:edit',
@@ -225,6 +280,47 @@ describe('AI command integration contract', () => {
         getPermissionSnapshot: () => permissions,
       }),
     ).rejects.toThrow(/not allowed/u);
+    expect(dryRun).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed allowed commands through the canonical transaction schema before dry-run', async () => {
+    const dryRun = vi.fn();
+    const command = {};
+    Object.defineProperty(command, 'type', {
+      enumerable: true,
+      get: () => 'set-cell-input',
+    });
+    await expect(
+      createAiProposalSession({
+        documentId: 'document-1',
+        documentRevision: 'revision-1',
+        permissionSnapshot: permissions,
+        signal: new AbortController().signal,
+        request: {
+          instruction: 'set A1',
+          locale: 'en-US',
+          allowedCommandTypes: ['set-cell-input'],
+        },
+        context: projectAiContext(document(), {
+          documentRevision: 'revision-1',
+          ranges: [],
+          include: [],
+          redactions: [],
+        }),
+        adapter: {
+          propose: async () => ({
+            id: 'proposal-1',
+            summary: 'Malformed',
+            assumptions: [],
+            commands: [command],
+          }),
+        },
+        dryRun,
+        apply: vi.fn(),
+        getCurrentRevision: () => 'revision-1',
+        getPermissionSnapshot: () => permissions,
+      }),
+    ).rejects.toThrow(/schema|command/u);
     expect(dryRun).not.toHaveBeenCalled();
   });
 

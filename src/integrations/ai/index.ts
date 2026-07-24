@@ -6,6 +6,7 @@ import type {
   DocumentTransactionEnvelope,
   DocumentTransactionResult,
 } from '../../document-controller';
+import { snapshotSerializableTransaction } from '../../core/controller/spreadsheet-document-controller';
 import type { PermissionSnapshot, PermissionStore } from '../permission';
 import { deriveWorkbookCommandPermissionRequests } from '../permission';
 
@@ -218,6 +219,40 @@ export function summarizeAiContext(context: SanitizedDocumentContext): AiContext
 }
 
 function snapshotProposal(value: unknown, allowed: ReadonlySet<string>): AiCommandProposal {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('AI response is invalid');
+  }
+  const commandsDescriptor = Object.getOwnPropertyDescriptor(value, 'commands');
+  if (
+    commandsDescriptor === undefined ||
+    !Object.hasOwn(commandsDescriptor, 'value') ||
+    !Array.isArray(commandsDescriptor.value) ||
+    commandsDescriptor.value.length > 1_000
+  ) {
+    throw new TypeError('AI response is invalid');
+  }
+  for (const command of commandsDescriptor.value) {
+    if (command === null || typeof command !== 'object' || Array.isArray(command)) continue;
+    const typeDescriptor = Object.getOwnPropertyDescriptor(command, 'type');
+    if (typeDescriptor === undefined || !Object.hasOwn(typeDescriptor, 'value')) continue;
+    const type = typeDescriptor.value;
+    if (typeof type === 'string' && (!allowed.has(type) || forbiddenCommandTypes.has(type))) {
+      throw new TypeError(`AI command ${type} is not allowed`);
+    }
+  }
+  const checked = snapshotSerializableTransaction({
+    schemaVersion: 1,
+    id: 'ai-proposal-validation',
+    baseRevision: 0,
+    commands: commandsDescriptor.value.map((command, index) => ({
+      schemaVersion: 1,
+      id: `ai-proposal-command-${index + 1}`,
+      command,
+    })),
+  });
+  if ('status' in checked) {
+    throw new TypeError(`AI command schema is invalid: ${checked.message}`);
+  }
   let snapshot: unknown;
   try {
     snapshot = JSON.parse(JSON.stringify(value));
@@ -233,16 +268,13 @@ function snapshotProposal(value: unknown, allowed: ReadonlySet<string>): AiComma
     typeof proposal.summary !== 'string' ||
     !Array.isArray(proposal.assumptions) ||
     !proposal.assumptions.every((entry) => typeof entry === 'string') ||
-    !Array.isArray(proposal.commands) ||
-    proposal.commands.length > 1_000
+    !Array.isArray(proposal.commands)
   ) {
     throw new TypeError('AI response is invalid');
   }
-  for (const command of proposal.commands) {
-    const type =
-      command !== null && typeof command === 'object' && 'type' in command
-        ? (command as { readonly type?: unknown }).type
-        : undefined;
+  const commands = checked.commands.map(({ command }) => command);
+  for (const command of commands) {
+    const type = command.type;
     if (typeof type !== 'string' || !allowed.has(type) || forbiddenCommandTypes.has(type)) {
       throw new TypeError(`AI command ${String(type)} is not allowed`);
     }
@@ -251,7 +283,7 @@ function snapshotProposal(value: unknown, allowed: ReadonlySet<string>): AiComma
     id: identifier(proposal.id, 'AI proposal ID'),
     summary: proposal.summary.slice(0, 2_000),
     assumptions: Object.freeze(proposal.assumptions.map((entry) => entry.slice(0, 2_000))),
-    commands: proposal.commands as WorkbookCommand[],
+    commands: Object.freeze(commands),
   });
 }
 
@@ -328,6 +360,19 @@ export async function createControllerAiProposalSession(
   options: CreateControllerAiProposalSessionOptions,
 ): Promise<ControllerAiProposalSession> {
   const snapshot = options.controller.getSnapshot();
+  const permissions = options.permissions.getSnapshot();
+  const deniedSheet = [...new Set(options.context.ranges.map(({ sheetId }) => sheetId))].find(
+    (sheetId) =>
+      !(
+        permissions?.can('sheet:view', {
+          type: 'sheet',
+          sheetId,
+        }) ?? false
+      ),
+  );
+  if (deniedSheet !== undefined) {
+    throw new TypeError('AI context sheet permission denied');
+  }
   const documentRevision = `revision-${snapshot.revision}`;
   const context = projectAiContext(snapshot.document, {
     ...options.context,
@@ -338,7 +383,7 @@ export async function createControllerAiProposalSession(
   const session = await createAiProposalSession({
     documentId: snapshot.document.id,
     documentRevision,
-    permissionSnapshot: options.permissions.getSnapshot(),
+    permissionSnapshot: permissions,
     signal: options.signal,
     request: options.request,
     context,

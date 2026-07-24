@@ -5,6 +5,7 @@ import {
   createRestoreVersionProposal,
   diffDocumentVersions,
   diffDocumentVersionsAsync,
+  listDocumentVersions,
   loadHistoryPreview,
   restoreDocumentVersion,
 } from '../../../src/integrations/history';
@@ -70,6 +71,25 @@ function withPrintProfile(base: ReturnType<typeof document>) {
 }
 
 describe('version history integration contract', () => {
+  it('requires history view permission before listing or loading versions', async () => {
+    const denied = createPermissionSnapshot({
+      revision: 'permission-1',
+      actorId: 'actor-1',
+      grants: [],
+    });
+    const list = vi.fn();
+    const load = vi.fn();
+
+    await expect(
+      listDocumentVersions({ list }, 'document-1', denied, new AbortController().signal),
+    ).rejects.toThrow(/permission/u);
+    await expect(
+      loadHistoryPreview({ load }, 'document-1', 'version-1', denied, new AbortController().signal),
+    ).rejects.toThrow(/permission/u);
+    expect(list).not.toHaveBeenCalled();
+    expect(load).not.toHaveBeenCalled();
+  });
+
   it('diffs by stable identity so a sheet rename is not deletion plus creation', () => {
     const result = diffDocumentVersions(
       { id: 'version-1', document: document('Old name', 1) },
@@ -145,11 +165,36 @@ describe('version history integration contract', () => {
 
     expect(proposal).toEqual({
       type: 'restore-version',
+      documentId: 'document-1',
       sourceVersionId: 'version-1',
       expectedCurrentRevision: 'revision-2',
       replacement,
     });
     expect(Object.isFrozen(proposal)).toBe(true);
+  });
+
+  it('binds restore proposals to the target document identity', () => {
+    const permissions = createPermissionSnapshot({
+      revision: 'permission-1',
+      actorId: 'actor-1',
+      grants: [
+        {
+          action: 'history:restore',
+          target: { type: 'document', documentId: 'document-2' },
+        },
+      ],
+    });
+
+    expect(() =>
+      createRestoreVersionProposal({
+        sourceVersionId: 'version-1',
+        expectedCurrentRevision: 'revision-2',
+        currentRevision: 'revision-2',
+        replacement: document('Old', 1),
+        documentId: 'document-2',
+        permissions,
+      }),
+    ).toThrow(/identity|document/u);
   });
 
   it('counts print profiles added with a new template', () => {
@@ -176,6 +221,16 @@ describe('version history integration contract', () => {
       },
       source.id,
       'version-1',
+      createPermissionSnapshot({
+        revision: 'permission-1',
+        actorId: 'actor-1',
+        grants: [
+          {
+            action: 'history:view',
+            target: { type: 'document', documentId: source.id },
+          },
+        ],
+      }),
       new AbortController().signal,
     );
     expect(preview.readOnly).toBe(true);

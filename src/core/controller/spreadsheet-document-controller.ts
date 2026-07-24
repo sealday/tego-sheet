@@ -338,7 +338,7 @@ function captureJsonValue(value: unknown, seen = new Set<object>()): unknown {
 
 /** @internal Captures and validates one hostile-safe immutable transaction envelope. */
 export function snapshotSerializableTransaction(
-  value: SerializableTransactionEnvelope,
+  value: unknown,
 ): SerializableTransactionEnvelope | TransactionRejection {
   let transaction: SerializableTransactionEnvelope;
   try {

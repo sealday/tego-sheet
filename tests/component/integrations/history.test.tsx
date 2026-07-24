@@ -3,6 +3,7 @@ import { createRef } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { TegoSheet, type TegoSheetHandle } from '../../../src';
 import { loadHistoryPreview } from '../../../src/integrations/history';
+import { createPermissionSnapshot } from '../../../src/integrations/permission';
 import { createCanvasHarness } from '../../helpers/canvas-harness';
 import { testDocument } from '../../helpers/workbook-builders';
 
@@ -35,6 +36,16 @@ it('mounts a loaded version preview through the ordinary isolated readonly surfa
     },
     document.id,
     'version-1',
+    createPermissionSnapshot({
+      revision: 'permission-1',
+      actorId: 'actor-1',
+      grants: [
+        {
+          action: 'history:view',
+          target: { type: 'document', documentId: document.id },
+        },
+      ],
+    }),
     new AbortController().signal,
   );
   const ref = createRef<TegoSheetHandle>();

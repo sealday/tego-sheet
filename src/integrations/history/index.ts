@@ -73,6 +73,7 @@ export interface HistoryCheckpointResult {
 
 export interface RestoreVersionProposal {
   readonly type: 'restore-version';
+  readonly documentId: string;
   readonly sourceVersionId: string;
   readonly expectedCurrentRevision: string;
   readonly replacement: SpreadsheetDocument;
@@ -278,9 +279,20 @@ export async function diffDocumentVersionsAsync(
 export async function listDocumentVersions(
   adapter: Pick<HistoryAdapter, 'list'>,
   documentId: string,
+  permissions: PermissionSnapshot | undefined,
   signal: AbortSignal,
 ): Promise<readonly HistoryVersionInfo[]> {
   const id = identifier(documentId, 'History documentId');
+  if (
+    !(
+      permissions?.can('history:view', {
+        type: 'document',
+        documentId: id,
+      }) ?? false
+    )
+  ) {
+    throw new TypeError('History view permission denied');
+  }
   const value = snapshotJson(await adapter.list(id, signal), 'History version list');
   if (signal.aborted) throw new TypeError('History list was cancelled');
   if (!Array.isArray(value) || value.length > 10_000) {
@@ -312,10 +324,21 @@ export async function loadHistoryPreview(
   adapter: Pick<HistoryAdapter, 'load'>,
   documentId: string,
   versionId: string,
+  permissions: PermissionSnapshot | undefined,
   signal: AbortSignal,
 ): Promise<HistoryPreview> {
   const expectedDocumentId = identifier(documentId, 'History documentId');
   const expectedVersionId = identifier(versionId, 'History versionId');
+  if (
+    !(
+      permissions?.can('history:view', {
+        type: 'document',
+        documentId: expectedDocumentId,
+      }) ?? false
+    )
+  ) {
+    throw new TypeError('History view permission denied');
+  }
   const value = snapshotJson(
     await adapter.load(expectedDocumentId, expectedVersionId, signal),
     'History version',
@@ -393,9 +416,13 @@ export function createRestoreVersionProposal(
     throw new TypeError('History restore permission denied');
   }
   const parsed = parseSpreadsheetDocument(JSON.parse(JSON.stringify(options.replacement)));
-  if (!parsed.ok) throw new TypeError('History replacement document is invalid');
+  const documentId = identifier(options.documentId, 'History documentId');
+  if (!parsed.ok || parsed.document.id !== documentId) {
+    throw new TypeError('History replacement document identity is invalid');
+  }
   return Object.freeze({
     type: 'restore-version',
+    documentId,
     sourceVersionId: identifier(options.sourceVersionId, 'History sourceVersionId'),
     expectedCurrentRevision: identifier(
       options.expectedCurrentRevision,

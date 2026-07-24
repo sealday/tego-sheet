@@ -28,6 +28,62 @@ function deferred<Result>() {
 }
 
 describe('persistence integration contract', () => {
+  it('sends the largest request prefix that fits the byte budget', async () => {
+    const requests: SaveRequest[] = [];
+    const sampleRequest = (transactions: readonly SerializableTransactionEnvelope[]) => ({
+      documentId: 'document-1',
+      requestId: 'request-1',
+      baseRevision: 'revision-1',
+      transactions,
+      reason: 'manual' as const,
+    });
+    const first = transaction('tx-1');
+    const second = transaction('tx-2');
+    const oneTransactionBytes = new TextEncoder().encode(
+      JSON.stringify(sampleRequest([first])),
+    ).byteLength;
+    const twoTransactionBytes = new TextEncoder().encode(
+      JSON.stringify(sampleRequest([first, second])),
+    ).byteLength;
+    const controller = createPersistenceController({
+      documentId: 'document-1',
+      initialRevision: 'revision-1',
+      adapter: {
+        save: async (request) => {
+          requests.push(request);
+          return {
+            status: 'saved',
+            revision: `revision-${requests.length + 1}`,
+            persistedTransactionIds: request.transactions.map(({ id }) => id),
+          };
+        },
+      },
+      requestId: () => 'request-1',
+      maximumRequestBytes: twoTransactionBytes - 1,
+    });
+    expect(oneTransactionBytes).toBeLessThan(twoTransactionBytes - 1);
+    controller.enqueue(first);
+    controller.enqueue(second);
+
+    await controller.save();
+
+    expect(requests[0]?.transactions.map(({ id }) => id)).toEqual(['tx-1']);
+    expect(controller.state).toMatchObject({ status: 'dirty', pending: ['tx-2'] });
+  });
+
+  it('rejects only when the first pending transaction cannot fit the byte budget', async () => {
+    const controller = createPersistenceController({
+      documentId: 'document-1',
+      initialRevision: 'revision-1',
+      adapter: { save: vi.fn() },
+      requestId: () => 'request-1',
+      maximumRequestBytes: 1,
+    });
+    controller.enqueue(transaction('tx-1'));
+
+    await expect(controller.save()).rejects.toThrow(/exceeds/u);
+  });
+
   it('keeps edits committed during a save in the next pending batch', async () => {
     const pending = deferred<SaveResult>();
     const save = vi.fn(() => pending.promise);
@@ -272,6 +328,20 @@ describe('persistence integration contract', () => {
     controller.dispose();
   });
 
+  it('rejects controllers whose document identity does not match the persistence session', () => {
+    const session = createPersistenceSession({
+      documentId: 'document-1',
+      initialRevision: 'revision-1',
+      adapter: { save: vi.fn() },
+      requestId: () => 'request-1',
+    });
+    const controller = new SpreadsheetDocumentController(testDocument([{ name: 'A' }]));
+
+    expect(() => session.attachController(controller)).toThrow(/document.*identity/u);
+    session.dispose();
+    controller.dispose();
+  });
+
   it('reschedules autosave when edits arrive during an in-flight batch', async () => {
     const pending = deferred<SaveResult>();
     const timers: Array<() => void> = [];
@@ -338,6 +408,7 @@ describe('persistence integration contract', () => {
     ).toThrow(/250/u);
 
     let now = 0;
+    const document = testDocument([{ name: 'A' }]);
     const delays: number[] = [];
     const listeners = new Set<(event: BeforeUnloadEvent) => void>();
     const save = vi
@@ -349,7 +420,7 @@ describe('persistence integration contract', () => {
         persistedTransactionIds: request.transactions.map(({ id }) => id),
       }));
     const session = createPersistenceSession({
-      documentId: 'document-1',
+      documentId: document.id,
       initialRevision: 'revision-1',
       adapter: { save },
       requestId: () => 'stable-request',
@@ -362,7 +433,7 @@ describe('persistence integration contract', () => {
       },
       clearTimer: () => undefined,
     });
-    const controller = new SpreadsheetDocumentController(testDocument([{ name: 'A' }]));
+    const controller = new SpreadsheetDocumentController(document);
     session.attachController(controller);
     const sheet = controller.getSheetIds()[0]!;
     controller.dispatch(

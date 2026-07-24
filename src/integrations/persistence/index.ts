@@ -412,18 +412,35 @@ export function createPersistenceController(
           persistedTransactionIds: Object.freeze([]),
         });
       }
-      const transactions = [...pending.values()].slice(0, maximumTransactions);
+      const requestId = identifier(options.requestId(), 'Persistence requestId');
+      const candidates = [...pending.values()].slice(0, maximumTransactions);
+      let transactions: readonly SerializableTransactionEnvelope[] = [];
+      for (const candidate of candidates) {
+        const prefix = [...transactions, candidate];
+        const bytes = new TextEncoder().encode(
+          JSON.stringify({
+            documentId,
+            requestId,
+            baseRevision: revision,
+            transactions: prefix,
+            reason,
+          } satisfies SaveRequest),
+        ).byteLength;
+        if (bytes > maximumRequestBytes) {
+          if (transactions.length === 0) {
+            throw new RangeError(`Persistence request exceeds ${maximumRequestBytes} bytes`);
+          }
+          break;
+        }
+        transactions = prefix;
+      }
       const request: SaveRequest = deepFreeze({
         documentId,
-        requestId: identifier(options.requestId(), 'Persistence requestId'),
+        requestId,
         baseRevision: revision,
         transactions,
         reason,
       });
-      const bytes = new TextEncoder().encode(JSON.stringify(request)).byteLength;
-      if (bytes > maximumRequestBytes) {
-        throw new RangeError(`Persistence request exceeds ${maximumRequestBytes} bytes`);
-      }
       return execute(request);
     },
     async retry(): Promise<SaveResult> {
@@ -569,9 +586,15 @@ export function createPersistenceSession(
     },
     attachController(controller): () => void {
       if (disposed) throw new TypeError('Persistence session is disposed');
+      if (controller.getDocument().id !== options.documentId) {
+        throw new TypeError('Persistence controller document identity does not match the session');
+      }
       detachController?.();
       attachedController = controller;
       const unsubscribe = controller.subscribe(({ snapshot, commit }) => {
+        if (snapshot.document.id !== options.documentId) {
+          throw new TypeError('Persistence commit document identity does not match the session');
+        }
         const transaction =
           commit.transaction ??
           ({
