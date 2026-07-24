@@ -1234,7 +1234,18 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
       ),
     ),
     activeSheet,
-    readOnly: renderRuntime.readOnly,
+    readOnly:
+      renderRuntime.readOnly ||
+      (props.permissionStore !== undefined &&
+        props.epoch.snapshot.sheets.some(
+          (sheet) =>
+            !(
+              props.permissionStore?.can('sheet:edit', {
+                type: 'sheet',
+                sheetId: sheet.id,
+              }) ?? false
+            ),
+        )),
     ...tabActions,
   });
   const filterSelection = filterAuthority?.selection ?? selection;

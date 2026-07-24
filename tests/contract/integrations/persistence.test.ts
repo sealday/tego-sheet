@@ -390,4 +390,53 @@ describe('persistence integration contract', () => {
     expect(listeners.size).toBe(0);
     controller.dispose();
   });
+
+  it.each(['conflict', 'rejected', 'error'] as const)(
+    'stops automatic retry after an autosave %s',
+    async (outcome) => {
+      const timers: Array<() => void> = [];
+      const document = testDocument([{ name: 'A' }]);
+      const adapter = {
+        save: vi.fn(async (): Promise<SaveResult> => {
+          if (outcome === 'conflict') {
+            return { status: 'conflict', currentRevision: 'revision-remote' };
+          }
+          if (outcome === 'rejected') {
+            return { status: 'rejected', code: 'DENIED', message: 'denied' };
+          }
+          throw new Error('offline');
+        }),
+      };
+      const session = createPersistenceSession({
+        documentId: document.id,
+        initialRevision: 'revision-1',
+        adapter,
+        requestId: () => 'request-1',
+        autosaveDelayMs: 250,
+        setTimer: (callback) => {
+          timers.push(callback);
+          return callback;
+        },
+        clearTimer: (handle) => {
+          const index = timers.indexOf(handle as () => void);
+          if (index >= 0) timers.splice(index, 1);
+        },
+      });
+      const controller = new SpreadsheetDocumentController(document);
+      session.attachController(controller);
+      const sheet = controller.getSheetIds()[0]!;
+      controller.dispatch(
+        { type: 'set-cell-text', address: { sheet, row: 0, column: 0 }, text: outcome },
+        'ref',
+      );
+      timers.shift()?.();
+      await vi.waitFor(() =>
+        expect(session.state.status).toBe(outcome === 'conflict' ? 'conflict' : 'error'),
+      );
+      expect(timers).toEqual([]);
+      expect(adapter.save).toHaveBeenCalledTimes(1);
+      session.dispose();
+      controller.dispose();
+    },
+  );
 });

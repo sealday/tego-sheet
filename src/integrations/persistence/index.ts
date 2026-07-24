@@ -488,6 +488,9 @@ export function createPersistenceSession(
   };
   const scheduleAutosave = (): void => {
     clearAutosave();
+    if (persistence.state.status === 'conflict' || persistence.state.status === 'error') {
+      return;
+    }
     if (!online || !persistence.hasPendingChanges()) {
       if (!persistence.hasPendingChanges()) firstPendingAt = undefined;
       return;
@@ -502,11 +505,15 @@ export function createPersistenceSession(
       void saving.then(
         () => {
           publish();
-          scheduleAutosave();
+          if (persistence.state.status === 'dirty') {
+            firstPendingAt = now();
+            scheduleAutosave();
+          } else if (persistence.state.status === 'clean') {
+            firstPendingAt = undefined;
+          }
         },
         () => {
           publish();
-          scheduleAutosave();
         },
       );
     }, delay);
