@@ -42,9 +42,9 @@ import {
 import type { ResolvedScreenResource } from '../../objects';
 import {
   createPersistedVisualizationValueSource,
-  createVisualizationPlacement,
   projectPersistedVisualizations,
 } from '../../analysis';
+import { resolveObjectAnchor } from '../../objects';
 
 export interface EngineAdapterOptions {
   readonly root: HTMLElement;
@@ -207,14 +207,27 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
       `${latestSnapshot.revision}:${latestSnapshot.calculation.revision}`,
       new Map(latestSnapshot.calculation.values.map(({ address, value }) => [address, value])),
     );
-    const visualizations = projectPersistedVisualizations(
-      documentSheet,
-      visualizationSource,
-      createVisualizationPlacement({
-        rowOffset: viewport.model.rowOffset,
-        columnOffset: viewport.model.columnOffset,
-      }),
-    );
+    const grid = viewport.model;
+    const visualizations = projectPersistedVisualizations(documentSheet, visualizationSource, {
+      chart: (definition) =>
+        definition.anchor === undefined
+          ? null
+          : resolveObjectAnchor(definition.anchor, {
+              rowOffset: (row) => grid.rowOffset(grid.visualIndexOfRow(row)),
+              columnOffset: grid.columnOffset,
+            }),
+      sparkline: (definition) => {
+        const visualRow = grid.visualIndexOfRow(definition.target.row);
+        return {
+          x: grid.columnOffset(definition.target.column),
+          y: grid.rowOffset(visualRow),
+          width:
+            grid.columnOffset(definition.target.column + 1) -
+            grid.columnOffset(definition.target.column),
+          height: grid.rowOffset(visualRow + 1) - grid.rowOffset(visualRow),
+        };
+      },
+    });
     if (
       typeof options.canvas.setAttribute === 'function' &&
       typeof options.canvas.removeAttribute === 'function'

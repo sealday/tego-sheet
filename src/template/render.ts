@@ -2,6 +2,7 @@ import type {
   Diagnostic,
   DocumentCellRange,
   DocumentSheetId,
+  ObjectAnchor,
   Sheet,
   SpreadsheetDocument,
 } from '../document';
@@ -717,35 +718,34 @@ function displayPages(
     const bodyOriginX = columnOffset(startColumn);
     const bodyOriginY = rowGeometry.offsets[page.rowStart]!;
     const bodyBottom = rowGeometry.offsets[page.rowEnd + 1]!;
+    const projectedAnchorRect = (anchor: ObjectAnchor) => {
+      const primaryRow =
+        anchor.type === 'absolute'
+          ? undefined
+          : anchor.type === 'one-cell'
+            ? anchor.cell.row
+            : anchor.from.row;
+      const primaryRowOffset =
+        primaryRow === undefined ? undefined : rowGeometry.markerOffset(primaryRow);
+      // A filtered primary anchor has no visual row, so the complete overlay is omitted.
+      if (primaryRow !== undefined && primaryRowOffset === undefined) return null;
+      const rowOffset = (row: number): number =>
+        rowGeometry.markerOffset(row) ?? primaryRowOffset ?? physicalRowOffset(row);
+      const resolved = resolveObjectAnchor(anchor, { rowOffset, columnOffset });
+      if (anchor.type !== 'two-cell' || viewProjection === undefined) return resolved;
+      const fromY = rowOffset(anchor.from.row) + anchor.from.offset.y;
+      const toY = rowOffset(anchor.to.row) + anchor.to.offset.y;
+      return {
+        ...resolved,
+        y: Math.min(fromY, toY),
+        height: Math.abs(toY - fromY),
+      };
+    };
     const objectOverlays = [...(target.sheet.objects ?? [])]
       .sort((left, right) => left.zIndex - right.zIndex || left.id.localeCompare(right.id))
       .flatMap((object): readonly PrintDisplayCommand[] => {
-        const primaryRow =
-          object.anchor.type === 'absolute'
-            ? undefined
-            : object.anchor.type === 'one-cell'
-              ? object.anchor.cell.row
-              : object.anchor.from.row;
-        const primaryRowOffset =
-          primaryRow === undefined ? undefined : rowGeometry.markerOffset(primaryRow);
-        // A filtered primary anchor has no visual row, so the complete object is omitted.
-        if (primaryRow !== undefined && primaryRowOffset === undefined) return [];
-        const rowOffset = (row: number): number =>
-          rowGeometry.markerOffset(row) ?? primaryRowOffset ?? physicalRowOffset(row);
-        const geometry = { rowOffset, columnOffset };
-        const resolvedRect = resolveObjectAnchor(object.anchor, geometry);
-        const rect =
-          object.anchor.type === 'two-cell' && viewProjection !== undefined
-            ? (() => {
-                const fromY = rowOffset(object.anchor.from.row) + object.anchor.from.offset.y;
-                const toY = rowOffset(object.anchor.to.row) + object.anchor.to.offset.y;
-                return {
-                  ...resolvedRect,
-                  y: Math.min(fromY, toY),
-                  height: Math.abs(toY - fromY),
-                };
-              })()
-            : resolvedRect;
+        const rect = projectedAnchorRect(object.anchor);
+        if (rect === null) return [];
         const bodyRight = columnOffset(endColumn + 1);
         const strokePadding = object.kind === 'shape' ? (object.style.strokeWidth ?? 1) / 2 : 0;
         const visibleBounds = rotatedObjectBounds(rect, object.rotation, strokePadding);
@@ -786,7 +786,7 @@ function displayPages(
                   anchor: { type: 'absolute' as const, rect: pageRect },
                 };
         return objectToDisplayCommands(displayObject, {
-          geometry,
+          geometry: { rowOffset: physicalRowOffset, columnOffset },
           resources: resources.byReference,
         });
       });
@@ -796,10 +796,8 @@ function displayPages(
       {
         chart(definition) {
           if (definition.anchor === undefined) return null;
-          const rect = resolveObjectAnchor(definition.anchor, {
-            rowOffset: (row) => rowGeometry.markerOffset(row) ?? physicalRowOffset(row),
-            columnOffset,
-          });
+          const rect = projectedAnchorRect(definition.anchor);
+          if (rect === null) return null;
           const bodyRight = columnOffset(endColumn + 1);
           if (
             rect.x + rect.width <= bodyOriginX ||
