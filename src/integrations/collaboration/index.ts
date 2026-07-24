@@ -11,6 +11,15 @@ export interface RemoteOperation {
   readonly transaction: SerializableTransactionEnvelope;
 }
 
+export interface CollaborationRecoveryDiagnostic {
+  readonly code: 'COLLABORATION_COMMIT_ROLLBACK_FAILED';
+  readonly message: string;
+  readonly cause: {
+    readonly commit: unknown;
+    readonly rollback: unknown;
+  };
+}
+
 export type RemoteOperationOutcome =
   | { readonly status: 'applied'; readonly revision: string }
   | { readonly status: 'duplicate'; readonly operationId: string }
@@ -18,6 +27,7 @@ export type RemoteOperationOutcome =
       readonly status: 'resync-required';
       readonly expectedRevision: string;
       readonly receivedBaseRevision: string;
+      readonly diagnostic?: CollaborationRecoveryDiagnostic;
     }
   | { readonly status: 'disconnected'; readonly revision: string }
   | { readonly status: 'rejected'; readonly operationId: string };
@@ -137,7 +147,11 @@ export interface CollaborationSession {
     | { readonly status: 'disconnected' }
     | { readonly status: 'connecting' }
     | { readonly status: 'connected'; readonly revision: string }
-    | { readonly status: 'resync-required'; readonly revision: string };
+    | {
+        readonly status: 'resync-required';
+        readonly revision: string;
+        readonly diagnostic?: CollaborationRecoveryDiagnostic;
+      };
   connect(signal: AbortSignal): Promise<void>;
   disconnect(): void;
   getSnapshot(): CollaborationSession['state'];
@@ -247,15 +261,21 @@ export function createRemoteOperationProcessor(
       if (prepared === undefined) return Object.freeze({ status: 'rejected', operationId });
       try {
         prepared.commit();
-      } catch {
+      } catch (commitCause) {
         try {
           prepared.rollback();
-        } catch {
+        } catch (rollbackCause) {
           resyncRequired = true;
           return Object.freeze({
             status: 'resync-required',
             expectedRevision: revision,
             receivedBaseRevision: baseRevision,
+            diagnostic: Object.freeze({
+              code: 'COLLABORATION_COMMIT_ROLLBACK_FAILED',
+              message:
+                'Remote transaction commit and rollback both failed; explicit resync is required',
+              cause: Object.freeze({ commit: commitCause, rollback: rollbackCause }),
+            }),
           });
         }
         return Object.freeze({ status: 'rejected', operationId });
@@ -626,24 +646,56 @@ export function createCollaborationSession(options: {
   readonly processor: RemoteOperationProcessor;
   readonly presence: PresenceStore;
 }): CollaborationSession {
+  interface ConnectionAttempt {
+    readonly generation: number;
+    readonly controller: AbortController;
+    unsubscribe?: () => void;
+    detachExternalAbort?: () => void;
+    cleaned: boolean;
+  }
+
   let state: CollaborationSession['state'] = Object.freeze({ status: 'disconnected' });
-  let unsubscribe: (() => void) | undefined;
-  let connectionAbort: AbortController | undefined;
-  let detachExternalAbort: (() => void) | undefined;
+  let currentAttempt: ConnectionAttempt | undefined;
   let connectionGeneration = 0;
   const listeners = new Set<() => void>();
   const publish = (next: CollaborationSession['state']): void => {
     state = Object.freeze(next);
     for (const listener of listeners) listener();
   };
+  const cleanupAttempt = (attempt: ConnectionAttempt): void => {
+    if (attempt.cleaned) return;
+    attempt.cleaned = true;
+    attempt.detachExternalAbort?.();
+    attempt.detachExternalAbort = undefined;
+    attempt.controller.abort();
+    attempt.unsubscribe?.();
+    attempt.unsubscribe = undefined;
+    if (currentAttempt === attempt) currentAttempt = undefined;
+  };
+  const requireResync = (
+    attempt: ConnectionAttempt,
+    diagnostic?: CollaborationRecoveryDiagnostic,
+  ): void => {
+    if (
+      attempt.cleaned ||
+      currentAttempt !== attempt ||
+      attempt.generation !== connectionGeneration
+    ) {
+      return;
+    }
+    connectionGeneration += 1;
+    cleanupAttempt(attempt);
+    options.processor.disconnect();
+    options.presence.replace([]);
+    publish({
+      status: 'resync-required',
+      revision: options.processor.revision,
+      ...(diagnostic === undefined ? {} : { diagnostic }),
+    });
+  };
   const disconnect = (): void => {
     connectionGeneration += 1;
-    detachExternalAbort?.();
-    detachExternalAbort = undefined;
-    connectionAbort?.abort();
-    connectionAbort = undefined;
-    unsubscribe?.();
-    unsubscribe = undefined;
+    if (currentAttempt !== undefined) cleanupAttempt(currentAttempt);
     options.processor.disconnect();
     options.presence.replace([]);
     publish({ status: 'disconnected' });
@@ -657,19 +709,28 @@ export function createCollaborationSession(options: {
       const generation = connectionGeneration;
       publish({ status: 'connecting' });
       const controller = new AbortController();
-      connectionAbort = controller;
+      const attempt: ConnectionAttempt = {
+        generation,
+        controller,
+        cleaned: false,
+      };
+      currentAttempt = attempt;
       const abort = (): void => {
-        if (generation === connectionGeneration) disconnect();
+        if (currentAttempt === attempt && generation === connectionGeneration) disconnect();
       };
       if (signal.aborted) {
         disconnect();
         throw new TypeError('Collaboration connect was cancelled');
       }
       signal.addEventListener('abort', abort, { once: true });
-      detachExternalAbort = () => signal.removeEventListener('abort', abort);
+      attempt.detachExternalAbort = () => signal.removeEventListener('abort', abort);
       try {
         const handshake = await options.port.connect(controller.signal);
-        if (controller.signal.aborted || generation !== connectionGeneration) {
+        if (
+          controller.signal.aborted ||
+          generation !== connectionGeneration ||
+          currentAttempt !== attempt
+        ) {
           throw new TypeError('Collaboration connect was cancelled');
         }
         if (!handshake.capabilities.protocolVersions.includes(1)) {
@@ -677,7 +738,7 @@ export function createCollaborationSession(options: {
         }
         options.processor.resetAfterResync(handshake.revision);
         const nextUnsubscribe = options.port.subscribe((event) => {
-          if (generation !== connectionGeneration) return;
+          if (generation !== connectionGeneration || currentAttempt !== attempt) return;
           try {
             if (event.type === 'presence') {
               options.presence.replace(event.presence);
@@ -685,28 +746,24 @@ export function createCollaborationSession(options: {
             }
             const outcome = options.processor.process(event.operation);
             if (outcome.status === 'resync-required') {
-              publish({ status: 'resync-required', revision: options.processor.revision });
+              requireResync(attempt, outcome.diagnostic);
             } else if (outcome.status === 'applied') {
               publish({ status: 'connected', revision: outcome.revision });
             }
           } catch {
-            connectionAbort?.abort();
-            connectionAbort = undefined;
-            unsubscribe?.();
-            unsubscribe = undefined;
-            options.processor.disconnect();
-            options.presence.replace([]);
-            publish({ status: 'resync-required', revision: options.processor.revision });
+            if (generation !== connectionGeneration || currentAttempt !== attempt) return;
+            requireResync(attempt);
           }
         }, controller.signal);
-        if (generation !== connectionGeneration) {
+        if (generation !== connectionGeneration || currentAttempt !== attempt) {
           nextUnsubscribe();
           throw new TypeError('Collaboration connect was cancelled');
         }
-        unsubscribe = nextUnsubscribe;
+        attempt.unsubscribe = nextUnsubscribe;
         publish({ status: 'connected', revision: options.processor.revision });
       } catch (error) {
-        if (generation === connectionGeneration) disconnect();
+        if (generation === connectionGeneration && currentAttempt === attempt) disconnect();
+        else cleanupAttempt(attempt);
         throw error;
       }
     },

@@ -44,6 +44,56 @@ export interface CommentAnchorUpdateAck {
   readonly operationId: string;
 }
 
+export interface CommentAnchorUpdateConflict {
+  readonly status: 'conflict';
+  readonly operationId: string;
+  readonly expectedRevision: string;
+  readonly currentRevision: string;
+}
+
+export interface CommentAnchorConflictRecovery {
+  readonly action: 'rebase-and-retry';
+  readonly rebase: {
+    readonly fromRevision: string;
+    readonly toRevision: string;
+  };
+  readonly retry: {
+    readonly method: 'queue';
+    readonly operationId: string;
+  };
+}
+
+/** Stable typed failure returned when a durable comment batch must be rebased before retrying. */
+export class CommentAnchorOutboxConflictError extends Error {
+  readonly code = 'COMMENT_ANCHOR_OUTBOX_CONFLICT';
+  readonly operationId: string;
+  readonly expectedRevision: string;
+  readonly currentRevision: string;
+  readonly recovery: CommentAnchorConflictRecovery;
+
+  constructor(
+    operationId: string,
+    expectedRevision: string,
+    currentRevision: string,
+    cause?: unknown,
+  ) {
+    super(
+      `Comment anchor update ${operationId} conflicted: expected ${expectedRevision}, current ${currentRevision}; rebase and retry`,
+      cause === undefined ? undefined : { cause },
+    );
+    this.name = 'CommentAnchorOutboxConflictError';
+    this.operationId = operationId;
+    this.expectedRevision = expectedRevision;
+    this.currentRevision = currentRevision;
+    this.recovery = deepFreeze({
+      action: 'rebase-and-retry',
+      rebase: { fromRevision: expectedRevision, toRevision: currentRevision },
+      retry: { method: 'queue', operationId },
+    });
+    Object.freeze(this);
+  }
+}
+
 /** Host-owned durable storage. `put` must complete before a remote submission begins. */
 export interface CommentAnchorOutbox {
   put(batch: CommentAnchorUpdateBatch): Promise<void>;
@@ -52,7 +102,10 @@ export interface CommentAnchorOutbox {
 }
 
 export interface CommentAnchorUpdatePort {
-  submit(batch: CommentAnchorUpdateBatch, signal: AbortSignal): Promise<CommentAnchorUpdateAck>;
+  submit(
+    batch: CommentAnchorUpdateBatch,
+    signal: AbortSignal,
+  ): Promise<CommentAnchorUpdateAck | CommentAnchorUpdateConflict>;
 }
 
 export interface CommentAnchorOutboxCoordinator {
@@ -464,6 +517,23 @@ export function createCommentAnchorOutboxCoordinator(options: {
   ): Promise<CommentAnchorUpdateAck> => {
     if (signal.aborted) throw new TypeError('Comment anchor update was cancelled');
     const acknowledgement = await options.adapter.submit(batch, signal);
+    if ('status' in acknowledgement) {
+      if (
+        acknowledgement.status !== 'conflict' ||
+        acknowledgement.operationId !== batch.operationId ||
+        acknowledgement.expectedRevision !== batch.fromDocumentRevision ||
+        !identifierPattern.test(acknowledgement.expectedRevision) ||
+        !identifierPattern.test(acknowledgement.currentRevision)
+      ) {
+        throw new TypeError('Comment anchor update conflict response is invalid');
+      }
+      throw new CommentAnchorOutboxConflictError(
+        batch.operationId,
+        acknowledgement.expectedRevision,
+        acknowledgement.currentRevision,
+        acknowledgement,
+      );
+    }
     if (acknowledgement.operationId !== batch.operationId) {
       throw new TypeError('Comment anchor update acknowledgement does not match operationId');
     }
@@ -483,11 +553,18 @@ export function createCommentAnchorOutboxCoordinator(options: {
           await options.outbox.list(snapshot.documentId),
         );
         const previous = pending[pending.length - 1];
+        const duplicate = pending.find((item) => item.operationId === snapshot.operationId);
         if (
-          pending.some((item) => item.operationId === snapshot.operationId) ||
+          duplicate !== undefined ||
           (previous !== undefined && previous.toDocumentRevision !== snapshot.fromDocumentRevision)
         ) {
-          throw new TypeError('Comment outbox pending revision chain conflict');
+          throw new CommentAnchorOutboxConflictError(
+            snapshot.operationId,
+            snapshot.fromDocumentRevision,
+            previous?.toDocumentRevision ??
+              duplicate?.toDocumentRevision ??
+              snapshot.fromDocumentRevision,
+          );
         }
         await options.outbox.put(snapshot);
         return submitStored(snapshot, signal);

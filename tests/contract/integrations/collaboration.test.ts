@@ -168,16 +168,18 @@ describe('collaboration integration contract', () => {
   });
 
   it('requires resync when both remote commit and rollback fail', () => {
+    const commitCause = new Error('partial host failure');
+    const rollbackCause = new Error('rollback failure');
     const processor = createRemoteOperationProcessor({
       initialRevision: 'revision-1',
       permissionGate: () => true,
       transactionBoundary: {
         prepare: () => ({
           commit: () => {
-            throw new Error('partial host failure');
+            throw commitCause;
           },
           rollback: () => {
-            throw new Error('rollback failure');
+            throw rollbackCause;
           },
         }),
       },
@@ -190,10 +192,18 @@ describe('collaboration integration contract', () => {
       transaction,
     };
 
-    expect(processor.process(operation)).toEqual({
+    expect(processor.process(operation)).toMatchObject({
       status: 'resync-required',
       expectedRevision: 'revision-1',
       receivedBaseRevision: 'revision-1',
+      diagnostic: {
+        code: 'COLLABORATION_COMMIT_ROLLBACK_FAILED',
+        message: 'Remote transaction commit and rollback both failed; explicit resync is required',
+        cause: {
+          commit: commitCause,
+          rollback: rollbackCause,
+        },
+      },
     });
     expect(
       processor.process({
@@ -625,6 +635,122 @@ describe('collaboration integration contract', () => {
       status: 'resync-required',
       revision: 'revision-1',
     });
+  });
+
+  it('stops the current subscription after commit and rollback fail until explicit resync', async () => {
+    const commitCause = new Error('partial host failure');
+    const rollbackCause = new Error('rollback failure');
+    const unsubscribe = vi.fn();
+    let listener:
+      | ((
+          event: import('../../../src/integrations/collaboration').CollaborationInboundEvent,
+        ) => void)
+      | undefined;
+    let connectionSignal: AbortSignal | undefined;
+    const session = createCollaborationSession({
+      processor: createRemoteOperationProcessor({
+        initialRevision: 'revision-0',
+        permissionGate: () => true,
+        transactionBoundary: {
+          prepare: () => ({
+            commit: () => {
+              throw commitCause;
+            },
+            rollback: () => {
+              throw rollbackCause;
+            },
+          }),
+        },
+      }),
+      presence: createPresenceStore({ now: () => 0 }),
+      port: {
+        connect: async (signal) => {
+          connectionSignal = signal;
+          return {
+            revision: 'revision-1',
+            capabilities: { protocolVersions: [1], collaborativeUndo: true },
+          };
+        },
+        subscribe: (next) => {
+          listener = next;
+          return unsubscribe;
+        },
+      },
+    });
+    await session.connect(new AbortController().signal);
+
+    listener?.({
+      type: 'operation',
+      operation: {
+        operationId: 'operation-corrupt',
+        actorId: 'actor-2',
+        baseRevision: 'revision-1',
+        revision: 'revision-2',
+        transaction,
+      },
+    });
+
+    expect(connectionSignal?.aborted).toBe(true);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(session.getSnapshot()).toMatchObject({
+      status: 'resync-required',
+      revision: 'revision-1',
+      diagnostic: {
+        code: 'COLLABORATION_COMMIT_ROLLBACK_FAILED',
+        cause: { commit: commitCause, rollback: rollbackCause },
+      },
+    });
+  });
+
+  it('lets a stale event catch clean only its own connection attempt', async () => {
+    let replacement: Promise<void> | undefined;
+    let failFirstPresence = false;
+    const unsubscribeFirst = vi.fn();
+    const unsubscribeSecond = vi.fn();
+    const listeners: ((
+      event: import('../../../src/integrations/collaboration').CollaborationInboundEvent,
+    ) => void)[] = [];
+    const presence = {
+      replace: vi.fn(() => {
+        if (!failFirstPresence) return;
+        failFirstPresence = false;
+        session.disconnect();
+        replacement = session.connect(new AbortController().signal);
+        throw new Error('obsolete presence failure');
+      }),
+      list: () => [],
+      getSnapshot: () => [],
+      subscribe: () => () => undefined,
+      close: () => undefined,
+    };
+    const session = createCollaborationSession({
+      processor: createRemoteOperationProcessor({
+        initialRevision: 'revision-0',
+        permissionGate: () => true,
+        transactionBoundary: {
+          prepare: () => ({ commit: vi.fn(), rollback: vi.fn() }),
+        },
+      }),
+      presence,
+      port: {
+        connect: async () => ({
+          revision: 'revision-1',
+          capabilities: { protocolVersions: [1], collaborativeUndo: true },
+        }),
+        subscribe: (listener) => {
+          listeners.push(listener);
+          return listeners.length === 1 ? unsubscribeFirst : unsubscribeSecond;
+        },
+      },
+    });
+    await session.connect(new AbortController().signal);
+    failFirstPresence = true;
+
+    listeners[0]?.({ type: 'presence', presence: [] });
+    await expect(replacement).resolves.toBeUndefined();
+    expect(unsubscribeFirst).toHaveBeenCalledTimes(1);
+    expect(unsubscribeSecond).not.toHaveBeenCalled();
+    expect(session.getSnapshot()).toEqual({ status: 'connected', revision: 'revision-1' });
   });
 
   it('does not let an obsolete handshake failure disconnect a newer connection', async () => {

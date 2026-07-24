@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CoordinateTransform } from '../../../src/core/coordinates/coordinate-transform';
 import {
+  CommentAnchorOutboxConflictError,
   createCommentStore,
   createCommentAnchorOutboxCoordinator,
   projectCommentPrintContent,
@@ -196,19 +197,70 @@ describe('comments integration contract', () => {
       adapter: { submit },
     });
 
-    await expect(
-      coordinator.queue(
-        {
-          ...batch,
-          operationId: 'operation-2',
-          fromDocumentRevision: 'revision-stale',
-          toDocumentRevision: 'revision-3',
-        },
-        new AbortController().signal,
-      ),
-    ).rejects.toThrow(/revision chain conflict/u);
+    const conflict = coordinator.queue(
+      {
+        ...batch,
+        operationId: 'operation-2',
+        fromDocumentRevision: 'revision-stale',
+        toDocumentRevision: 'revision-3',
+      },
+      new AbortController().signal,
+    );
+    await expect(conflict).rejects.toMatchObject({
+      name: 'CommentAnchorOutboxConflictError',
+      code: 'COMMENT_ANCHOR_OUTBOX_CONFLICT',
+      operationId: 'operation-2',
+      expectedRevision: 'revision-stale',
+      currentRevision: 'revision-2',
+      recovery: {
+        action: 'rebase-and-retry',
+        rebase: { fromRevision: 'revision-stale', toRevision: 'revision-2' },
+        retry: { method: 'queue', operationId: 'operation-2' },
+      },
+    } satisfies Partial<CommentAnchorOutboxConflictError>);
     expect(put).not.toHaveBeenCalled();
     expect(submit).not.toHaveBeenCalled();
+  });
+
+  it('retains a remotely conflicted batch with a typed rebase-and-retry path', async () => {
+    const stored = new Map<string, CommentAnchorUpdateBatch>();
+    const coordinator = createCommentAnchorOutboxCoordinator({
+      outbox: {
+        put: async (item) => {
+          stored.set(item.operationId, item);
+        },
+        remove: async (operationId) => {
+          stored.delete(operationId);
+        },
+        list: async () => [...stored.values()],
+      },
+      adapter: {
+        submit: async () => ({
+          status: 'conflict' as const,
+          operationId: 'operation-1',
+          expectedRevision: 'revision-1',
+          currentRevision: 'revision-remote',
+        }),
+      },
+    });
+
+    await expect(coordinator.queue(batch, new AbortController().signal)).rejects.toBeInstanceOf(
+      CommentAnchorOutboxConflictError,
+    );
+    await expect(
+      coordinator.resume('document-1', new AbortController().signal),
+    ).rejects.toMatchObject({
+      code: 'COMMENT_ANCHOR_OUTBOX_CONFLICT',
+      operationId: 'operation-1',
+      expectedRevision: 'revision-1',
+      currentRevision: 'revision-remote',
+      recovery: {
+        action: 'rebase-and-retry',
+        rebase: { fromRevision: 'revision-1', toRevision: 'revision-remote' },
+        retry: { method: 'queue', operationId: 'operation-1' },
+      },
+    });
+    expect(stored.has('operation-1')).toBe(true);
   });
 
   it('sanitizes bounded rich text and rejects revision or permission conflicts', () => {
