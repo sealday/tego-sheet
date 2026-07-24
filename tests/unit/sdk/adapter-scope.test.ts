@@ -102,6 +102,50 @@ describe('AdapterScope invocation boundary', () => {
     expect(direct).not.toHaveBeenCalled();
   });
 
+  it('snapshots hostile invocation fields once before authorization and execution', async () => {
+    const direct = vi.fn(async ({ capability, input }) => ({ capability, input }));
+    const registry = createAdapterRegistry({
+      apiVersion: '1.0',
+      environment: 'browser',
+    });
+    await registry.register(trustedSolver(direct, ['solve', 'inspect']));
+    const scope = registry.createScope({
+      signal: new AbortController().signal,
+      grant: createCapabilityGrant(['solve']),
+    });
+    let capabilityReads = 0;
+    let inputReads = 0;
+    let validatorReads = 0;
+    const invocation = {
+      get capability() {
+        capabilityReads += 1;
+        return capabilityReads === 1 ? 'solve' : 'inspect';
+      },
+      get input() {
+        inputReads += 1;
+        return inputReads === 1 ? { value: 'first' } : { value: 'second' };
+      },
+      get validateResult() {
+        validatorReads += 1;
+        return () => true;
+      },
+    };
+
+    await expect(scope.invoke(registry.resolve('solver'), invocation as never)).resolves.toEqual({
+      capability: 'solve',
+      input: { value: 'first' },
+    });
+    expect({ capabilityReads, inputReads, validatorReads }).toEqual({
+      capabilityReads: 1,
+      inputReads: 1,
+      validatorReads: 1,
+    });
+    expect(direct).toHaveBeenCalledWith(
+      { capability: 'solve', input: { value: 'first' } },
+      expect.any(Object),
+    );
+  });
+
   it('snapshots grants instead of trusting a caller-supplied allows method', async () => {
     const direct = vi.fn(async () => null);
     const registry = createAdapterRegistry({

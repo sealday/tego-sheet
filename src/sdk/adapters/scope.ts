@@ -204,18 +204,33 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
           'ADAPTER_RESOLUTION_INVALID',
           'Adapter resolution is forged, foreign, or no longer registered',
         );
-      if (
-        !grant.allows(invocation.capability) ||
-        !binding.manifest.capabilities.includes(invocation.capability)
-      ) {
-        fail('CAPABILITY_DENIED', `Capability ${invocation.capability} was not granted`, {
+      let capability: string;
+      let input: unknown;
+      let validateResult: ScopedAdapterInvocation<Result>['validateResult'];
+      try {
+        capability = invocation.capability;
+        input = invocation.input;
+        validateResult = invocation.validateResult;
+      } catch (cause) {
+        return fail('ADAPTER_INPUT_INVALID', 'Adapter invocation could not be read safely', {
           resolution,
-          details: { capability: invocation.capability },
+          cause,
+        });
+      }
+      if (typeof capability !== 'string' || typeof validateResult !== 'function') {
+        fail('ADAPTER_INPUT_INVALID', 'Adapter invocation has invalid capability or validator', {
+          resolution,
+        });
+      }
+      if (!grant.allows(capability) || !binding.manifest.capabilities.includes(capability)) {
+        fail('CAPABILITY_DENIED', `Capability ${capability} was not granted`, {
+          resolution,
+          details: { capability },
         });
       }
       let inputSnapshot: JsonValue;
       try {
-        inputSnapshot = snapshotJsonValue(invocation.input, 'adapter.input');
+        inputSnapshot = snapshotJsonValue(input, 'adapter.input');
       } catch (cause) {
         return fail('ADAPTER_INPUT_INVALID', 'Adapter input is not strict JSON data', {
           resolution,
@@ -262,7 +277,7 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
               adapterId: binding.manifest.id,
               workerId: binding.descriptor.workerId,
               kind: binding.manifest.kind,
-              capability: invocation.capability,
+              capability,
               input: inputSnapshot,
               ...(configuration.documentId === undefined
                 ? {}
@@ -275,7 +290,7 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
           throw new TypeError(`Adapter ${binding.manifest.id} is not generically callable`);
         }
         return binding.implementation.invoke(
-          Object.freeze({ capability: invocation.capability, input: inputSnapshot }),
+          Object.freeze({ capability, input: inputSnapshot }),
           Object.freeze({
             ...(configuration.documentId === undefined
               ? {}
@@ -313,14 +328,14 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
         }
         let valid = false;
         try {
-          valid = invocation.validateResult(resultSnapshot);
+          valid = validateResult(resultSnapshot);
         } catch {
           valid = false;
         }
         if (!valid) {
           fail('ADAPTER_RESULT_INVALID', 'Adapter result failed its host-owned schema', {
             resolution,
-            details: { capability: invocation.capability },
+            details: { capability },
           });
         }
         const outputBytes = jsonSnapshotBytes(resultSnapshot);
@@ -346,7 +361,7 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
         return fail('ADAPTER_INVOCATION_FAILED', 'Adapter invocation failed', {
           resolution,
           cause,
-          details: { capability: invocation.capability },
+          details: { capability },
         });
       } finally {
         clearTimeout(timeout);
