@@ -4,25 +4,45 @@ import { useState } from 'react';
 export interface AiProposalPanelProps<ApplyResult = unknown> {
   /** Validated proposal, dry-run preview, and the one-shot accept/reject boundary. */
   readonly session: {
+    /** Validated command proposal awaiting an explicit user decision. */
     readonly proposal: {
+      /** Stable proposal identifier. */
       readonly id: string;
+      /** Human-readable description of the proposed change. */
       readonly summary: string;
+      /** Model assumptions displayed before the user decides. */
       readonly assumptions: readonly string[];
+      /** Validated opaque commands retained by the proposal session. */
       readonly commands: readonly unknown[];
     };
+    /** Value-free scope summary for the sanitized AI context. */
     readonly contextSummary?: {
+      /** Number of worksheets represented in the context. */
       readonly sheetCount: number;
+      /** Number of cells represented in the context. */
       readonly cellCount: number;
+      /** Number of cells omitted by limits or sanitization. */
       readonly omittedCellCount: number;
+      /** Serialized byte size of the sanitized context. */
       readonly serializedBytes: number;
     };
+    /** Dry-run result shown before any command can be applied. */
     readonly preview: {
+      /** Whether the proposal produces a change or is a no-op. */
       readonly status: 'ready' | 'noop';
-      readonly diagnostics: readonly { readonly severity?: string }[];
+      /** Diagnostics produced by validation and the dry run. */
+      readonly diagnostics: readonly {
+        /** Optional host-defined diagnostic severity. */
+        readonly severity?: string;
+      }[];
+      /** Document revision against which the proposal was previewed. */
       readonly baseRevision?: number;
+      /** Optional isolated preview document. */
       readonly document?: unknown;
     };
+    /** Applies the already validated proposal exactly once. */
     accept(): ApplyResult;
+    /** Rejects the proposal without applying commands. */
     reject(): void;
   };
   /** Receives the result returned by the accepted proposal session. */

@@ -80,4 +80,4 @@ test('release parity gate rejects synthetic evidence without a release context',
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);

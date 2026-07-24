@@ -253,10 +253,15 @@ export interface GroupCommand {
   readonly sheet: SheetId;
   /** Stable group definition; nesting level is derived by the controller. */
   readonly group: {
+    /** Stable group identifier. */
     readonly id: GroupId;
+    /** Whether the group spans rows or columns. */
     readonly axis: 'row' | 'column';
+    /** Inclusive zero-based start index. */
     readonly start: number;
+    /** Inclusive zero-based end index. */
     readonly end: number;
+    /** Whether the group is initially collapsed. */
     readonly collapsed: boolean;
   };
 }

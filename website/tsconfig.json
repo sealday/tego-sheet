@@ -17,7 +17,8 @@
       "tego-sheet/output/image": ["../dist/output/image/index.d.ts"],
       "tego-sheet/sdk": ["../dist/sdk/index.d.ts"],
       "tego-sheet/integrations": ["../dist/integrations/index.d.ts"],
-      "tego-sheet/interchange": ["../dist/interchange/index.d.ts"]
+      "tego-sheet/interchange": ["../dist/interchange/index.d.ts"],
+      "tego-sheet/analysis": ["../dist/analysis/index.d.ts"]
     },
     "strict": true
   },

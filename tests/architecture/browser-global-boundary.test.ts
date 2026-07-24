@@ -670,7 +670,7 @@ it('[ARCH-9] imports the public source entry without creating browser globals', 
   for (const [name, descriptor] of before) {
     expect(Object.getOwnPropertyDescriptor(globalThis, name), name).toEqual(descriptor);
   }
-});
+}, 15_000);
 
 it(
   '[ARCH-8] lists an enabled Playwright registration for every browser and visual assertion',

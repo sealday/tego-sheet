@@ -50,6 +50,9 @@ export default defineConfig({
   },
   test: {
     exclude: sharedExcludes,
+    // Architecture suites spawn TypeDoc, TypeScript, and React child processes. Bounding the shared
+    // pool keeps their explicit timeout contracts stable on developer and CI machines.
+    maxWorkers: 4,
     reporters: ['default', new VitestParityEvidenceReporter({ releaseOnly: true })],
     projects: [
       {
@@ -80,6 +83,7 @@ export default defineConfig({
           name: 'architecture',
           environment: 'node',
           exclude: sharedExcludes,
+          fileParallelism: false,
           include: ['tests/architecture/**/*.test.{ts,tsx}'],
         },
       },

@@ -111,6 +111,7 @@ export interface PresentationResolverOptions {
   readonly annotations?: (address: DocumentCellAddress) => readonly PresentationAnnotation[];
   /** Optional public custom-cell registry; unknown types retain safe text fallback semantics. */
   readonly cellTypes?: {
+    /** Returns the registered definition for a custom cell type. */
     readonly get: (type: string) => unknown;
   };
 }

@@ -76,48 +76,83 @@ interface TegoSheetSharedProps extends TegoSheetCallbacks {
   readonly readOnly?: boolean;
   /** Optional live host permission store; installed stores default every protected action to deny. */
   readonly permissionStore?: {
+    /** Returns the current immutable permission snapshot, or `undefined` before initialization. */
     getSnapshot():
       | {
+          /** Monotonic host permission revision. */
           readonly revision: string;
+          /** Actor whose grants are represented by the snapshot. */
           readonly actorId: string;
+          /** Evaluates one action against a typed host target. */
           can(action: string, target: object): boolean;
         }
       | undefined;
+    /** Evaluates one action against the current snapshot. */
     can(action: string, target: object): boolean;
+    /** Subscribes to permission changes and returns an idempotent disposer. */
     subscribe(listener: () => void): () => void;
   };
   /** Optional host-owned persistence session attached to committed workbook transactions. */
   readonly persistenceSession?: {
-    readonly state: { readonly status: string };
+    /** Current save, conflict, or connectivity state. */
+    readonly state: {
+      /** Stable persistence-state discriminator. */
+      readonly status: string;
+    };
+    /** Attaches the public controller and returns an idempotent disposer. */
     attachController(controller: object): () => void;
+    /** Installs unload protection for pending changes and returns an idempotent disposer. */
     bindBeforeUnload(target: {
+      /** Registers the unload listener. */
       addEventListener(type: 'beforeunload', listener: (event: BeforeUnloadEvent) => void): void;
+      /** Removes the unload listener. */
       removeEventListener(type: 'beforeunload', listener: (event: BeforeUnloadEvent) => void): void;
     }): () => void;
+    /** Subscribes to persistence state changes and returns an idempotent disposer. */
     subscribe(listener: () => void): () => void;
   };
   /** Optional host comment store used to project semantic cell/range markers. */
   readonly commentStore?: {
+    /** Returns the current immutable visible comment threads. */
     getSnapshot(): readonly {
+      /** Stable comment-thread identifier. */
       readonly id: string;
-      readonly anchor: { readonly type: string };
+      /** Semantic cell or range anchor. */
+      readonly anchor: {
+        /** Anchor discriminator used by the semantic projection. */
+        readonly type: string;
+      };
     }[];
+    /** Subscribes to comment changes and returns an idempotent disposer. */
     subscribe(listener: () => void): () => void;
   };
   /** Explicit comment print projection policy; defaults to excluding comments. */
   readonly commentPrintPolicy?: 'exclude' | 'markers' | 'full';
   /** Optional ephemeral collaboration presence projected as semantic participants. */
   readonly presenceStore?: {
+    /** Returns the current immutable remote presence records. */
     getSnapshot(): readonly {
+      /** Stable remote actor identifier. */
       readonly actorId: string;
+      /** Stable worksheet identifier containing the remote actor. */
       readonly sheetId: string;
-      readonly display: { readonly label: string };
+      /** Human-readable participant presentation. */
+      readonly display: {
+        /** Participant label announced by accessibility surfaces. */
+        readonly label: string;
+      };
     }[];
+    /** Subscribes to presence changes and returns an idempotent disposer. */
     subscribe(listener: () => void): () => void;
   };
   /** Optional collaboration connection session projected as accessible live status. */
   readonly collaborationSession?: {
-    getSnapshot(): { readonly status: string };
+    /** Returns the current collaboration connection state. */
+    getSnapshot(): {
+      /** Stable connection-state discriminator. */
+      readonly status: string;
+    };
+    /** Subscribes to connection changes and returns an idempotent disposer. */
     subscribe(listener: () => void): () => void;
   };
   /** Per-instance locale identifier and message dictionary for built-in chrome. */
