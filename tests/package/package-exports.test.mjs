@@ -76,6 +76,7 @@ test('the built root has only the approved runtime exports and internal subpaths
       `
       const root = await import('tego-sheet');
       const expected = [
+        'AiProposalPanel',
         'BUILTIN_FORMULA_COMPATIBILITY',
         'BUILTIN_NUMBER_FORMAT_COMPATIBILITY',
         'BrowserPrintError',
@@ -324,18 +325,34 @@ test('the integrations subpath exposes only host-owned protocol runtimes', () =>
       `
       const integrations = await import('tego-sheet/integrations');
       const expected = [
+        'checkpointDocumentVersion',
         'createAiProposalSession',
         'createCollaborationOutboxCoordinator',
+        'createCollaborationSession',
         'createCommentAnchorOutboxCoordinator',
+        'createCommentStore',
+        'createControllerAiProposalSession',
+        'createControllerRemoteTransactionBoundary',
         'createPermissionSnapshot',
         'createPermissionStore',
         'createPersistenceController',
+        'createPersistenceSession',
         'createPresenceStore',
         'createRemoteOperationProcessor',
         'createRestoreVersionProposal',
+        'createWorkbookTransactionPermissionGate',
+        'deriveWorkbookCommandPermissionRequests',
         'diffDocumentVersions',
+        'diffDocumentVersionsAsync',
         'evaluatePermission',
+        'listDocumentVersions',
+        'loadHistoryPreview',
+        'loadPersistedDocument',
         'projectAiContext',
+        'projectCommentPrintContent',
+        'restoreDocumentVersion',
+        'sanitizeCommentRichText',
+        'summarizeAiContext',
         'transformCommentAnchor',
       ];
       if (JSON.stringify(Object.keys(integrations)) !== JSON.stringify(expected)) {

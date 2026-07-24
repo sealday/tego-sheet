@@ -73,5 +73,5 @@ it('projects the collaboration connection state as accessible status', async () 
 
   await collaborationSession.connect(new AbortController().signal);
 
-  expect(rendered.getByText('connected')).toHaveClass('tego-sheet__collaboration-status');
+  expect(rendered.getByText('connected').className).toContain('tego-sheet__collaboration-status');
 });

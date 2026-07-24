@@ -23,6 +23,7 @@ import type {
 import type { JsonObject } from '../types/json';
 import { sheetId, type CellAddress, type SheetId } from '../types/coordinates';
 import type { ValidationResult } from '../types/validation';
+import type { WorkbookInitializationDefaults } from '../serialization/canonicalize-workbook';
 import { TegoSheetException } from '../errors/tego-sheet-exception';
 import {
   WorkbookController,
@@ -552,7 +553,7 @@ export class SpreadsheetDocumentController {
     return this.legacy.getSheetIds();
   }
 
-  getInitializationDefaults() {
+  getInitializationDefaults(): Readonly<WorkbookInitializationDefaults> {
     return this.legacy.getInitializationDefaults();
   }
 

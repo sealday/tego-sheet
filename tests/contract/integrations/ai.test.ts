@@ -1,9 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { WorkbookCommand } from '../../../src/core/commands/workbook-command';
 import { sheetId } from '../../../src/core';
+import { createDocumentController } from '../../../src/document-controller';
 import { parseSpreadsheetDocument } from '../../../src/document';
-import { createAiProposalSession, projectAiContext } from '../../../src/integrations/ai';
-import { createPermissionSnapshot } from '../../../src/integrations/permission';
+import {
+  createAiProposalSession,
+  createControllerAiProposalSession,
+  projectAiContext,
+  summarizeAiContext,
+} from '../../../src/integrations/ai';
+import {
+  createPermissionSnapshot,
+  createPermissionStore,
+} from '../../../src/integrations/permission';
 
 function document() {
   const parsed = parseSpreadsheetDocument({
@@ -81,6 +90,98 @@ describe('AI command integration contract', () => {
     ]);
     expect(JSON.stringify(context)).not.toContain('hidden');
     expect(JSON.stringify(context)).not.toContain('apiKey');
+    expect(summarizeAiContext(context)).toEqual({
+      sheetCount: 1,
+      cellCount: 2,
+      omittedCellCount: 1,
+      serializedBytes: new TextEncoder().encode(JSON.stringify(context)).byteLength,
+    });
+    expect(JSON.stringify(summarizeAiContext(context))).not.toContain('secret');
+  });
+
+  it('binds preview and explicit acceptance to one atomic controller transaction', async () => {
+    const source = document();
+    const controller = createDocumentController(source);
+    const permissionStore = createPermissionStore();
+    permissionStore.replace(
+      createPermissionSnapshot({
+        revision: 'permission-1',
+        actorId: 'actor-1',
+        grants: [
+          {
+            action: 'ai:propose',
+            target: { type: 'document', documentId: source.id },
+          },
+          {
+            action: 'ai:apply',
+            target: { type: 'document', documentId: source.id },
+          },
+          {
+            action: 'range:edit',
+            target: {
+              type: 'range',
+              range: {
+                sheetId: source.workbook.sheets[0]!.id,
+                start: { row: 0, column: 0 },
+                end: { row: 0, column: 0 },
+              },
+            },
+          },
+        ],
+      }),
+    );
+    const events = vi.fn();
+    controller.subscribe(events);
+    const session = await createControllerAiProposalSession({
+      controller,
+      permissions: permissionStore,
+      transactionId: 'ai-transaction-1',
+      signal: new AbortController().signal,
+      request: {
+        instruction: 'set A1',
+        locale: 'en-US',
+        allowedCommandTypes: ['set-cell-text'],
+      },
+      context: {
+        ranges: [
+          {
+            sheetId: source.workbook.sheets[0]!.id,
+            start: { row: 0, column: 0 },
+            end: { row: 0, column: 0 },
+          },
+        ],
+        include: ['values'],
+        redactions: [{ kind: 'mask-strings', replacement: '[redacted]' }],
+      },
+      adapter: {
+        propose: async () => ({
+          id: 'proposal-controller-1',
+          summary: 'Set A1',
+          assumptions: [],
+          commands: [
+            {
+              type: 'set-cell-text',
+              address: { sheet: sheetId(source.workbook.sheets[0]!.id), row: 0, column: 0 },
+              text: 'done',
+            },
+          ],
+        }),
+      },
+    });
+
+    expect(controller.getSnapshot().revision).toBe(0);
+    expect(events).not.toHaveBeenCalled();
+    expect(session.contextSummary.cellCount).toBe(1);
+    expect(session.preview.status).toBe('ready');
+
+    const result = session.accept();
+
+    expect(result.status).toBe('committed');
+    expect(result.transaction?.id).toBe('ai-transaction-1');
+    expect(result.transaction?.commands).toHaveLength(1);
+    expect(controller.getSnapshot().revision).toBe(1);
+    expect(events).toHaveBeenCalledTimes(1);
+    controller.dispose();
   });
 
   it('rejects unknown or disallowed proposal commands before dry-run', async () => {
@@ -314,6 +415,7 @@ describe('AI command integration contract', () => {
         type: 'paint-format',
         source: {
           sheet: sheetId('sheet-1'),
+          active: { row: 0, column: 1 },
           range: {
             start: { row: 0, column: 1 },
             end: { row: 0, column: 1 },
@@ -321,6 +423,7 @@ describe('AI command integration contract', () => {
         },
         target: {
           sheet: sheetId('sheet-1'),
+          active: { row: 0, column: 0 },
           range: {
             start: { row: 0, column: 0 },
             end: { row: 0, column: 0 },
@@ -331,6 +434,7 @@ describe('AI command integration contract', () => {
         type: 'autofill',
         source: {
           sheet: sheetId('sheet-1'),
+          active: { row: 0, column: 1 },
           range: {
             start: { row: 0, column: 1 },
             end: { row: 0, column: 1 },
@@ -338,6 +442,7 @@ describe('AI command integration contract', () => {
         },
         target: {
           sheet: sheetId('sheet-1'),
+          active: { row: 0, column: 0 },
           range: {
             start: { row: 0, column: 0 },
             end: { row: 0, column: 0 },

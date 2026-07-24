@@ -502,6 +502,8 @@ export { TemplatePreview } from './react/preview';
 export type { TemplatePreviewProps } from './react/preview';
 export { TemplateDesigner } from './react/template-designer';
 export type { TemplateDesignerProps } from './react/template-designer';
+export { AiProposalPanel } from './react/ai-proposal-panel';
+export type { AiProposalPanelProps } from './react/ai-proposal-panel';
 export { TegoSheet } from './react/tego-sheet';
 export type {
   SheetTabsRenderer,

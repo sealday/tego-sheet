@@ -1,14 +1,14 @@
+import type { JsonValue } from '../types/json';
 import type {
   AutoFilterData,
   CellData,
   CellStyle,
   ColsData,
-  JsonValue,
   RowsData,
   SheetData,
   ValidationData,
   WorkbookData,
-} from '..';
+} from '../types/workbook';
 import type { SheetId } from '../types/coordinates';
 import { migrateLegacyWorkbook } from '../../document/migrate-legacy';
 import type {

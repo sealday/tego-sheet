@@ -1,6 +1,17 @@
 import type { WorkbookCommand } from '../../core/commands/workbook-command';
 import type { SpreadsheetDocument } from '../../document';
-import type { PermissionAction, PermissionSnapshot, PermissionTarget } from '../permission';
+import type {
+  DocumentCommand,
+  DocumentController,
+  DocumentTransactionEnvelope,
+  DocumentTransactionResult,
+} from '../../document-controller';
+import type {
+  PermissionAction,
+  PermissionSnapshot,
+  PermissionStore,
+  PermissionTarget,
+} from '../permission';
 
 export type AiContextInclude = 'values' | 'formulas' | 'formats' | 'headers' | 'template-bindings';
 
@@ -63,6 +74,8 @@ export interface AiCommandPort {
 export interface AiTransactionPreview {
   readonly status: 'ready' | 'noop';
   readonly diagnostics: readonly { readonly severity?: string }[];
+  readonly baseRevision?: number;
+  readonly document?: SpreadsheetDocument;
 }
 
 export interface AiProposalSession<ApplyResult = unknown> {
@@ -70,6 +83,30 @@ export interface AiProposalSession<ApplyResult = unknown> {
   readonly preview: AiTransactionPreview;
   accept(): ApplyResult;
   reject(): void;
+}
+
+/** Value-free summary shown before or alongside an AI request. */
+export interface AiContextSummary {
+  readonly sheetCount: number;
+  readonly cellCount: number;
+  readonly omittedCellCount: number;
+  readonly serializedBytes: number;
+}
+
+/** Proposal session bound to the public atomic document controller. */
+export interface ControllerAiProposalSession extends AiProposalSession<DocumentTransactionResult> {
+  readonly contextSummary: AiContextSummary;
+}
+
+export interface CreateControllerAiProposalSessionOptions {
+  readonly controller: DocumentController;
+  readonly permissions: PermissionStore;
+  readonly adapter: AiCommandPort;
+  readonly signal: AbortSignal;
+  readonly request: AiRequest;
+  readonly context: Omit<ProjectAiContextOptions, 'documentRevision'>;
+  /** Stable caller-owned ID used for the one previewed and committed transaction. */
+  readonly transactionId: string;
 }
 
 export interface CreateAiProposalSessionOptions<ApplyResult> {
@@ -376,6 +413,16 @@ export function projectAiContext(
   return context;
 }
 
+/** Summarizes projected context without exposing cell values or formulas. */
+export function summarizeAiContext(context: SanitizedDocumentContext): AiContextSummary {
+  return Object.freeze({
+    sheetCount: context.sheets.length,
+    cellCount: context.sheets.reduce((total, sheet) => total + sheet.cells.length, 0),
+    omittedCellCount: context.omittedCellCount,
+    serializedBytes: new TextEncoder().encode(JSON.stringify(context)).byteLength,
+  });
+}
+
 function snapshotProposal(value: unknown, allowed: ReadonlySet<string>): AiCommandProposal {
   let snapshot: unknown;
   try {
@@ -479,5 +526,71 @@ export async function createAiProposalSession<ApplyResult>(
     reject(): void {
       settled = true;
     },
+  });
+}
+
+/** Binds sanitized AI proposals to one dry-run and one atomic public controller transaction. */
+export async function createControllerAiProposalSession(
+  options: CreateControllerAiProposalSessionOptions,
+): Promise<ControllerAiProposalSession> {
+  const snapshot = options.controller.getSnapshot();
+  const documentRevision = `revision-${snapshot.revision}`;
+  const context = projectAiContext(snapshot.document, {
+    ...options.context,
+    documentRevision,
+  });
+  const transactionId = identifier(options.transactionId, 'AI transaction ID');
+  let transaction: DocumentTransactionEnvelope | undefined;
+  const session = await createAiProposalSession({
+    documentId: snapshot.document.id,
+    documentRevision,
+    permissionSnapshot: options.permissions.getSnapshot(),
+    signal: options.signal,
+    request: options.request,
+    context,
+    adapter: options.adapter,
+    dryRun(commands): AiTransactionPreview {
+      transaction = Object.freeze({
+        schemaVersion: 1,
+        id: transactionId,
+        baseRevision: snapshot.revision,
+        commands: Object.freeze(
+          commands.map((command, index) =>
+            Object.freeze({
+              schemaVersion: 1,
+              id: `${transactionId}:command-${index + 1}`,
+              command: command as DocumentCommand,
+            }),
+          ),
+        ),
+      });
+      const preview = options.controller.dryRun(transaction, { source: 'ref' });
+      if (preview.status === 'rejected') {
+        return Object.freeze({
+          status: 'noop',
+          diagnostics: Object.freeze([
+            Object.freeze({ severity: 'error', code: preview.code, message: preview.message }),
+          ]),
+        });
+      }
+      return Object.freeze({
+        status: preview.status,
+        diagnostics: Object.freeze([]),
+        baseRevision: preview.baseRevision,
+        document: preview.document,
+      });
+    },
+    apply(): DocumentTransactionResult {
+      if (transaction === undefined) {
+        throw new TypeError('AI proposal transaction was not prepared');
+      }
+      return options.controller.transact(transaction, { source: 'ref' });
+    },
+    getCurrentRevision: () => `revision-${options.controller.getSnapshot().revision}`,
+    getPermissionSnapshot: () => options.permissions.getSnapshot(),
+  });
+  return Object.freeze({
+    ...session,
+    contextSummary: summarizeAiContext(context),
   });
 }
