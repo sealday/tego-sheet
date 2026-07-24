@@ -3,6 +3,7 @@ import type {
   ConditionalStyle,
   DocumentSheetId,
   JsonValue,
+  ResourceMetadata,
   SpreadsheetDocumentInput,
 } from '../document';
 import { archiveXml, readArchive } from './archive';
@@ -19,6 +20,7 @@ import {
 } from './contracts';
 import { buildDocument, type ImportedSheet } from './document-builder';
 import { attributes, decodeXml, textContent } from './xml';
+import { parseWorksheetDrawing } from './xlsx-drawing';
 
 function columnIndex(reference: string): number {
   const letters = /^([A-Z]+)\d+$/i.exec(reference)?.[1];
@@ -566,6 +568,7 @@ export function createXlsxReader(configuredLimits: InterchangeLimits = {}): Work
         );
       }
       for (const name of entryNames.filter((entry) => /\.rels$/i.test(entry))) {
+        if (/^xl\/drawings\/_rels\//i.test(name)) continue;
         relationshipTargets(archiveXml(entries, name, limits));
       }
       const workbook = archiveXml(entries, 'xl/workbook.xml', limits);
@@ -602,6 +605,7 @@ export function createXlsxReader(configuredLimits: InterchangeLimits = {}): Work
       }
       const sheets: ImportedSheet[] = [];
       const validations: { id: string; value: JsonValue }[] = [];
+      const resources: ResourceMetadata[] = [];
       const printProfiles: SpreadsheetDocumentInput['templates'][number]['printProfiles'][number][] =
         [];
       let totalCells = 0;
@@ -624,7 +628,7 @@ export function createXlsxReader(configuredLimits: InterchangeLimits = {}): Work
               ? ('very-hidden' as const)
               : ('visible' as const);
         const worksheetXml = archiveXml(entries, worksheetName, limits);
-        const sheet = parseWorksheet(
+        const parsedSheet = parseWorksheet(
           id,
           sheetAttributes.name,
           worksheetXml,
@@ -636,6 +640,23 @@ export function createXlsxReader(configuredLimits: InterchangeLimits = {}): Work
           visibility,
           options.signal,
         );
+        const drawing = parseWorksheetDrawing(
+          entries,
+          worksheetName,
+          worksheetXml,
+          id as DocumentSheetId,
+          limits,
+        );
+        if (!drawing.unsupported.includes('xlsx:drawing-objects')) {
+          const genericDrawing = unsupported.lastIndexOf('xlsx:drawing-objects');
+          if (genericDrawing >= 0) unsupported.splice(genericDrawing, 1);
+        }
+        unsupported.push(...drawing.unsupported);
+        resources.push(...drawing.resources);
+        const sheet: ImportedSheet = {
+          ...parsedSheet,
+          ...(drawing.objects.length === 0 ? {} : { objects: drawing.objects }),
+        };
         const profile = printProfile(id, worksheetXml);
         if (profile !== undefined) printProfiles.push(profile);
         totalCells += sheet.cells.length;
@@ -654,6 +675,7 @@ export function createXlsxReader(configuredLimits: InterchangeLimits = {}): Work
         buildDocument(sheets, {
           styles: styles.registry,
           validations,
+          resources,
           templates:
             printProfiles.length === 0
               ? []

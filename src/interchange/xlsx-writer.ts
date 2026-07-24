@@ -1,4 +1,4 @@
-import type { SpreadsheetDocument } from '../document';
+import type { SheetObject, SpreadsheetDocument } from '../document';
 import { XlsxAdapter } from '../output/xlsx';
 import type { GeneratedDocument, TemplatePrintProfile } from '../template';
 import {
@@ -29,10 +29,75 @@ function defaultPrintProfile(document: SpreadsheetDocument): TemplatePrintProfil
   };
 }
 
+function dataUrlBytes(
+  url: string | undefined,
+  mimeType: string | undefined,
+): readonly number[] | undefined {
+  if (url === undefined || mimeType === undefined) return undefined;
+  const match = /^data:([^;,]+);base64,([\s\S]*)$/i.exec(url);
+  if (match === null || match[1]?.toLowerCase() !== mimeType.toLowerCase()) return undefined;
+  try {
+    return Object.freeze(
+      atob(match[2]!)
+        .split('')
+        .map((character) => character.charCodeAt(0)),
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+function objectRange(
+  sheetId: SpreadsheetDocument['workbook']['sheets'][number]['id'],
+  object: SheetObject,
+) {
+  if (object.anchor.type === 'two-cell') {
+    return {
+      sheetId,
+      start: { row: object.anchor.from.row, column: object.anchor.from.column },
+      end: { row: object.anchor.to.row, column: object.anchor.to.column },
+    };
+  }
+  if (object.anchor.type === 'one-cell') {
+    return {
+      sheetId,
+      start: { row: object.anchor.cell.row, column: object.anchor.cell.column },
+      end: { row: object.anchor.cell.row, column: object.anchor.cell.column },
+    };
+  }
+  return {
+    sheetId,
+    start: { row: 0, column: 0 },
+    end: { row: 0, column: 0 },
+  };
+}
+
 function generatedDocument(document: SpreadsheetDocument): GeneratedDocument {
   const profile =
     document.templates.flatMap((template) => template.printProfiles)[0] ??
     defaultPrintProfile(document);
+  const resolved = document.resources.items.flatMap((resource) => {
+    const bytes = dataUrlBytes(resource.url, resource.mimeType);
+    return bytes === undefined || resource.mimeType === undefined
+      ? []
+      : [
+          {
+            reference: resource.id,
+            resource: {
+              contentHash: `xlsx:${resource.id}`,
+              type: 'image' as const,
+              mimeType: resource.mimeType,
+              bytes,
+            },
+          },
+        ];
+  });
+  const byReference = Object.fromEntries(
+    resolved.map(({ reference, resource }) => [reference, resource]),
+  );
+  const byHash = Object.fromEntries(
+    resolved.map(({ resource }) => [resource.contentHash, resource]),
+  );
   return {
     workbook: document.workbook,
     calculatedCells: [],
@@ -43,12 +108,24 @@ function generatedDocument(document: SpreadsheetDocument): GeneratedDocument {
     })),
     print: { pages: [], displayList: { pages: [], diagnostics: [] }, profile },
     resources: {
-      byHash: {},
-      byReference: {},
-      totalBytes: 0,
+      byHash,
+      byReference,
+      totalBytes: resolved.reduce((total, { resource }) => total + resource.bytes.length, 0),
       dispose: async () => undefined,
     },
-    objects: [],
+    objects: document.workbook.sheets.flatMap((sheet) =>
+      sheet.objects.map((object) => {
+        const range = objectRange(sheet.id, object);
+        return {
+          objectId: object.id,
+          ...(object.kind === 'image' ? { resourceId: object.resourceId } : {}),
+          policy: 'shared' as const,
+          itemIndex: 0,
+          source: range,
+          generated: range,
+        };
+      }),
+    ),
     diagnostics: [],
     metadata: {
       templateId: document.templates[0]?.id ?? 'interchange-default-template',
@@ -76,9 +153,7 @@ export function createXlsxWriter(configuredLimits: InterchangeLimits = {}): Work
     options: InterchangeWriteOptions = {},
   ): Promise<WorkbookExportResult> => {
     throwIfAborted(options.signal);
-    const unsupported = document.workbook.sheets.flatMap((sheet) =>
-      sheet.objects.length === 0 ? [] : ['xlsx:drawing-objects'],
-    );
+    const unsupported: string[] = [];
     const blob = await adapter.render(generatedDocument(document), {
       formulaMode: 'formula-and-cached-value',
       compatibility: 'excel',

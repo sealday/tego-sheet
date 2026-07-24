@@ -1,0 +1,414 @@
+import type { DocumentSheetId, ResourceId, ResourceMetadata, SheetObject } from '../document';
+import { archiveXml } from './archive';
+import type { ResolvedInterchangeLimits } from './contracts';
+import { attributes, textContent } from './xml';
+
+const EMU_PER_DIP = 9_525;
+const DEFAULT_COLUMN_WIDTH = 64;
+const DEFAULT_ROW_HEIGHT = 20;
+
+interface DrawingRelationship {
+  readonly target: string;
+  readonly external: boolean;
+  readonly type: string;
+}
+
+export interface ParsedWorksheetDrawing {
+  readonly objects: readonly SheetObject[];
+  readonly resources: readonly ResourceMetadata[];
+  readonly unsupported: readonly string[];
+}
+
+function relationships(xml: string): ReadonlyMap<string, DrawingRelationship> {
+  const result = new Map<string, DrawingRelationship>();
+  for (const match of xml.matchAll(/<Relationship\b([^>]*?)(?:\/>|>[\s\S]*?<\/Relationship>)/gi)) {
+    const value = attributes(match[1]!);
+    if (value.Id === undefined || value.Target === undefined) continue;
+    result.set(value.Id, {
+      target: value.Target,
+      external:
+        value.TargetMode?.toLowerCase() === 'external' || /^[a-z][\w+.-]*:/i.test(value.Target),
+      type: value.Type ?? '',
+    });
+  }
+  return result;
+}
+
+function relatedPart(basePart: string, target: string, requiredPrefix: string): string | undefined {
+  if (target.startsWith('/') || target.startsWith('\\')) return undefined;
+  const segments = [
+    ...basePart.split('/').slice(0, -1),
+    ...target.replaceAll('\\', '/').split('/'),
+  ];
+  const normalized: string[] = [];
+  for (const segment of segments) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..') {
+      if (normalized.length === 0) return undefined;
+      normalized.pop();
+    } else {
+      normalized.push(segment);
+    }
+  }
+  const result = normalized.join('/');
+  return result.startsWith(requiredPrefix) ? result : undefined;
+}
+
+function relationshipsPart(part: string): string {
+  const segments = part.split('/');
+  const name = segments.pop()!;
+  return `${segments.join('/')}/_rels/${name}.rels`;
+}
+
+function dip(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric / EMU_PER_DIP : undefined;
+}
+
+function integerElement(body: string, name: 'col' | 'row'): number | undefined {
+  const value = textContent(
+    new RegExp(`<(?:[\\w.-]+:)?${name}\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?${name}>`, 'i').exec(
+      body,
+    )?.[1] ?? '',
+  );
+  const numeric = Number(value);
+  return Number.isSafeInteger(numeric) && numeric >= 0 ? numeric : undefined;
+}
+
+function offsetElement(body: string, name: 'colOff' | 'rowOff'): number | undefined {
+  const value = textContent(
+    new RegExp(`<(?:[\\w.-]+:)?${name}\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?${name}>`, 'i').exec(
+      body,
+    )?.[1] ?? '',
+  );
+  return dip(value);
+}
+
+function marker(
+  body: string,
+  name: 'from' | 'to',
+):
+  | {
+      readonly row: number;
+      readonly column: number;
+      readonly offset: { readonly x: number; readonly y: number };
+    }
+  | undefined {
+  const content = new RegExp(
+    `<(?:[\\w.-]+:)?${name}\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?${name}>`,
+    'i',
+  ).exec(body)?.[1];
+  if (content === undefined) return undefined;
+  const column = integerElement(content, 'col');
+  const row = integerElement(content, 'row');
+  const x = offsetElement(content, 'colOff');
+  const y = offsetElement(content, 'rowOff');
+  return column === undefined || row === undefined || x === undefined || y === undefined
+    ? undefined
+    : { row, column, offset: { x, y } };
+}
+
+function extent(body: string): { readonly width: number; readonly height: number } | undefined {
+  const value = attributes(/<(?:[\w.-]+:)?ext\b([^>]*?)(?:\/>|>)/i.exec(body)?.[1] ?? '');
+  const width = dip(value.cx);
+  const height = dip(value.cy);
+  return width === undefined || height === undefined || width < 0 || height < 0
+    ? undefined
+    : { width, height };
+}
+
+function anchor(
+  type: 'absoluteAnchor' | 'oneCellAnchor' | 'twoCellAnchor',
+  anchorAttributes: Readonly<Record<string, string>>,
+  body: string,
+  sheetId: DocumentSheetId,
+): SheetObject['anchor'] | undefined {
+  if (type === 'absoluteAnchor') {
+    const position = attributes(/<(?:[\w.-]+:)?pos\b([^>]*?)(?:\/>|>)/i.exec(body)?.[1] ?? '');
+    const x = dip(position.x);
+    const y = dip(position.y);
+    const size = extent(body);
+    return x === undefined || y === undefined || size === undefined
+      ? undefined
+      : { type: 'absolute', rect: { x, y, ...size } };
+  }
+  const from = marker(body, 'from');
+  if (from === undefined) return undefined;
+  if (type === 'oneCellAnchor') {
+    const size = extent(body);
+    return size === undefined
+      ? undefined
+      : {
+          type: 'one-cell',
+          cell: { sheetId, row: from.row, column: from.column },
+          offset: from.offset,
+          size,
+        };
+  }
+  const to = marker(body, 'to');
+  if (to === undefined) return undefined;
+  const editAs = anchorAttributes.editAs ?? 'twoCell';
+  if (editAs === 'oneCell' || editAs === 'absolute') {
+    const x = from.column * DEFAULT_COLUMN_WIDTH + from.offset.x;
+    const y = from.row * DEFAULT_ROW_HEIGHT + from.offset.y;
+    const right = to.column * DEFAULT_COLUMN_WIDTH + to.offset.x;
+    const bottom = to.row * DEFAULT_ROW_HEIGHT + to.offset.y;
+    const size = { width: Math.max(0, right - x), height: Math.max(0, bottom - y) };
+    return editAs === 'absolute'
+      ? { type: 'absolute', rect: { x, y, ...size } }
+      : {
+          type: 'one-cell',
+          cell: { sheetId, row: from.row, column: from.column },
+          offset: from.offset,
+          size,
+        };
+  }
+  return {
+    type: 'two-cell',
+    from: { sheetId, ...from },
+    to: { sheetId, ...to },
+  };
+}
+
+function base64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
+}
+
+function imageMime(path: string, bytes: Uint8Array): 'image/png' | 'image/jpeg' | undefined {
+  if (
+    path.toLowerCase().endsWith('.png') &&
+    bytes.length >= 8 &&
+    [137, 80, 78, 71, 13, 10, 26, 10].every((value, index) => bytes[index] === value)
+  ) {
+    return 'image/png';
+  }
+  if (
+    /\.(?:jpe?g)$/i.test(path) &&
+    bytes.length >= 3 &&
+    bytes[0] === 0xff &&
+    bytes[1] === 0xd8 &&
+    bytes[2] === 0xff
+  ) {
+    return 'image/jpeg';
+  }
+  return undefined;
+}
+
+function rotation(body: string): number | undefined {
+  const value = Number(
+    attributes(/<(?:[\w.-]+:)?xfrm\b([^>]*?)(?:\/>|>)/i.exec(body)?.[1] ?? '').rot,
+  );
+  if (!Number.isFinite(value)) return undefined;
+  const degrees = (((value / 60_000) % 360) + 360) % 360;
+  return degrees === 0 ? undefined : degrees;
+}
+
+function nonVisual(body: string): {
+  readonly name: string;
+  readonly description?: string;
+  readonly locked: boolean;
+} {
+  const value = attributes(/<(?:[\w.-]+:)?cNvPr\b([^>]*?)(?:\/>|>)/i.exec(body)?.[1] ?? '');
+  return {
+    name: value.name ?? 'Imported object',
+    ...(value.descr === undefined ? {} : { description: value.descr }),
+    locked: /<(?:[\w.-]+:)?(?:spLocks|picLocks)\b[^>]*(?:noMove|noResize)="1"/i.test(body),
+  };
+}
+
+function shapeStyle(body: string): {
+  readonly fill?: string;
+  readonly stroke?: string;
+  readonly strokeWidth?: number;
+} {
+  const properties =
+    /<(?:[\w.-]+:)?spPr\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?spPr>/i.exec(body)?.[1] ?? '';
+  const line = /<(?:[\w.-]+:)?ln\b([^>]*)>([\s\S]*?)<\/(?:[\w.-]+:)?ln>/i.exec(properties);
+  const fillArea = line === null ? properties : properties.slice(0, line.index);
+  const fill = attributes(
+    /<(?:[\w.-]+:)?srgbClr\b([^>]*?)(?:\/>|>)/i.exec(fillArea)?.[1] ?? '',
+  ).val;
+  const stroke =
+    line === null
+      ? undefined
+      : attributes(/<(?:[\w.-]+:)?srgbClr\b([^>]*?)(?:\/>|>)/i.exec(line[2]!)?.[1] ?? '').val;
+  const width = line === null ? undefined : dip(attributes(line[1]!).w);
+  return {
+    ...(fill === undefined ? {} : { fill: `#${fill.toLowerCase()}` }),
+    ...(stroke === undefined ? {} : { stroke: `#${stroke.toLowerCase()}` }),
+    ...(width === undefined ? {} : { strokeWidth: width }),
+  };
+}
+
+function textBoxStyle(body: string): Extract<SheetObject, { kind: 'text-box' }>['style'] {
+  const runProperties = attributes(/<(?:[\w.-]+:)?rPr\b([^>]*?)(?:\/>|>)/i.exec(body)?.[1] ?? '');
+  const font = attributes(/<(?:[\w.-]+:)?latin\b([^>]*?)(?:\/>|>)/i.exec(body)?.[1] ?? '').typeface;
+  const color = attributes(/<(?:[\w.-]+:)?srgbClr\b([^>]*?)(?:\/>|>)/i.exec(body)?.[1] ?? '').val;
+  const alignment = attributes(/<(?:[\w.-]+:)?pPr\b([^>]*?)(?:\/>|>)/i.exec(body)?.[1] ?? '').algn;
+  return {
+    color: color === undefined ? '#000000' : `#${color.toLowerCase()}`,
+    fontFamily: font ?? 'Arial',
+    fontSize: Number(runProperties.sz ?? 1_200) / 100,
+    ...(alignment === undefined
+      ? {}
+      : {
+          horizontalAlign:
+            alignment === 'ctr'
+              ? ('center' as const)
+              : alignment === 'r'
+                ? ('right' as const)
+                : ('left' as const),
+        }),
+  };
+}
+
+function anchorEntries(xml: string): readonly {
+  readonly index: number;
+  readonly type: 'absoluteAnchor' | 'oneCellAnchor' | 'twoCellAnchor';
+  readonly attributes: Readonly<Record<string, string>>;
+  readonly body: string;
+}[] {
+  return (['absoluteAnchor', 'oneCellAnchor', 'twoCellAnchor'] as const)
+    .flatMap((type) =>
+      [
+        ...xml.matchAll(
+          new RegExp(
+            `<(?:[\\w.-]+:)?${type}\\b([^>]*)>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?${type}>`,
+            'gi',
+          ),
+        ),
+      ].map((match) => ({
+        index: match.index,
+        type,
+        attributes: attributes(match[1]!),
+        body: match[2]!,
+      })),
+    )
+    .sort((left, right) => left.index - right.index);
+}
+
+export function parseWorksheetDrawing(
+  entries: Readonly<Record<string, Uint8Array>>,
+  worksheetPart: string,
+  worksheetXml: string,
+  sheetId: DocumentSheetId,
+  limits: ResolvedInterchangeLimits,
+): ParsedWorksheetDrawing {
+  const unsupported: string[] = [];
+  const drawingReference = attributes(
+    /<(?:[\w.-]+:)?drawing\b([^>]*?)(?:\/>|>)/i.exec(worksheetXml)?.[1] ?? '',
+  )['r:id'];
+  if (drawingReference === undefined) return { objects: [], resources: [], unsupported };
+  const worksheetRelationshipsPath = relationshipsPart(worksheetPart);
+  const worksheetRelationshipsBytes = entries[worksheetRelationshipsPath];
+  if (worksheetRelationshipsBytes === undefined) {
+    return { objects: [], resources: [], unsupported: ['xlsx:drawing-objects'] };
+  }
+  const worksheetRelationships = relationships(
+    archiveXml(entries, worksheetRelationshipsPath, limits),
+  );
+  const drawingRelationship = worksheetRelationships.get(drawingReference);
+  if (drawingRelationship === undefined || drawingRelationship.external) {
+    return { objects: [], resources: [], unsupported: ['xlsx:drawing-external-relationship'] };
+  }
+  if (!drawingRelationship.type.endsWith('/drawing') && drawingRelationship.type !== 'drawing') {
+    return { objects: [], resources: [], unsupported: ['xlsx:drawing-resource-unsafe'] };
+  }
+  const drawingPart = relatedPart(worksheetPart, drawingRelationship.target, 'xl/drawings/');
+  if (drawingPart === undefined || entries[drawingPart] === undefined) {
+    return { objects: [], resources: [], unsupported: ['xlsx:drawing-resource-unsafe'] };
+  }
+  const drawingXml = archiveXml(entries, drawingPart, limits);
+  const drawingRelationshipsPath = relationshipsPart(drawingPart);
+  const drawingRelationships =
+    entries[drawingRelationshipsPath] === undefined
+      ? new Map<string, DrawingRelationship>()
+      : relationships(archiveXml(entries, drawingRelationshipsPath, limits));
+  const objects: SheetObject[] = [];
+  const resources: ResourceMetadata[] = [];
+  for (const [zIndex, entry] of anchorEntries(drawingXml).entries()) {
+    const objectAnchor = anchor(entry.type, entry.attributes, entry.body, sheetId);
+    if (objectAnchor === undefined) {
+      unsupported.push('xlsx:drawing-object-invalid');
+      continue;
+    }
+    const accessible = nonVisual(entry.body);
+    const common = {
+      id: `xlsx-object-${zIndex + 1}`,
+      anchor: objectAnchor,
+      zIndex,
+      locked: accessible.locked,
+      templateRepeat: 'shared' as const,
+      accessibility: {
+        name: accessible.name,
+        ...(accessible.description === undefined ? {} : { description: accessible.description }),
+      },
+      ...(rotation(entry.body) === undefined ? {} : { rotation: rotation(entry.body) }),
+    };
+    if (/<(?:[\w.-]+:)?pic\b/i.test(entry.body)) {
+      const relationshipId = attributes(
+        /<(?:[\w.-]+:)?blip\b([^>]*?)(?:\/>|>)/i.exec(entry.body)?.[1] ?? '',
+      )['r:embed'];
+      const relationship =
+        relationshipId === undefined ? undefined : drawingRelationships.get(relationshipId);
+      if (relationship === undefined || relationship.external) {
+        unsupported.push('xlsx:drawing-external-relationship');
+        continue;
+      }
+      if (!relationship.type.endsWith('/image') && relationship.type !== 'image') {
+        unsupported.push('xlsx:drawing-resource-unsupported');
+        continue;
+      }
+      const mediaPath = relatedPart(drawingPart, relationship.target, 'xl/media/');
+      if (mediaPath === undefined || entries[mediaPath] === undefined) {
+        unsupported.push('xlsx:drawing-resource-unsafe');
+        continue;
+      }
+      const bytes = entries[mediaPath]!;
+      const mimeType = imageMime(mediaPath, bytes);
+      if (mimeType === undefined) {
+        unsupported.push('xlsx:drawing-resource-unsupported');
+        continue;
+      }
+      const resourceId = `${sheetId}-xlsx-resource-${resources.length + 1}` as ResourceId;
+      resources.push({
+        id: resourceId,
+        kind: 'image',
+        mimeType,
+        byteLength: bytes.byteLength,
+        url: `data:${mimeType};base64,${base64(bytes)}`,
+      });
+      objects.push({ ...common, kind: 'image', resourceId, fit: 'fill' } as SheetObject);
+      continue;
+    }
+    const preset = attributes(
+      /<(?:[\w.-]+:)?prstGeom\b([^>]*?)(?:\/>|>)/i.exec(entry.body)?.[1] ?? '',
+    ).prst;
+    if (/<(?:[\w.-]+:)?cNvSpPr\b[^>]*\btxBox="1"/i.test(entry.body)) {
+      const text = [...entry.body.matchAll(/<(?:[\w.-]+:)?t\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?t>/gi)]
+        .map((match) => textContent(match[1]!))
+        .join('');
+      objects.push({
+        ...common,
+        kind: 'text-box',
+        text,
+        style: textBoxStyle(entry.body),
+      } as SheetObject);
+    } else if (preset === 'rect' || preset === 'ellipse' || preset === 'line') {
+      objects.push({
+        ...common,
+        kind: 'shape',
+        shape: preset === 'rect' ? 'rectangle' : preset,
+        style: shapeStyle(entry.body),
+      } as SheetObject);
+    } else {
+      unsupported.push('xlsx:drawing-unknown-shape');
+    }
+  }
+  return { objects, resources, unsupported };
+}

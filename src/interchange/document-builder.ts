@@ -3,6 +3,8 @@ import {
   type CellInput,
   type ConditionalFormat,
   type JsonValue,
+  type ResourceMetadata,
+  type SheetObject,
   type SheetFilter,
   type SheetRange,
   type SparseCellInput,
@@ -26,12 +28,14 @@ export interface ImportedSheet {
   readonly filter?: SheetFilter;
   readonly conditionalFormatting?: readonly ConditionalFormat[];
   readonly visibility?: WorksheetVisibility;
+  readonly objects?: readonly SheetObject[];
 }
 
 export interface ImportedWorkbookMetadata {
   readonly styles?: readonly { readonly id: string; readonly value: JsonValue }[];
   readonly validations?: readonly { readonly id: string; readonly value: JsonValue }[];
   readonly templates?: readonly SpreadsheetDocumentInput['templates'][number][];
+  readonly resources?: readonly ResourceMetadata[];
 }
 
 export function buildDocument(
@@ -90,6 +94,7 @@ export function buildDocument(
           ...(sheet.conditionalFormatting === undefined
             ? {}
             : { conditionalFormatting: [...sheet.conditionalFormatting] }),
+          ...(sheet.objects === undefined ? {} : { objects: [...sheet.objects] }),
         }),
       ),
       styles: metadata.styles?.map((entry) => ({ id: entry.id, value: entry.value })) ?? [],
@@ -104,7 +109,13 @@ export function buildDocument(
         bindings: [...template.bindings],
         printProfiles: [...template.printProfiles],
       })) ?? [],
-    resources: { items: [] },
+    resources: {
+      items:
+        metadata.resources?.map((resource) => ({
+          ...resource,
+          ...(resource.metadata === undefined ? {} : { metadata: resource.metadata }),
+        })) ?? [],
+    },
     extensions: {},
   };
   const parsed = parseSpreadsheetDocument(input);
