@@ -1,6 +1,6 @@
 # Extensibility Mini-RFCs
 
-- 状态：`planned`
+- 状态：`shipped`
 - 能力域：SDK Ecosystem
 - 产品边界：本项目提供可嵌入的电子表格组件与 TypeScript SDK，不提供插件市场、账号体系、插件托管、远程代码分发或商业授权服务。
 - 设计基线：允许破坏尚未发布的旧 API；扩展协议稳定后再承诺兼容窗口。
@@ -51,7 +51,7 @@ interface ExtensionRuntimeContext {
 
 ### 状态
 
-`planned`
+`shipped`
 
 ### 产品目标与用户场景
 
@@ -229,7 +229,7 @@ Editor input
 
 ### 状态
 
-`planned`
+`shipped`
 
 ### 产品目标与用户场景
 
@@ -401,7 +401,7 @@ Template metadata
 
 ### 状态
 
-`planned`
+`shipped`
 
 ### 产品目标与用户场景
 
@@ -597,4 +597,4 @@ Operation request
 
 ## 能力域完成定义
 
-当 E1–E3 的协议、类型测试、资源账本测试、异常隔离测试和至少一个参考实现全部通过后，Extensibility 能力域才可从 `planned` 进入 `in-progress`。在协议首个稳定主版本发布前，不对第三方扩展承诺长期兼容。
+E1–E3 的协议、类型测试、资源账本测试、异常隔离测试和参考实现已通过，Extensibility 能力域状态为 `shipped`。在协议首个稳定主版本发布前，不对第三方扩展承诺长期兼容。

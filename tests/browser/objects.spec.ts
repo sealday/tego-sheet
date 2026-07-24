@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('objects are keyboard accessible, undoable, and locked objects remain selectable', async ({
+test('@parity:structure.objects objects are keyboard accessible, undoable, and locked objects remain selectable', async ({
   page,
 }) => {
   await page.goto('/?objects=1');

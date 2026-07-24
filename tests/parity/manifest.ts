@@ -42,7 +42,7 @@ export const parityManifest: readonly ParityRow[] = [
     id: 'structure',
     unit: { assertions: ['structure.row-column-operations'] },
     component: { assertions: ['structure.sheet-tabs'] },
-    browser: { assertions: ['structure.resize-drag'] },
+    browser: { assertions: ['structure.objects', 'structure.resize-drag'] },
     visual: { assertions: ['structure.hidden-resized-grid'] },
   },
   {

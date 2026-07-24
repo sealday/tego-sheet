@@ -1,6 +1,6 @@
 # tego-sheet Roadmap
 
-状态基线：2026-07-22
+状态基线：2026-07-24
 
 本 Roadmap 面向可嵌入业务系统的 React 电子表格组件与 TypeScript SDK。优先级表达能力依赖和建议实施顺序，不代表发布日期。
 
@@ -10,28 +10,10 @@
 
 ## Planned phases
 
-| Phase | Capability                                                   | Status  | Design                                                  |
-| ----- | ------------------------------------------------------------ | ------- | ------------------------------------------------------- |
-| 2     | XLSX template output                                         | planned | [Template printing](template-printing.md)               |
-| 3     | Conditional formatting                                       | planned | [Formulas and data](formulas-data.md)                   |
-| 3     | Advanced validation, dropdown and checkbox cells             | planned | [Formulas and data](formulas-data.md)                   |
-| 3     | Expanded function library and cross-sheet references         | planned | [Formulas and data](formulas-data.md)                   |
-| 3     | Named ranges, array and spill formulas                       | planned | [Formulas and data](formulas-data.md)                   |
-| 3     | Multi-column sort, conditional filter and saved views        | planned | [Formulas and data](formulas-data.md)                   |
-| 3     | Grouping, deduplication, text split and data cleanup         | planned | [Formulas and data](formulas-data.md)                   |
-| 3     | CSV/TSV, XLSX and ODS interchange                            | planned | [Formulas and data](formulas-data.md)                   |
-| 3     | Structured tables and structured references                  | planned | [Analysis and visualization](analysis-visualization.md) |
-| 3     | Charts and Sparklines                                        | planned | [Analysis and visualization](analysis-visualization.md) |
-| 3     | Images, shapes, text boxes and anchored objects              | planned | [Analysis and visualization](analysis-visualization.md) |
-| 3     | PivotTable and Slicer                                        | planned | [Analysis and visualization](analysis-visualization.md) |
-| 3     | Goal Seek and pluggable Solver                               | planned | [Analysis and visualization](analysis-visualization.md) |
-| 4     | Public structured cell renderer/editor plugin SDK            | planned | [Extensibility](extensibility.md)                       |
-| 4     | Versioned Template Module SDK                                | planned | [Extensibility](extensibility.md)                       |
-| 4     | Public adapter lifecycle, trust policy and compatibility SDK | planned | [Extensibility](extensibility.md)                       |
-| 4     | Persistence and version history adapters                     | planned | [Host integrations](host-integrations.md)               |
-| 4     | Collaboration and remote selection adapters                  | planned | [Host integrations](host-integrations.md)               |
-| 4     | Permission and comment adapters                              | planned | [Host integrations](host-integrations.md)               |
-| 4     | Validated AI command proposals                               | planned | [Host integrations](host-integrations.md)               |
+| Phase | Capability                        | Status  | Design                                    |
+| ----- | --------------------------------- | ------- | ----------------------------------------- |
+| 2     | XLSX template output              | planned | [Template printing](template-printing.md) |
+| 3     | CSV/TSV, XLSX and ODS interchange | planned | [Formulas and data](formulas-data.md)     |
 
 已完成能力见 [Shipped Roadmap capabilities](shipped.md)。
 

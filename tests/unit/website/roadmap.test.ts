@@ -35,7 +35,7 @@ const miniRfcs = {
 describe('product roadmap data', () => {
   it('contains the approved capabilities in dependency order', () => {
     expect(roadmapPhases.map((phase) => phase.id)).toEqual([0, 1, 2, 3, 4]);
-    expect(roadmapItems).toHaveLength(20);
+    expect(roadmapItems).toHaveLength(2);
     expect(allRoadmapItems).toHaveLength(roadmapItems.length + shippedRoadmapItems.length);
     expect(shippedRoadmapItems.map((item) => item.id)).toEqual([
       'workbook-2',
@@ -51,8 +51,26 @@ describe('product roadmap data', () => {
       'resource-pipeline',
       'pdf-output',
       'image-output',
+      'conditional-formatting',
+      'advanced-validation',
+      'formula-library',
+      'array-formulas',
+      'saved-views',
+      'data-cleanup',
+      'structured-tables',
+      'charts',
+      'objects',
+      'pivot-slicer',
+      'solver',
+      'cell-sdk',
+      'template-sdk',
+      'adapter-sdk',
+      'persistence-history',
+      'collaboration',
+      'permission-comments',
+      'ai-commands',
     ]);
-    expect(new Set(roadmapItems.map((item) => item.id))).toHaveProperty('size', 20);
+    expect(new Set(roadmapItems.map((item) => item.id))).toHaveProperty('size', 2);
     expect(roadmapItems.every((item) => item.status === 'planned')).toBe(true);
     expect(roadmapItems[0]?.title).toBe('XLSX template output');
   });
@@ -141,6 +159,7 @@ describe('product roadmap data', () => {
       /依赖.*已决决策/,
     ];
     const ids = Object.values(miniRfcs).flat();
+    const plannedMiniRfcs = new Set(['TP5', 'IO-01']);
 
     expect(ids).toHaveLength(34);
     expect(new Set(ids)).toHaveProperty('size', 34);
@@ -157,20 +176,7 @@ describe('product roadmap data', () => {
           expect(miniRfc, `${file} ${id} must include ${section}`).toMatch(section);
         }
 
-        expect(miniRfc).toContain(
-          id === 'F1' ||
-            id === 'F2' ||
-            id === 'F3' ||
-            id === 'F4' ||
-            id === 'F5' ||
-            id === 'TP1' ||
-            id === 'TP2' ||
-            id === 'TP3' ||
-            id === 'TP4' ||
-            id === 'TP6'
-            ? 'shipped'
-            : 'planned',
-        );
+        expect(miniRfc).toContain(plannedMiniRfcs.has(id) ? 'planned' : 'shipped');
       }
     }
   });

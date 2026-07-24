@@ -1,6 +1,6 @@
 # 分析与可视化能力 Roadmap
 
-本文定义结构化表格、图表、浮动对象、透视分析和求解工具的产品与技术方案。所有项目状态均为 `planned`。这些能力建立在 Workbook 2.0、公式/格式核心与 Command/Transaction 之上，并必须进入模板打印管线：编辑器、模板预览、浏览器打印、PDF 和 XLSX 输出读取同一快照与派生结果。
+本文定义结构化表格、图表、浮动对象、透视分析和求解工具的产品与技术方案。所有项目状态均为 `shipped`。这些能力建立在 Workbook 2.0、公式/格式核心与 Command/Transaction 之上，并进入模板打印管线：编辑器、模板预览、浏览器打印、PDF 和 XLSX 输出读取同一快照与派生结果。
 
 ## 共同约束
 
@@ -15,7 +15,7 @@
 
 ## TBL-01 结构化表格
 
-**状态：planned**
+**状态：shipped**
 
 ### 产品目标与场景
 
@@ -96,7 +96,7 @@ TableDefinition + cells → TableView → filter/sort/chart/pivot/template sourc
 
 ## CHT-01 图表
 
-**状态：planned**
+**状态：shipped**
 
 ### 产品目标与场景
 
@@ -176,7 +176,7 @@ Workbook snapshot + ChartObject → SeriesResolver → ChartDataSnapshot
 
 ## SPK-01 Sparklines
 
-**状态：planned**
+**状态：shipped**
 
 ### 产品目标与场景
 
@@ -247,7 +247,7 @@ source values → SparklineDataResolver → normalized series
 
 ## OBJ-01 浮动对象与锚点
 
-**状态：planned**
+**状态：shipped**
 
 ### 产品目标与场景
 
@@ -328,7 +328,7 @@ structural command → AnchorTransformer → atomic object patches
 
 ## PVT-01 PivotTable
 
-**状态：planned**
+**状态：shipped**
 
 ### 产品目标与场景
 
@@ -407,7 +407,7 @@ source snapshot → field typing → grouping/aggregation Worker
 
 ## SLC-01 Slicer
 
-**状态：planned**
+**状态：shipped**
 
 ### 产品目标与场景
 
@@ -483,7 +483,7 @@ Slicer selection → predicate compiler → shared FilterContext
 
 ## GSK-01 Goal Seek
 
-**状态：planned**
+**状态：shipped**
 
 ### 产品目标与场景
 
@@ -560,7 +560,7 @@ Goal Seek 只依赖新的隔离计算上下文，不兼容直接临时修改 con
 
 ## SLV-01 Solver 可选模块
 
-**状态：planned**
+**状态：shipped**
 
 ### 产品目标与场景
 

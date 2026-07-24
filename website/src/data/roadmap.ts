@@ -195,6 +195,7 @@ export const allRoadmapItems = [
     'Conditional formatting',
     'Apply deterministic visual rules without mutating base styles.',
     '/docs/roadmap/formulas-data',
+    'shipped',
   ),
   item(
     'advanced-validation',
@@ -202,6 +203,7 @@ export const allRoadmapItems = [
     'Advanced validation, dropdown and checkbox cells',
     'Combine typed rules with accessible interactive cell controls.',
     '/docs/roadmap/formulas-data',
+    'shipped',
   ),
   item(
     'formula-library',
@@ -209,6 +211,7 @@ export const allRoadmapItems = [
     'Expanded function library and cross-sheet references',
     'Broaden Excel-compatible calculation with explicit support levels.',
     '/docs/roadmap/formulas-data',
+    'shipped',
   ),
   item(
     'array-formulas',
@@ -216,6 +219,7 @@ export const allRoadmapItems = [
     'Named ranges, array and spill formulas',
     'Model reusable names and dynamic multi-cell results safely.',
     '/docs/roadmap/formulas-data',
+    'shipped',
   ),
   item(
     'saved-views',
@@ -223,6 +227,7 @@ export const allRoadmapItems = [
     'Multi-column sort, conditional filter and saved views',
     'Separate reusable data views from destructive row changes.',
     '/docs/roadmap/formulas-data',
+    'shipped',
   ),
   item(
     'data-cleanup',
@@ -230,6 +235,7 @@ export const allRoadmapItems = [
     'Grouping, deduplication, text split and data cleanup',
     'Preview data transformations before one atomic command commits them.',
     '/docs/roadmap/formulas-data',
+    'shipped',
   ),
   item(
     'file-interchange',
@@ -244,6 +250,7 @@ export const allRoadmapItems = [
     'Structured tables and structured references',
     'Give tabular regions stable identity, columns and formula semantics.',
     '/docs/roadmap/analysis-visualization',
+    'shipped',
   ),
   item(
     'charts',
@@ -251,6 +258,7 @@ export const allRoadmapItems = [
     'Charts and Sparklines',
     'Render data-bound visualizations through deterministic series models.',
     '/docs/roadmap/analysis-visualization',
+    'shipped',
   ),
   item(
     'objects',
@@ -258,6 +266,7 @@ export const allRoadmapItems = [
     'Images, shapes, text boxes and anchored objects',
     'Keep floating content attached through structural sheet edits.',
     '/docs/roadmap/analysis-visualization',
+    'shipped',
   ),
   item(
     'pivot-slicer',
@@ -265,6 +274,7 @@ export const allRoadmapItems = [
     'PivotTable and Slicer',
     'Build refreshable aggregations and connected filter controls.',
     '/docs/roadmap/analysis-visualization',
+    'shipped',
   ),
   item(
     'solver',
@@ -272,6 +282,7 @@ export const allRoadmapItems = [
     'Goal Seek and pluggable Solver',
     'Express bounded optimization without embedding a solver service.',
     '/docs/roadmap/analysis-visualization',
+    'shipped',
   ),
   item(
     'cell-sdk',
@@ -279,6 +290,7 @@ export const allRoadmapItems = [
     'Public structured cell renderer/editor plugin SDK',
     'Open the typed cell protocol to trusted host extensions.',
     '/docs/roadmap/extensibility',
+    'shipped',
   ),
   item(
     'template-sdk',
@@ -286,6 +298,7 @@ export const allRoadmapItems = [
     'Versioned Template Module SDK',
     'Extend compilation through validated intermediate-representation hooks.',
     '/docs/roadmap/extensibility',
+    'shipped',
   ),
   item(
     'adapter-sdk',
@@ -293,6 +306,7 @@ export const allRoadmapItems = [
     'Public adapter lifecycle, trust policy and compatibility SDK',
     'Make environment, capabilities and cleanup explicit for integrations.',
     '/docs/roadmap/extensibility',
+    'shipped',
   ),
   item(
     'persistence-history',
@@ -300,6 +314,7 @@ export const allRoadmapItems = [
     'Persistence and version history adapters',
     'Let hosts save snapshots and expose durable revision history.',
     '/docs/roadmap/host-integrations',
+    'shipped',
   ),
   item(
     'collaboration',
@@ -307,6 +322,7 @@ export const allRoadmapItems = [
     'Collaboration and remote selection adapters',
     'Integrate host-owned synchronization without selecting a CRDT backend.',
     '/docs/roadmap/host-integrations',
+    'shipped',
   ),
   item(
     'permission-comments',
@@ -314,6 +330,7 @@ export const allRoadmapItems = [
     'Permission and comment adapters',
     'Connect authorization and discussion while preserving command checks.',
     '/docs/roadmap/host-integrations',
+    'shipped',
   ),
   item(
     'ai-commands',
@@ -321,6 +338,7 @@ export const allRoadmapItems = [
     'Validated AI command proposals',
     'Require schema validation, dry-run and user confirmation before changes.',
     '/docs/roadmap/host-integrations',
+    'shipped',
   ),
 ] as const satisfies readonly RoadmapItem[];
 

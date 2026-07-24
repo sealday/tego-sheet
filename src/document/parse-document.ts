@@ -1723,6 +1723,31 @@ function structuredTablesAt(
       );
     }
   });
+  const hasActiveProjection = (table: StructuredTable): boolean =>
+    table.filter !== undefined &&
+    (table.filter.filters.some(({ operator }) => operator !== 'all') ||
+      (table.filter.sort !== undefined && table.filter.sort !== null));
+  const dataRows = (table: StructuredTable): { start: number; end: number } => ({
+    start: table.range.start.row + (table.headerRows ?? 1),
+    end: table.range.end.row - (table.totalsRow === true ? 1 : 0),
+  });
+  tables.forEach((table, index) => {
+    if (!hasActiveProjection(table)) return;
+    const rows = dataRows(table);
+    const conflict = tables.findIndex((candidate, candidateIndex) => {
+      if (candidateIndex >= index || !hasActiveProjection(candidate)) return false;
+      const candidateRows = dataRows(candidate);
+      return rows.start <= candidateRows.end && candidateRows.start <= rows.end;
+    });
+    if (conflict >= 0) {
+      addDiagnostic(
+        context,
+        'INVALID_RANGE',
+        `${path}[${index}].filter`,
+        `Active table row projections overlap ${tables[conflict]!.name}`,
+      );
+    }
+  });
   return tables;
 }
 

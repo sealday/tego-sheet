@@ -382,7 +382,7 @@ describe('TBL-01 persistent structured tables', () => {
     expect(model.rowHeight(2)).toBeGreaterThan(0);
   });
 
-  it('resolves parallel active table row projections by deterministic left-to-right priority', () => {
+  it('rejects parallel active table row projections during parsing', () => {
     const input = fixture([
       {
         id: 'z-left-table',
@@ -434,14 +434,73 @@ describe('TBL-01 persistent structured tables', () => {
       { row: 2, column: 3, cell: { input: { type: 'number', value: 3 } } },
     ];
 
-    const controller = new SpreadsheetDocumentController(parseOk(input));
-    const model = createSheetGridModel(controller.getSnapshot().projection[0]!);
-
-    expect(Array.from({ length: 3 }, (_, visual) => model.logicalRowAtVisualIndex(visual))).toEqual(
-      [0, 2, 1],
+    const parsed = parseSpreadsheetDocument(input);
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) throw new Error('parallel active table row projections must fail');
+    expect(parsed.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'INVALID_RANGE',
+          message: expect.stringMatching(/active table.*row.*overlap/iu),
+        }),
+      ]),
     );
-    expect(model.rowHeight(1)).toBe(0);
-    expect(model.rowHeight(2)).toBeGreaterThan(0);
+  });
+
+  it('rejects a set-table command that activates an overlapping row projection atomically', () => {
+    const input = fixture([
+      {
+        id: 'left-table',
+        name: 'LeftValues',
+        range: {
+          sheetId: 'sheet-1',
+          start: { row: 0, column: 0 },
+          end: { row: 2, column: 1 },
+        },
+        columns: [
+          { id: 'left-region', name: 'Region' },
+          { id: 'left-amount', name: 'Amount' },
+        ],
+        filter: {
+          filters: [{ column: 0, operator: 'in', values: ['West'] }],
+          sort: { column: 1, direction: 'desc' },
+        },
+      },
+      {
+        id: 'right-table',
+        name: 'RightValues',
+        range: {
+          sheetId: 'sheet-1',
+          start: { row: 0, column: 2 },
+          end: { row: 2, column: 3 },
+        },
+        columns: [
+          { id: 'right-region', name: 'Region' },
+          { id: 'right-amount', name: 'Amount' },
+        ],
+      },
+    ]);
+    const controller = new SpreadsheetDocumentController(parseOk(input));
+    const before = controller.getDocument();
+    const right = before.workbook.sheets[0]!.tables.find(({ id }) => id === 'right-table')!;
+
+    expect(() =>
+      controller.dispatch(
+        {
+          type: 'set-table',
+          sheet: sheetId('sheet-1'),
+          table: {
+            ...right,
+            filter: {
+              filters: [{ column: 2, operator: 'in', values: ['South'] }],
+              sort: { column: 3, direction: 'asc' },
+            },
+          },
+        },
+        'ref',
+      ),
+    ).toThrowError(/active table.*row.*overlap/iu);
+    expect(controller.getDocument()).toEqual(before);
   });
 
   it.each([

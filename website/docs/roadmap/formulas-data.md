@@ -1,6 +1,6 @@
 # 公式与数据能力 Roadmap
 
-本文定义公式、格式、验证、筛选、数据整理与文件互操作的产品和技术方案。所有项目状态均为 `planned`，并以 Excel/XLSX 语义为主要兼容基准。能力建设必须服务于模板打印主线：同一文档快照在编辑器、模板预览、浏览器打印、PDF 与 XLSX 输出中使用一致的值、格式和可见性语义。
+本文定义公式、格式、验证、筛选、数据整理与文件互操作的产品和技术方案。除仍等待外部 Office 互操作证据的 IO-01 外，其余项目状态均为 `shipped`，并以 Excel/XLSX 语义为主要兼容基准。能力建设必须服务于模板打印主线：同一文档快照在编辑器、模板预览、浏览器打印、PDF 与 XLSX 输出中使用一致的值、格式和可见性语义。
 
 ## 共同约束
 
@@ -15,7 +15,7 @@
 
 ## FMT-01 数字格式与条件格式
 
-**状态：planned**
+**状态：shipped**
 
 ### 产品目标与场景
 
@@ -101,7 +101,7 @@ Workbook snapshot + patches → dependency invalidation → CellPresentation
 
 ## VAL-01 数据验证与交互式单元格
 
-**状态：planned**
+**状态：shipped**
 
 ### 产品目标与场景
 
@@ -184,7 +184,7 @@ Validation source change → dependency invalidation → affected-cell state
 
 ## FRM-01 高级公式引擎
 
-**状态：planned**
+**状态：shipped**
 
 ### 产品目标与场景
 
@@ -278,7 +278,7 @@ formula source → tokenizer/parser → typed AST → reference binder
 
 ## VIEW-01 排序、筛选与保存视图
 
-**状态：planned**
+**状态：shipped**
 
 ### 产品目标与场景
 
@@ -356,7 +356,7 @@ snapshot + selected visibility map → template render / print pagination
 
 ## DATA-01 数据整理与清洗命令
 
-**状态：planned**
+**状态：shipped**
 
 ### 产品目标与场景
 

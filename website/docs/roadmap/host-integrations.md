@@ -1,6 +1,6 @@
 # Host Integrations Mini-RFCs
 
-- 状态：`planned`
+- 状态：`shipped`
 - 能力域：Host Integrations
 - 产品定位：可嵌入业务系统的 React 电子表格组件与 TypeScript SDK。
 - 核心边界：本项目定义本地状态机、UI 协议、事务与 adapter 接口；宿主负责账号、认证、服务端授权、数据存储、实时服务、通知、计费、审计基础设施和运维。
@@ -24,7 +24,7 @@
 
 ### 状态
 
-`planned`
+`shipped`
 
 ### 产品目标与用户场景
 
@@ -183,7 +183,7 @@ Committed transaction
 
 ### 状态
 
-`planned`
+`shipped`
 
 ### 产品目标与用户场景
 
@@ -313,7 +313,7 @@ Remote event
 
 ### 状态
 
-`planned`
+`shipped`
 
 ### 产品目标与用户场景
 
@@ -440,7 +440,7 @@ Command proposal
 
 ### 状态
 
-`planned`
+`shipped`
 
 ### 产品目标与用户场景
 
@@ -585,7 +585,7 @@ Structural transaction
 
 ### 状态
 
-`planned`
+`shipped`
 
 ### 产品目标与用户场景
 
@@ -709,7 +709,7 @@ Restore confirm
 
 ### 状态
 
-`planned`
+`shipped`
 
 ### 产品目标与用户场景
 
@@ -850,7 +850,7 @@ User selection + instruction
 
 实施顺序为 `Permission → Persistence → Comments → Version History → Collaboration → AI Command`：权限先建立统一动作模型；持久化提供 revision；评论验证锚点协议；版本历史复用 snapshot/diff；协作最后接入事务与 revision；AI 在 command、权限和 dry-run 全部稳定后开放。
 
-每个 Host Integration 只有在以下条件同时满足时才能从 `planned` 进入 `in-progress`：
+每个 Host Integration 已满足以下交付条件并进入 `shipped`：
 
 - adapter 契约测试覆盖成功、拒绝、取消、超时、超限与释放。
 - 没有 adapter 时核心组件仍通过编辑、模板、预览和本地输出测试。

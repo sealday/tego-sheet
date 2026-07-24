@@ -664,10 +664,13 @@ it('[ARCH-5] separates browser API implementations from section 6.6 lifetime own
       'listener',
       new Set([
         'src/engine/interaction/resource-registry.ts',
+        'src/integrations/collaboration/index.ts',
+        'src/integrations/persistence/index.ts',
         'src/output/browser-print-adapter.ts',
         'src/output/pdf/index.ts',
         'src/react/adapters/interaction-adapter.ts',
         'src/sdk/adapters/scope.ts',
+        'src/sdk/cells/index.ts',
         'src/template/render.ts',
         'src/template/resources/resource-pipeline.ts',
         'src/validation/engine.ts',
@@ -680,6 +683,8 @@ it('[ARCH-5] separates browser API implementations from section 6.6 lifetime own
       'timer',
       new Set([
         'src/data-tools/range-index.ts',
+        'src/integrations/collaboration/index.ts',
+        'src/integrations/persistence/index.ts',
         'src/output/browser-print-adapter.ts',
         'src/output/pdf/index.ts',
         'src/react/adapters/interaction-adapter.ts',
@@ -695,11 +700,21 @@ it('[ARCH-5] separates browser API implementations from section 6.6 lifetime own
         'src/core/controller/spreadsheet-document-controller.ts',
         'src/core/controller/workbook-controller.ts',
         'src/document-controller.ts',
+        'src/integrations/collaboration/index.ts',
+        'src/integrations/persistence/index.ts',
         'src/react/adapters/controller-external-store.ts',
         'src/react/hooks/use-canvas-engine.ts',
       ]),
     ],
-    ['overlay', new Set(['src/output/browser-print-adapter.ts', 'src/output/image/index.ts'])],
+    [
+      'overlay',
+      new Set([
+        'src/integrations/collaboration/index.ts',
+        'src/integrations/comments/index.ts',
+        'src/output/browser-print-adapter.ts',
+        'src/output/image/index.ts',
+      ]),
+    ],
     ['portal', new Set()],
   ]);
   for (const [primitive, allowed] of implementationSites) {
@@ -713,7 +728,15 @@ it('[ARCH-5] separates browser API implementations from section 6.6 lifetime own
     ['animation-frame', new Set(['src/engine/canvas/render-scheduler.ts'])],
     ['timer', new Set(['src/engine/interaction/interaction-manager.ts'])],
     ['subscription', new Set(['src/react/hooks/use-canvas-engine.ts'])],
-    ['overlay', new Set(['src/output/browser-print-adapter.ts', 'src/output/image/index.ts'])],
+    [
+      'overlay',
+      new Set([
+        'src/integrations/collaboration/index.ts',
+        'src/integrations/comments/index.ts',
+        'src/output/browser-print-adapter.ts',
+        'src/output/image/index.ts',
+      ]),
+    ],
     ['portal', new Set()],
   ]);
   for (const [primitive, allowed] of ownership) {

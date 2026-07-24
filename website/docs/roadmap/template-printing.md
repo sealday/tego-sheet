@@ -1,6 +1,6 @@
 # 模板打印与文档生成 Mini-RFC
 
-**Status:** planned
+**Status:** mixed — TP5 planned; TP1–TP4 and TP6 shipped
 **Owner:** tego-sheet core team
 **Product boundary:** 可嵌入业务系统的组件与 TypeScript SDK
 **Priority:** Roadmap 首要能力域
@@ -29,7 +29,7 @@
 - 模板绑定以独立元数据为真相来源；单元格内可见标签只是编辑表现，编译器不依赖扫描任意字符串恢复结构。
 - 允许破坏性更新。旧的无参数 `print()`、旧打印 Canvas 挂载逻辑和旧数据模型不会保留并行兼容实现。
 - 浏览器原生打印对话框属于平台边界，SDK 保证纸面只包含目标内容，但不承诺静默打印。
-- Roadmap 中本能力域所有项目状态均为 `planned`，交付顺序由本文阶段定义。
+- Roadmap 中仅 TP5 因外部 Office 互操作门禁保持 `planned`，其余项目均为 `shipped`。
 
 ### 1.2 共享核心契约
 
