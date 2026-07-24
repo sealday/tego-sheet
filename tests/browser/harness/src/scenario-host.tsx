@@ -8,6 +8,7 @@ import {
   type ValidationResult,
 } from 'tego-sheet';
 import type { WorkbookData } from '../../../../src/core';
+import type { SpreadsheetDocument } from '../../../../src/document';
 
 interface PrintSnapshot {
   readonly css: string;
@@ -32,6 +33,13 @@ declare global {
       unmount(): void;
       setCellText(row: number, column: number, text: string): void;
       recalculateLayout(): void;
+      objectRect(): {
+        readonly x: number;
+        readonly y: number;
+        readonly width: number;
+        readonly height: number;
+      } | null;
+      undo(): void;
     };
     __tegoPrintCalls?: number;
     __tegoPrintSnapshot?: PrintSnapshot;
@@ -103,6 +111,50 @@ const printWorkbook: WorkbookData = [
     cols: { len: 2, 0: { width: 80 }, 1: { width: 120 } },
   },
 ];
+
+function objectFixture(): SpreadsheetDocument {
+  const document = testDocument(workbook);
+  return {
+    ...document,
+    workbook: {
+      ...document.workbook,
+      sheets: document.workbook.sheets.map((sheet, index) =>
+        index === 0
+          ? {
+              ...sheet,
+              objects: [
+                {
+                  id: 'browser-object',
+                  kind: 'shape',
+                  anchor: { type: 'absolute', rect: { x: 20, y: 30, width: 80, height: 40 } },
+                  zIndex: 1,
+                  locked: false,
+                  templateRepeat: 'shared',
+                  shape: 'rectangle',
+                  style: { fill: '#ffeecc', stroke: '#112233' },
+                  accessibility: {
+                    name: 'Browser chart',
+                    description: 'Keyboard-editable browser object',
+                  },
+                },
+                {
+                  id: 'browser-locked-object',
+                  kind: 'shape',
+                  anchor: { type: 'absolute', rect: { x: 120, y: 30, width: 80, height: 40 } },
+                  zIndex: 2,
+                  locked: true,
+                  templateRepeat: 'shared',
+                  shape: 'rectangle',
+                  style: { fill: '#ddeeff' },
+                  accessibility: { name: 'Locked browser chart' },
+                },
+              ],
+            }
+          : sheet,
+      ),
+    },
+  } as SpreadsheetDocument;
+}
 
 function installClipboard(mode: string | null): void {
   const state = { reads: 0, writes: [] as string[] };
@@ -191,6 +243,8 @@ export function ScenarioHost() {
   const [zoom, setZoom] = useState(1);
   const [readOnly, setReadOnly] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
+  const [initialObjectDocument] = useState(objectFixture);
+  const objectMode = params.get('objects') === '1';
 
   const takeSnapshot = useCallback(() => {
     const next = legacyProjection(sheet.current!.getDocument()) ?? [];
@@ -208,6 +262,11 @@ export function ScenarioHost() {
           sheet.current?.setCellText({ sheet: sheetId, row, column }, text);
       },
       recalculateLayout: () => sheet.current?.recalculateLayout(),
+      objectRect: () => {
+        const object = sheet.current?.getDocument().workbook.sheets[0]?.objects[0];
+        return object?.anchor.type === 'absolute' ? object.anchor.rect : null;
+      },
+      undo: () => sheet.current?.undo(),
     };
   }, [takeSnapshot]);
 
@@ -269,10 +328,14 @@ export function ScenarioHost() {
         {mounted ? (
           <TegoSheet
             ref={sheet}
-            document={testDocument(value)}
+            {...(objectMode
+              ? { defaultDocument: initialObjectDocument }
+              : {
+                  document: testDocument(value),
+                  onDocumentChange: (next: SpreadsheetDocument) => setValue(legacyProjection(next)),
+                })}
             readOnly={readOnly}
             options={{ showGrid }}
-            onDocumentChange={(next) => setValue(legacyProjection(next))}
             onSelectionChange={(next) => {
               selectionRef.current = next;
               setSelection(next);

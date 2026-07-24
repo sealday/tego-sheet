@@ -28,6 +28,7 @@ import {
 } from '../../engine';
 import { createPresentationCache, createPresentationResolver } from '../../presentation';
 import { createPresentationValidationResolver } from './presentation-adapter';
+import { projectSheetObjectsToViewport } from './object-adapter';
 import { applyDocumentFilterView } from '../../views';
 
 export interface EngineAdapterOptions {
@@ -60,6 +61,7 @@ export interface EngineAdapter {
   readonly recalculateLayout: () => void;
   readonly setScroll: (scroll: ScrollState) => void;
   readonly setSelection: (selection: SelectionState) => void;
+  readonly setSelectedObject: (objectId: string | null) => void;
   readonly stageSelection: (selection: SelectionState) => Selection | null;
   readonly updateReadOnly: (readOnly: boolean) => void;
   readonly updateLiveOptions: (options: Readonly<{ readonly showGrid?: boolean }>) => void;
@@ -113,6 +115,7 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
   let activeSheet: SheetId | null = null;
   let viewport: ViewportMetrics | null = null;
   let selection: SelectionState | null = null;
+  let selectedObjectId: string | null = null;
   let disposed = false;
   let liveReadOnly: boolean | null = null;
   let showGrid = options.showGrid;
@@ -171,6 +174,11 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
     const renderSnapshot: CanvasRenderSnapshot = {
       sheet,
       viewport,
+      objects: projectSheetObjectsToViewport(
+        documentSheet.objects,
+        latestSnapshot.document.resources.items,
+        viewport,
+      ),
       presentations: {
         resolve: ({ row, column }) =>
           resolver.resolve({
@@ -180,6 +188,7 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
           }),
       },
       ...(selection === null ? {} : { selection: selection.range }),
+      ...(selectedObjectId === null ? {} : { selectedObjectId }),
       showGrid,
       templateDecorations,
     };
@@ -396,6 +405,11 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
       selection = normalizeSelection(next, viewport.model);
       paint();
     },
+    setSelectedObject(objectId) {
+      if (disposed || selectedObjectId === objectId) return;
+      selectedObjectId = objectId;
+      paint();
+    },
     stageSelection(next) {
       if (disposed || viewport === null || activeSheet === null) return null;
       selection = normalizeSelection(next, viewport.model);
@@ -427,6 +441,7 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
       failedSnapshot = null;
       viewport = null;
       selection = null;
+      selectedObjectId = null;
       presentationCache.clear();
       engine.dispose();
     },

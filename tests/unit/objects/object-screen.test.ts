@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { projectObjectsToScreen } from '../../../src/objects';
+import { projectObjectsToScreen, transformObjectByKeyboard } from '../../../src/objects';
 
 const geometry = {
   rowOffset: (row: number) => row * 20,
@@ -189,5 +189,46 @@ describe('screen object projection', () => {
         fit: 'contain',
       },
     ]);
+  });
+});
+
+describe('keyboard object transforms', () => {
+  const object = {
+    ...common,
+    id: 'shape',
+    kind: 'shape',
+    zIndex: 1,
+    shape: 'rectangle',
+    rotation: 359,
+    style: { fill: '#ffeecc' },
+  } as const;
+
+  it('moves, resizes, and rotates absolute objects without mutating the input', () => {
+    expect(transformObjectByKeyboard(object as never, { type: 'move', x: 3, y: -2 })).toMatchObject(
+      {
+        anchor: { rect: { x: 13, y: 18, width: 40, height: 30 } },
+      },
+    );
+    expect(
+      transformObjectByKeyboard(object as never, { type: 'resize', x: -50, y: 4 }),
+    ).toMatchObject({
+      anchor: { rect: { x: 10, y: 20, width: 1, height: 34 } },
+    });
+    expect(
+      transformObjectByKeyboard(object as never, { type: 'rotate', degrees: 2 }),
+    ).toMatchObject({
+      rotation: 1,
+    });
+    expect(object.anchor.rect).toEqual({ x: 10, y: 20, width: 40, height: 30 });
+  });
+
+  it('allows locked objects to be selected but refuses every transform', () => {
+    expect(
+      transformObjectByKeyboard({ ...object, locked: true } as never, {
+        type: 'move',
+        x: 1,
+        y: 0,
+      }),
+    ).toBeUndefined();
   });
 });

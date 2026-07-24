@@ -58,6 +58,7 @@ import {
   filterValuesForSelection,
 } from './sheet-chrome-runtime';
 import { AccessibilityGrid } from './accessibility/accessibility-grid';
+import { AccessibilityObjects } from './accessibility/accessibility-objects';
 import { createPresentationCache, createPresentationResolver } from '../presentation';
 import type {
   ValidationEngineOptions,
@@ -68,6 +69,7 @@ import { compileSpreadsheetTemplate, renderSpreadsheetTemplate } from '../templa
 import { TemplateDesigner } from './template-designer';
 import { TemplatePreview } from './preview';
 import { applyDocumentFilterView } from '../views';
+import { projectSheetObjectsToViewport } from './adapters/object-adapter';
 
 function callbacksFromProps(props: TegoSheetProps): TegoSheetCallbacks {
   return {
@@ -523,6 +525,7 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
     sheet: null as SheetId | null,
   }));
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   const [accessibilityViewportRevision, refreshAccessibilityViewport] = useReducer(
     (value: number) => value + 1,
     0,
@@ -799,7 +802,6 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
     sheetOptions: initialOptions,
     showGrid: props.options?.showGrid,
   });
-
   const reconciliationVersion = props.controlled.getNotificationVersion();
   const transientAuthorityRef = useRef({
     activeSheet,
@@ -971,6 +973,24 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
       : props.epoch.snapshot.document.workbook.sheets.find(
           ({ id }) => id === (activeSheet as string),
         );
+  const activeSelectedObjectId =
+    selectedObjectId !== null &&
+    activeDocumentSheet?.objects.some(({ id }) => id === selectedObjectId) === true
+      ? selectedObjectId
+      : null;
+  useLayoutEffect(() => {
+    engineSlot.get()?.setSelectedObject(activeSelectedObjectId);
+  }, [activeSelectedObjectId, activeSheet, engineGeneration, engineSlot]);
+  const visibleObjectProjections = (() => {
+    void accessibilityViewportRevision;
+    const viewport = engineSlot.get()?.interactionSnapshot()?.viewport;
+    if (activeDocumentSheet === undefined || viewport === undefined) return [];
+    return projectSheetObjectsToViewport(
+      activeDocumentSheet.objects,
+      props.epoch.snapshot.document.resources.items,
+      viewport,
+    );
+  })();
   void filterViewRevision;
   const activeFilterView =
     activeSheet === null ? undefined : props.epoch.controller.getActiveFilterView(activeSheet);
@@ -1394,6 +1414,30 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
                     engineSlot.get()?.render(controller.getSnapshot(), activeSheet);
                   }}
                   onRequestEdit={(point) => requestEdit(point, undefined, 'pointer')}
+                />
+              </div>
+            )}
+            {visibleObjectProjections.length === 0 ? null : (
+              <div className="tego-sheet__accessibility-grid">
+                <AccessibilityObjects
+                  objects={visibleObjectProjections}
+                  selectedObjectId={activeSelectedObjectId}
+                  onSelect={(objectId) => {
+                    setSelectedObjectId(objectId);
+                    engineSlot.get()?.setSelectedObject(objectId);
+                  }}
+                  onChange={(object) => {
+                    if (
+                      activeSheet === null ||
+                      renderRuntime.readOnly ||
+                      props.epoch.snapshot.readOnly
+                    )
+                      return;
+                    dispatcher.dispatchUi(
+                      { type: 'set-sheet-object', sheet: activeSheet, object },
+                      'keyboard',
+                    );
+                  }}
                 />
               </div>
             )}

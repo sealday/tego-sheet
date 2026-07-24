@@ -10,8 +10,10 @@ import { createSparseCellScanBudget, paintGrid, paneCells, paneGridIndexes } fro
 import { paintHeaders } from './header-painter';
 import { RenderScheduler } from './render-scheduler';
 import type { AnimationFramePort } from './render-scheduler';
+import { paintObjects } from './object-painter';
 import { paintSelection } from './selection-painter';
 import { paintTemplateDecorations } from './template-decoration-painter';
+import type { ScreenObjectProjection } from '../../objects';
 
 export interface TemplateCanvasDecoration {
   readonly range: CellRange;
@@ -30,6 +32,10 @@ export interface CanvasRenderSnapshot {
   readonly invalidCells?: readonly CellPoint[];
   readonly templateDecorations?: readonly TemplateCanvasDecoration[];
   readonly showGrid?: boolean;
+  /** Visible persistent objects already projected through shared display geometry. */
+  readonly objects?: readonly ScreenObjectProjection[];
+  /** Transient object selection; never serialized into the document. */
+  readonly selectedObjectId?: string;
   /** Shared presentation batch for the visible document revision. */
   readonly presentations?: {
     readonly resolve: (point: CellPoint) => CellPresentation;
@@ -141,6 +147,7 @@ export class CanvasEngine {
         },
       );
     }
+    paintObjects(this.draw, snapshot.objects ?? [], snapshot.selectedObjectId);
     paintHeaders(
       this.draw,
       viewport,
