@@ -174,6 +174,37 @@ describe('AdapterScope invocation boundary', () => {
     expect(direct).not.toHaveBeenCalled();
   });
 
+  it('rejects reentrant disposal triggered while deep-snapshotting input', async () => {
+    const direct = vi.fn(async () => null);
+    const registry = createAdapterRegistry({
+      apiVersion: '1.0',
+      environment: 'browser',
+    });
+    await registry.register(trustedSolver(direct));
+    const scope = registry.createScope({
+      signal: new AbortController().signal,
+      grant: createCapabilityGrant(['solve']),
+    });
+    const input = new Proxy(
+      { value: 1 },
+      {
+        ownKeys(target) {
+          void scope.dispose();
+          return Reflect.ownKeys(target);
+        },
+      },
+    );
+
+    await expect(
+      scope.invoke(registry.resolve('solver'), {
+        capability: 'solve',
+        input,
+        validateResult: () => true,
+      }),
+    ).rejects.toMatchObject({ code: 'ADAPTER_INVOCATION_ABORTED' });
+    expect(direct).not.toHaveBeenCalled();
+  });
+
   it('snapshots grants instead of trusting a caller-supplied allows method', async () => {
     const direct = vi.fn(async () => null);
     const registry = createAdapterRegistry({

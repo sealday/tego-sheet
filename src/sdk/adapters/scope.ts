@@ -243,6 +243,12 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
           cause,
         });
       }
+      if (disposed || controller.signal.aborted) {
+        fail('ADAPTER_INVOCATION_ABORTED', 'Adapter invocation was aborted', {
+          resolution,
+          cause: controller.signal.reason,
+        });
+      }
       const inputBytes = jsonSnapshotBytes(inputSnapshot);
       if (inputBytes > limits.maxInputBytes) {
         fail('ADAPTER_LIMIT_EXCEEDED', 'Adapter input exceeds the scope byte limit', {
