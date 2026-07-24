@@ -277,10 +277,30 @@ function replaceText(
   value: string,
   transform: FindReplaceTransform,
   pattern: SafeRegexBudget | undefined,
+  maximumOutputLength: number,
 ): string {
-  return pattern === undefined
-    ? value.replaceAll(transform.find, transform.replacement)
-    : pattern.replace(value, transform.replacement);
+  if (pattern !== undefined) return pattern.replace(value, transform.replacement);
+  const matchCount =
+    transform.find === ''
+      ? value.length + 1
+      : (() => {
+          let count = 0;
+          let index = 0;
+          while ((index = value.indexOf(transform.find, index)) !== -1) {
+            count += 1;
+            index += transform.find.length;
+          }
+          return count;
+        })();
+  const outputLength =
+    value.length + matchCount * (transform.replacement.length - transform.find.length);
+  if (!Number.isSafeInteger(outputLength) || outputLength > maximumOutputLength) {
+    throw new DataTransformError(
+      'REPLACE_BUDGET_EXCEEDED',
+      'Replacement output exceeds the configured length budget',
+    );
+  }
+  return value.replaceAll(transform.find, () => transform.replacement);
 }
 
 function duplicateKey(
@@ -511,7 +531,9 @@ export function createDataTransformPlanner(limits: {
           await yieldForCancellation(inspected, options.signal);
           const before = inputText(entry.cell.input);
           if (entry.cell.input.type === 'formula') {
-            if (replaceText(before, transform, pattern) !== before) {
+            if (
+              replaceText(before, transform, pattern, regexLimits.maximumInputLength) !== before
+            ) {
               warnings.push(
                 diagnostic(
                   'FORMULA_TRANSFORM_SKIPPED',
@@ -523,7 +545,7 @@ export function createDataTransformPlanner(limits: {
             continue;
           }
           if (entry.cell.input.type !== 'string') continue;
-          const after = replaceText(before, transform, pattern);
+          const after = replaceText(before, transform, pattern, regexLimits.maximumInputLength);
           if (before === after) continue;
           changes.push({ row: entry.row, column: entry.column, before, after });
           commands.push(setCellCommand(sheetId, entry.row, entry.column, after, commands.length));

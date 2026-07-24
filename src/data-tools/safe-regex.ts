@@ -59,7 +59,11 @@ function assertLinearPattern(source: string): void {
     let end = index + 1;
     if (token === '{') {
       const match = /^\{(\d+)(?:,(\d+))?\}/u.exec(source.slice(index));
-      if (match === null || (match[2] !== undefined && Number(match[2]) > 100)) {
+      if (
+        match === null ||
+        Number(match[1]) > 100 ||
+        (match[2] !== undefined && Number(match[2]) > 100)
+      ) {
         throw new DataTransformError(
           'REPLACE_PATTERN_INVALID',
           'Replacement patterns require a finite bounded quantifier no greater than 100',
@@ -97,6 +101,11 @@ export interface SafeRegexBudget {
   replace(value: string, replacement: string): string;
 }
 
+function advanceUnicodeIndex(value: string, index: number): number {
+  const codePoint = value.codePointAt(index);
+  return index + (codePoint !== undefined && codePoint > 0xffff ? 2 : 1);
+}
+
 export function createSafeRegexBudget(source: string, limits: SafeRegexLimits): SafeRegexBudget {
   assertSafePattern(source, limits);
   let pattern: RegExp;
@@ -128,7 +137,22 @@ export function createSafeRegexBudget(source: string, limits: SafeRegexLimits): 
       }
       pattern.lastIndex = 0;
       const started = performance.now();
-      const result = value.replace(pattern, replacement);
+      let outputLength = value.length;
+      let match: RegExpExecArray | null;
+      while ((match = pattern.exec(value)) !== null) {
+        outputLength += replacement.length - match[0].length;
+        if (!Number.isSafeInteger(outputLength) || outputLength > limits.maximumInputLength) {
+          throw new DataTransformError(
+            'REPLACE_BUDGET_EXCEEDED',
+            'Replacement output exceeds the configured length budget',
+          );
+        }
+        if (match[0] === '') {
+          pattern.lastIndex = advanceUnicodeIndex(value, pattern.lastIndex);
+        }
+      }
+      pattern.lastIndex = 0;
+      const result = value.replace(pattern, () => replacement);
       elapsed += performance.now() - started;
       if (elapsed > limits.maximumMilliseconds) {
         throw new DataTransformError(

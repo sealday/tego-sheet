@@ -158,6 +158,63 @@ describe('DATA-01 advanced cleanup safety', () => {
     });
   });
 
+  it('treats replacement text literally and rejects output expansion before allocation', async () => {
+    const literalController = seededController([
+      { row: 0, column: 0, input: { type: 'string', value: 'a' } },
+    ]);
+    const literalPlanner = createDataTransformPlanner({
+      maxCells: 10,
+      maxSamples: 10,
+      maxRegexInputLength: 100,
+    });
+    await expect(
+      literalPlanner.preview(literalController.getSnapshot(), {
+        type: 'find-replace',
+        range,
+        find: 'a',
+        replacement: '$`',
+        match: 'literal',
+      }),
+    ).resolves.toMatchObject({
+      sampleChanges: [{ before: 'a', after: '$`' }],
+    });
+
+    const hostileController = seededController([
+      { row: 0, column: 0, input: { type: 'string', value: 'a'.repeat(10_000) } },
+    ]);
+    const hostilePlanner = createDataTransformPlanner({
+      maxCells: 10,
+      maxSamples: 10,
+      maxRegexInputLength: 10_000,
+      maxRegexSteps: 1_000_000,
+    });
+    await expect(
+      hostilePlanner.preview(hostileController.getSnapshot(), {
+        type: 'find-replace',
+        range,
+        find: 'a?',
+        replacement: '$`',
+        match: 'regex',
+      }),
+    ).rejects.toMatchObject({ code: 'REPLACE_BUDGET_EXCEEDED' });
+  });
+
+  it('rejects an oversized exact bounded quantifier before evaluation', async () => {
+    const controller = seededController([
+      { row: 0, column: 0, input: { type: 'string', value: 'a' } },
+    ]);
+    const planner = createDataTransformPlanner({ maxCells: 10, maxSamples: 10 });
+    await expect(
+      planner.preview(controller.getSnapshot(), {
+        type: 'find-replace',
+        range,
+        find: 'a{1000}',
+        replacement: 'x',
+        match: 'regex',
+      }),
+    ).rejects.toMatchObject({ code: 'REPLACE_PATTERN_INVALID' });
+  });
+
   it('fails closed when the cumulative regex time budget is exceeded', async () => {
     const controller = seededController([
       { row: 0, column: 0, input: { type: 'string', value: 'aaaaab' } },
