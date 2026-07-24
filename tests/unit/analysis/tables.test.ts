@@ -292,6 +292,51 @@ describe('TBL-01 persistent structured tables', () => {
     expect(controller.getDocument().workbook.sheets[0]?.tables).toEqual([]);
   });
 
+  it('rewrites structured-reference display names by stable IDs when a table is renamed', () => {
+    const controller = new SpreadsheetDocumentController(parseOk(fixture()));
+    const table = controller.getDocument().workbook.sheets[0]!.tables[0]!;
+
+    expect(
+      controller.dispatch(
+        {
+          type: 'set-table',
+          sheet: sheetId('sheet-1'),
+          table: {
+            ...table,
+            name: 'Revenue',
+            columns: [table.columns[0]!, { ...table.columns[1]!, name: 'NetAmount' }],
+          },
+        },
+        'ref',
+      ).status,
+    ).toBe('committed');
+
+    expect(controller.getDocument().workbook.sheets[0]?.cells).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          row: 0,
+          column: 3,
+          cell: { input: { type: 'formula', source: '=SUM(Revenue[NetAmount])' } },
+        }),
+      ]),
+    );
+    const program = createFormulaEngine({
+      tables: createStructuredTableResolver(() => controller.getDocument()),
+    }).compile(controller.getDocument());
+    expect(program.bindings.get('sheet-1!D1')).toEqual([
+      { kind: 'table-column', tableId: 'table-sales', columnId: 'column-amount' },
+    ]);
+
+    expect(controller.undo('ref').status).toBe('committed');
+    expect(controller.getDocument().workbook.sheets[0]?.cells).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          cell: { input: { type: 'formula', source: '=SUM(Sales[Amount])' } },
+        }),
+      ]),
+    );
+  });
+
   it('tracks row structure changes but rejects column edits that would invent column identities', () => {
     const controller = new SpreadsheetDocumentController(parseOk(fixture()));
 

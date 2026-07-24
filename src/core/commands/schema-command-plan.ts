@@ -394,6 +394,44 @@ function setStructuredTable(
   if (sheet === undefined) return;
   const tables = [...(sheet.tables ?? [])];
   const index = tables.findIndex((table) => table.id === command.table.id);
+  const previous = index < 0 ? undefined : tables[index];
+  if (previous !== undefined) {
+    const nextColumns = new Map<string, string>(
+      command.table.columns.map((column) => [column.id, column.name]),
+    );
+    const replacements = previous.columns.flatMap((column) => {
+      const nextColumnName = nextColumns.get(column.id);
+      return nextColumnName === undefined
+        ? []
+        : [
+            {
+              fromTable: previous.name,
+              fromColumn: column.name,
+              toTable: command.table.name,
+              toColumn: nextColumnName,
+            },
+          ];
+    });
+    if (replacements.length > 0) {
+      input.workbook.sheets.forEach((workbookSheet) => {
+        workbookSheet.cells.forEach((entry) => {
+          if (entry.cell.input.type !== 'formula') return;
+          let formula = entry.cell.input.source;
+          replacements.forEach(({ fromTable, fromColumn, toTable, toColumn }) => {
+            const escapedTable = fromTable.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+            const escapedColumn = fromColumn.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+            formula = formula.replace(
+              new RegExp(`\\b${escapedTable}\\[${escapedColumn}\\]`, 'giu'),
+              `${toTable}[${toColumn}]`,
+            );
+          });
+          if (formula !== entry.cell.input.source) {
+            entry.cell = { ...entry.cell, input: { type: 'formula', source: formula } };
+          }
+        });
+      });
+    }
+  }
   const snapshot = {
     ...structuredClone(command.table),
     columns: command.table.columns.map((column) => ({ ...column })),
