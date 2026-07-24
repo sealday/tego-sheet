@@ -123,15 +123,25 @@ function objectAnchorRange(
 
 type ObjectRepeatBinding = Extract<
   TemplateBinding,
-  { readonly type: 'repeat-rows' | 'repeat-range' | 'repeat-page' | 'repeat-sheet' }
+  {
+    readonly type:
+      | 'repeat-rows'
+      | 'repeat-columns'
+      | 'repeat-range'
+      | 'repeat-page'
+      | 'repeat-sheet'
+      | 'subtemplate';
+  }
 >;
 
 function isObjectRepeatBinding(binding: TemplateBinding): binding is ObjectRepeatBinding {
   return (
     binding.type === 'repeat-rows' ||
+    binding.type === 'repeat-columns' ||
     binding.type === 'repeat-range' ||
     binding.type === 'repeat-page' ||
-    binding.type === 'repeat-sheet'
+    binding.type === 'repeat-sheet' ||
+    binding.type === 'subtemplate'
   );
 }
 
@@ -226,6 +236,48 @@ function detectRepeatedObjects(
       return owned.length === 0 ? withoutObjects : { ...withoutObjects, objects: owned };
     }),
   };
+}
+
+function validateSubtemplateObjectBoundary(
+  document: SpreadsheetDocument,
+  template: SpreadsheetTemplate,
+  subtemplates: ReadonlyMap<SpreadsheetTemplate['id'], SpreadsheetTemplate>,
+  diagnostics: Diagnostic[],
+): void {
+  for (const binding of template.bindings) {
+    if (binding.type !== 'subtemplate') continue;
+    const registered = subtemplates.get(binding.templateId);
+    if (registered === undefined) continue;
+    const childRanges = registered.bindings.flatMap((candidate) =>
+      candidate.type === 'value'
+        ? [
+            {
+              sheetId: candidate.target.sheetId,
+              start: { row: candidate.target.row, column: candidate.target.column },
+              end: { row: candidate.target.row, column: candidate.target.column },
+            },
+          ]
+        : [candidate.range],
+    );
+    const hasChildObject = document.workbook.sheets.some((sheet) =>
+      sheet.objects.some((object) => {
+        const anchor = objectAnchorRange(object);
+        return (
+          anchor !== undefined &&
+          childRanges.some((range) => range.sheetId === sheet.id && intersects(range, anchor))
+        );
+      }),
+    );
+    if (hasChildObject) {
+      diagnostics.push(
+        diagnostic(
+          'OBJECT_REPEAT_FORBIDDEN',
+          `Subtemplate ${binding.id} cannot paste child floating objects`,
+          binding,
+        ),
+      );
+    }
+  }
 }
 
 function normalized(range: DocumentCellRange): boolean {
@@ -350,6 +402,15 @@ function validateStructuralBindings(
           diagnostic(
             'OBJECT_REPEAT_FORBIDDEN',
             `Binding ${binding.id} forbids repeating intersecting objects`,
+            binding,
+          ),
+        );
+      }
+      if (binding.type === 'subtemplate') {
+        diagnostics.push(
+          diagnostic(
+            'OBJECT_REPEAT_FORBIDDEN',
+            `Subtemplate ${binding.id} cannot safely materialize floating objects`,
             binding,
           ),
         );
@@ -961,6 +1022,12 @@ export function compileSpreadsheetTemplate(
     return immutableClone({ diagnostics: frozenDiagnostics, hasErrors: true });
   }
   const template = detectRepeatedObjects(resolved.document, unresolvedTemplate, diagnostics);
+  validateSubtemplateObjectBoundary(
+    resolved.document,
+    template,
+    options?.subtemplates ?? new Map(),
+    diagnostics,
+  );
   if (exceedsCompilationBudget(resolved.document, template)) {
     const frozenDiagnostics = immutableClone([
       ...diagnostics,

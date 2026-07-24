@@ -223,7 +223,7 @@ describe('repeat-row floating object materialization', () => {
           objectPolicy: binding.objectPolicy,
         },
       ],
-    } as SpreadsheetTemplate;
+    } as unknown as SpreadsheetTemplate;
     const document = { ...seeded.document, templates: [template] };
     const compiled = compile(document, template);
     const expanded = expandAdvancedTemplate(compiled.template!, { items: [{}, {}] }, limits);
@@ -275,6 +275,95 @@ describe('repeat-row floating object materialization', () => {
         }),
       );
     }
+  });
+
+  it('requires a column-repeat object policy and materializes one-cell copies by column', () => {
+    const seeded = fixture('per-item');
+    const missing = {
+      ...seeded.template,
+      bindings: [
+        {
+          id: 'columns',
+          type: 'repeat-columns',
+          range: objectRange,
+          source: 'items',
+          empty: 'remove',
+        },
+      ],
+    } as unknown as SpreadsheetTemplate;
+    expect(
+      compile({ ...seeded.document, templates: [missing] }, missing).diagnostics,
+    ).toContainEqual(
+      expect.objectContaining({
+        code: 'OBJECT_REPEAT_POLICY_REQUIRED',
+        location: { bindingId: 'columns' },
+      }),
+    );
+
+    const declared = {
+      ...missing,
+      bindings: [{ ...missing.bindings[0]!, objectPolicy: 'per-item' }],
+    } as unknown as SpreadsheetTemplate;
+    const document = { ...seeded.document, templates: [declared] };
+    const compiled = compile(document, declared);
+    const expanded = expandAdvancedTemplate(compiled.template!, { items: [{}, {}] }, limits);
+
+    expect(compiled.hasErrors).toBe(false);
+    expect(
+      expanded.document?.workbook.sheets[0]?.objects.map((object) => ({
+        id: object.id,
+        column: object.anchor.type === 'one-cell' ? object.anchor.cell.column : -1,
+      })),
+    ).toEqual([
+      { id: 'badge~columns~1', column: 0 },
+      { id: 'badge~columns~2', column: 1 },
+    ]);
+  });
+
+  it('fails closed when subtemplate materialization would discard child floating objects', () => {
+    const seeded = fixture('per-item');
+    const child = {
+      id: 'child' as never,
+      name: 'Child',
+      bindings: [
+        {
+          id: 'child-value',
+          type: 'value',
+          target: { sheetId: 'sheet-1' as never, row: 0, column: 0 },
+          expression: 'item',
+        },
+      ],
+      printProfiles: [],
+    } as unknown as SpreadsheetTemplate;
+    const parent = {
+      id: 'parent' as never,
+      name: 'Parent',
+      bindings: [
+        {
+          id: 'child-slot',
+          type: 'subtemplate',
+          range: {
+            sheetId: 'sheet-1' as never,
+            start: { row: 2, column: 0 },
+            end: { row: 2, column: 0 },
+          },
+          templateId: child.id,
+          source: 'child',
+        },
+      ],
+      printProfiles: [],
+    } as unknown as SpreadsheetTemplate;
+    const result = compileSpreadsheetTemplate(seeded.document, parent, {
+      ...options,
+      subtemplates: new Map([[child.id, child]]),
+    });
+
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: 'OBJECT_REPEAT_FORBIDDEN',
+        location: { bindingId: 'child-slot' },
+      }),
+    );
   });
 
   it('assigns nested objects to the deepest repeat and encodes the complete stable item path', () => {
