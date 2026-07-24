@@ -170,8 +170,22 @@ describe('OBJ-01 shared object anchors', () => {
       { type: 'delete-column', sheetId, index: 1, count: 4 },
       {
         type: 'two-cell',
-        from: { sheetId, row: 1, column: 1, offset: { x: 1, y: 2 } },
-        to: { sheetId, row: 4, column: 1, offset: { x: 3, y: 4 } },
+        from: { sheetId, row: 1, column: 1, offset: { x: 0, y: 2 } },
+        to: { sheetId, row: 4, column: 1, offset: { x: 0, y: 4 } },
+      },
+    ],
+    [
+      'normalizes offsets when row deletion collapses both markers',
+      {
+        type: 'two-cell',
+        from: { sheetId, row: 1, column: 1, offset: { x: 1, y: 10 } },
+        to: { sheetId, row: 2, column: 4, offset: { x: 3, y: 0 } },
+      },
+      { type: 'delete-row', sheetId, index: 1, count: 2 },
+      {
+        type: 'two-cell',
+        from: { sheetId, row: 1, column: 1, offset: { x: 1, y: 0 } },
+        to: { sheetId, row: 1, column: 4, offset: { x: 3, y: 0 } },
       },
     ],
   ])('%s', (_name, anchor, operation, expected) => {

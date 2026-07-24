@@ -54,7 +54,7 @@ export function transformObjectAnchor(
   if (anchor.from.sheetId !== operation.sheetId || anchor.to.sheetId !== operation.sheetId) {
     return anchor;
   }
-  return {
+  const transformed: Extract<ObjectAnchor, { type: 'two-cell' }> = {
     ...anchor,
     from: {
       ...anchor.from,
@@ -67,4 +67,19 @@ export function transformObjectAnchor(
       column: transformIndex(anchor.to.column, operation, 'column'),
     },
   };
+  if (operation.type === 'delete-row' && transformed.from.row === transformed.to.row) {
+    return {
+      ...transformed,
+      from: { ...transformed.from, offset: { ...transformed.from.offset, y: 0 } },
+      to: { ...transformed.to, offset: { ...transformed.to.offset, y: 0 } },
+    };
+  }
+  if (operation.type === 'delete-column' && transformed.from.column === transformed.to.column) {
+    return {
+      ...transformed,
+      from: { ...transformed.from, offset: { ...transformed.from.offset, x: 0 } },
+      to: { ...transformed.to, offset: { ...transformed.to.offset, x: 0 } },
+    };
+  }
+  return transformed;
 }

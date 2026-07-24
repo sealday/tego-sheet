@@ -276,11 +276,34 @@ function transformObjectAnchor(anchor: ObjectAnchor, transform: CoordinateTransf
   if (anchor.type === 'one-cell') {
     return { ...anchor, cell: { ...anchor.cell, ...point(anchor.cell) } };
   }
-  return {
+  const transformed: Extract<ObjectAnchor, { type: 'two-cell' }> = {
     ...anchor,
     from: { ...anchor.from, ...point(anchor.from) },
     to: { ...anchor.to, ...point(anchor.to) },
   };
+  if (
+    transform.kind === 'delete' &&
+    transform.axis === 'row' &&
+    transformed.from.row === transformed.to.row
+  ) {
+    return {
+      ...transformed,
+      from: { ...transformed.from, offset: { ...transformed.from.offset, y: 0 } },
+      to: { ...transformed.to, offset: { ...transformed.to.offset, y: 0 } },
+    };
+  }
+  if (
+    transform.kind === 'delete' &&
+    transform.axis === 'column' &&
+    transformed.from.column === transformed.to.column
+  ) {
+    return {
+      ...transformed,
+      from: { ...transformed.from, offset: { ...transformed.from.offset, x: 0 } },
+      to: { ...transformed.to, offset: { ...transformed.to.offset, x: 0 } },
+    };
+  }
+  return transformed;
 }
 
 /** Applies a coordinate mapping to every coordinate-bearing field currently in a schema 2 sheet. */
