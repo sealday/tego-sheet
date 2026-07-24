@@ -18,6 +18,10 @@ export default defineConfig({
         replacement: resolve(repositoryRoot, 'src/ui/styles/index.less'),
       },
       {
+        find: 'tego-sheet/integrations',
+        replacement: resolve(repositoryRoot, 'src/integrations/index.ts'),
+      },
+      {
         find: 'tego-sheet',
         replacement: resolve(repositoryRoot, 'src/index.ts'),
       },

@@ -165,6 +165,16 @@ describe('demo workbench', () => {
     expect(currentSheetProps().locale).toBeUndefined();
   });
 
+  it('demonstrates the optional default-deny host permission connection', () => {
+    const rendered = render(<App />);
+
+    expect(currentSheetProps().permissionStore).toBeUndefined();
+    fireEvent.click(rendered.getByRole('checkbox', { name: 'Enforce host permissions' }));
+
+    expect(currentSheetProps().permissionStore?.getSnapshot()).toBeDefined();
+    expect(rendered.getByText(/host policy: enforced/i)).toBeTruthy();
+  });
+
   it('reports invalid JSON without replacing or remounting the workbook', () => {
     const rendered = render(<App />);
     const initialWorkbook = workbookFromBoundary(rendered.getByTestId('tego-sheet'));

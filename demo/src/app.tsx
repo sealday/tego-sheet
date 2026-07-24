@@ -18,6 +18,11 @@ import {
 } from 'tego-sheet';
 import { zhCN } from 'tego-sheet/locales/zh-cn';
 import {
+  createPermissionSnapshot,
+  createPermissionStore,
+  type PermissionGrant,
+} from 'tego-sheet/integrations';
+import {
   appendPreviewEvent,
   cloneExampleWorkbook,
   formatWorkbookJson,
@@ -74,6 +79,7 @@ export function App() {
   const recoveringRef = useRef(false);
   const [mode, setMode] = useState<PreviewMode>('uncontrolled');
   const [readOnly, setReadOnly] = useState(false);
+  const [hostPermissionsEnabled, setHostPermissionsEnabled] = useState(false);
   const [localeCode, setLocaleCode] = useState<LocaleCode>('en');
   const [workbook, setWorkbook] = useState<SpreadsheetDocument>(initialWorkbook);
   const [jsonText, setJsonText] = useState(() => formatWorkbookJson(initialWorkbook));
@@ -83,6 +89,7 @@ export function App() {
   const [eventsVisible, setEventsVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [events, setEvents] = useState<ReturnType<typeof appendPreviewEvent>>([]);
+  const permissionStore = useMemo(createPermissionStore, []);
 
   const locale = useMemo(() => (localeCode === 'zh-CN' ? zhCN : undefined), [localeCode]);
 
@@ -93,6 +100,47 @@ export function App() {
     lastStableRef.current = { workbook: stableWorkbook, mode };
     recoveringRef.current = false;
   }, [mode, mountEpoch, workbook]);
+
+  useEffect(() => {
+    if (!hostPermissionsEnabled) {
+      permissionStore.clear();
+      return;
+    }
+    const grants: PermissionGrant[] = [
+      {
+        action: 'document:edit',
+        target: { type: 'document', documentId: workbook.id },
+      },
+      ...workbook.workbook.sheets.flatMap((sheet): PermissionGrant[] => [
+        {
+          action: 'sheet:view',
+          target: { type: 'sheet', sheetId: sheet.id },
+        },
+        {
+          action: 'sheet:edit',
+          target: { type: 'sheet', sheetId: sheet.id },
+        },
+        {
+          action: 'range:edit',
+          target: {
+            type: 'range',
+            range: {
+              sheetId: sheet.id,
+              start: { row: 0, column: 0 },
+              end: { row: 1_048_575, column: 16_383 },
+            },
+          },
+        },
+      ]),
+    ];
+    permissionStore.replace(
+      createPermissionSnapshot({
+        revision: `demo-permission-${mountEpoch}`,
+        actorId: 'demo-user',
+        grants,
+      }),
+    );
+  }, [hostPermissionsEnabled, mountEpoch, permissionStore, workbook]);
 
   const recordEvent = useCallback((input: Omit<PreviewEventInput, 'timestamp'>) => {
     setEvents((current) =>
@@ -190,6 +238,8 @@ export function App() {
               <span>Mode: {mode === 'controlled' ? 'Controlled' : 'Uncontrolled'}</span>
               {' · '}
               <span>Workbook: {workbookStatus(workbook)}</span>
+              {' · '}
+              <span>Host policy: {hostPermissionsEnabled ? 'Enforced' : 'Open'}</span>
             </p>
           </div>
           <button
@@ -229,6 +279,15 @@ export function App() {
                   onChange={(event) => setReadOnly(event.currentTarget.checked)}
                 />
                 Read only
+              </label>
+
+              <label>
+                <input
+                  type="checkbox"
+                  checked={hostPermissionsEnabled}
+                  onChange={(event) => setHostPermissionsEnabled(event.currentTarget.checked)}
+                />
+                Enforce host permissions
               </label>
 
               <label>
@@ -312,6 +371,7 @@ export function App() {
             ref={sheetRef}
             {...(mode === 'controlled' ? { document: workbook } : { defaultDocument: workbook })}
             readOnly={readOnly}
+            permissionStore={hostPermissionsEnabled ? permissionStore : undefined}
             locale={locale}
             onDocumentChange={handleChange}
             onActiveSheetChange={handleActiveSheetChange}
