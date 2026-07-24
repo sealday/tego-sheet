@@ -26,6 +26,7 @@ import {
   expandTemplate,
   type RowInsertion,
   type StructuralMapping,
+  type StructuralObjectMapping,
 } from './expand';
 import { TemplateExpressionError } from './expression';
 import {
@@ -52,6 +53,7 @@ const DEFAULT_LIMITS: RenderLimits = Object.freeze({
   maxLayoutTimeMs: 5_000,
   maxExpandedColumns: 16_384,
   maxGeneratedSheets: 256,
+  maxExpandedObjects: 10_000,
   maxNestingDepth: 8,
   maxResources: 256,
   maxResourceBytes: 16 * 1024 * 1024,
@@ -69,6 +71,15 @@ interface ResolvedTarget {
   readonly id: string;
   readonly sheet: Sheet;
   readonly range: DocumentCellRange;
+}
+
+interface RenderExpansion {
+  readonly document?: SpreadsheetDocument;
+  readonly diagnostics: readonly Diagnostic[];
+  readonly insertedRows: ReadonlyMap<string, readonly RowInsertion[]>;
+  readonly repeatPageBreaks: ReadonlyMap<string, readonly number[]>;
+  readonly structuralMappings: readonly StructuralMapping[];
+  readonly objectMappings: readonly StructuralObjectMapping[];
 }
 
 function freeze<T>(value: T): T {
@@ -815,6 +826,19 @@ function persistentImageMappings(
   );
 }
 
+function generatedObjectMappings(
+  document: SpreadsheetDocument,
+  repeated: readonly StructuralObjectMapping[],
+): readonly StructuralObjectMapping[] {
+  const repeatedIds = new Set(repeated.map(({ objectId }) => String(objectId)));
+  return [
+    ...repeated,
+    ...persistentImageMappings(document).filter(
+      ({ objectId }) => !repeatedIds.has(String(objectId)),
+    ),
+  ];
+}
+
 function abortResult(): RenderResult {
   const diagnostic = renderDiagnostic('RENDER_ABORTED', 'Template rendering was aborted');
   return freeze({ diagnostics: [diagnostic] });
@@ -928,17 +952,20 @@ export async function renderSpreadsheetTemplate(
         }),
       );
     }
-    let expansion;
+    let expansion: RenderExpansion;
     try {
       const hasAdvanced =
         request.template.ir.regionTree !== undefined ||
         request.template.ir.bindings.some(
-          ({ type }) =>
-            type === 'repeat-columns' ||
-            type === 'repeat-range' ||
-            type === 'repeat-page' ||
-            type === 'repeat-sheet' ||
-            type === 'subtemplate',
+          (binding) =>
+            (binding.type === 'repeat-rows' &&
+              binding.objects !== undefined &&
+              binding.objects.length > 0) ||
+            binding.type === 'repeat-columns' ||
+            binding.type === 'repeat-range' ||
+            binding.type === 'repeat-page' ||
+            binding.type === 'repeat-sheet' ||
+            binding.type === 'subtemplate',
         );
       if (hasAdvanced) {
         const advanced = expandAdvancedTemplate(
@@ -957,7 +984,7 @@ export async function renderSpreadsheetTemplate(
           objectMappings: advanced.objectMappings,
         };
       } else {
-        expansion = expandTemplate(
+        const basic = expandTemplate(
           request.template.sourceDocument,
           request.template.ir.template,
           request.template.ir.bindings,
@@ -966,7 +993,7 @@ export async function renderSpreadsheetTemplate(
           limits,
           request.signal,
         );
-        expansion = { ...expansion, structuralMappings: [], objectMappings: [] };
+        expansion = { ...basic, structuralMappings: [], objectMappings: [] };
       }
     } catch (cause) {
       if (!(cause instanceof TemplateExpressionError)) throw cause;
@@ -1197,7 +1224,7 @@ export async function renderSpreadsheetTemplate(
         profile,
       },
       resources,
-      objects: [...expansion.objectMappings, ...persistentImageMappings(expansion.document)],
+      objects: generatedObjectMappings(expansion.document, expansion.objectMappings),
       diagnostics,
       metadata: {
         templateId: request.template.templateId,

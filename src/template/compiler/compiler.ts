@@ -104,6 +104,54 @@ function compileBinding(binding: TemplateBinding): TemplateIRBinding {
   }) as TemplateIRBinding;
 }
 
+function objectAnchorRange(
+  object: SpreadsheetDocument['workbook']['sheets'][number]['objects'][number],
+): DocumentCellRange | undefined {
+  if (object.anchor.type === 'absolute') return undefined;
+  return object.anchor.type === 'one-cell'
+    ? {
+        sheetId: object.anchor.cell.sheetId,
+        start: { row: object.anchor.cell.row, column: object.anchor.cell.column },
+        end: { row: object.anchor.cell.row, column: object.anchor.cell.column },
+      }
+    : {
+        sheetId: object.anchor.from.sheetId,
+        start: { row: object.anchor.from.row, column: object.anchor.from.column },
+        end: { row: object.anchor.to.row, column: object.anchor.to.column },
+      };
+}
+
+function detectRepeatedRowObjects(
+  document: SpreadsheetDocument,
+  template: SpreadsheetTemplate,
+): SpreadsheetTemplate {
+  return {
+    ...template,
+    bindings: template.bindings.map((binding) => {
+      if (binding.type !== 'repeat-rows') return binding;
+      const sheet = document.workbook.sheets.find(({ id }) => id === binding.range.sheetId);
+      const detected = (sheet?.objects ?? []).flatMap((object) => {
+        const anchor = objectAnchorRange(object);
+        if (anchor === undefined || !intersects(binding.range, anchor)) return [];
+        return [
+          {
+            id: String(object.id),
+            anchor,
+            anchorMode: 'range' as const,
+            ...(object.kind === 'image' ? { resourceId: String(object.resourceId) } : {}),
+          },
+        ];
+      });
+      if (detected.length === 0) return binding;
+      const declared = new Set((binding.objects ?? []).map(({ id }) => id));
+      return {
+        ...binding,
+        objects: [...(binding.objects ?? []), ...detected.filter(({ id }) => !declared.has(id))],
+      };
+    }),
+  };
+}
+
 function normalized(range: DocumentCellRange): boolean {
   return (
     Number.isInteger(range.start.row) &&
@@ -217,6 +265,13 @@ function validateStructuralBindings(
       } else if (binding.objectPolicy === 'forbidden') {
         diagnostics.push(
           diagnostic(
+            'OBJECT_REPEAT_POLICY_REQUIRED',
+            `Binding ${binding.id} requires per-item or shared object behavior`,
+            binding,
+          ),
+        );
+        diagnostics.push(
+          diagnostic(
             'OBJECT_REPEAT_FORBIDDEN',
             `Binding ${binding.id} forbids repeating intersecting objects`,
             binding,
@@ -235,6 +290,36 @@ function validateStructuralBindings(
           );
         }
         objectIds.add(object.id);
+        const persistentObject = document.workbook.sheets
+          .find(({ id }) => id === binding.range.sheetId)
+          ?.objects.find(({ id }) => id === object.id);
+        if (
+          persistentObject !== undefined &&
+          binding.objectPolicy !== undefined &&
+          binding.objectPolicy !== 'forbidden' &&
+          persistentObject.templateRepeat !== binding.objectPolicy
+        ) {
+          diagnostics.push(
+            diagnostic(
+              'OBJECT_REPEAT_POLICY_REQUIRED',
+              `Object ${object.id} policy ${persistentObject.templateRepeat} does not match ${binding.objectPolicy}`,
+              binding,
+            ),
+          );
+        }
+        if (
+          persistentObject?.kind === 'image' &&
+          object.resourceId !== undefined &&
+          object.resourceId !== persistentObject.resourceId
+        ) {
+          diagnostics.push(
+            diagnostic(
+              'INVALID_OBJECT_ANCHOR',
+              `Object ${object.id} resource does not match the persistent object`,
+              binding,
+            ),
+          );
+        }
         if (
           object.anchor === undefined ||
           !normalized(object.anchor) ||
@@ -787,18 +872,19 @@ export function compileSpreadsheetTemplate(
     return immutableClone({ diagnostics: frozenDiagnostics, hasErrors: true });
   }
   const resolved = resolveTemplate(document, templateOrId, diagnostics);
-  const template = resolved.template;
-  if (template === undefined) {
+  const unresolvedTemplate = resolved.template;
+  if (unresolvedTemplate === undefined) {
     const frozenDiagnostics = immutableClone(diagnostics);
     return immutableClone({ diagnostics: frozenDiagnostics, hasErrors: true });
   }
-  if (!hasRuntimeTemplateShape(template)) {
+  if (!hasRuntimeTemplateShape(unresolvedTemplate)) {
     const frozenDiagnostics = immutableClone([
       ...diagnostics,
       diagnostic('INVALID_TEMPLATE_STRUCTURE', 'Template structure is malformed'),
     ]);
     return immutableClone({ diagnostics: frozenDiagnostics, hasErrors: true });
   }
+  const template = detectRepeatedRowObjects(resolved.document, unresolvedTemplate);
   if (exceedsCompilationBudget(resolved.document, template)) {
     const frozenDiagnostics = immutableClone([
       ...diagnostics,

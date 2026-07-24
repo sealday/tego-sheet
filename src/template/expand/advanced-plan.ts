@@ -8,6 +8,7 @@ export type AdvancedBinding = Extract<
   {
     readonly type:
       | 'repeat-columns'
+      | 'repeat-rows'
       | 'repeat-range'
       | 'repeat-page'
       | 'repeat-sheet'
@@ -70,6 +71,9 @@ export function createExpansionPlan(compiled: CompiledTemplate): ExpansionPlan {
   const advanced = compiled.ir.bindings.filter(
     (binding): binding is AdvancedBinding =>
       (binding.type === 'repeat-columns' ||
+        (binding.type === 'repeat-rows' &&
+          binding.objects !== undefined &&
+          binding.objects.length > 0) ||
         binding.type === 'repeat-range' ||
         binding.type === 'repeat-page' ||
         binding.type === 'repeat-sheet' ||
@@ -80,7 +84,8 @@ export function createExpansionPlan(compiled: CompiledTemplate): ExpansionPlan {
   const tp1Bindings = compiled.ir.bindings.filter(
     (binding) =>
       binding.type === 'value' ||
-      binding.type === 'repeat-rows' ||
+      (binding.type === 'repeat-rows' &&
+        (binding.objects === undefined || binding.objects.length === 0)) ||
       binding.type === 'conditional-range',
   );
   const structuralRanges = compiled.ir.bindings.flatMap((binding) =>
@@ -171,6 +176,7 @@ export function estimateAllocation(
     const width = binding.range.end.column - binding.range.start.column + 1;
     if (
       binding.type === 'repeat-page' ||
+      binding.type === 'repeat-rows' ||
       (binding.type === 'repeat-range' && binding.axis === 'vertical')
     ) {
       rows += height * multiplier;

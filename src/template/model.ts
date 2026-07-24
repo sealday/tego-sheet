@@ -63,6 +63,10 @@ export interface RepeatRowsBinding {
   readonly empty: 'remove' | 'keep-template-row';
   /** Per-item pagination preference. */
   readonly pageBreak: 'auto' | 'before-each-item';
+  /** Explicit object-copy behavior when the repeated rows intersect floating objects. */
+  readonly objectPolicy?: ObjectRepeatPolicy;
+  /** Compiler-visible object references intersecting the repeated rows. */
+  readonly objects?: readonly RepeatedObjectRef[];
 }
 
 /** Explicit floating-object behavior for a repeated structural region. */
@@ -391,6 +395,8 @@ export interface RenderLimits {
   readonly maxExpandedColumns?: number;
   /** Maximum generated worksheets. */
   readonly maxGeneratedSheets?: number;
+  /** Maximum floating objects after structural expansion. */
+  readonly maxExpandedObjects?: number;
   /** Maximum generated pages. */
   readonly maxPages: number;
   /** Maximum layout wall-clock duration. */
