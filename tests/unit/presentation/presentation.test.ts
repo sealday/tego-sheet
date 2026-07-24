@@ -540,27 +540,25 @@ describe('shared cell presentation', () => {
 
 describe('device-independent print display list', () => {
   it('supports the full draw-command vocabulary and diagnoses unknown commands', () => {
-    const knownKinds = [
-      'fill-rect',
-      'stroke-rect',
-      'text',
-      'line',
-      'image',
-      'path',
-      'clip',
-      'link',
+    const knownCommands = [
+      { kind: 'fill-rect' },
+      { kind: 'stroke-rect' },
+      { kind: 'text' },
+      { kind: 'line' },
+      { kind: 'image' },
+      { kind: 'path' },
+      { kind: 'clip', rect: { x: 0, y: 0, width: 1, height: 1 }, commands: [] },
+      { kind: 'group', rotation: 0, origin: { x: 0, y: 0 }, commands: [] },
+      { kind: 'link' },
     ];
 
     expect(
-      validatePrintDisplayCommands([
-        ...knownKinds.map((kind) => ({ kind })),
-        { kind: 'script', source: 'alert(1)' },
-      ]),
+      validatePrintDisplayCommands([...knownCommands, { kind: 'script', source: 'alert(1)' }]),
     ).toEqual([
       expect.objectContaining({
         code: 'DRAW_COMMAND_UNSUPPORTED',
         severity: 'error',
-        details: { index: 8, kind: 'script' },
+        details: { index: 9, kind: 'script' },
       }),
     ]);
   });
