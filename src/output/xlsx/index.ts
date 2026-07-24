@@ -13,6 +13,7 @@ import type {
   TemplatePrintProfile,
 } from '../../template';
 import { outputError, throwIfAborted } from '../output-error';
+import { createDrawingPart, type DrawingPart } from './drawing';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const FIXED_ZIP_DATE = new Date(1980, 0, 1, 0, 0, 0, 0);
@@ -77,18 +78,6 @@ export interface XlsxAdapterOptions {
 
 type Workbook = SpreadsheetDocument['workbook'];
 type JsonRecord = Readonly<Record<string, JsonValue>>;
-
-interface DrawingPart {
-  readonly drawingPath: string;
-  readonly relationshipsPath: string;
-  readonly drawingXml: string;
-  readonly relationshipsXml: string;
-  readonly media: readonly {
-    readonly path: string;
-    readonly bytes: Uint8Array;
-    readonly mimeType: 'image/png' | 'image/jpeg';
-  }[];
-}
 
 function xml(value: string): string {
   return value
@@ -457,6 +446,15 @@ function sourceStringBytes(document: GeneratedDocument): number {
         total += utf8Length(input.cellType) + jsonStringBytes(input.value);
       }
     }
+    for (const object of sheet.objects ?? []) {
+      total += utf8Length(String(object.id)) + utf8Length(object.accessibility.name);
+      if (object.accessibility.description !== undefined) {
+        total += utf8Length(object.accessibility.description);
+      }
+      if (object.kind === 'text-box') {
+        total += utf8Length(object.text) + utf8Length(object.style.fontFamily);
+      }
+    }
   }
   for (const style of document.workbook.styles) {
     total += utf8Length(style.id) + jsonStringBytes(style.value);
@@ -472,6 +470,20 @@ function sourceStringBytes(document: GeneratedDocument): number {
     }
   }
   return total;
+}
+
+function drawingObjectCount(document: GeneratedDocument): number {
+  const persistent = document.workbook.sheets.flatMap((sheet) =>
+    (sheet.objects ?? []).map((object) => `${sheet.id}\u0000${object.id}`),
+  );
+  const persistentIds = new Set(persistent);
+  return (
+    persistent.length +
+    document.objects.filter(
+      ({ generated, objectId }) =>
+        !persistentIds.has(`${generated.sheetId}\u0000${String(objectId)}`),
+    ).length
+  );
 }
 
 function conservativeUncompressedBytes(document: GeneratedDocument, stringBytes: number): number {
@@ -495,7 +507,7 @@ function conservativeUncompressedBytes(document: GeneratedDocument, stringBytes:
     merges * 128 +
     workbook.styles.length * 2 * 1024 +
     workbook.validations.length * 1024 +
-    document.objects.length * 2 * 1024 +
+    drawingObjectCount(document) * 2 * 1024 +
     conditionalFormats * 1024
   );
 }
@@ -880,76 +892,6 @@ function pageXml(profile: TemplatePrintProfile | undefined, sheet: Sheet): strin
   );
 }
 
-function drawingPart(
-  sheet: Sheet,
-  sheetIndex: number,
-  document: GeneratedDocument,
-): DrawingPart | undefined {
-  const objects = document.objects.filter(({ generated }) => generated.sheetId === sheet.id);
-  if (objects.length === 0) return undefined;
-  const mediaByHash = new Map<
-    string,
-    {
-      readonly path: string;
-      readonly bytes: Uint8Array;
-      readonly mimeType: 'image/png' | 'image/jpeg';
-    }
-  >();
-  const relationships: string[] = [];
-  const anchors = objects.map((object, index) => {
-    if (object.resourceId === undefined) {
-      throw outputError('XLSX_RESOURCE_UNSUPPORTED', `Object ${object.objectId} has no resource`, {
-        details: { objectId: object.objectId },
-      });
-    }
-    const resource = document.resources.byReference[object.resourceId];
-    if (
-      resource === undefined ||
-      (resource.mimeType !== 'image/png' && resource.mimeType !== 'image/jpeg')
-    ) {
-      throw outputError(
-        'XLSX_RESOURCE_UNSUPPORTED',
-        `Object ${object.objectId} is not PNG or JPEG`,
-        {
-          details: { objectId: object.objectId, resourceId: object.resourceId },
-        },
-      );
-    }
-    let media = mediaByHash.get(resource.contentHash);
-    if (media === undefined) {
-      const extension = resource.mimeType === 'image/png' ? 'png' : 'jpeg';
-      media = {
-        path: `xl/media/image${sheetIndex + 1}-${mediaByHash.size + 1}.${extension}`,
-        bytes: new Uint8Array(resource.bytes),
-        mimeType: resource.mimeType,
-      };
-      mediaByHash.set(resource.contentHash, media);
-    }
-    const relationshipId = `rId${index + 1}`;
-    relationships.push(
-      `<Relationship Id="${relationshipId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${media.path.split('/').at(-1)}"/>`,
-    );
-    const range = object.generated;
-    return (
-      `<xdr:twoCellAnchor><xdr:from><xdr:col>${range.start.column}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${range.start.row}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>` +
-      `<xdr:to><xdr:col>${range.end.column + 1}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${range.end.row + 1}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>` +
-      `<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="${index + 1}" name="${xml(object.objectId)}"/><xdr:cNvPicPr/></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="${relationshipId}"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:twoCellAnchor>`
-    );
-  });
-  return {
-    drawingPath: `xl/drawings/drawing${sheetIndex + 1}.xml`,
-    relationshipsPath: `xl/drawings/_rels/drawing${sheetIndex + 1}.xml.rels`,
-    drawingXml:
-      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-      '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
-      `${anchors.join('')}</xdr:wsDr>`,
-    relationshipsXml:
-      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${relationships.join('')}</Relationships>`,
-    media: [...mediaByHash.values()],
-  };
-}
-
 function worksheetXml(
   sheet: Sheet,
   workbook: Workbook,
@@ -1112,7 +1054,7 @@ function packageParts(
   const calculated = calculatedValueMap(document);
   const profile = document.print.profile;
   const worksheetById = worksheetSettings(document);
-  const drawings = workbook.sheets.map((sheet, index) => drawingPart(sheet, index, document));
+  const drawings = workbook.sheets.map((sheet, index) => createDrawingPart(sheet, index, document));
   const parts = new Map<string, Uint8Array>();
   const add = (path: string, value: string | Uint8Array): void => {
     parts.set(path, typeof value === 'string' ? strToU8(value) : value);
@@ -1190,13 +1132,14 @@ export class XlsxAdapter {
     throwIfAborted(options.signal);
     const workbook = document.workbook;
     const cells = workbook.sheets.reduce((sum, sheet) => sum + sheet.cells.length, 0);
+    const drawingObjects = drawingObjectCount(document);
     const stringBytes = sourceStringBytes(document);
     const estimatedUncompressedBytes = conservativeUncompressedBytes(document, stringBytes);
     if (
       workbook.sheets.length > this.#limits.maxSheets ||
       cells > this.#limits.maxCells ||
       workbook.styles.length > this.#limits.maxStyles ||
-      document.objects.length > this.#limits.maxImages ||
+      drawingObjects > this.#limits.maxImages ||
       stringBytes > this.#limits.maxStringBytes ||
       document.resources.totalBytes > this.#limits.maxResourceBytes ||
       !Number.isSafeInteger(estimatedUncompressedBytes) ||
