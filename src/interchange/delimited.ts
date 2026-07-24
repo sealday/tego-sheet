@@ -135,10 +135,7 @@ function createDelimitedReader(
       input: InterchangeInput,
       options: InterchangeReadOptions = {},
     ): Promise<WorkbookImportResult> {
-      const bytes = await inputBytes(input, options.signal);
-      if (bytes.byteLength > limits.maxTextBytes) {
-        throw new InterchangeError('ARCHIVE_LIMIT_EXCEEDED', 'Delimited input byte limit exceeded');
-      }
+      const bytes = await inputBytes(input, options.signal, limits.maxTextBytes);
       let text: string;
       try {
         text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);

@@ -84,10 +84,7 @@ export async function readArchive(
   limits: ResolvedInterchangeLimits,
   signal?: AbortSignal,
 ): Promise<Readonly<Record<string, Uint8Array>>> {
-  const bytes = await inputBytes(input, signal);
-  if (bytes.byteLength > limits.maxPackageBytes) {
-    throw new InterchangeError('ARCHIVE_LIMIT_EXCEEDED', 'ZIP package byte limit exceeded');
-  }
+  const bytes = await inputBytes(input, signal, limits.maxPackageBytes);
   inspectCentralDirectory(bytes, limits);
   throwIfAborted(signal);
   let entries: Record<string, Uint8Array>;

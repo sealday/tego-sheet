@@ -201,8 +201,20 @@ export function throwIfAborted(signal?: AbortSignal): void {
 export async function inputBytes(
   input: InterchangeInput,
   signal: AbortSignal | undefined,
+  maximumBytes: number,
 ): Promise<Uint8Array> {
   throwIfAborted(signal);
+  const knownSize =
+    typeof input === 'string'
+      ? new TextEncoder().encode(input).byteLength
+      : input instanceof Uint8Array
+        ? input.byteLength
+        : input instanceof ArrayBuffer
+          ? input.byteLength
+          : input.size;
+  if (knownSize > maximumBytes) {
+    throw new InterchangeError('ARCHIVE_LIMIT_EXCEEDED', 'Interchange input byte limit exceeded');
+  }
   let bytes: Uint8Array;
   if (typeof input === 'string') {
     bytes = new TextEncoder().encode(input);
@@ -212,6 +224,9 @@ export async function inputBytes(
     bytes = new Uint8Array(input);
   } else {
     bytes = new Uint8Array(await input.arrayBuffer());
+  }
+  if (bytes.byteLength > maximumBytes) {
+    throw new InterchangeError('ARCHIVE_LIMIT_EXCEEDED', 'Interchange input byte limit exceeded');
   }
   throwIfAborted(signal);
   return bytes;
