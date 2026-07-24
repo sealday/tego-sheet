@@ -110,7 +110,9 @@ export interface PresentationResolverOptions {
   /** Optional ordered annotation resolver. */
   readonly annotations?: (address: DocumentCellAddress) => readonly PresentationAnnotation[];
   /** Optional public custom-cell registry; unknown types retain safe text fallback semantics. */
-  readonly cellTypes?: CellTypeRegistry;
+  readonly cellTypes?: {
+    readonly get: (type: string) => unknown;
+  };
 }
 
 const EMPTY_CELL_TYPE_REGISTRY = createCellTypeRegistry({
@@ -457,7 +459,7 @@ export function createPresentationResolver(
   const collapsedGroupsBySheet = new Map(
     options.document.workbook.sheets.map((sheet) => [
       sheet.id,
-      sheet.groups.filter(({ collapsed }) => collapsed),
+      (sheet.groups ?? []).filter(({ collapsed }) => collapsed),
     ]),
   );
   const activeViewKey = activeViews.map(({ id }) => id).join(',');
@@ -479,7 +481,7 @@ export function createPresentationResolver(
       const custom = customPresentation(
         cell,
         options.environment,
-        options.cellTypes ?? EMPTY_CELL_TYPE_REGISTRY,
+        (options.cellTypes as CellTypeRegistry | undefined) ?? EMPTY_CELL_TYPE_REGISTRY,
       );
       const value = custom?.value ?? formulaValue ?? inputValue(cell);
       let formattedText = custom?.formattedText ?? plain(value);

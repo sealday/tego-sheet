@@ -62,10 +62,22 @@ export function createStructuredTableResolver(
 
 /** Result of deciding whether a direct append may expand a structured table. */
 export type StructuredTableAutoExpandResult =
-  | { readonly status: 'unchanged'; readonly table: StructuredTable }
-  | { readonly status: 'expanded'; readonly table: StructuredTable }
   | {
+      /** No expansion was required. */
+      readonly status: 'unchanged';
+      /** Original immutable table definition. */
+      readonly table: StructuredTable;
+    }
+  | {
+      /** The append expands the table by one row. */
+      readonly status: 'expanded';
+      /** Expanded immutable table definition. */
+      readonly table: StructuredTable;
+    }
+  | {
+      /** Expansion is not safe or enabled. */
       readonly status: 'rejected';
+      /** Stable reason the expansion was rejected. */
       readonly code:
         | 'TABLE_AUTO_EXPAND_DISABLED'
         | 'TABLE_AUTO_EXPAND_OUTSIDE_BOUNDARY'

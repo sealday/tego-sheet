@@ -215,17 +215,22 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
         columnOffset: viewport.model.columnOffset,
       }),
     );
-    if (visualizations.length === 0) {
-      options.canvas.removeAttribute('role');
-      options.canvas.removeAttribute('aria-label');
-      options.canvas.removeAttribute('data-visualization-revision');
-    } else {
-      options.canvas.setAttribute('role', 'img');
-      options.canvas.setAttribute(
-        'aria-label',
-        visualizations.map(({ summary }) => summary).join('. '),
-      );
-      options.canvas.setAttribute('data-visualization-revision', visualizationSource.revision);
+    if (
+      typeof options.canvas.setAttribute === 'function' &&
+      typeof options.canvas.removeAttribute === 'function'
+    ) {
+      if (visualizations.length === 0) {
+        options.canvas.removeAttribute('role');
+        options.canvas.removeAttribute('aria-label');
+        options.canvas.removeAttribute('data-visualization-revision');
+      } else {
+        options.canvas.setAttribute('role', 'img');
+        options.canvas.setAttribute(
+          'aria-label',
+          visualizations.map(({ summary }) => summary).join('. '),
+        );
+        options.canvas.setAttribute('data-visualization-revision', visualizationSource.revision);
+      }
     }
     reportObjectDiagnostics(
       options.onObjectDiagnostics,

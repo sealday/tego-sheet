@@ -41,7 +41,7 @@ export function projectPersistedVisualizations(
   source: ChartValueSource,
   placement: VisualizationPlacement,
 ): readonly PersistedVisualizationProjection[] {
-  const charts = sheet.charts
+  const charts = (sheet.charts ?? [])
     .map((definition): PersistedVisualizationProjection | undefined => {
       const rect = placement.chart(definition);
       if (rect === null) return undefined;
@@ -60,7 +60,7 @@ export function projectPersistedVisualizations(
     .filter(
       (projection): projection is PersistedVisualizationProjection => projection !== undefined,
     );
-  const sparklines = sheet.sparklines
+  const sparklines = (sheet.sparklines ?? [])
     .map((definition): PersistedVisualizationProjection | undefined => {
       const rect = placement.sparkline(definition);
       if (rect === null) return undefined;

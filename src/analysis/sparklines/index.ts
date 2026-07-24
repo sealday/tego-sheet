@@ -16,11 +16,17 @@ export type SparklineType = 'line' | 'column' | 'win-loss';
 
 /** Persistent sparkline definition. The target stores presentation, not a cell value. */
 export interface SparklineDefinition {
+  /** Stable sparkline identifier. */
   readonly id: string;
+  /** Compact renderer-neutral visualization family. */
   readonly type: SparklineType;
+  /** Worksheet range supplying sparkline values. */
   readonly source: AnalysisRangeReference;
+  /** Worksheet cell receiving the in-cell visualization. */
   readonly target: AnalysisCellReference;
+  /** Optional primary series color. */
   readonly color?: string;
+  /** Optional color used for negative values. */
   readonly negativeColor?: string;
 }
 

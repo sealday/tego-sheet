@@ -79,3 +79,4 @@ export {
   projectPersistedVisualizations,
 } from './visualizations';
 export type { PersistedVisualizationProjection, VisualizationPlacement } from './visualizations';
+export type { AnalysisCellReference, AnalysisRangeReference } from './references';

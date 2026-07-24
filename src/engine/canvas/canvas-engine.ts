@@ -156,13 +156,15 @@ export class CanvasEngine {
             (pane.kind === 'left' || pane.kind === 'body' ? viewport.scroll.y : 0),
         },
       );
-      this.draw.withClip(pane, () => {
-        const paneObjects =
-          snapshot.objectPanes?.find(({ kind }) => kind === pane.kind)?.objects ??
-          snapshot.objects ??
-          [];
-        paintObjects(this.draw, paneObjects, snapshot.selectedObjectId);
-      });
+      const paneObjects =
+        snapshot.objectPanes?.find(({ kind }) => kind === pane.kind)?.objects ??
+        snapshot.objects ??
+        [];
+      if (paneObjects.length > 0) {
+        this.draw.withClip(pane, () => {
+          paintObjects(this.draw, paneObjects, snapshot.selectedObjectId);
+        });
+      }
     }
     paintHeaders(
       this.draw,

@@ -14,17 +14,25 @@ export type ChartType = 'column' | 'bar' | 'line' | 'area' | 'pie' | 'scatter' |
 
 /** One persistent chart series backed by a stable worksheet range. */
 export interface ChartSeriesDefinition {
+  /** Stable series identifier. */
   readonly id: string;
+  /** Optional series label. */
   readonly name?: string;
+  /** Worksheet range supplying series values. */
   readonly values: AnalysisRangeReference;
 }
 
 /** Persistent renderer-neutral chart definition. */
 export interface ChartDefinition {
+  /** Stable chart identifier. */
   readonly id: string;
+  /** Renderer-neutral chart family. */
   readonly type: ChartType;
+  /** Optional chart title. */
   readonly title?: string;
+  /** Optional worksheet range supplying category labels. */
   readonly categories?: AnalysisRangeReference;
+  /** Ordered worksheet-backed data series. */
   readonly series: readonly ChartSeriesDefinition[];
   /** Optional persistent worksheet-object anchor used by screen and output projections. */
   readonly anchor?: ObjectAnchor;

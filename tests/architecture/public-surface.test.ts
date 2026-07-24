@@ -90,6 +90,7 @@ function trackedFiles(): readonly string[] {
 
 it('[ARCH-1] exposes only the approved React and Workbook 2.0 runtime API', () => {
   expect(Object.keys(publicApi).sort()).toEqual([
+    'AiProposalPanel',
     'BUILTIN_FORMULA_COMPATIBILITY',
     'BUILTIN_NUMBER_FORMAT_COMPATIBILITY',
     'BrowserPrintError',

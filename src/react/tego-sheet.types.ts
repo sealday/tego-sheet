@@ -21,10 +21,6 @@ import type {
   ValidationResult as AdvancedValidationResult,
 } from '../validation';
 import type { SheetTabsRenderer, ToolbarRenderer } from '../ui/slot-types';
-import type { PermissionStore } from '../integrations/permission';
-import type { PersistenceSession } from '../integrations/persistence';
-import type { CommentPrintPolicy, CommentStore } from '../integrations/comments';
-import type { CollaborationSession, PresenceStore } from '../integrations/collaboration';
 
 export type { SheetTabsRenderer, ToolbarRenderer } from '../ui/slot-types';
 
@@ -79,17 +75,51 @@ interface TegoSheetSharedProps extends TegoSheetCallbacks {
   /** Disables workbook mutations while preserving navigation, selection, copy, and printing. */
   readonly readOnly?: boolean;
   /** Optional live host permission store; installed stores default every protected action to deny. */
-  readonly permissionStore?: PermissionStore;
+  readonly permissionStore?: {
+    getSnapshot():
+      | {
+          readonly revision: string;
+          readonly actorId: string;
+          can(action: string, target: object): boolean;
+        }
+      | undefined;
+    can(action: string, target: object): boolean;
+    subscribe(listener: () => void): () => void;
+  };
   /** Optional host-owned persistence session attached to committed workbook transactions. */
-  readonly persistenceSession?: PersistenceSession;
+  readonly persistenceSession?: {
+    readonly state: { readonly status: string };
+    attachController(controller: object): () => void;
+    bindBeforeUnload(target: {
+      addEventListener(type: 'beforeunload', listener: (event: BeforeUnloadEvent) => void): void;
+      removeEventListener(type: 'beforeunload', listener: (event: BeforeUnloadEvent) => void): void;
+    }): () => void;
+    subscribe(listener: () => void): () => void;
+  };
   /** Optional host comment store used to project semantic cell/range markers. */
-  readonly commentStore?: CommentStore;
+  readonly commentStore?: {
+    getSnapshot(): readonly {
+      readonly id: string;
+      readonly anchor: { readonly type: string };
+    }[];
+    subscribe(listener: () => void): () => void;
+  };
   /** Explicit comment print projection policy; defaults to excluding comments. */
-  readonly commentPrintPolicy?: CommentPrintPolicy;
+  readonly commentPrintPolicy?: 'exclude' | 'markers' | 'full';
   /** Optional ephemeral collaboration presence projected as semantic participants. */
-  readonly presenceStore?: PresenceStore;
+  readonly presenceStore?: {
+    getSnapshot(): readonly {
+      readonly actorId: string;
+      readonly sheetId: string;
+      readonly display: { readonly label: string };
+    }[];
+    subscribe(listener: () => void): () => void;
+  };
   /** Optional collaboration connection session projected as accessible live status. */
-  readonly collaborationSession?: CollaborationSession;
+  readonly collaborationSession?: {
+    getSnapshot(): { readonly status: string };
+    subscribe(listener: () => void): () => void;
+  };
   /** Per-instance locale identifier and message dictionary for built-in chrome. */
   readonly locale?: LocaleDefinition;
   /** Per-instance worksheet behavior and layout settings. */

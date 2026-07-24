@@ -1,12 +1,33 @@
 import { useState } from 'react';
-import type { AiContextSummary, AiProposalSession, AiTransactionPreview } from '../integrations/ai';
 
+/** Props for the explicit AI proposal review surface. */
 export interface AiProposalPanelProps<ApplyResult = unknown> {
-  readonly session: AiProposalSession<ApplyResult> & {
-    readonly contextSummary?: AiContextSummary;
-    readonly preview: AiTransactionPreview;
+  /** Validated proposal, dry-run preview, and the one-shot accept/reject boundary. */
+  readonly session: {
+    readonly proposal: {
+      readonly id: string;
+      readonly summary: string;
+      readonly assumptions: readonly string[];
+      readonly commands: readonly unknown[];
+    };
+    readonly contextSummary?: {
+      readonly sheetCount: number;
+      readonly cellCount: number;
+      readonly omittedCellCount: number;
+      readonly serializedBytes: number;
+    };
+    readonly preview: {
+      readonly status: 'ready' | 'noop';
+      readonly diagnostics: readonly { readonly severity?: string }[];
+      readonly baseRevision?: number;
+      readonly document?: unknown;
+    };
+    accept(): ApplyResult;
+    reject(): void;
   };
+  /** Receives the result returned by the accepted proposal session. */
   readonly onAccepted?: (result: ApplyResult) => void;
+  /** Runs after the proposal session is rejected. */
   readonly onRejected?: () => void;
 }
 

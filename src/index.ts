@@ -47,9 +47,11 @@ export type {
   PasteInternalCommand,
   PasteMode,
   RedoCommand,
+  RemoveChartCommand,
   RemoveConditionalFormatCommand,
   RemoveFilterViewCommand,
   RemoveSheetObjectCommand,
+  RemoveSparklineCommand,
   RemoveTableCommand,
   RemoveValidationCommand,
   RenameSheetCommand,
@@ -62,12 +64,14 @@ export type {
   SetCellMetadataCommand,
   SetCellInputCommand,
   SetCellTextCommand,
+  SetChartCommand,
   SetConditionalFormatCommand,
   SetFilterCommand,
   SetFilterViewCommand,
   SetFreezeCommand,
   SetStyleCommand,
   SetSheetObjectCommand,
+  SetSparklineCommand,
   SetTableCommand,
   SetValidationCommand,
   SheetColumnOptions,
@@ -187,7 +191,17 @@ export type {
   WorksheetVisibility,
 } from './document';
 export { createStructuredTableResolver, planStructuredTableAutoExpand } from './analysis';
-export type { StructuredTableAutoExpandResult, StructuredTableDocumentProvider } from './analysis';
+export type {
+  AnalysisCellReference,
+  AnalysisRangeReference,
+  ChartDefinition,
+  ChartSeriesDefinition,
+  ChartType,
+  SparklineDefinition,
+  SparklineType,
+  StructuredTableAutoExpandResult,
+  StructuredTableDocumentProvider,
+} from './analysis';
 /** A zero-based Workbook 2.0 cell coordinate. */
 export type { CellPoint as DocumentCellPoint } from './document';
 export {

@@ -9,8 +9,11 @@ export type AnalysisRangeReference = DocumentCellRange;
 
 /** Immutable, stable worksheet address consumed by analysis objects. */
 export interface AnalysisCellReference {
+  /** Stable worksheet identifier. */
   readonly sheetId: DocumentSheetId;
+  /** Zero-based worksheet row. */
   readonly row: number;
+  /** Zero-based worksheet column. */
   readonly column: number;
 }
 

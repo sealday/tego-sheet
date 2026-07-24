@@ -413,29 +413,41 @@ export interface RemoveTableCommand {
 
 /** Creates or replaces one persistent renderer-neutral chart. */
 export interface SetChartCommand {
+  /** Command discriminator. */
   readonly type: 'set-chart';
+  /** Worksheet owning the chart. */
   readonly sheet: SheetId;
+  /** Complete persistent chart definition. */
   readonly chart: ChartDefinition;
 }
 
 /** Removes one persistent chart by stable ID. */
 export interface RemoveChartCommand {
+  /** Command discriminator. */
   readonly type: 'remove-chart';
+  /** Worksheet owning the chart. */
   readonly sheet: SheetId;
+  /** Stable identifier of the chart to remove. */
   readonly chartId: string;
 }
 
 /** Creates or replaces one persistent in-cell sparkline. */
 export interface SetSparklineCommand {
+  /** Command discriminator. */
   readonly type: 'set-sparkline';
+  /** Worksheet owning the sparkline. */
   readonly sheet: SheetId;
+  /** Complete persistent sparkline definition. */
   readonly sparkline: SparklineDefinition;
 }
 
 /** Removes one persistent sparkline by stable ID. */
 export interface RemoveSparklineCommand {
+  /** Command discriminator. */
   readonly type: 'remove-sparkline';
+  /** Worksheet owning the sparkline. */
   readonly sheet: SheetId;
+  /** Stable identifier of the sparkline to remove. */
   readonly sparklineId: string;
 }
 
