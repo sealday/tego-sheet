@@ -566,11 +566,15 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
           }
         }
       }
+      const changedKeySet = new Set(changedKeys);
       for (const [anchor, projected] of program.spills) {
+        if (!dirty.has(anchor) && ![...projected].some((address) => changedKeySet.has(address))) {
+          continue;
+        }
         for (const address of projected) program.values.delete(address);
+        program.spills.delete(anchor);
         dirty.add(anchor);
       }
-      program.spills.clear();
       for (const [address, value] of program.values) {
         if (value.type === 'error' && value.value === '#SPILL!') dirty.add(address);
       }
@@ -656,6 +660,10 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
                 )
                 .map(([key]) => key),
             );
+            for (const [otherAnchor, projected] of program.spills) {
+              if (otherAnchor === address) continue;
+              for (const key of projected) occupied.add(key);
+            }
             const plan = planFormulaSpill({
               anchor: { ...anchor, sheetId: anchor.sheetId as DocumentSheetId },
               value: snapshot,

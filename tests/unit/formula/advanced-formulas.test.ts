@@ -315,6 +315,9 @@ describe('FRM-01 advanced formula foundation', () => {
     expect(initial.values.get('sheet-1!D1')).toEqual({ type: 'number', value: 6 });
     expect(program.spillAnchors).toEqual(new Map([['sheet-1!C2', 'sheet-1!C1']]));
     expect(program.graph.dependencies.get('sheet-1!D1')).toEqual(new Set(['sheet-1!C1']));
+    const unchanged = engine.recalculate(program, [], environment);
+    expect(unchanged.evaluatedAddresses).toEqual([]);
+    expect(unchanged.values.get('sheet-1!C2')).toEqual({ type: 'number', value: 3 });
 
     const updated = engine.recalculate(
       program,
@@ -333,5 +336,54 @@ describe('FRM-01 advanced formula foundation', () => {
     expect(removed.values.has('sheet-1!C2')).toBe(false);
     expect(program.spillAnchors).toEqual(new Map());
     expect(removed.values.get('sheet-1!D1')).toEqual({ type: 'number', value: 0 });
+  });
+
+  it('blocks deterministic child-only overlap between independent spills', () => {
+    const cells = [
+      ...Array.from({ length: 2 }, (_, row) =>
+        Array.from({ length: 3 }, (_, column) => ({
+          row,
+          column,
+          cell: { input: { type: 'number' as const, value: row * 3 + column + 1 } },
+        })),
+      ).flat(),
+      ...Array.from({ length: 3 }, (_, offset) =>
+        Array.from({ length: 2 }, (_, column) => ({
+          row: 6 + offset,
+          column,
+          cell: { input: { type: 'number' as const, value: 10 + offset * 2 + column } },
+        })),
+      ).flat(),
+      { row: 3, column: 2, cell: { input: { type: 'formula' as const, source: '=A1:C2' } } },
+      { row: 2, column: 3, cell: { input: { type: 'formula' as const, source: '=A7:B9' } } },
+    ];
+    const parsed = parseSpreadsheetDocument({
+      schemaVersion: 2,
+      id: 'formula-document',
+      workbook: {
+        sheets: [{ id: 'sheet-1', name: 'Sheet 1', cells, merges: [] }],
+        styles: [],
+        validations: [],
+        settings: { dateSystem: 'excel-1900' },
+      },
+      templates: [],
+      resources: { items: [] },
+      extensions: {},
+    });
+    if (!parsed.ok) throw new Error('formula fixture must parse');
+    const engine = createFormulaEngine();
+    const program = engine.compile(parsed.document);
+    const result = engine.recalculate(program, [], {
+      locale: 'en-US',
+      timeZone: 'UTC',
+      dateSystem: 'excel-1900',
+      clock: { now: () => 0 },
+      tick: 0,
+      functionRegistryVersion: 'builtin-1',
+    });
+
+    expect(result.values.get('sheet-1!C4')).toEqual({ type: 'number', value: 1 });
+    expect(result.values.get('sheet-1!D3')).toEqual({ type: 'error', value: '#SPILL!' });
+    expect(program.spillAnchors.get('sheet-1!D4')).toBe('sheet-1!C4');
   });
 });
