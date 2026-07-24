@@ -30,9 +30,13 @@ export interface DataTransformPreview {
   readonly baseRevision: number;
   /** Bounded preview of changed cells. */
   readonly sampleChanges: readonly {
+    /** Zero-based source row. */
     readonly row: number;
+    /** Zero-based source column. */
     readonly column: number;
+    /** Cell text before the transform. */
     readonly before: string;
+    /** Cell text after the transform. */
     readonly after: string;
   }[];
 }
@@ -71,10 +75,12 @@ export function createDataTransformPlanner(limits: {
   readonly maxCells: number;
   readonly maxSamples: number;
 }): {
+  /** Builds an immutable bounded preview against one document revision. */
   preview(
     snapshot: DocumentControllerSnapshot,
     transform: FindReplaceTransform,
   ): Promise<DataTransformPreview>;
+  /** Atomically commits a previously previewed plan when its revision is still current. */
   commit(controller: DocumentController, planId: string): DataTransformCommitResult;
 } {
   const plans = new Map<string, PendingPlan>();

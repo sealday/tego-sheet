@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { createRef } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { parseSpreadsheetDocument, TegoSheet, type TegoSheetHandle } from '../../src';
@@ -84,4 +84,62 @@ it('activates a saved view as session-only screen and accessibility state', asyn
 
   ref.current!.deactivateFilterView(ref.current!.getDocument().workbook.sheets[0]!.id as never);
   await waitFor(() => expect(rendered.getByText('drop')).toBeTruthy());
+});
+
+it('activates a saved view beyond the default grid extent through the production adapter', async () => {
+  const parsed = parseSpreadsheetDocument({
+    schemaVersion: 2,
+    id: 'large-view-component',
+    workbook: {
+      sheets: [
+        {
+          id: 'sheet-1',
+          name: 'Sheet 1',
+          cells: [],
+          merges: [],
+          filterViews: [
+            {
+              id: 'large',
+              name: 'Large',
+              range: {
+                sheetId: 'sheet-1',
+                start: { row: 0, column: 0 },
+                end: { row: 500, column: 0 },
+              },
+              sorts: [],
+              filters: [],
+              visibility: 'document',
+            },
+          ],
+        },
+      ],
+      styles: [],
+      validations: [],
+      settings: { dateSystem: 'excel-1900' },
+    },
+    templates: [],
+    resources: { items: [] },
+    extensions: {},
+  });
+  if (!parsed.ok) throw new Error(JSON.stringify(parsed.diagnostics));
+  const ref = createRef<TegoSheetHandle>();
+  const rendered = render(<TegoSheet ref={ref} defaultDocument={parsed.document} />);
+  await waitFor(() => expect(ref.current).not.toBeNull());
+  const root = rendered.container.querySelector<HTMLElement>('[data-tego-sheet]')!;
+  Object.defineProperties(root, {
+    clientWidth: { configurable: true, value: 500 },
+    clientHeight: { configurable: true, value: 300 },
+  });
+  fireEvent(window, new Event('resize'));
+
+  await act(async () => {
+    ref.current!.activateFilterView(
+      ref.current!.getDocument().workbook.sheets[0]!.id as never,
+      'large',
+    );
+  });
+  await waitFor(() =>
+    expect(rendered.container.querySelector('.tego-sheet__accessibility-grid')).not.toBeNull(),
+  );
+  expect(root.getAttribute('aria-rowcount')).toBe('501');
 });

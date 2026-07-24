@@ -18,7 +18,12 @@ export interface ObjectBase {
   /** Object policy during template repetition. */
   readonly templateRepeat: 'shared' | 'per-item' | 'forbidden';
   /** Accessible object description. */
-  readonly accessibility: { readonly name: string; readonly description?: string };
+  readonly accessibility: {
+    /** Accessible object name. */
+    readonly name: string;
+    /** Optional longer accessible description. */
+    readonly description?: string;
+  };
 }
 
 /** Sheet geometry provider used to resolve logical anchors. */

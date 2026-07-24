@@ -31,9 +31,12 @@ import { SubscriptionStore } from './subscription-store';
 import { History, type HistoryCheckpoint } from './history';
 import { applyDocumentPatch, createDocumentPatch, type DocumentPatch } from './document-patch';
 import {
+  plannedPasteTargetRange,
   prepareSchemaCommand,
   prepareSchemaProjectionCommit,
 } from '../commands/schema-command-plan';
+import { resolveDocumentValidation } from '../../validation/document-rule';
+import { validateValidationRequestSync } from '../../validation/synchronous';
 
 function sameJson(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
@@ -124,6 +127,10 @@ export interface ExecuteOptions extends TransactionOptions {
 export type TransactionRejectionCode =
   | 'COMMAND_SCHEMA_INVALID'
   | 'COMMAND_NOT_ALLOWED'
+  | 'ASYNC_REQUIRED'
+  | 'VALIDATION_REJECTED'
+  | 'VALIDATION_RULE_INVALID'
+  | 'VALIDATION_CAPABILITY_INVALID'
   | 'REVISION_CONFLICT'
   | 'TRANSACTION_INVARIANT_FAILED'
   | 'TRANSACTION_LIMIT_EXCEEDED';
@@ -186,6 +193,46 @@ export type TransactionPreview =
 
 const MAX_TRANSACTION_COMMANDS = 1_000;
 const MAX_TRANSACTION_BYTES = 4 * 1_024 * 1_024;
+
+class ValidationBoundaryError extends Error {
+  constructor(
+    readonly code: Extract<
+      TransactionRejectionCode,
+      | 'ASYNC_REQUIRED'
+      | 'VALIDATION_REJECTED'
+      | 'VALIDATION_RULE_INVALID'
+      | 'VALIDATION_CAPABILITY_INVALID'
+      | 'TRANSACTION_LIMIT_EXCEEDED'
+    >,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ValidationBoundaryError';
+  }
+}
+
+const validationCapabilities = new WeakMap<
+  SpreadsheetDocumentController,
+  WeakMap<object, { readonly transaction: string; readonly revision: number }>
+>();
+
+/** @internal Creates a controller-owned, opaque, one-use prevalidation capability. */
+export function issueValidationCapability(
+  controller: SpreadsheetDocumentController,
+  transaction: SerializableTransactionEnvelope,
+): object {
+  const capability = Object.freeze({});
+  let issued = validationCapabilities.get(controller);
+  if (issued === undefined) {
+    issued = new WeakMap();
+    validationCapabilities.set(controller, issued);
+  }
+  issued.set(capability, {
+    transaction: JSON.stringify(transaction),
+    revision: transaction.baseRevision,
+  });
+  return capability;
+}
 
 function calculationEnvironment(
   document: SpreadsheetDocument,
@@ -271,7 +318,8 @@ function captureJsonValue(value: unknown, seen = new Set<object>()): unknown {
   }
 }
 
-function snapshotTransaction(
+/** @internal Captures and validates one hostile-safe immutable transaction envelope. */
+export function snapshotSerializableTransaction(
   value: SerializableTransactionEnvelope,
 ): SerializableTransactionEnvelope | TransactionRejection {
   let transaction: SerializableTransactionEnvelope;
@@ -418,6 +466,7 @@ export class SpreadsheetDocumentController {
   private readonly subscriptions = new SubscriptionStore<SpreadsheetControllerEvent>();
   private permissionGateActive = false;
   private commitMutationActive = false;
+  private validatedTransactionActive = false;
   private checkpointOwner: object = Object.freeze({});
   private checkpoints = new WeakSet<SpreadsheetControllerCheckpoint>();
 
@@ -648,6 +697,45 @@ export class SpreadsheetDocumentController {
     }
   }
 
+  /** @internal Commits a previously validated transaction with an opaque one-use capability. */
+  transactValidated(
+    input: SerializableTransactionEnvelope,
+    options: TransactionOptions,
+    capability: object,
+  ): TransactionResult {
+    const issued = validationCapabilities.get(this);
+    const binding = issued?.get(capability);
+    if (binding === undefined || binding.transaction !== JSON.stringify(input)) {
+      return {
+        status: 'rejected',
+        code: 'VALIDATION_CAPABILITY_INVALID',
+        message: 'Validation capability is invalid or has already been consumed',
+      };
+    }
+    if (binding.revision !== this.getSnapshot().revision) {
+      issued!.delete(capability);
+      return {
+        status: 'rejected',
+        code: 'REVISION_CONFLICT',
+        message: 'Transaction base revision is stale',
+      };
+    }
+    if (this.validatedTransactionActive) {
+      return {
+        status: 'rejected',
+        code: 'VALIDATION_CAPABILITY_INVALID',
+        message: 'Validated transactions cannot be nested',
+      };
+    }
+    issued!.delete(capability);
+    this.validatedTransactionActive = true;
+    try {
+      return this.transact(input, options);
+    } finally {
+      this.validatedTransactionActive = false;
+    }
+  }
+
   dryRun(
     input: SerializableTransactionEnvelope,
     options: TransactionOptions = {},
@@ -679,6 +767,26 @@ export class SpreadsheetDocumentController {
     }
   }
 
+  /** @internal Produces the exact candidate document while bypassing only validation. */
+  previewValidated(
+    input: SerializableTransactionEnvelope,
+    options: TransactionOptions = {},
+  ): TransactionPreview {
+    if (this.validatedTransactionActive) {
+      return {
+        status: 'rejected',
+        code: 'VALIDATION_CAPABILITY_INVALID',
+        message: 'Validated transaction previews cannot be nested',
+      };
+    }
+    this.validatedTransactionActive = true;
+    try {
+      return this.dryRun(input, options);
+    } finally {
+      this.validatedTransactionActive = false;
+    }
+  }
+
   dispatch<Command extends WorkbookCommand>(
     command: Command,
     source: ChangeSource,
@@ -700,6 +808,7 @@ export class SpreadsheetDocumentController {
     this.legacy.assertCommand(command);
     const rollbackCheckpoint = this.checkpoint();
     const plan = prepareSchemaCommand(this.currentDocument, command, this.legacy.getSheetIds());
+    if (!this.validatedTransactionActive) this.assertSynchronousValidation(command, plan.document);
     const plannedProjection = projectDocumentToLegacy(plan.document);
     const historyCheckpoint = this.documentHistory.checkpoint();
     let preparedDocument: SpreadsheetDocument | undefined;
@@ -1011,7 +1120,7 @@ export class SpreadsheetDocumentController {
     input: SerializableTransactionEnvelope,
     options: TransactionOptions,
   ): SerializableTransactionEnvelope | TransactionRejection {
-    const transaction = snapshotTransaction(input);
+    const transaction = snapshotSerializableTransaction(input);
     if ('status' in transaction) return transaction;
     if (this.commitMutationActive) {
       return {
@@ -1092,11 +1201,130 @@ export class SpreadsheetDocumentController {
     return {
       status: 'rejected',
       code:
-        error instanceof TegoSheetException && error.code === 'INVALID_COMMAND'
-          ? 'COMMAND_SCHEMA_INVALID'
-          : 'TRANSACTION_INVARIANT_FAILED',
+        error instanceof ValidationBoundaryError
+          ? error.code
+          : error instanceof TegoSheetException && error.code === 'INVALID_COMMAND'
+            ? 'COMMAND_SCHEMA_INVALID'
+            : 'TRANSACTION_INVARIANT_FAILED',
       message: error instanceof Error ? error.message : 'Transaction failed',
     };
+  }
+
+  private assertSynchronousValidation(
+    command: WorkbookCommand,
+    plannedDocument: SpreadsheetDocument,
+  ): void {
+    const maxCandidates = 100_000;
+    const candidates: {
+      readonly sheet: SheetId;
+      readonly row: number;
+      readonly column: number;
+      readonly text: string;
+    }[] = [];
+    if (command.type === 'set-cell-text') {
+      candidates.push({ ...command.address, text: command.text });
+    } else if (command.type === 'clear-contents') {
+      const { start, end } = command.selection.range;
+      const count = (end.row - start.row + 1) * (end.column - start.column + 1);
+      if (!Number.isSafeInteger(count) || count < 0 || count > maxCandidates) {
+        throw new ValidationBoundaryError(
+          'TRANSACTION_LIMIT_EXCEEDED',
+          'Validation candidate limit exceeded',
+        );
+      }
+      for (let row = start.row; row <= end.row; row += 1) {
+        for (let column = start.column; column <= end.column; column += 1) {
+          candidates.push({ sheet: command.selection.sheet, row, column, text: '' });
+        }
+      }
+    } else if (command.type === 'paste-external') {
+      const count = command.values.reduce((total, row) => total + row.length, 0);
+      if (!Number.isSafeInteger(count) || count > maxCandidates) {
+        throw new ValidationBoundaryError(
+          'TRANSACTION_LIMIT_EXCEEDED',
+          'Validation candidate limit exceeded',
+        );
+      }
+      const start = command.target.range.start;
+      for (let row = 0; row < command.values.length; row += 1) {
+        const values = command.values[row]!;
+        for (let column = 0; column < values.length; column += 1) {
+          candidates.push({
+            sheet: command.target.sheet,
+            row: start.row + row,
+            column: start.column + column,
+            text: values[column]!,
+          });
+        }
+      }
+    } else if (
+      (command.type === 'paste-internal' || command.type === 'autofill') &&
+      command.mode !== 'format'
+    ) {
+      const target = plannedPasteTargetRange(command);
+      const count =
+        (target.end.row - target.start.row + 1) * (target.end.column - target.start.column + 1);
+      if (!Number.isSafeInteger(count) || count < 0 || count > maxCandidates) {
+        throw new ValidationBoundaryError(
+          'TRANSACTION_LIMIT_EXCEEDED',
+          'Validation candidate limit exceeded',
+        );
+      }
+      for (let row = target.start.row; row <= target.end.row; row += 1) {
+        for (let column = target.start.column; column <= target.end.column; column += 1) {
+          const input = plannedDocument.workbook.sheets
+            .find((sheet) => sheet.id === (command.target.sheet as string))
+            ?.cells.find((item) => item.row === row && item.column === column)?.cell.input;
+          if (command.type === 'paste-internal' && command.cut && input === undefined) continue;
+          const text =
+            input === undefined || input.type === 'blank'
+              ? ''
+              : input.type === 'string'
+                ? input.value
+                : input.type === 'number' || input.type === 'boolean'
+                  ? String(input.value)
+                  : input.type === 'formula'
+                    ? input.source
+                    : typeof input.value === 'string'
+                      ? input.value
+                      : JSON.stringify(input.value);
+          candidates.push({ sheet: command.target.sheet, row, column, text });
+        }
+      }
+    } else {
+      return;
+    }
+
+    for (const candidate of candidates) {
+      const resolution = resolveDocumentValidation(
+        command.type === 'paste-internal' || command.type === 'autofill'
+          ? plannedDocument
+          : this.currentDocument,
+        {
+          sheetId: candidate.sheet as string as import('../../document').DocumentSheetId,
+          row: candidate.row,
+          column: candidate.column,
+        },
+        candidate.text,
+      );
+      if (resolution.kind === 'none') continue;
+      if (resolution.kind === 'legacy') continue;
+      if (resolution.kind === 'invalid') {
+        throw new ValidationBoundaryError(
+          'VALIDATION_RULE_INVALID',
+          `Referenced validation rule ${resolution.validationId} is invalid`,
+        );
+      }
+      const result = validateValidationRequestSync(resolution.request);
+      if (result.status === 'accepted') continue;
+      if (result.status === 'async-required' || result.status === 'warning') {
+        throw new ValidationBoundaryError(
+          'ASYNC_REQUIRED',
+          'Validation must complete before this command can mutate the document',
+        );
+      }
+      throw new ValidationBoundaryError('VALIDATION_REJECTED', 'Cell value failed validation');
+    }
   }
 
   private createDocumentHistoryEntry(

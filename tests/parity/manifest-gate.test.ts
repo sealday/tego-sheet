@@ -133,6 +133,13 @@ const expectedCatalog: readonly CatalogRow[] = [
     visual: ['locale.localized-ui'],
   },
   {
+    id: 'interchange',
+    unit: null,
+    component: null,
+    browser: ['interchange.readers'],
+    visual: null,
+  },
+  {
     id: 'correction.empty-workbook',
     unit: ['correction.empty-workbook'],
     component: ['correction.empty-workbook-component'],
@@ -682,6 +689,7 @@ test('@parity:manifest.catalog is complete and uses stable assertion prefixes', 
     'output',
     'input',
     'localization',
+    'interchange',
     ...correctionIds,
   ];
   const prefixes = new Map([
@@ -691,12 +699,12 @@ test('@parity:manifest.catalog is complete and uses stable assertion prefixes', 
 
   const projection = projectCatalog(parityManifest);
   assert.deepEqual(projection, expectedCatalog);
-  assert.equal(projection.length, 19);
-  assert.equal(projection.flatMap((row) => lanes.flatMap((lane) => row[lane] ?? [])).length, 65);
+  assert.equal(projection.length, 20);
+  assert.equal(projection.flatMap((row) => lanes.flatMap((lane) => row[lane] ?? [])).length, 66);
   assert.equal(
     projection.flatMap((row) => lanes.map((lane) => row[lane])).filter((lane) => lane === null)
       .length,
-    16,
+    19,
   );
   assert.deepEqual(
     parityManifest.map(({ id }) => id),

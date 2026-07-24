@@ -10,7 +10,10 @@ export interface ApplyFilterViewInput {
   /** Explicit comparison locale. */
   readonly locale: string;
   /** Evaluation resource limits. */
-  readonly limits: { readonly maxRows: number };
+  readonly limits: {
+    /** Maximum source rows accepted by one evaluation. */
+    readonly maxRows: number;
+  };
 }
 
 function scalar(value: FormulaValue | undefined): string | number | boolean | undefined {
@@ -50,7 +53,9 @@ function matches(
 
 /** Derives hidden rows from a view without changing the source rows or document. */
 export function applyFilterView(input: ApplyFilterViewInput): {
+  /** Logical row indexes excluded by the active filters. */
   readonly hiddenRows: ReadonlySet<number>;
+  /** Logical data-row indexes in the active sort order. */
   readonly rowOrder: readonly number[];
 } {
   if (input.rows.length > input.limits.maxRows) {

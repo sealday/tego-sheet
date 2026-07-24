@@ -504,7 +504,12 @@ export function createSheetGridModel(
   sheet: Readonly<SheetData>,
   sizing: Readonly<SheetGridSizing> = {},
 ): GridModelPort {
-  const rowCount = collectionLength(sheet.rows?.len, DEFAULT_ROW_COUNT, 'row');
+  const baseRowCount = collectionLength(sheet.rows?.len, DEFAULT_ROW_COUNT, 'row');
+  const rowCount = collectionLength(
+    Math.max(baseRowCount, (sizing.derivedRows?.end ?? -1) + 1),
+    DEFAULT_ROW_COUNT,
+    'row',
+  );
   const columnCount = collectionLength(sheet.cols?.len, DEFAULT_COLUMN_COUNT, 'column');
   const defaultRowHeight = defaultSize(
     sizing.defaultRowHeight,

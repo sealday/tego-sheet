@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { DocumentSheetId } from '../../../src/document';
-import { createSpreadsheetDocument } from '../../../src/document';
+import {
+  parseSpreadsheetDocument,
+  type JsonValue,
+  type SpreadsheetDocument,
+} from '../../../src/document';
 import { createDocumentController } from '../../../src/document-controller';
 import {
   createValidationEngine,
@@ -10,6 +14,37 @@ import {
 
 describe('VAL-01 validation foundation', () => {
   const sheetId = 'sheet-1' as DocumentSheetId;
+
+  function documentWithRule(rule: JsonValue): SpreadsheetDocument {
+    const parsed = parseSpreadsheetDocument({
+      schemaVersion: 2,
+      id: 'validation-edit',
+      workbook: {
+        sheets: [
+          {
+            id: 'sheet-1',
+            name: 'Sheet 1',
+            cells: [
+              {
+                row: 0,
+                column: 0,
+                cell: { input: { type: 'number', value: 1 }, validationId: 'amount' },
+              },
+            ],
+            merges: [],
+          },
+        ],
+        styles: [],
+        validations: [{ id: 'amount', value: rule }],
+        settings: { dateSystem: 'excel-1900' },
+      },
+      templates: [],
+      resources: { items: [] },
+      extensions: {},
+    });
+    if (!parsed.ok) throw new Error(JSON.stringify(parsed.diagnostics));
+    return parsed.document;
+  }
 
   it('distinguishes reject, warn, and accepted edits without mutation', async () => {
     const engine = createValidationEngine();
@@ -83,43 +118,48 @@ describe('VAL-01 validation foundation', () => {
   });
 
   it('commits accepted and confirmed warning edits through one document transaction', async () => {
-    const controller = createDocumentController(
-      createSpreadsheetDocument({ id: 'document-1', sheetId: 'sheet-1' }),
-    );
-    const engine = createValidationEngine();
-    const request = {
-      address: { sheetId, row: 0, column: 0 },
-      value: { type: 'number' as const, value: 12 },
-      rule: {
-        id: 'amount',
-        type: 'number' as const,
-        predicate: { operator: 'between' as const, minimum: 0, maximum: 10 },
-        behavior: 'reject' as const,
-        allowBlank: false,
-      },
+    const rule = {
+      id: 'amount',
+      type: 'number',
+      predicate: { operator: 'between', minimum: 0, maximum: 10 },
+      behavior: 'reject',
+      allowBlank: false,
     };
-
-    await expect(
-      executeValidatedCellEdit({ controller, engine, request, text: '12' }),
-    ).resolves.toMatchObject({ status: 'rejected', code: 'VALIDATION_REJECTED' });
-    expect(controller.getSnapshot().revision).toBe(0);
+    const controller = createDocumentController(documentWithRule(rule));
 
     await expect(
       executeValidatedCellEdit({
         controller,
-        engine,
-        request: { ...request, rule: { ...request.rule, behavior: 'warn' } },
+        address: { sheetId, row: 0, column: 0 },
+        text: '12',
+      }),
+    ).resolves.toMatchObject({ status: 'rejected', code: 'VALIDATION_REJECTED' });
+    expect(controller.getSnapshot().revision).toBe(0);
+
+    const warningController = createDocumentController(
+      documentWithRule({ ...rule, behavior: 'warn' }),
+    );
+    await expect(
+      executeValidatedCellEdit({
+        controller: warningController,
+        address: { sheetId, row: 0, column: 0 },
         text: '12',
         confirmWarning: () => true,
       }),
     ).resolves.toMatchObject({ status: 'committed' });
-    expect(controller.getSnapshot().revision).toBe(1);
-    expect(controller.undo()).toMatchObject({ status: 'committed' });
+    expect(warningController.getSnapshot().revision).toBe(1);
+    expect(warningController.undo()).toMatchObject({ status: 'committed' });
   });
 
   it('rejects a stale async validation result instead of overwriting a newer revision', async () => {
     const controller = createDocumentController(
-      createSpreadsheetDocument({ id: 'document-race', sheetId: 'sheet-1' }),
+      documentWithRule({
+        id: 'amount',
+        type: 'list',
+        predicate: { source: { type: 'resolver', id: 'delayed' } },
+        behavior: 'reject',
+        allowBlank: false,
+      }),
     );
     let release!: (values: readonly string[]) => void;
     const values = new Promise<readonly string[]>((resolve) => {
@@ -129,18 +169,8 @@ describe('VAL-01 validation foundation', () => {
     registry.register('delayed', () => values);
     const pending = executeValidatedCellEdit({
       controller,
-      engine: createValidationEngine({ resolvers: registry }),
-      request: {
-        address: { sheetId, row: 0, column: 0 },
-        value: { type: 'string', value: 'old' },
-        rule: {
-          id: 'delayed-rule',
-          type: 'list',
-          predicate: { source: { type: 'resolver', id: 'delayed' } },
-          behavior: 'reject',
-          allowBlank: false,
-        },
-      },
+      address: { sheetId, row: 0, column: 0 },
+      validation: { resolvers: registry },
       text: 'old',
     });
     controller.execute({
@@ -148,7 +178,7 @@ describe('VAL-01 validation foundation', () => {
       id: 'newer-edit',
       command: {
         type: 'set-cell-text',
-        address: { sheet: 'sheet-1' as never, row: 0, column: 0 },
+        address: { sheet: 'sheet-1' as never, row: 1, column: 0 },
         text: 'newer',
       },
     });

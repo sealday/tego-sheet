@@ -137,6 +137,7 @@ it('[ARCH-1] exposes only the approved React and Workbook 2.0 runtime API', () =
     'createXlsxReader',
     'evaluateTemplateExpression',
     'executeValidatedCellEdit',
+    'executeValidatedTransaction',
     'expandAdvancedTemplate',
     'hashSpreadsheetDocument',
     'migrateLegacyWorkbook',

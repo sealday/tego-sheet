@@ -19,5 +19,9 @@ export type {
   ValidationResolverRegistry,
 } from './engine';
 export { createValidationEngine, createValidationResolverRegistry } from './engine';
+export { validateValidationRequestSync } from './synchronous';
+export type { SynchronousValidationResult } from './synchronous';
 export { executeValidatedCellEdit } from './edit';
 export type { ValidatedCellEditRequest, ValidatedCellEditResult } from './edit';
+export { executeValidatedTransaction } from './transaction';
+export type { ValidatedTransactionRequest } from './transaction';

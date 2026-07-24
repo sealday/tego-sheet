@@ -59,8 +59,10 @@ import {
 } from './sheet-chrome-runtime';
 import { AccessibilityGrid } from './accessibility/accessibility-grid';
 import { createPresentationCache, createPresentationResolver } from '../presentation';
-import { createValidationEngine } from '../validation';
-import type { ValidationEngine, ValidationResult as AdvancedValidationResult } from '../validation';
+import type {
+  ValidationEngineOptions,
+  ValidationResult as AdvancedValidationResult,
+} from '../validation';
 import { createPresentationValidationResolver } from './adapters/presentation-adapter';
 import { compileSpreadsheetTemplate, renderSpreadsheetTemplate } from '../template';
 import { TemplateDesigner } from './template-designer';
@@ -166,7 +168,7 @@ const SELECTION_ACTIONS = new Set<ToolbarAction['type']>([
 interface SlotRuntime extends TegoSheetHandleRuntime {
   readonly selection: Selection | null;
   readonly readOnly: boolean;
-  readonly validationEngine: ValidationEngine;
+  readonly validation: ValidationEngineOptions;
   readonly confirmValidationWarning?: (
     result: AdvancedValidationResult,
   ) => boolean | Promise<boolean>;
@@ -505,7 +507,6 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const interactionManagerRef = useRef<InteractionManager | null>(null);
   const [engineSlot] = useState(createEngineAdapterSlot);
-  const [defaultValidationEngine] = useState(createValidationEngine);
   const [accessibilityCache] = useState(() =>
     createPresentationCache({
       maximumEntries: 2_000,
@@ -641,7 +642,7 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
     engineSlot,
     isActive: props.epoch.isActive,
     readOnly: props.readOnly ?? false,
-    validationEngine: props.validationEngine ?? defaultValidationEngine,
+    validation: props.validationEngine ?? {},
     ...(props.confirmValidationWarning === undefined
       ? {}
       : { confirmValidationWarning: props.confirmValidationWarning }),
@@ -980,6 +981,7 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
         : Math.max(
             selection?.active.row ?? 0,
             typeof activeData.rows?.len === 'number' ? activeData.rows.len - 1 : 0,
+            activeFilterView?.range.end.row ?? 0,
           ) + 1;
     if (activeFilterView === undefined) {
       return Array.from({ length: rowCount }, (_, row) => row);

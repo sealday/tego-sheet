@@ -5,7 +5,6 @@ import ts from 'typescript';
 import { Application, normalizePath } from 'typedoc';
 import type { TypeDocOptions } from 'typedoc';
 import { describe, expect, it } from 'vitest';
-import { publicApiProjectionPluginPath } from '../../website/plugins/strict-typedoc-generation';
 
 const root = process.cwd();
 const entryPoint = join(root, 'src/index.ts');
@@ -348,6 +347,7 @@ const expectedPublicExports = [
   'UnverifiedResource',
   'ValidatedCellEditRequest',
   'ValidatedCellEditResult',
+  'ValidatedTransactionRequest',
   'ValidationComparison',
   'ValidationComparisonOperator',
   'ValidationData',
@@ -412,6 +412,7 @@ const expectedPublicExports = [
   'createXlsxReader',
   'evaluateTemplateExpression',
   'executeValidatedCellEdit',
+  'executeValidatedTransaction',
   'expandAdvancedTemplate',
   'hashSpreadsheetDocument',
   'migrateLegacyWorkbook',
@@ -731,7 +732,7 @@ describe('public API documentation', () => {
     expect(undocumented).toEqual([]);
   });
 
-  it('@interface is TypeDoc display-only and keeps all 14 compiler declarations as type aliases', () => {
+  it('keeps all 14 structured compiler declarations as type aliases', () => {
     const source = publicProgram.getSourceFile(join(root, 'src/core/types/workbook.ts'));
     if (source === undefined)
       throw new Error('workbook types must be part of the TypeScript program');
@@ -760,11 +761,7 @@ describe('public API documentation', () => {
         excludePrivate: true,
         excludeProtected: true,
         out: outputDirectory,
-        plugin: [
-          'typedoc-plugin-markdown',
-          'typedoc-docusaurus-theme',
-          publicApiProjectionPluginPath,
-        ],
+        plugin: ['typedoc-plugin-markdown', 'typedoc-docusaurus-theme'],
         readme: 'none',
         treatValidationWarningsAsErrors: true,
         treatWarningsAsErrors: true,
@@ -829,11 +826,25 @@ describe('public API documentation', () => {
       }
 
       const tegoSheetProps = rootChildren.find((child) => child.name === 'TegoSheetProps');
-      const propChildren = directRecords(tegoSheetProps, 'children');
-      expect(propChildren.map((child) => child.name).sort()).toEqual([...tegoSheetPropNames]);
-      expect(propChildren.filter((child) => !hasSummary(child)).map((child) => child.name)).toEqual(
-        [],
-      );
+      const propChildren: Readonly<Record<string, unknown>>[] = [];
+      visitRecords(tegoSheetProps?.type, (record) => {
+        if (
+          record.kind === 1024 &&
+          typeof record.name === 'string' &&
+          tegoSheetPropNames.includes(record.name as (typeof tegoSheetPropNames)[number])
+        ) {
+          propChildren.push(record);
+        }
+      });
+      expect([...new Set(propChildren.map((child) => child.name))].sort()).toEqual([
+        ...tegoSheetPropNames,
+      ]);
+      for (const name of tegoSheetPropNames) {
+        expect(
+          propChildren.some((child) => child.name === name && hasSummary(child)),
+          `${name} has at least one documented ownership branch`,
+        ).toBe(true);
+      }
       expect(JSON.stringify(tegoSheetProps)).not.toContain('TegoSheetCallbacks');
       expect(localReferenceViolations(serializedRecord, publicLocalDeclarationNames)).toEqual([]);
 
@@ -853,7 +864,7 @@ describe('public API documentation', () => {
         0, 0,
       ]);
       const propsMarkdown = await readFile(
-        join(outputDirectory, 'interfaces/TegoSheetProps.md'),
+        join(outputDirectory, 'type-aliases/TegoSheetProps.md'),
         'utf8',
       );
       expect(propsMarkdown).not.toContain('TegoSheetCallbacks');

@@ -17,9 +17,8 @@ import {
 import type { TegoSheetCallbacks } from '../tego-sheet.types';
 import {
   executeValidatedCellEdit,
-  type ValidationEngine,
-  type ValidationRequest,
-  type ValidationResult as AdvancedValidationResult,
+  type ValidationEngineOptions,
+  type ValidationResult,
 } from '../../validation';
 import type { DocumentController } from '../../document-controller';
 
@@ -38,9 +37,7 @@ export type UiDispatchOutcome =
     }
   | { readonly status: 'rejected'; readonly error: TegoSheetError };
 
-export type ValidatedUiDispatchOutcome =
-  | UiDispatchOutcome
-  | { readonly status: 'validation-rejected'; readonly result: AdvancedValidationResult };
+export type ValidatedUiDispatchOutcome = UiDispatchOutcome;
 
 type RefDispatchOutcome = Exclude<UiDispatchOutcome, { readonly status: 'rejected' }>;
 
@@ -70,10 +67,11 @@ export interface EventDispatcher {
   /** Validates an editor value asynchronously, then commits exactly one transaction. */
   readonly dispatchValidatedUi: (
     input: {
-      readonly engine: ValidationEngine;
-      readonly request: ValidationRequest;
+      readonly address: import('../../document').DocumentCellAddress;
       readonly text: string;
-      readonly confirmWarning?: (result: AdvancedValidationResult) => boolean | Promise<boolean>;
+      readonly validation?: ValidationEngineOptions;
+      readonly signal?: AbortSignal;
+      readonly confirmWarning?: (result: ValidationResult) => boolean | Promise<boolean>;
       readonly canCommit?: () => boolean;
     },
     source: ChangeSource,
@@ -174,17 +172,6 @@ function committedTarget(
 
 function pasteValues(result: unknown): readonly (readonly string[])[] {
   return Array.isArray(result) ? (result as readonly (readonly string[])[]) : [];
-}
-
-function isAdvancedValidationResult(result: {
-  readonly status: string;
-}): result is AdvancedValidationResult {
-  return (
-    result.status === 'accepted' ||
-    result.status === 'warning' ||
-    result.status === 'error' ||
-    (result.status === 'rejected' && 'diagnostics' in result)
-  );
 }
 
 export function createEventDispatcher(options: EventDispatcherOptions): EventDispatcher {
@@ -324,23 +311,21 @@ export function createEventDispatcher(options: EventDispatcherOptions): EventDis
         return { status: 'rejected', error: clone(inactiveException().error) };
       }
       const address = {
-        sheet: input.request.address.sheetId as unknown as import('../../core').SheetId,
-        row: input.request.address.row,
-        column: input.request.address.column,
+        sheet: input.address.sheetId as unknown as import('../../core').SheetId,
+        row: input.address.row,
+        column: input.address.column,
       };
       const previousText = controller.getCellText(address);
       const result = await executeValidatedCellEdit({
         controller: controller as unknown as DocumentController,
-        engine: input.engine,
-        request: input.request,
+        address: input.address,
         text: input.text,
+        ...(input.validation === undefined ? {} : { validation: input.validation }),
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
         source,
         ...(input.confirmWarning === undefined ? {} : { confirmWarning: input.confirmWarning }),
         canCommit: () => isActive() && input.canCommit?.() !== false,
       });
-      if (isAdvancedValidationResult(result)) {
-        return { status: 'validation-rejected', result };
-      }
       if (result.status === 'noop') return { status: 'noop' };
       if (result.status === 'rejected') {
         return {

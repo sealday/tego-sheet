@@ -135,6 +135,145 @@ describe('FMT-01 conditional formatting foundation', () => {
     });
   });
 
+  it('translates relative formula references across a single-row rule range', () => {
+    const evaluator = createConditionalFormatEvaluator({ maxRules: 10, maxCells: 100 });
+    const lookup = vi.fn(({ row, column }: { readonly row: number; readonly column: number }) =>
+      row === 0 && column === 2
+        ? { type: 'number' as const, value: 12 }
+        : { type: 'number' as const, value: 0 },
+    );
+
+    const result = evaluator.evaluate({
+      address: { sheetId, row: 0, column: 4 },
+      value: { type: 'number', value: 1 },
+      text: '1',
+      baseStyle: {},
+      lookup,
+      rules: [
+        {
+          id: 'relative-row',
+          priority: 1,
+          stopIfTrue: false,
+          ranges: [{ sheetId, start: { row: 0, column: 2 }, end: { row: 0, column: 4 } }],
+          condition: { type: 'formula', source: '=A1>10' },
+          effect: { type: 'style', patch: { bold: true } },
+        },
+      ],
+    });
+
+    expect(result.matchedRuleIds).toEqual(['relative-row']);
+    expect(lookup).toHaveBeenCalledWith({ sheetId, row: 0, column: 2 });
+  });
+
+  it('translates relative formula references across rows and columns', () => {
+    const evaluator = createConditionalFormatEvaluator({ maxRules: 10, maxCells: 100 });
+    const lookup = vi.fn(({ row, column }: { readonly row: number; readonly column: number }) =>
+      row === 2 && column === 1
+        ? { type: 'number' as const, value: 12 }
+        : { type: 'number' as const, value: 0 },
+    );
+
+    const result = evaluator.evaluate({
+      address: { sheetId, row: 3, column: 3 },
+      value: { type: 'number', value: 1 },
+      text: '1',
+      baseStyle: {},
+      lookup,
+      rules: [
+        {
+          id: 'relative-grid',
+          priority: 1,
+          stopIfTrue: false,
+          ranges: [{ sheetId, start: { row: 1, column: 2 }, end: { row: 3, column: 3 } }],
+          condition: { type: 'formula', source: '=A1>10' },
+          effect: { type: 'style', patch: { bold: true } },
+        },
+      ],
+    });
+
+    expect(result.matchedRuleIds).toEqual(['relative-grid']);
+    expect(lookup).toHaveBeenCalledWith({ sheetId, row: 2, column: 1 });
+  });
+
+  it('preserves mixed absolute axes while translating conditional formulas', () => {
+    const evaluator = createConditionalFormatEvaluator({ maxRules: 10, maxCells: 100 });
+    const values = new Map([
+      ['2:0', 1],
+      ['0:1', 2],
+      ['0:0', 3],
+    ]);
+    const lookup = vi.fn(({ row, column }: { readonly row: number; readonly column: number }) => ({
+      type: 'number' as const,
+      value: values.get(`${row}:${column}`) ?? 0,
+    }));
+
+    const result = evaluator.evaluate({
+      address: { sheetId, row: 3, column: 3 },
+      value: { type: 'number', value: 1 },
+      text: '1',
+      baseStyle: {},
+      lookup,
+      rules: [
+        {
+          id: 'mixed-absolute',
+          priority: 1,
+          stopIfTrue: false,
+          ranges: [{ sheetId, start: { row: 1, column: 2 }, end: { row: 3, column: 3 } }],
+          condition: { type: 'formula', source: '=$A1+A$1+$A$1=6' },
+          effect: { type: 'style', patch: { bold: true } },
+        },
+      ],
+    });
+
+    expect(result.matchedRuleIds).toEqual(['mixed-absolute']);
+    expect(lookup.mock.calls.map(([address]) => address)).toEqual([
+      { sheetId, row: 2, column: 0 },
+      { sheetId, row: 0, column: 1 },
+      { sheetId, row: 0, column: 0 },
+    ]);
+  });
+
+  it('does not translate explicitly sheet-qualified references', () => {
+    const evaluator = createConditionalFormatEvaluator({ maxRules: 10, maxCells: 100 });
+    const otherSheetId = 'sheet-2' as DocumentSheetId;
+    const lookup = vi.fn(
+      ({
+        sheetId: targetSheetId,
+        row,
+        column,
+      }: {
+        readonly sheetId: DocumentSheetId;
+        readonly row: number;
+        readonly column: number;
+      }) => ({
+        type: 'number' as const,
+        value: targetSheetId === otherSheetId && row === 0 && column === 0 ? 7 : 0,
+      }),
+    );
+
+    const result = evaluator.evaluate({
+      address: { sheetId, row: 3, column: 3 },
+      value: { type: 'number', value: 1 },
+      text: '1',
+      baseStyle: {},
+      lookup,
+      resolveSheetId: (sheetToken) => (sheetToken === 'Other' ? otherSheetId : undefined),
+      rules: [
+        {
+          id: 'qualified',
+          priority: 1,
+          stopIfTrue: false,
+          ranges: [{ sheetId, start: { row: 1, column: 2 }, end: { row: 3, column: 3 } }],
+          condition: { type: 'formula', source: '=Other!A1=7' },
+          effect: { type: 'style', patch: { bold: true } },
+        },
+      ],
+    });
+
+    expect(result.matchedRuleIds).toEqual(['qualified']);
+    expect(lookup).toHaveBeenCalledWith({ sheetId: otherSheetId, row: 0, column: 0 });
+  });
+
   it('interpolates deterministic color-scale backgrounds from range values', () => {
     const evaluator = createConditionalFormatEvaluator({ maxRules: 10, maxCells: 100 });
     const values = [0, 5, 10];
@@ -199,6 +338,44 @@ describe('FMT-01 conditional formatting foundation', () => {
     expect(lookup).toHaveBeenCalledTimes(3);
   });
 
+  it('evaluates large color scales without spreading the range onto the call stack', () => {
+    const cellCount = 150_000;
+    const evaluator = createConditionalFormatEvaluator({
+      maxRules: 10,
+      maxCells: 200_000,
+    });
+
+    expect(
+      evaluator.evaluate({
+        address: { sheetId, row: cellCount - 1, column: 0 },
+        value: { type: 'number', value: cellCount - 1 },
+        text: String(cellCount - 1),
+        baseStyle: {},
+        lookup: ({ row }) => ({ type: 'number', value: row }),
+        rules: [
+          {
+            id: 'large-scale',
+            priority: 1,
+            stopIfTrue: false,
+            ranges: [
+              {
+                sheetId,
+                start: { row: 0, column: 0 },
+                end: { row: cellCount - 1, column: 0 },
+              },
+            ],
+            condition: { type: 'not-blank' },
+            effect: {
+              type: 'color-scale',
+              minimumColor: '#000000',
+              maximumColor: '#ffffff',
+            },
+          },
+        ],
+      }),
+    ).toMatchObject({ stylePatch: { backgroundColor: '#ffffff' } });
+  });
+
   it('enforces explicit formula source and evaluation budgets', () => {
     const evaluator = createConditionalFormatEvaluator({
       maxRules: 10,
@@ -225,5 +402,34 @@ describe('FMT-01 conditional formatting foundation', () => {
         ],
       }),
     ).toThrowError(expect.objectContaining({ code: 'INVALID_CONDITIONAL_EXPRESSION' }));
+  });
+
+  it('bounds the lifetime formula cache while continuing to evaluate evicted formulas', () => {
+    const evaluator = createConditionalFormatEvaluator({
+      maxRules: 10,
+      maxCells: 100,
+      maxCachedFormulas: 1,
+    });
+    const evaluate = (source: string) =>
+      evaluator.evaluate({
+        address: { sheetId, row: 0, column: 0 },
+        value: { type: 'number', value: 1 },
+        text: '1',
+        baseStyle: {},
+        rules: [
+          {
+            id: source,
+            priority: 1,
+            stopIfTrue: false,
+            ranges: [{ sheetId, start: { row: 0, column: 0 }, end: { row: 0, column: 0 } }],
+            condition: { type: 'formula', source },
+            effect: { type: 'style', patch: { bold: true } },
+          },
+        ],
+      });
+
+    expect(evaluate('=1=1').matchedRuleIds).toEqual(['=1=1']);
+    expect(evaluate('=2=2').matchedRuleIds).toEqual(['=2=2']);
+    expect(evaluate('=1=1').matchedRuleIds).toEqual(['=1=1']);
   });
 });

@@ -249,10 +249,12 @@ export {
   createValidationEngine,
   createValidationResolverRegistry,
   executeValidatedCellEdit,
+  executeValidatedTransaction,
 } from './validation';
 export type {
   ValidatedCellEditRequest,
   ValidatedCellEditResult,
+  ValidatedTransactionRequest,
   ValidationEngine,
   ValidationEngineOptions,
   ValidationFormulaContext,

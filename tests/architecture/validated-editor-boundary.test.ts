@@ -19,7 +19,9 @@ describe('validated editor mutation boundary', () => {
   it('keeps accepted validation mutations on one revision-bound transaction', () => {
     const edit = readFileSync(resolve(root, 'src/validation/edit.ts'), 'utf8');
     expect(edit).toContain('const baseRevision = input.controller.getSnapshot().revision');
-    expect(edit).toContain('input.controller.transact(');
+    expect(edit).toContain('executeValidatedTransaction(');
+    expect(edit).not.toContain('commitValidatedDocumentTransaction(');
+    expect(edit).not.toContain('input.controller.transact(');
     expect(edit).not.toContain('input.controller.execute(');
   });
 

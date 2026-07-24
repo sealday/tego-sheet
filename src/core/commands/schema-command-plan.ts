@@ -46,6 +46,17 @@ function sheetIndex(sheetIds: readonly SheetId[], sheet: SheetId): number {
   return sheetIds.findIndex((candidate) => candidate === sheet);
 }
 
+/** Pure target range shared by command planning and validation boundaries. */
+export function plannedPasteTargetRange(
+  command: Extract<WorkbookCommand, { readonly type: 'paste-internal' | 'autofill' }>,
+): CellRange {
+  return internalPasteRange(
+    command.source.range,
+    command.target.range,
+    command.type === 'paste-internal' && command.cut,
+  );
+}
+
 function transformStructure(
   input: SpreadsheetDocumentInput,
   command: Extract<
@@ -334,11 +345,7 @@ function transformInternalPaste(
   const targetSheet = input.workbook.sheets[targetIndex];
   if (sourceSheet === undefined || targetSheet === undefined) return;
   const source = command.source.range;
-  const range = internalPasteRange(
-    source,
-    command.target.range,
-    command.type === 'paste-internal' && command.cut,
-  );
+  const range = plannedPasteTargetRange(command);
   assertClipboardResourceLimit(source);
   assertClipboardResourceLimit(range);
   const sourceRows = source.end.row - source.start.row + 1;
@@ -414,11 +421,7 @@ export function prepareSchemaProjectionCommit(
   if (command.type === 'set-sheet-object' || command.type === 'remove-sheet-object') {
     return { result: undefined, kind: 'object', sheet: command.sheet };
   }
-  const range = internalPasteRange(
-    command.source.range,
-    command.target.range,
-    command.type === 'paste-internal' && command.cut,
-  );
+  const range = plannedPasteTargetRange(command);
   if (command.type === 'autofill') {
     return {
       result: undefined,

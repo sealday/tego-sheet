@@ -1,5 +1,6 @@
 import type { WorkbookCommand } from './core/commands/workbook-command';
 import {
+  issueValidationCapability,
   SpreadsheetDocumentController,
   type CommittedTransactionRecord,
   type SerializableCommandEnvelope,
@@ -398,12 +399,70 @@ function toPreview(result: TransactionPreview): DocumentTransactionPreview {
   };
 }
 
+const publicControllerCores = new WeakMap<DocumentController, SpreadsheetDocumentController>();
+
+/** @internal Commits only after validation code has completed against the current revision. */
+export function commitValidatedDocumentTransaction(
+  controller: DocumentController,
+  transaction: DocumentTransactionEnvelope,
+  options: DocumentTransactionOptions,
+): DocumentTransactionResult {
+  const core =
+    controller instanceof SpreadsheetDocumentController
+      ? controller
+      : publicControllerCores.get(controller);
+  if (core === undefined) {
+    return {
+      status: 'rejected',
+      code: 'VALIDATION_CAPABILITY_INVALID',
+      message: 'Controller does not expose the private validation boundary',
+    };
+  }
+  const capability = issueValidationCapability(
+    core,
+    transaction as unknown as SerializableTransactionEnvelope,
+  );
+  return toResult(
+    core.transactValidated(
+      transaction as unknown as SerializableTransactionEnvelope,
+      toOptions(core, options),
+      capability,
+    ),
+  );
+}
+
+/** @internal Plans a validation transaction through the exact controller execution pipeline. */
+export function previewValidatedDocumentTransaction(
+  controller: DocumentController,
+  transaction: DocumentTransactionEnvelope,
+  options: DocumentTransactionOptions,
+): DocumentTransactionPreview {
+  const core =
+    controller instanceof SpreadsheetDocumentController
+      ? controller
+      : publicControllerCores.get(controller);
+  if (core === undefined) {
+    return {
+      status: 'rejected',
+      code: 'VALIDATION_CAPABILITY_INVALID',
+      message: 'Controller does not expose the private validation boundary',
+    };
+  }
+  return toPreview(
+    core.previewValidated(
+      transaction as unknown as SerializableTransactionEnvelope,
+      toOptions(core, options),
+    ),
+  );
+}
+
 class PublicDocumentController implements DocumentController {
   readonly #controller: SpreadsheetDocumentController;
   #notificationError: string | undefined;
 
   constructor(document: SpreadsheetDocument, options: DocumentControllerOptions) {
     this.#controller = new SpreadsheetDocumentController(document, options);
+    publicControllerCores.set(this, this.#controller);
   }
 
   getSnapshot(): DocumentControllerSnapshot {

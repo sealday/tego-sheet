@@ -799,6 +799,9 @@ describe('SpreadsheetDocumentController', () => {
     expect(cells.find((item) => item.row === 8 && item.column === 8)?.cell.validationId).toBe(
       'validation-1',
     );
+    expect(cut.workbook.validations.some(({ id }) => id.startsWith('runtime-validation-'))).toBe(
+      false,
+    );
 
     controller.undo();
     expect(controller.getDocument()).toEqual(initial);

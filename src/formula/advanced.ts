@@ -8,7 +8,12 @@ export interface FormulaNameDefinition {
   /** Case-insensitive formula name. */
   readonly name: string;
   /** Workbook-wide or sheet-local visibility. */
-  readonly scope: 'workbook' | { readonly sheetId: string };
+  readonly scope:
+    | 'workbook'
+    | {
+        /** Sheet that owns this local name. */
+        readonly sheetId: string;
+      };
   /** Range referenced by the name. */
   readonly refersTo: DocumentCellRange;
 }
@@ -55,9 +60,17 @@ export interface AdvancedFormulaBindingContext {
   readonly names: FormulaNameRegistry;
   /** Structured tables available to the formula. */
   readonly tables: readonly {
+    /** Stable table identifier. */
     readonly id: string;
+    /** Case-insensitive formula-facing table name. */
     readonly name: string;
-    readonly columns: readonly { readonly id: string; readonly name: string }[];
+    /** Ordered columns available through structured references. */
+    readonly columns: readonly {
+      /** Stable column identifier. */
+      readonly id: string;
+      /** Formula-facing column name. */
+      readonly name: string;
+    }[];
   }[];
 }
 
@@ -66,16 +79,28 @@ export function bindAdvancedFormula(
   source: string,
   context: AdvancedFormulaBindingContext,
 ): {
+  /** Stable identifiers referenced by the source formula, in source order. */
   readonly references: readonly (
-    | { readonly kind: 'name'; readonly id: string }
     | {
+        /** Named-range reference discriminator. */
+        readonly kind: 'name';
+        /** Stable named-range identifier. */
+        readonly id: string;
+      }
+    | {
+        /** Structured table-column reference discriminator. */
         readonly kind: 'table-column';
+        /** Stable table identifier. */
         readonly tableId: string;
+        /** Stable column identifier. */
         readonly columnId: string;
       }
   )[];
+  /** Recoverable binding failures discovered in the source formula. */
   readonly diagnostics: readonly {
+    /** Stable invalid-reference diagnostic code. */
     readonly code: 'FORMULA_REFERENCE_INVALID';
+    /** Human-readable diagnostic detail. */
     readonly message: string;
   }[];
 } {

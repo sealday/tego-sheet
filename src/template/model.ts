@@ -435,7 +435,9 @@ export interface RenderRequest {
   readonly resourceRefs?: readonly ResourceRef[];
   /** Explicit session-only saved-view selections consumed by this render. */
   readonly activeFilterViews?: readonly {
+    /** Sheet whose saved view is active. */
     readonly sheetId: DocumentSheetId;
+    /** Stable saved-view identifier. */
     readonly viewId: string;
   }[];
 }

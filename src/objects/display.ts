@@ -23,7 +23,9 @@ export interface ObjectDisplayContext {
       string,
       | Uint8Array
       | {
+          /** Encoded resource bytes. */
           readonly bytes: Uint8Array | readonly number[];
+          /** Optional media type associated with the encoded bytes. */
           readonly mimeType?: string;
         }
     >

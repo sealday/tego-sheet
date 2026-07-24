@@ -31,6 +31,7 @@ it('imports the library entry without browser globals', async () => {
     'createValidationEngine',
     'createValidationResolverRegistry',
     'executeValidatedCellEdit',
+    'executeValidatedTransaction',
     'applyFilterView',
     'createFilterViewSession',
     'createDataTransformPlanner',

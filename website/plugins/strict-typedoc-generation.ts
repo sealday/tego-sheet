@@ -10,11 +10,7 @@ export const publicApiProjectionPluginPath = fileURLToPath(
   new URL('./public-api-projection.cjs', import.meta.url),
 );
 
-const requiredPlugins = [
-  'typedoc-plugin-markdown',
-  'typedoc-docusaurus-theme',
-  publicApiProjectionPluginPath,
-];
+const requiredPlugins = ['typedoc-plugin-markdown', 'typedoc-docusaurus-theme'];
 const require = createRequire(import.meta.url);
 
 interface TypeDocGenerationContext {

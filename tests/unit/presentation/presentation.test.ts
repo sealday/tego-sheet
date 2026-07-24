@@ -333,6 +333,69 @@ describe('shared cell presentation', () => {
     });
   });
 
+  it('resolves sheet-qualified conditional references without relative translation', () => {
+    const base = documentFixture();
+    const parsed = parseSpreadsheetDocument({
+      ...base,
+      workbook: {
+        ...base.workbook,
+        sheets: [
+          {
+            ...base.workbook.sheets[0],
+            cells: [
+              ...base.workbook.sheets[0]!.cells,
+              { row: 3, column: 3, cell: { input: { type: 'number', value: 7 } } },
+            ],
+            conditionalFormatting: [
+              {
+                type: 'cell-is',
+                range: {
+                  sheetId: 'sheet-1',
+                  start: { row: 1, column: 2 },
+                  end: { row: 3, column: 3 },
+                },
+                operator: 'equal',
+                formula: 'Other!A1',
+                style: { bold: true },
+              },
+            ],
+          },
+          {
+            id: 'sheet-2',
+            name: 'Other',
+            cells: [{ row: 0, column: 0, cell: { input: { type: 'number', value: 7 } } }],
+            merges: [],
+            rows: [],
+            columns: [],
+            conditionalFormatting: [],
+          },
+        ],
+      },
+    });
+    if (!parsed.ok) throw new Error('qualified conditional presentation fixture must parse');
+    const resolver = createPresentationResolver({
+      document: parsed.document,
+      cache: createPresentationCache({ maximumEntries: 10, maximumBytes: 10_000 }),
+      revisions: {
+        document: 1,
+        calculation: 0,
+        condition: 1,
+        style: 1,
+        environment: 1,
+      },
+      environment: {
+        locale: 'en-US',
+        timeZone: 'UTC',
+        dateSystem: 'excel-1900',
+        target: 'screen',
+      },
+    });
+
+    expect(
+      resolver.resolve({ sheetId: 'sheet-1' as never, row: 3, column: 3 }).style,
+    ).toMatchObject({ bold: true });
+  });
+
   it('composes an active filter view as derived shared visibility', () => {
     const { document, cache } = resolverFixture();
     const resolver = createPresentationResolver({

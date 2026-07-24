@@ -12,7 +12,7 @@ import type { ChromeEditor } from '../../ui/sheet-chrome';
 import type { EditorCommitResult, EditorSelectionTarget } from '../adapters/interaction-adapter';
 import type { TegoSheetHandleRuntime, TegoSheetRuntimeAuthority } from './use-tego-sheet-handle';
 import type {
-  ValidationEngine,
+  ValidationEngineOptions,
   ValidationResult as AdvancedValidationResult,
 } from '../../validation';
 import { documentValidationRequest } from '../../validation/document-rule';
@@ -25,7 +25,7 @@ export interface ActiveCellEditor extends ChromeEditor {
 
 export interface CellEditorRuntime extends TegoSheetHandleRuntime {
   readonly readOnly: boolean;
-  readonly validationEngine: ValidationEngine;
+  readonly validation: ValidationEngineOptions;
   readonly confirmValidationWarning?: (
     result: AdvancedValidationResult,
   ) => boolean | Promise<boolean>;
@@ -132,15 +132,15 @@ export function useCellEditorRuntime<Runtime extends CellEditorRuntime>(
       if (unresolvedValidationRequest !== undefined) {
         if (pendingValidation.current !== null) return { allow: false };
         const lease = beginCellValidation(runtime.controller, validationAddress);
-        const validationRequest = { ...unresolvedValidationRequest, signal: lease.signal };
         const token = {};
         pendingValidation.current = { token, lease };
         void runtime.dispatcher
           .dispatchValidatedUi(
             {
-              engine: runtime.validationEngine,
-              request: validationRequest,
+              address: validationAddress,
               text: current.value,
+              validation: runtime.validation,
+              signal: lease.signal,
               ...(runtime.confirmValidationWarning === undefined
                 ? {}
                 : { confirmWarning: runtime.confirmValidationWarning }),
@@ -167,7 +167,6 @@ export function useCellEditorRuntime<Runtime extends CellEditorRuntime>(
             pendingValidation.current = null;
             lease.release();
             if (!isActive() || editorRef.current !== current) return;
-            if (outcome.status === 'validation-rejected') return;
             if (outcome.status === 'rejected') {
               runtime.dispatcher.reportUiError(outcome.error);
               return;

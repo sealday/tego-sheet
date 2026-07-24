@@ -1,52 +1,42 @@
 import type { DocumentController, DocumentTransactionResult } from '../document-controller';
 import type { SheetId } from '../core';
 import type { ChangeSource } from '../core';
-import type { ValidationEngine } from './engine';
-import type { ValidationRequest, ValidationResult } from './model';
+import type { DocumentCellAddress } from '../document';
+import type { ValidationEngineOptions } from './engine';
+import type { ValidationResult } from './model';
+import { executeValidatedTransaction } from './transaction';
 
-/** Inputs for validating and atomically committing one cell edit. */
+/** Inputs for validating and atomically committing one document-owned cell edit. */
 export interface ValidatedCellEditRequest {
-  /** Document controller that owns mutation and history. */
+  /** Document controller that owns mutation, validation rules, and history. */
   readonly controller: DocumentController;
-  /** Validation engine used before mutation. */
-  readonly engine: ValidationEngine;
-  /** Typed validation candidate. */
-  readonly request: ValidationRequest;
-  /** User-facing cell text submitted after validation. */
+  /** Cell receiving the submitted text. */
+  readonly address: DocumentCellAddress;
+  /** User-facing cell text submitted for validation and commit. */
   readonly text: string;
+  /** Restricted resolver/formula capabilities for document-owned rules. */
+  readonly validation?: ValidationEngineOptions;
   /** Explicit confirmation gate for warning-mode rules. */
   readonly confirmWarning?: (result: ValidationResult) => boolean | Promise<boolean>;
   /** Interaction surface attributed to an accepted edit transaction. */
   readonly source?: ChangeSource;
+  /** Optional cancellation signal shared with async validation. */
+  readonly signal?: AbortSignal;
   /** Optional lifecycle/race gate checked immediately before mutation. */
   readonly canCommit?: () => boolean;
 }
 
-/** Validation result or the single transaction result used to commit an accepted edit. */
-export type ValidatedCellEditResult = ValidationResult | DocumentTransactionResult;
+/** Single transaction result used to commit a document-owned validated edit. */
+export type ValidatedCellEditResult = DocumentTransactionResult;
 
-/** Validates an edit and commits it through exactly one document transaction. */
+/** Resolves the current document rule, validates the submitted text, and commits atomically. */
 export async function executeValidatedCellEdit(
   input: ValidatedCellEditRequest,
 ): Promise<ValidatedCellEditResult> {
   const baseRevision = input.controller.getSnapshot().revision;
-  const validation = await input.engine.validate(input.request);
-  if (validation.status === 'rejected' || validation.status === 'error') return validation;
-  if (
-    validation.status === 'warning' &&
-    (input.confirmWarning === undefined || !(await input.confirmWarning(validation)))
-  ) {
-    return validation;
-  }
-  if (input.canCommit?.() === false) {
-    return {
-      status: 'error',
-      code: 'VALIDATION_SOURCE_ERROR',
-      diagnostics: [{ code: 'VALIDATION_EDIT_CANCELLED', ruleId: input.request.rule.id }],
-    };
-  }
-  return input.controller.transact(
-    {
+  return executeValidatedTransaction({
+    controller: input.controller,
+    transaction: {
       schemaVersion: 1,
       id: `validated-edit-${baseRevision}`,
       baseRevision,
@@ -57,15 +47,19 @@ export async function executeValidatedCellEdit(
           command: {
             type: 'set-cell-text',
             address: {
-              sheet: input.request.address.sheetId as string as SheetId,
-              row: input.request.address.row,
-              column: input.request.address.column,
+              sheet: input.address.sheetId as string as SheetId,
+              row: input.address.row,
+              column: input.address.column,
             },
             text: input.text,
           },
         },
       ],
     },
-    input.source === undefined ? undefined : { source: input.source },
-  );
+    ...(input.validation === undefined ? {} : { validation: input.validation }),
+    ...(input.confirmWarning === undefined ? {} : { confirmWarning: input.confirmWarning }),
+    ...(input.source === undefined ? {} : { options: { source: input.source } }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    ...(input.canCommit === undefined ? {} : { canCommit: input.canCommit }),
+  });
 }

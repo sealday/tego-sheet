@@ -669,6 +669,8 @@ it('[ARCH-5] separates browser API implementations from section 6.6 lifetime own
         'src/react/adapters/interaction-adapter.ts',
         'src/template/render.ts',
         'src/template/resources/resource-pipeline.ts',
+        'src/validation/engine.ts',
+        'src/validation/transaction.ts',
       ]),
     ],
     ['observer', new Set(['src/react/adapters/interaction-adapter.ts'])],
@@ -680,6 +682,8 @@ it('[ARCH-5] separates browser API implementations from section 6.6 lifetime own
         'src/output/pdf/index.ts',
         'src/react/adapters/interaction-adapter.ts',
         'src/template/resources/resource-pipeline.ts',
+        'src/validation/engine.ts',
+        'src/validation/transaction.ts',
       ]),
     ],
     [

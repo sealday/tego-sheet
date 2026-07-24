@@ -8,10 +8,7 @@ import {
   type SpreadsheetDocument,
   type TegoSheetHandle,
 } from '../../src';
-import type {
-  ValidationEngine,
-  ValidationResult as AdvancedValidationResult,
-} from '../../src/validation';
+import type { ValidationEngineOptions } from '../../src/validation';
 import type { WorkbookInput } from '../../src/core';
 import { createCanvasHarness } from '../helpers/canvas-harness';
 import { legacyProjection, testDocument } from '../helpers/workbook-builders';
@@ -65,8 +62,8 @@ function validatedDocument(behavior: 'reject' | 'warn' = 'reject'): SpreadsheetD
           id: 'amount',
           value: {
             id: 'amount',
-            type: 'number',
-            predicate: { operator: 'between', minimum: 0, maximum: 100 },
+            type: 'custom-formula',
+            predicate: { formula: '=VALIDATE_EDIT()' },
             behavior,
             allowBlank: false,
           },
@@ -83,14 +80,14 @@ function validatedDocument(behavior: 'reject' | 'warn' = 'reject'): SpreadsheetD
 }
 
 function deferredValidation(): {
-  readonly engine: ValidationEngine;
-  readonly release: (result: AdvancedValidationResult) => void;
+  readonly options: ValidationEngineOptions;
+  readonly release: (result: boolean) => void;
 } {
-  let release!: (result: AdvancedValidationResult) => void;
-  const result = new Promise<AdvancedValidationResult>((resolve) => {
+  let release!: (result: boolean) => void;
+  const result = new Promise<boolean>((resolve) => {
     release = resolve;
   });
-  return { engine: { validate: () => result }, release };
+  return { options: { evaluateCustomFormula: () => result }, release };
 }
 
 it('validates editor commits asynchronously before one controlled callback sequence', async () => {
@@ -103,7 +100,7 @@ it('validates editor commits asynchronously before one controlled callback seque
       <TegoSheet
         ref={ref}
         document={document}
-        validationEngine={validation.engine}
+        validationEngine={validation.options}
         onDocumentChange={(next) => {
           order.push('change');
           setDocument(next);
@@ -125,7 +122,7 @@ it('validates editor commits asynchronously before one controlled callback seque
   expect(rendered.getByRole('textbox', { name: /cell editor/i })).toBe(editor);
   expect(order).toEqual([]);
 
-  validation.release({ status: 'accepted', diagnostics: [] });
+  validation.release(true);
   await waitFor(() => expect(rendered.queryByRole('textbox', { name: /cell editor/i })).toBeNull());
   expect(order).toEqual(['change', 'cell-edit', 'selection']);
   expect(legacyProjection(ref.current!.getDocument())[0]?.rows?.['0']).toMatchObject({
@@ -140,7 +137,7 @@ it('gates imperative cell edits through the same asynchronous validation path', 
     <TegoSheet
       ref={ref}
       defaultDocument={validatedDocument()}
-      validationEngine={validation.engine}
+      validationEngine={validation.options}
     />,
   );
   await waitFor(() => expect(ref.current).not.toBeNull());
@@ -153,7 +150,7 @@ it('gates imperative cell edits through the same asynchronous validation path', 
     cells: { 0: { type: 'number', value: 1 } },
   });
 
-  validation.release({ status: 'accepted', diagnostics: [] });
+  validation.release(true);
   await waitFor(() =>
     expect(legacyProjection(ref.current!.getDocument())[0]?.rows?.['0']).toMatchObject({
       cells: { 0: { text: '12' } },
@@ -170,9 +167,9 @@ it('aborts pending imperative validation when the component is disposed', async 
       ref={ref}
       defaultDocument={validatedDocument()}
       validationEngine={{
-        validate: (request) => {
-          observedSignal = request.signal;
-          return validation.engine.validate(request);
+        evaluateCustomFormula: (_formula, context) => {
+          observedSignal = context.signal;
+          return validation.options.evaluateCustomFormula!(_formula, context);
         },
       }}
     />,
@@ -183,10 +180,11 @@ it('aborts pending imperative validation when the component is disposed', async 
     { sheet: ref.current!.getDocument().workbook.sheets[0]!.id as never, row: 0, column: 0 },
     '12',
   );
+  await waitFor(() => expect(observedSignal).toBeDefined());
   expect(observedSignal?.aborted).toBe(false);
   rendered.unmount();
   expect(observedSignal?.aborted).toBe(true);
-  validation.release({ status: 'accepted', diagnostics: [] });
+  validation.release(true);
   await Promise.resolve();
 });
 
@@ -198,11 +196,7 @@ it('requires explicit host confirmation before committing a warning-mode editor 
       ref={ref}
       defaultDocument={validatedDocument('warn')}
       validationEngine={{
-        validate: async () => ({
-          status: 'warning',
-          code: 'VALIDATION_REJECTED',
-          diagnostics: [{ code: 'VALIDATION_REJECTED', ruleId: 'amount' }],
-        }),
+        evaluateCustomFormula: async () => false,
       }}
       confirmValidationWarning={confirmValidationWarning}
     />,
@@ -230,7 +224,7 @@ it('keeps stale async editor validation from overwriting a newer revision', asyn
     <TegoSheet
       ref={ref}
       defaultDocument={validatedDocument()}
-      validationEngine={validation.engine}
+      validationEngine={validation.options}
     />,
   );
   await waitFor(() => expect(ref.current).not.toBeNull());
@@ -245,7 +239,7 @@ it('keeps stale async editor validation from overwriting a newer revision', asyn
     { sheet: ref.current!.getDocument().workbook.sheets[0]!.id as never, row: 0, column: 0 },
     'newer',
   );
-  validation.release({ status: 'accepted', diagnostics: [] });
+  validation.release(true);
 
   await waitFor(() => expect(rendered.getByRole('textbox', { name: /cell editor/i })).toBe(editor));
   expect(legacyProjection(ref.current!.getDocument())[0]?.rows?.['0']).toMatchObject({
@@ -259,7 +253,7 @@ it('cancels pending async editor validation when the component is disposed', asy
   const rendered = render(
     <TegoSheet
       defaultDocument={validatedDocument()}
-      validationEngine={validation.engine}
+      validationEngine={validation.options}
       onDocumentChange={onDocumentChange}
     />,
   );
@@ -271,7 +265,7 @@ it('cancels pending async editor validation when the component is disposed', asy
   fireEvent.change(editor, { target: { value: '12' } });
   fireEvent.keyDown(editor, { key: 'Enter' });
   rendered.unmount();
-  validation.release({ status: 'accepted', diagnostics: [] });
+  validation.release(true);
   await Promise.resolve();
   expect(onDocumentChange).not.toHaveBeenCalled();
 });

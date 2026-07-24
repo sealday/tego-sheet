@@ -22,6 +22,7 @@ import type {
 import type { FormulaValue } from '../../formula/ast';
 import { formulaAddressKey } from '../../formula/dependency-graph';
 import { parseSpreadsheetDocument } from '../../document/parse-document';
+import { legacyValidationRule } from '../../validation/document-rule';
 
 type ValidationId = NonNullable<Cell['validationId']>;
 
@@ -85,6 +86,32 @@ function jsonRecord(value: JsonValue): Record<string, JsonValue> {
     : {};
 }
 
+function normalizeRuntimeWorkbook(workbook: WorkbookData): WorkbookData {
+  const normalized = structuredClone(workbook) as SheetData[];
+  for (const sheet of normalized) {
+    for (const [rowKey, row] of Object.entries(sheet.rows ?? {})) {
+      if (rowKey === 'len' || typeof row !== 'object' || row === null || !('cells' in row))
+        continue;
+      const cells = row.cells;
+      if (typeof cells !== 'object' || cells === null) continue;
+      for (const cell of Object.values(cells)) {
+        if (typeof cell !== 'object' || cell === null) continue;
+        const mutable = cell as Record<string, unknown>;
+        if (
+          (mutable.text === undefined || mutable.text === '') &&
+          ((mutable.type === 'number' &&
+            (typeof mutable.value !== 'number' || !Number.isFinite(mutable.value))) ||
+            (mutable.type === 'boolean' && typeof mutable.value !== 'boolean'))
+        ) {
+          delete mutable.value;
+          delete mutable.type;
+        }
+      }
+    }
+  }
+  return normalized;
+}
+
 /** @internal Projects a schema 2 snapshot into the sole legacy operation boundary. */
 export function projectDocumentToLegacy(
   document: SpreadsheetDocument,
@@ -140,9 +167,14 @@ export function projectDocumentToLegacy(
           (entry) => entry.id === sparse.cell.validationId,
         );
         if (registry !== undefined) {
+          const legacy = {
+            ...jsonRecord(registry.value),
+            refs: [a1(sparse)],
+          } as ValidationData;
+          if (legacyValidationRule(legacy) === undefined) continue;
           const existing = validations.get(registry.id);
           validations.set(registry.id, {
-            ...jsonRecord(registry.value),
+            ...legacy,
             refs: [...(existing?.refs ?? []), a1(sparse)],
           });
         }
@@ -235,6 +267,7 @@ function mergeSheet(
   afterLegacy: SheetData | undefined,
   authoritativeInputs: ReadonlySet<string> | undefined,
   authoritativeValidations: ReadonlyMap<string, ValidationId | null> | undefined,
+  legacyValidationIds: ReadonlySet<string>,
 ): SpreadsheetDocumentInput['workbook']['sheets'][number] {
   if (previous === undefined) return operational;
   const previousCells = new Map(
@@ -252,20 +285,43 @@ function mergeSheet(
       const beforeCell = legacyCell(beforeLegacy, row, column);
       const afterCell = legacyCell(afterLegacy, row, column);
       if (sameJson(beforeCell, afterCell)) {
-        if (authoritativeValidations?.has(key) === true) return previousCell;
+        if (authoritativeValidations?.has(key) !== true) {
+          if (
+            previousCell !== undefined &&
+            operationalCell !== undefined &&
+            previousCell.cell.validationId !== operationalCell.cell.validationId &&
+            (operationalCell.cell.validationId !== undefined ||
+              previousCell.cell.validationId === undefined ||
+              legacyValidationIds.has(previousCell.cell.validationId))
+          ) {
+            const { validationId: _validationId, ...previousCellData } = previousCell.cell;
+            return {
+              ...previousCell,
+              cell: {
+                ...previousCellData,
+                ...(operationalCell.cell.validationId === undefined
+                  ? {}
+                  : { validationId: operationalCell.cell.validationId }),
+              },
+            };
+          }
+          return previousCell ?? operationalCell;
+        }
         if (
-          previousCell !== undefined &&
-          operationalCell !== undefined &&
-          previousCell.cell.validationId !== operationalCell.cell.validationId
+          authoritativeValidations.get(key) === null &&
+          authoritativeInputs?.has(key) !== true &&
+          operationalCell?.cell.input.type === 'blank'
         ) {
+          return undefined;
+        }
+        if (previousCell !== undefined && operationalCell !== undefined) {
           const { validationId: _validationId, ...previousCellData } = previousCell.cell;
+          const validationId = authoritativeValidations.get(key) ?? undefined;
           return {
             ...previousCell,
             cell: {
               ...previousCellData,
-              ...(operationalCell.cell.validationId === undefined
-                ? {}
-                : { validationId: operationalCell.cell.validationId }),
+              ...(validationId === undefined ? {} : { validationId }),
             },
           };
         }
@@ -276,7 +332,7 @@ function mergeSheet(
       const validationId =
         authoritativeValidations?.has(key) === true
           ? (authoritativeValidations.get(key) ?? undefined)
-          : operationalCell.cell.validationId;
+          : (previousCellData?.validationId ?? operationalCell.cell.validationId);
       return {
         ...operationalCell,
         cell: {
@@ -451,7 +507,7 @@ export function projectLegacyToDocument(
     ReadonlyMap<string, ValidationId | null>
   > = new Map(),
 ): SpreadsheetDocument {
-  const migrated = migrateLegacyWorkbook(afterWorkbook, {
+  const migrated = migrateLegacyWorkbook(normalizeRuntimeWorkbook(afterWorkbook), {
     ids: {
       documentId: () => previous.id,
       sheetId: (index) => sheetIds[index] ?? `runtime-sheet-${index + 1}`,
@@ -471,6 +527,11 @@ export function projectLegacyToDocument(
     migrated.document.workbook.validations,
     'runtime-validation',
   );
+  const legacyValidationIds = new Set(
+    previous.workbook.validations
+      .filter(({ value }) => legacyValidationRule({ ...jsonRecord(value), refs: [] }) !== undefined)
+      .map(({ id }) => id),
+  );
   const result = parseSpreadsheetDocument({
     ...migrated.document,
     workbook: {
@@ -487,6 +548,7 @@ export function projectLegacyToDocument(
           afterWorkbook[index],
           authoritativeInputs.get(sheet.id),
           authoritativeValidations.get(sheet.id),
+          legacyValidationIds,
         ),
       ),
       styles: styleRegistry.entries,

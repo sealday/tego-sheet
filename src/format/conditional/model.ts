@@ -1,4 +1,4 @@
-import type { DocumentCellAddress, DocumentCellRange } from '../../document';
+import type { DocumentCellAddress, DocumentCellRange, DocumentSheetId } from '../../document';
 import type { FormulaValue } from '../../formula';
 import type { JsonValue } from '../../core/types/json';
 
@@ -116,6 +116,8 @@ export interface ConditionalEvaluationInput {
   readonly rules: readonly ConditionalRule[];
   /** Optional side-effect-free referenced-cell lookup. */
   readonly lookup?: (address: DocumentCellAddress) => FormulaValue | undefined;
+  /** Resolves an explicit formula sheet token to its stable document identity. */
+  readonly resolveSheetId?: (sheetToken: string) => DocumentSheetId | undefined;
 }
 
 /** Deterministic conditional evaluation output. */
@@ -126,7 +128,9 @@ export interface ConditionalEvaluationResult {
   readonly stylePatch: ConditionalStylePatch;
   /** Recoverable unsupported-effect diagnostics. */
   readonly diagnostics: readonly {
+    /** Stable unsupported-feature diagnostic code. */
     readonly code: 'UNSUPPORTED_FORMAT_FEATURE';
+    /** Rule that produced the diagnostic. */
     readonly ruleId: ConditionalRuleId;
   }[];
 }

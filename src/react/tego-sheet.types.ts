@@ -16,7 +16,10 @@ import type {
 } from '../core';
 import type { SpreadsheetDocument } from '../document';
 import type { RenderEnvironment, SpreadsheetTemplate } from '../template';
-import type { ValidationEngine, ValidationResult as AdvancedValidationResult } from '../validation';
+import type {
+  ValidationEngineOptions,
+  ValidationResult as AdvancedValidationResult,
+} from '../validation';
 import type { SheetTabsRenderer, ToolbarRenderer } from '../ui/slot-types';
 
 export type { SheetTabsRenderer, ToolbarRenderer } from '../ui/slot-types';
@@ -51,6 +54,8 @@ export interface TegoSheetCallbacks {
  * @remarks
  * Choose controlled `document` or uncontrolled `defaultDocument` when mounting. Supplying both, or
  * switching a mounted instance between those ownership modes, throws a `TegoSheetException`.
+ *
+ * @inline
  */
 interface TegoSheetSharedProps extends TegoSheetCallbacks {
   /** Active product surface; defaults to the ordinary spreadsheet editor. */
@@ -73,8 +78,8 @@ interface TegoSheetSharedProps extends TegoSheetCallbacks {
   readonly locale?: LocaleDefinition;
   /** Per-instance worksheet behavior and layout settings. */
   readonly options?: SheetOptions;
-  /** Async validation engine used by cell-owned Workbook 2.0 validation rules. */
-  readonly validationEngine?: ValidationEngine;
+  /** Restricted resolver/formula capabilities used by cell-owned validation rules. */
+  readonly validationEngine?: ValidationEngineOptions;
   /** Explicit confirmation gate for warning-mode Workbook 2.0 validation rules. */
   readonly confirmValidationWarning?: (
     result: AdvancedValidationResult,
@@ -89,13 +94,16 @@ interface TegoSheetSharedProps extends TegoSheetCallbacks {
   readonly style?: CSSProperties;
 }
 
+/** @inline */
 type TegoSheetOwnership =
   | {
       /** Controlled schema 2 document owned by the parent. */
       readonly ['document']: SpreadsheetDocument;
+      /** Excluded when the component is controlled. */
       readonly defaultDocument?: never;
     }
   | {
+      /** Excluded when the component is uncontrolled. */
       readonly ['document']?: never;
       /** Schema 2 document read once when mounting an uncontrolled spreadsheet. */
       readonly defaultDocument: SpreadsheetDocument;
@@ -107,8 +115,6 @@ type TegoSheetOwnership =
  * @remarks
  * The union makes ownership exclusive at compile time. Controlled read-only consumers may omit
  * `onDocumentChange`; editable controlled consumers should apply its snapshots to `document`.
- *
- * @interface
  */
 export type TegoSheetProps = TegoSheetSharedProps & TegoSheetOwnership;
 

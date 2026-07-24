@@ -14,7 +14,7 @@ import type { EventDispatcher } from '../adapters/event-dispatcher';
 import type { EngineAdapterSlot } from './use-canvas-engine';
 import type { TegoSheetHandle } from '../tego-sheet.types';
 import type {
-  ValidationEngine,
+  ValidationEngineOptions,
   ValidationResult as AdvancedValidationResult,
 } from '../../validation';
 import { documentValidationRequest } from '../../validation/document-rule';
@@ -47,7 +47,7 @@ export interface TegoSheetHandleRuntime {
   readonly root: HTMLDivElement | null;
   readonly setActiveSheet: (sheet: SheetId | null) => void;
   readonly refreshFilterView?: () => void;
-  readonly validationEngine: ValidationEngine;
+  readonly validation: ValidationEngineOptions;
   readonly confirmValidationWarning?: (
     result: AdvancedValidationResult,
   ) => boolean | Promise<boolean>;
@@ -189,14 +189,14 @@ function createStableHandle<Runtime extends TegoSheetHandleRuntime>(
         return;
       }
       const lease = beginCellValidation(runtime.controller, validationAddress);
-      const request = { ...unresolvedRequest, signal: lease.signal };
       const untrack = authority.trackValidation(lease);
       void runtime.dispatcher
         .dispatchValidatedUi(
           {
-            engine: runtime.validationEngine,
-            request,
+            address: validationAddress,
             text,
+            validation: runtime.validation,
+            signal: lease.signal,
             ...(runtime.confirmValidationWarning === undefined
               ? {}
               : { confirmWarning: runtime.confirmValidationWarning }),

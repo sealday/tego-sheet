@@ -407,6 +407,14 @@ export function createPresentationResolver(
       options.formulaProgram?.values.get(formulaAddressKey(target));
     return targetCell?.input.type === 'formula' ? calculated : inputValue(targetCell);
   };
+  const resolveConditionalSheetId = (sheetToken: string): DocumentSheetId | undefined => {
+    const exact = options.document.workbook.sheets.find(({ name }) => name === sheetToken);
+    if (exact !== undefined) return exact.id;
+    const insensitive = options.document.workbook.sheets.filter(
+      ({ name }) => name.toLowerCase() === sheetToken.toLowerCase(),
+    );
+    return insensitive.length === 1 ? insensitive[0]?.id : undefined;
+  };
   const activeViews =
     options.activeFilterViews ??
     [options.activeFilterView].filter((view): view is FilterView => view !== undefined);
@@ -463,6 +471,7 @@ export function createPresentationResolver(
         baseStyle,
         rules: conditionalRulesBySheet.get(address.sheetId) ?? [],
         lookup: conditionalLookup,
+        resolveSheetId: resolveConditionalSheetId,
       });
       diagnostics.push(
         ...conditional.diagnostics.map(

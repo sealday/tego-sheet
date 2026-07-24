@@ -557,7 +557,6 @@ describe('strict TypeDoc generation', () => {
     expect(options.plugin).toEqual([
       'typedoc-plugin-markdown',
       'typedoc-docusaurus-theme',
-      publicApiProjectionPluginPath,
       'custom-typedoc-plugin',
     ]);
     expect(options).not.toHaveProperty('id');

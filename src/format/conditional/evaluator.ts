@@ -38,6 +38,8 @@ export interface ConditionalFormatLimits {
   readonly maxAstNodes?: number;
   /** Maximum recursive evaluation steps allowed per formula match. */
   readonly maxEvaluationSteps?: number;
+  /** Maximum parsed formulas retained by one evaluator instance. */
+  readonly maxCachedFormulas?: number;
 }
 
 interface FormulaRuntime {
@@ -45,10 +47,14 @@ interface FormulaRuntime {
   readonly maxFormulaLength: number;
   readonly maxAstNodes: number;
   readonly maxEvaluationSteps: number;
+  readonly maxCachedFormulas: number;
 }
 
-function contains(rule: ConditionalRule, address: ConditionalEvaluationInput['address']): boolean {
-  return rule.ranges.some(
+function containingRange(
+  rule: ConditionalRule,
+  address: ConditionalEvaluationInput['address'],
+): ConditionalRule['ranges'][number] | undefined {
+  return rule.ranges.find(
     (range) =>
       range.sheetId === address.sheetId &&
       address.row >= range.start.row &&
@@ -129,6 +135,7 @@ function truthy(value: ScalarFormulaValue): boolean {
 function evaluateFormulaAst(
   ast: FormulaAst,
   input: ConditionalEvaluationInput,
+  origin: { readonly row: number; readonly column: number },
   budget: { remaining: number },
 ): ScalarFormulaValue {
   budget.remaining -= 1;
@@ -143,10 +150,27 @@ function evaluateFormulaAst(
   }
   if (ast.kind === 'error') return { type: 'error', value: ast.value };
   if (ast.kind === 'reference') {
+    const resolvedSheetId =
+      ast.reference.sheetId ??
+      (ast.reference.sheetToken === undefined
+        ? input.address.sheetId
+        : input.resolveSheetId?.(ast.reference.sheetToken));
+    if (resolvedSheetId === undefined) return { type: 'error', value: '#REF!' };
+    const row =
+      ast.reference.sheetToken !== undefined || ast.reference.rowAbsolute
+        ? ast.reference.row
+        : ast.reference.row + input.address.row - origin.row;
+    const column =
+      ast.reference.sheetToken !== undefined || ast.reference.columnAbsolute
+        ? ast.reference.column
+        : ast.reference.column + input.address.column - origin.column;
+    if (row < 0 || row >= 1_048_576 || column < 0 || column >= 16_384) {
+      return { type: 'error', value: '#REF!' };
+    }
     const value = input.lookup?.({
-      sheetId: ast.reference.sheetId ?? input.address.sheetId,
-      row: ast.reference.row,
-      column: ast.reference.column,
+      sheetId: resolvedSheetId,
+      row,
+      column,
     }) ?? { type: 'blank' };
     return value.type === 'array' ? { type: 'error', value: '#VALUE!' } : value;
   }
@@ -157,7 +181,7 @@ function evaluateFormulaAst(
     );
   }
   if (ast.kind === 'unary') {
-    const value = numeric(evaluateFormulaAst(ast.operand, input, budget));
+    const value = numeric(evaluateFormulaAst(ast.operand, input, origin, budget));
     return value === undefined
       ? { type: 'error', value: '#VALUE!' }
       : { type: 'number', value: -value };
@@ -171,7 +195,7 @@ function evaluateFormulaAst(
       );
     }
     const value = definition.evaluate(
-      ast.arguments.map((argument) => evaluateFormulaAst(argument, input, budget)),
+      ast.arguments.map((argument) => evaluateFormulaAst(argument, input, origin, budget)),
       {
         locale: 'en-US',
         timeZone: 'UTC',
@@ -187,8 +211,8 @@ function evaluateFormulaAst(
     }
     return value;
   }
-  const left = evaluateFormulaAst(ast.left, input, budget);
-  const right = evaluateFormulaAst(ast.right, input, budget);
+  const left = evaluateFormulaAst(ast.left, input, origin, budget);
+  const right = evaluateFormulaAst(ast.right, input, origin, budget);
   if (left.type === 'error') return left;
   if (right.type === 'error') return right;
   const leftValue = left.type === 'blank' ? '' : left.value;
@@ -249,7 +273,11 @@ function parseConditionalFormula(source: string, runtime: FormulaRuntime): Formu
     );
   }
   const cached = runtime.asts.get(source);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) {
+    runtime.asts.delete(source);
+    runtime.asts.set(source, cached);
+    return cached;
+  }
   const ast = parseFormula(source.startsWith('=') ? source : `=${source}`);
   validateFormula(ast);
   if (astNodes(ast) > runtime.maxAstNodes) {
@@ -258,13 +286,21 @@ function parseConditionalFormula(source: string, runtime: FormulaRuntime): Formu
       'Conditional formula exceeds its AST node limit',
     );
   }
-  runtime.asts.set(source, ast);
+  if (runtime.maxCachedFormulas > 0) {
+    while (runtime.asts.size >= runtime.maxCachedFormulas) {
+      const oldest = runtime.asts.keys().next().value;
+      if (oldest === undefined) break;
+      runtime.asts.delete(oldest);
+    }
+    runtime.asts.set(source, ast);
+  }
   return ast;
 }
 
 function matches(
   condition: ConditionalExpression,
   input: ConditionalEvaluationInput,
+  origin: { readonly row: number; readonly column: number },
   runtime: FormulaRuntime,
 ): boolean {
   if (condition.type === 'blank') return input.value.type === 'blank';
@@ -275,13 +311,18 @@ function matches(
   }
   if (condition.type === 'cell-is-formula') {
     try {
-      const first = evaluateFormulaAst(parseConditionalFormula(condition.source, runtime), input, {
-        remaining: runtime.maxEvaluationSteps,
-      });
+      const first = evaluateFormulaAst(
+        parseConditionalFormula(condition.source, runtime),
+        input,
+        origin,
+        {
+          remaining: runtime.maxEvaluationSteps,
+        },
+      );
       const second =
         condition.source2 === undefined
           ? undefined
-          : evaluateFormulaAst(parseConditionalFormula(condition.source2, runtime), input, {
+          : evaluateFormulaAst(parseConditionalFormula(condition.source2, runtime), input, origin, {
               remaining: runtime.maxEvaluationSteps,
             });
       if (first.type === 'blank' || first.type === 'error') return false;
@@ -302,7 +343,9 @@ function matches(
   }
   try {
     const ast = parseConditionalFormula(condition.source, runtime);
-    return truthy(evaluateFormulaAst(ast, input, { remaining: runtime.maxEvaluationSteps }));
+    return truthy(
+      evaluateFormulaAst(ast, input, origin, { remaining: runtime.maxEvaluationSteps }),
+    );
   } catch (error) {
     if (error instanceof ConditionalFormatError) throw error;
     throw new ConditionalFormatError(
@@ -351,7 +394,8 @@ function colorScalePatch(
   if (current === undefined) return undefined;
   let bounds = input.lookup === undefined ? undefined : cache.get(rule)?.get(input.lookup);
   if (bounds === undefined) {
-    const values: number[] = [];
+    let minimum = Number.POSITIVE_INFINITY;
+    let maximum = Number.NEGATIVE_INFINITY;
     for (const range of rule.ranges) {
       for (let row = range.start.row; row <= range.end.row; row += 1) {
         for (let column = range.start.column; column <= range.end.column; column += 1) {
@@ -364,12 +408,15 @@ function colorScalePatch(
               : undefined);
           if (value === undefined || value.type === 'array') continue;
           const number = numeric(value);
-          if (number !== undefined) values.push(number);
+          if (number !== undefined) {
+            minimum = Math.min(minimum, number);
+            maximum = Math.max(maximum, number);
+          }
         }
       }
     }
-    if (values.length === 0) return undefined;
-    bounds = [Math.min(...values), Math.max(...values)];
+    if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) return undefined;
+    bounds = [minimum, maximum];
     if (input.lookup !== undefined) {
       const byLookup = cache.get(rule) ?? new WeakMap();
       byLookup.set(input.lookup, bounds);
@@ -392,6 +439,7 @@ function colorScalePatch(
 
 /** Creates an isolated pure conditional-format evaluator. */
 export function createConditionalFormatEvaluator(limits: ConditionalFormatLimits): {
+  /** Evaluates ordered conditional rules for one presented cell. */
   evaluate(input: ConditionalEvaluationInput): ConditionalEvaluationResult;
 } {
   const formulaRuntime: FormulaRuntime = {
@@ -399,6 +447,7 @@ export function createConditionalFormatEvaluator(limits: ConditionalFormatLimits
     maxFormulaLength: limits.maxFormulaLength ?? 4_096,
     maxAstNodes: limits.maxAstNodes ?? 1_024,
     maxEvaluationSteps: limits.maxEvaluationSteps ?? 4_096,
+    maxCachedFormulas: limits.maxCachedFormulas ?? 1_024,
   };
   const colorScaleCache = new WeakMap<
     ConditionalRule,
@@ -431,8 +480,10 @@ export function createConditionalFormatEvaluator(limits: ConditionalFormatLimits
       for (const rule of [...input.rules].sort(
         (left, right) => left.priority - right.priority || left.id.localeCompare(right.id),
       )) {
-        if (!contains(rule, input.address) || !matches(rule.condition, input, formulaRuntime))
+        const range = containingRange(rule, input.address);
+        if (range === undefined || !matches(rule.condition, input, range.start, formulaRuntime)) {
           continue;
+        }
         matched.push(rule.id);
         if (rule.effect.type === 'style') Object.assign(patch, rule.effect.patch);
         else {

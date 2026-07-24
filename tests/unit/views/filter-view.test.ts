@@ -163,6 +163,24 @@ describe('VIEW-01 derived filter views', () => {
     expect(model.rowHeight(2)).toBe(0);
   });
 
+  it('extends the default grid extent to cover a valid derived view range', () => {
+    const model = createSheetGridModel(
+      {},
+      {
+        derivedRows: {
+          start: 1,
+          end: 500,
+          rowOrder: Array.from({ length: 500 }, (_, index) => index + 1),
+          hiddenRows: new Set([500]),
+        },
+      },
+    );
+
+    expect(model.rowCount).toBe(501);
+    expect(model.logicalRowAtVisualIndex(500)).toBe(500);
+    expect(model.rowHeight(500)).toBe(0);
+  });
+
   it('activates and deactivates saved views without changing document revision', () => {
     const parsed = parseSpreadsheetDocument({
       schemaVersion: 2,

@@ -104,6 +104,19 @@ export const parityManifest: readonly ParityRow[] = [
     visual: { assertions: ['locale.localized-ui'] },
   },
   {
+    id: 'interchange',
+    unit: {
+      notApplicable: 'Reader parsing and limits are covered by focused unit suites.',
+    },
+    component: {
+      notApplicable: 'File readers are framework-independent SDK adapters.',
+    },
+    browser: { assertions: ['interchange.readers'] },
+    visual: {
+      notApplicable: 'Interchange readers produce document data, not pixel output.',
+    },
+  },
+  {
     id: 'correction.empty-workbook',
     unit: { assertions: ['correction.empty-workbook'] },
     component: { assertions: ['correction.empty-workbook-component'] },
