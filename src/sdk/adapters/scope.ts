@@ -222,6 +222,12 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
           resolution,
         });
       }
+      if (disposed || controller.signal.aborted) {
+        fail('ADAPTER_INVOCATION_ABORTED', 'Adapter invocation was aborted', {
+          resolution,
+          cause: controller.signal.reason,
+        });
+      }
       if (!grant.allows(capability) || !binding.manifest.capabilities.includes(capability)) {
         fail('CAPABILITY_DENIED', `Capability ${capability} was not granted`, {
           resolution,
@@ -259,13 +265,15 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
         () => invocationController.abort(timeoutMarker),
         limits.maxDurationMs,
       );
-      const abortPromise = new Promise<never>((_resolve, reject) => {
-        invocationController.signal.addEventListener(
-          'abort',
-          () => reject(invocationController.signal.reason),
-          { once: true },
-        );
-      });
+      const abortPromise = invocationController.signal.aborted
+        ? Promise.reject<never>(invocationController.signal.reason)
+        : new Promise<never>((_resolve, reject) => {
+            invocationController.signal.addEventListener(
+              'abort',
+              () => reject(invocationController.signal.reason),
+              { once: true },
+            );
+          });
 
       const execution = Promise.resolve().then(async () => {
         if (binding.manifest.execution === 'isolated-worker') {
