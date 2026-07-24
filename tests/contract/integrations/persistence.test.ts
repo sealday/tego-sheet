@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  createPersistenceSession,
   createPersistenceController,
+  loadPersistedDocument,
   type SaveRequest,
   type SaveResult,
 } from '../../../src/integrations/persistence';
 import type { SerializableTransactionEnvelope } from '../../../src/core/controller/spreadsheet-document-controller';
+import { SpreadsheetDocumentController } from '../../../src/core/controller/spreadsheet-document-controller';
+import { testDocument } from '../../helpers/workbook-builders';
 
 function transaction(id: string): SerializableTransactionEnvelope {
   return {
@@ -179,5 +183,92 @@ describe('persistence integration contract', () => {
 
     await expect(saving).rejects.toThrow('Persistence save was cancelled');
     await expect(controller.save()).rejects.toThrow(/disposed/u);
+  });
+
+  it('validates a complete loaded document envelope before exposure', async () => {
+    const document = testDocument([{ name: 'A' }]);
+    await expect(
+      loadPersistedDocument(
+        {
+          load: async () => ({
+            schemaVersion: 1,
+            documentId: document.id,
+            revision: 'revision-1',
+            document,
+          }),
+        },
+        document.id,
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ revision: 'revision-1', document });
+    await expect(
+      loadPersistedDocument(
+        {
+          load: async () => ({
+            schemaVersion: 1,
+            documentId: document.id,
+            revision: 'revision-1',
+            document: { ...document, schemaVersion: 999 },
+          }),
+        },
+        document.id,
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow(/loaded document is invalid/u);
+  });
+
+  it('tracks controller commits, stays durable offline, and guards beforeunload', async () => {
+    const document = testDocument([{ name: 'A' }]);
+    const requests: SaveRequest[] = [];
+    const session = createPersistenceSession({
+      documentId: document.id,
+      initialRevision: 'revision-1',
+      adapter: {
+        save: async (request) => {
+          requests.push(request);
+          return {
+            status: 'saved',
+            revision: 'revision-2',
+            persistedTransactionIds: request.transactions.map(({ id }) => id),
+          };
+        },
+      },
+      requestId: () => 'request-1',
+      autosaveDelayMs: 10,
+    });
+    const controller = new SpreadsheetDocumentController(document);
+    session.attachController(controller);
+    const sheet = controller.getSheetIds()[0]!;
+    controller.dispatch(
+      { type: 'set-cell-text', address: { sheet, row: 0, column: 0 }, text: 'local' },
+      'ref',
+    );
+    session.setOnline(false);
+
+    expect(session.state).toMatchObject({ status: 'offline' });
+    await expect(session.save()).resolves.toEqual({ status: 'offline' });
+    expect(requests).toEqual([]);
+
+    let beforeUnload: ((event: BeforeUnloadEvent) => void) | undefined;
+    const unbind = session.bindBeforeUnload({
+      addEventListener: (_type, listener) => {
+        beforeUnload = listener;
+      },
+      removeEventListener: () => undefined,
+    });
+    const event = {
+      preventDefault: vi.fn(),
+      returnValue: undefined,
+    } as unknown as BeforeUnloadEvent;
+    beforeUnload?.(event);
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.returnValue).toBe('');
+
+    session.setOnline(true);
+    await expect(session.save('before-close')).resolves.toMatchObject({ status: 'saved' });
+    expect(requests).toHaveLength(1);
+    unbind();
+    session.dispose();
+    controller.dispose();
   });
 });

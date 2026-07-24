@@ -51,9 +51,11 @@ export interface EventDispatcherOptions {
     commit: SpreadsheetControllerCommit<unknown, WorkbookCommand>,
   ) => void;
   readonly schedulePaint?: () => void;
+  readonly canDispatch?: (command: WorkbookCommand) => boolean;
 }
 
 export interface EventDispatcher {
+  readonly canDispatch: (command: WorkbookCommand) => boolean;
   readonly dispatchUi: (
     command: WorkbookCommand,
     source: ChangeSource,
@@ -259,6 +261,13 @@ export function createEventDispatcher(options: EventDispatcherOptions): EventDis
     readonly previousText: string | undefined;
   } => {
     ensureActive();
+    if (options.canDispatch?.(command) === false) {
+      throw new TegoSheetException({
+        code: 'INVALID_COMMAND',
+        message: 'Workbook command was denied by the permission store',
+        recoverable: true,
+      });
+    }
     const previousText =
       command.type === 'set-cell-text' ? controller.getCellText(command.address) : undefined;
     const capturePasteValues =
@@ -291,6 +300,7 @@ export function createEventDispatcher(options: EventDispatcherOptions): EventDis
   };
 
   return {
+    canDispatch: (command) => options.canDispatch?.(command) !== false,
     dispatchUi(command, source, notificationOptions) {
       if (!isActive()) {
         return { status: 'rejected', error: clone(inactiveException().error) };
@@ -324,7 +334,10 @@ export function createEventDispatcher(options: EventDispatcherOptions): EventDis
         ...(input.signal === undefined ? {} : { signal: input.signal }),
         source,
         ...(input.confirmWarning === undefined ? {} : { confirmWarning: input.confirmWarning }),
-        canCommit: () => isActive() && input.canCommit?.() !== false,
+        canCommit: () =>
+          isActive() &&
+          options.canDispatch?.({ type: 'set-cell-text', address, text: input.text }) !== false &&
+          input.canCommit?.() !== false,
       });
       if (result.status === 'noop') return { status: 'noop' };
       if (result.status === 'rejected') {

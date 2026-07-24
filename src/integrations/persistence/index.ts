@@ -1,5 +1,7 @@
 import type { Diagnostic } from '../../document';
+import { parseSpreadsheetDocument, type SpreadsheetDocument } from '../../document';
 import type { SerializableTransactionEnvelope } from '../../core/controller/spreadsheet-document-controller';
+import type { SpreadsheetDocumentController } from '../../core/controller/spreadsheet-document-controller';
 
 export type SaveReason = 'manual' | 'autosave' | 'checkpoint' | 'before-close';
 
@@ -24,6 +26,17 @@ export type SaveResult =
 
 export interface PersistencePort {
   save(request: SaveRequest, signal: AbortSignal): Promise<SaveResult>;
+}
+
+export interface PersistedDocumentEnvelope {
+  readonly schemaVersion: 1;
+  readonly documentId: string;
+  readonly revision: string;
+  readonly document: SpreadsheetDocument;
+}
+
+export interface PersistenceLoadPort {
+  load(documentId: string, signal: AbortSignal): Promise<unknown>;
 }
 
 export type PersistenceState =
@@ -73,6 +86,35 @@ export interface PersistenceController {
   dispose(): void;
 }
 
+export type PersistenceSessionState =
+  | PersistenceState
+  | {
+      readonly status: 'offline';
+      readonly pending: readonly string[];
+      readonly revision: string;
+    };
+
+export interface PersistenceSession {
+  readonly state: PersistenceSessionState;
+  attachController(controller: SpreadsheetDocumentController): () => void;
+  save(reason?: SaveReason): Promise<SaveResult | { readonly status: 'offline' }>;
+  setOnline(online: boolean): void;
+  resolveConflict(revision: string): void;
+  bindBeforeUnload(target: {
+    addEventListener(type: 'beforeunload', listener: (event: BeforeUnloadEvent) => void): void;
+    removeEventListener(type: 'beforeunload', listener: (event: BeforeUnloadEvent) => void): void;
+  }): () => void;
+  subscribe(listener: () => void): () => void;
+  dispose(): void;
+}
+
+export interface CreatePersistenceSessionOptions extends CreatePersistenceControllerOptions {
+  readonly autosaveDelayMs?: number;
+  readonly setTimer?: (callback: () => void, delay: number) => unknown;
+  readonly clearTimer?: (handle: unknown) => void;
+  readonly initiallyOnline?: boolean;
+}
+
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/;
 
 function identifier(value: string, label: string): string {
@@ -110,6 +152,51 @@ function snapshotTransaction(
 
 function frozenIds(transactions: Iterable<SerializableTransactionEnvelope>): readonly string[] {
   return Object.freeze([...transactions].map(({ id }) => id));
+}
+
+/** Loads one host envelope and validates the complete document before exposing it. */
+export async function loadPersistedDocument(
+  adapter: PersistenceLoadPort,
+  documentId: string,
+  signal: AbortSignal,
+): Promise<PersistedDocumentEnvelope> {
+  const expectedDocumentId = identifier(documentId, 'Persistence documentId');
+  if (signal.aborted) throw new TypeError('Persistence load was cancelled');
+  const value = await adapter.load(expectedDocumentId, signal);
+  if (signal.aborted) throw new TypeError('Persistence load was cancelled');
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('Persistence load envelope is invalid');
+  }
+  let snapshot: {
+    readonly schemaVersion?: unknown;
+    readonly documentId?: unknown;
+    readonly revision?: unknown;
+    readonly document?: unknown;
+  };
+  try {
+    snapshot = JSON.parse(JSON.stringify(value)) as typeof snapshot;
+  } catch {
+    throw new TypeError('Persistence load envelope must be JSON serializable');
+  }
+  if (
+    snapshot.schemaVersion !== 1 ||
+    snapshot.documentId !== expectedDocumentId ||
+    typeof snapshot.revision !== 'string'
+  ) {
+    throw new TypeError('Persistence load envelope identity is invalid');
+  }
+  const revision = identifier(snapshot.revision, 'Persistence loaded revision');
+  const parsed = parseSpreadsheetDocument(snapshot.document);
+  if (!parsed.ok) throw new TypeError('Persistence loaded document is invalid');
+  if (parsed.document.id !== expectedDocumentId) {
+    throw new TypeError('Persistence loaded documentId does not match envelope');
+  }
+  return deepFreeze({
+    schemaVersion: 1,
+    documentId: expectedDocumentId,
+    revision,
+    document: parsed.document,
+  });
 }
 
 /** Creates a revision/ack-driven persistence coordinator with isolated in-flight batches. */
@@ -343,4 +430,150 @@ export function createPersistenceController(
     },
   };
   return Object.freeze(controller);
+}
+
+/** Binds revision persistence to controller commits without owning storage or network policy. */
+export function createPersistenceSession(
+  options: CreatePersistenceSessionOptions,
+): PersistenceSession {
+  const persistence = createPersistenceController(options);
+  const autosaveDelayMs = options.autosaveDelayMs ?? 1_000;
+  if (!Number.isSafeInteger(autosaveDelayMs) || autosaveDelayMs < 0) {
+    throw new RangeError('Persistence autosaveDelayMs must be a non-negative safe integer');
+  }
+  const setTimer = options.setTimer ?? ((callback, delay) => setTimeout(callback, delay));
+  const clearTimer =
+    options.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
+  let online = options.initiallyOnline ?? true;
+  let disposed = false;
+  let timer: unknown;
+  let detachController: (() => void) | undefined;
+  const listeners = new Set<() => void>();
+
+  const computeState = (): PersistenceSessionState => {
+    if (online) return persistence.state;
+    const pending =
+      persistence.state.status === 'clean' ? Object.freeze([]) : persistence.state.pending;
+    return Object.freeze({
+      status: 'offline',
+      pending,
+      revision:
+        persistence.state.status === 'conflict'
+          ? persistence.state.baseRevision
+          : persistence.state.revision,
+    });
+  };
+  let currentState = computeState();
+  const publish = (): void => {
+    currentState = computeState();
+    for (const listener of listeners) listener();
+  };
+  const clearAutosave = (): void => {
+    if (timer === undefined) return;
+    clearTimer(timer);
+    timer = undefined;
+  };
+  const scheduleAutosave = (): void => {
+    clearAutosave();
+    if (!online || !persistence.hasPendingChanges()) return;
+    timer = setTimer(() => {
+      timer = undefined;
+      const saving = persistence.save('autosave');
+      publish();
+      void saving.then(publish, publish);
+    }, autosaveDelayMs);
+  };
+
+  const session: PersistenceSession = {
+    get state(): PersistenceSessionState {
+      return currentState;
+    },
+    attachController(controller): () => void {
+      if (disposed) throw new TypeError('Persistence session is disposed');
+      detachController?.();
+      const unsubscribe = controller.subscribe(({ snapshot, commit }) => {
+        const transaction =
+          commit.transaction ??
+          ({
+            schemaVersion: 1,
+            id: `ui:${commit.change.id}`,
+            baseRevision: Math.max(0, snapshot.revision - 1),
+            commands: [
+              {
+                schemaVersion: 1,
+                id: `command:${commit.change.id}`,
+                command: commit.command,
+              },
+            ],
+          } satisfies SerializableTransactionEnvelope);
+        persistence.enqueue(transaction);
+        scheduleAutosave();
+        publish();
+      });
+      let active = true;
+      const detach = (): void => {
+        if (!active) return;
+        active = false;
+        unsubscribe();
+        if (detachController === detach) detachController = undefined;
+      };
+      detachController = detach;
+      return detach;
+    },
+    async save(reason = 'manual') {
+      if (disposed) throw new TypeError('Persistence session is disposed');
+      clearAutosave();
+      if (!online) return Object.freeze({ status: 'offline' as const });
+      const saving = persistence.save(reason);
+      publish();
+      try {
+        return await saving;
+      } finally {
+        publish();
+        scheduleAutosave();
+      }
+    },
+    setOnline(nextOnline): void {
+      if (disposed) throw new TypeError('Persistence session is disposed');
+      if (online === nextOnline) return;
+      online = nextOnline;
+      if (online) scheduleAutosave();
+      else clearAutosave();
+      publish();
+    },
+    resolveConflict(revision): void {
+      persistence.resolveConflict(revision);
+      scheduleAutosave();
+      publish();
+    },
+    bindBeforeUnload(target): () => void {
+      if (disposed) throw new TypeError('Persistence session is disposed');
+      const listener = (event: BeforeUnloadEvent): void => {
+        if (!persistence.hasPendingChanges()) return;
+        event.preventDefault();
+        event.returnValue = '';
+      };
+      target.addEventListener('beforeunload', listener);
+      let active = true;
+      return (): void => {
+        if (!active) return;
+        active = false;
+        target.removeEventListener('beforeunload', listener);
+      };
+    },
+    subscribe(listener): () => void {
+      if (disposed) return () => undefined;
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    dispose(): void {
+      if (disposed) return;
+      disposed = true;
+      clearAutosave();
+      detachController?.();
+      listeners.clear();
+      persistence.dispose();
+    },
+  };
+  return Object.freeze(session);
 }

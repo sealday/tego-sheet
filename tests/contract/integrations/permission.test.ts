@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  createWorkbookTransactionPermissionGate,
   createPermissionSnapshot,
   createPermissionStore,
+  deriveWorkbookCommandPermissionRequests,
   evaluatePermission,
 } from '../../../src/integrations/permission';
 
@@ -152,5 +154,79 @@ describe('permission integration contract', () => {
     store.clear();
 
     expect(observed).toEqual([undefined]);
+  });
+
+  it('derives one document guard plus precise command targets', () => {
+    expect(
+      deriveWorkbookCommandPermissionRequests(
+        {
+          type: 'set-cell-input',
+          address: { sheet: 'sheet-1' as never, row: 2, column: 3 },
+          input: { type: 'number', value: 1 },
+        },
+        'document-1',
+      ),
+    ).toEqual([
+      {
+        action: 'document:edit',
+        target: { type: 'document', documentId: 'document-1' },
+      },
+      {
+        action: 'range:edit',
+        target: {
+          type: 'range',
+          range: {
+            sheetId: 'sheet-1',
+            start: { row: 2, column: 3 },
+            end: { row: 2, column: 3 },
+          },
+        },
+      },
+    ]);
+  });
+
+  it('creates a default-deny transaction gate covering every command atomically', () => {
+    const store = createPermissionStore();
+    const gate = createWorkbookTransactionPermissionGate({
+      documentId: 'document-1',
+      getSnapshot: store.getSnapshot,
+    });
+    const context = {
+      transaction: {
+        schemaVersion: 1 as const,
+        id: 'transaction-1',
+        baseRevision: 0,
+        commands: [
+          {
+            schemaVersion: 1 as const,
+            id: 'command-1',
+            command: {
+              type: 'rename-sheet' as const,
+              sheet: 'sheet-1' as never,
+              name: 'Renamed',
+            },
+          },
+        ],
+      },
+      snapshot: {} as never,
+    };
+    expect(gate(context)).toBe(false);
+    store.replace(
+      createPermissionSnapshot({
+        revision: 'permission-1',
+        actorId: 'actor-1',
+        grants: [
+          {
+            action: 'document:edit',
+            target: { type: 'document', documentId: 'document-1' },
+          },
+          {
+            action: 'sheet:edit',
+            target: { type: 'sheet', sheetId: 'sheet-1' },
+          },
+        ],
+      }),
+    );
+    expect(gate(context)).toBe(true);
   });
 });

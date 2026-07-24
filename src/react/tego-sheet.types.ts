@@ -21,6 +21,8 @@ import type {
   ValidationResult as AdvancedValidationResult,
 } from '../validation';
 import type { SheetTabsRenderer, ToolbarRenderer } from '../ui/slot-types';
+import type { PermissionStore } from '../integrations/permission';
+import type { PersistenceSession } from '../integrations/persistence';
 
 export type { SheetTabsRenderer, ToolbarRenderer } from '../ui/slot-types';
 
@@ -74,6 +76,10 @@ interface TegoSheetSharedProps extends TegoSheetCallbacks {
   readonly initialActiveSheetIndex?: number;
   /** Disables workbook mutations while preserving navigation, selection, copy, and printing. */
   readonly readOnly?: boolean;
+  /** Optional live host permission store; installed stores default every protected action to deny. */
+  readonly permissionStore?: PermissionStore;
+  /** Optional host-owned persistence session attached to committed workbook transactions. */
+  readonly persistenceSession?: PersistenceSession;
   /** Per-instance locale identifier and message dictionary for built-in chrome. */
   readonly locale?: LocaleDefinition;
   /** Per-instance worksheet behavior and layout settings. */

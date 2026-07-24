@@ -1,3 +1,9 @@
+import type { WorkbookCommand } from '../../core/commands/workbook-command';
+import type {
+  TransactionPermissionContext,
+  TransactionPermissionGate,
+} from '../../core/controller/spreadsheet-document-controller';
+
 /** Stable permission actions shared by every product entry point. */
 export type PermissionAction =
   | 'document:view'
@@ -71,6 +77,11 @@ export interface PermissionStore {
   clear(): void;
   can(action: PermissionAction, target: PermissionTarget): boolean;
   subscribe(listener: (snapshot: PermissionSnapshot | undefined) => void): () => void;
+}
+
+export interface CreateWorkbookTransactionPermissionGateOptions {
+  readonly documentId: string;
+  readonly getSnapshot: () => PermissionSnapshot | undefined;
 }
 
 const actions = new Set<PermissionAction>([
@@ -178,6 +189,158 @@ function targetMatches(granted: PermissionTarget, requested: PermissionTarget): 
     );
   }
   return false;
+}
+
+function rangeRequest(
+  sheetId: string,
+  start: { readonly row: number; readonly column: number },
+  end = start,
+): PermissionRequest {
+  return {
+    action: 'range:edit',
+    target: {
+      type: 'range',
+      range: {
+        sheetId,
+        start: { row: start.row, column: start.column },
+        end: { row: end.row, column: end.column },
+      },
+    },
+  };
+}
+
+/** Derives the document guard and precise mutation target for one workbook command. */
+export function deriveWorkbookCommandPermissionRequests(
+  command: WorkbookCommand,
+  documentId: string,
+): readonly PermissionRequest[] {
+  const documentRequest: PermissionRequest = {
+    action: 'document:edit',
+    target: { type: 'document', documentId: identifier(documentId, 'Permission documentId') },
+  };
+  let targetRequest: PermissionRequest;
+  switch (command.type) {
+    case 'set-cell-text':
+    case 'set-cell-input':
+      targetRequest = rangeRequest(command.address.sheet, command.address);
+      break;
+    case 'clear-contents':
+    case 'set-cell-metadata':
+    case 'set-style':
+    case 'set-border':
+    case 'clear-format':
+    case 'merge':
+    case 'unmerge':
+    case 'set-validation':
+    case 'remove-validation':
+    case 'set-filter':
+      targetRequest = rangeRequest(
+        command.selection.sheet,
+        command.selection.range.start,
+        command.selection.range.end,
+      );
+      break;
+    case 'paint-format':
+    case 'paste-external':
+    case 'autofill':
+      targetRequest = rangeRequest(
+        command.target.sheet,
+        command.target.range.start,
+        command.target.range.end,
+      );
+      break;
+    case 'paste-internal': {
+      const target = rangeRequest(
+        command.target.sheet,
+        command.target.range.start,
+        command.target.range.end,
+      );
+      if (!command.cut) return Object.freeze([documentRequest, target]);
+      return Object.freeze([
+        documentRequest,
+        target,
+        rangeRequest(command.source.sheet, command.source.range.start, command.source.range.end),
+      ]);
+    }
+    case 'set-sheet-object':
+      targetRequest = {
+        action: 'object:edit',
+        target: { type: 'object', sheetId: command.sheet, objectId: command.object.id },
+      };
+      break;
+    case 'remove-sheet-object':
+      targetRequest = {
+        action: 'object:edit',
+        target: { type: 'object', sheetId: command.sheet, objectId: command.objectId },
+      };
+      break;
+    case 'set-chart':
+      targetRequest = {
+        action: 'object:edit',
+        target: { type: 'object', sheetId: command.sheet, objectId: command.chart.id },
+      };
+      break;
+    case 'remove-chart':
+      targetRequest = {
+        action: 'object:edit',
+        target: { type: 'object', sheetId: command.sheet, objectId: command.chartId },
+      };
+      break;
+    case 'set-sparkline':
+      targetRequest = rangeRequest(command.sparkline.target.sheetId, command.sparkline.target);
+      break;
+    case 'remove-sparkline':
+      targetRequest = {
+        action: 'sheet:edit',
+        target: { type: 'sheet', sheetId: command.sheet },
+      };
+      break;
+    case 'add-sheet':
+    case 'undo':
+    case 'redo':
+      return Object.freeze([documentRequest]);
+    case 'insert-row':
+    case 'delete-row':
+    case 'insert-column':
+    case 'delete-column':
+    case 'set-row-height':
+    case 'set-row-hidden':
+    case 'set-column-width':
+    case 'set-column-hidden':
+    case 'set-freeze':
+    case 'delete-sheet':
+    case 'rename-sheet':
+    case 'group':
+    case 'ungroup':
+    case 'toggle-group':
+    case 'clear-filter':
+    case 'sort':
+    case 'set-conditional-format':
+    case 'remove-conditional-format':
+    case 'set-filter-view':
+    case 'remove-filter-view':
+    case 'set-table':
+    case 'remove-table':
+      targetRequest = {
+        action: 'sheet:edit',
+        target: { type: 'sheet', sheetId: command.sheet },
+      };
+      break;
+  }
+  return Object.freeze([documentRequest, targetRequest]);
+}
+
+/** Creates one atomic default-deny gate for public controller transactions. */
+export function createWorkbookTransactionPermissionGate(
+  options: CreateWorkbookTransactionPermissionGateOptions,
+): TransactionPermissionGate {
+  const documentId = identifier(options.documentId, 'Permission documentId');
+  return (context: TransactionPermissionContext): boolean => {
+    const requests = context.transaction.commands.flatMap(({ command }) =>
+      deriveWorkbookCommandPermissionRequests(command, documentId),
+    );
+    return evaluatePermission(options.getSnapshot(), requests).allowed;
+  };
 }
 
 /** Creates an immutable, normalized, default-deny permission snapshot. */

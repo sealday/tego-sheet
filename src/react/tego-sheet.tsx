@@ -8,6 +8,7 @@ import {
   useReducer,
   useRef,
   useState,
+  useSyncExternalStore,
   type ForwardedRef,
 } from 'react';
 import {
@@ -70,6 +71,10 @@ import { TemplateDesigner } from './template-designer';
 import { TemplatePreview } from './preview';
 import { applyDocumentFilterView } from '../views';
 import { projectSheetObjectsToViewport } from './adapters/object-adapter';
+import {
+  deriveWorkbookCommandPermissionRequests,
+  evaluatePermission,
+} from '../integrations/permission';
 
 function callbacksFromProps(props: TegoSheetProps): TegoSheetCallbacks {
   return {
@@ -536,6 +541,40 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
   const [filterViewRevision, refreshFilterView] = useReducer((value: number) => value + 1, 0);
   const controller = props.epoch.controller;
   const isActive = props.epoch.isActive;
+  const permissionSnapshot = useSyncExternalStore(
+    props.permissionStore?.subscribe ?? (() => () => undefined),
+    props.permissionStore?.getSnapshot ?? (() => undefined),
+    props.permissionStore?.getSnapshot ?? (() => undefined),
+  );
+  const permissionReadOnly =
+    props.permissionStore !== undefined &&
+    !(
+      permissionSnapshot?.can('document:edit', {
+        type: 'document',
+        documentId: props.epoch.snapshot.document.id,
+      }) ?? false
+    );
+  const persistenceState = useSyncExternalStore(
+    props.persistenceSession?.subscribe ?? (() => () => undefined),
+    props.persistenceSession === undefined
+      ? () => undefined
+      : () => props.persistenceSession?.state,
+    props.persistenceSession === undefined
+      ? () => undefined
+      : () => props.persistenceSession?.state,
+  );
+  useEffect(() => {
+    if (props.persistenceSession === undefined) return;
+    const detach = props.persistenceSession.attachController(controller);
+    const detachBeforeUnload =
+      typeof window === 'undefined'
+        ? () => undefined
+        : props.persistenceSession.bindBeforeUnload(window);
+    return () => {
+      detachBeforeUnload();
+      detach();
+    };
+  }, [controller, props.persistenceSession]);
   const requestSurfaceFocus = useCallback(() => {
     const root = rootRef.current;
     if (
@@ -616,6 +655,17 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
         },
         recordControlledCheckpoint: props.controlled.recordCheckpoint,
         schedulePaint: () => engineSlot.get()?.render(controller.getSnapshot(), activeSheet),
+        canDispatch:
+          props.permissionStore === undefined
+            ? undefined
+            : (command) =>
+                evaluatePermission(
+                  props.permissionStore?.getSnapshot(),
+                  deriveWorkbookCommandPermissionRequests(
+                    command,
+                    props.epoch.snapshot.document.id,
+                  ),
+                ).allowed,
       }),
     [
       activeSheet,
@@ -625,6 +675,8 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
       isActive,
       props.controlled.getNotificationVersion,
       props.controlled.recordCheckpoint,
+      props.epoch.snapshot.document.id,
+      props.permissionStore,
       setNotification,
     ],
   );
@@ -647,7 +699,7 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
     dispatcher,
     engineSlot,
     isActive: props.epoch.isActive,
-    readOnly: props.readOnly ?? false,
+    readOnly: (props.readOnly ?? false) || permissionReadOnly,
     validation: props.validationEngine ?? {},
     ...(props.confirmValidationWarning === undefined
       ? {}
@@ -1276,6 +1328,7 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
       data-mode={props.epoch.mode}
       data-grid-visible={props.options?.showGrid === false ? 'false' : 'true'}
       data-context-menu-enabled={props.options?.showContextMenu === false ? 'false' : 'true'}
+      data-persistence-status={persistenceState?.status}
       role="grid"
       aria-rowcount={activeData === null ? undefined : accessibilityRows.length}
       aria-colcount={
@@ -1294,6 +1347,11 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
       tabIndex={0}
     >
       <CommitAuthority commit={commitRuntime} />
+      {persistenceState === undefined ? null : (
+        <span className="tego-sheet__persistence-status" aria-live="polite">
+          {persistenceState.status}
+        </span>
+      )}
       <SheetChrome
         toolbar={toolbarProps}
         toolbarRenderer={props.toolbar}
