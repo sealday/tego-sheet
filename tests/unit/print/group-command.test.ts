@@ -3,6 +3,40 @@ import { createFontMetrics } from '../../../src/presentation';
 import { createPrintDisplayList, validatePrintDisplayCommands } from '../../../src/print';
 
 describe('renderer-neutral display command groups', () => {
+  it('diagnoses malformed and recursively cyclic containers without throwing', () => {
+    expect(() =>
+      validatePrintDisplayCommands([
+        { kind: 'group', rotation: 90, origin: null, commands: [] },
+        { kind: 'clip', rect: null, commands: null },
+      ]),
+    ).not.toThrow();
+    expect(
+      validatePrintDisplayCommands([
+        { kind: 'group', rotation: 90, origin: null, commands: [] },
+        { kind: 'clip', rect: null, commands: null },
+      ]),
+    ).toEqual([
+      expect.objectContaining({ code: 'DRAW_COMMAND_UNSUPPORTED' }),
+      expect.objectContaining({ code: 'DRAW_COMMAND_UNSUPPORTED' }),
+    ]);
+
+    const cyclic: {
+      kind: 'group';
+      rotation: number;
+      origin: { x: number; y: number };
+      commands: unknown[];
+    } = {
+      kind: 'group',
+      rotation: 0,
+      origin: { x: 0, y: 0 },
+      commands: [],
+    };
+    cyclic.commands.push(cyclic);
+    expect(validatePrintDisplayCommands([cyclic])).toEqual([
+      expect.objectContaining({ code: 'DRAW_COMMAND_UNSUPPORTED' }),
+    ]);
+  });
+
   it('validates nested commands and deeply freezes grouped transforms', () => {
     const command = {
       kind: 'group',

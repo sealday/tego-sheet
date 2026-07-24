@@ -458,6 +458,24 @@ function bandCommands(
   return commands;
 }
 
+function rotatedObjectBounds(
+  rect: { readonly x: number; readonly y: number; readonly width: number; readonly height: number },
+  rotation: number | undefined,
+  padding: number,
+): { readonly x: number; readonly y: number; readonly width: number; readonly height: number } {
+  const angle = ((rotation ?? 0) * Math.PI) / 180;
+  const cosine = Math.abs(Math.cos(angle));
+  const sine = Math.abs(Math.sin(angle));
+  const width = rect.width * cosine + rect.height * sine + padding * 2;
+  const height = rect.width * sine + rect.height * cosine + padding * 2;
+  return {
+    x: rect.x + rect.width / 2 - width / 2,
+    y: rect.y + rect.height / 2 - height / 2,
+    width,
+    height,
+  };
+}
+
 function displayPages(
   pages: readonly PaginationPage[],
   resolved: readonly ResolvedTarget[],
@@ -712,11 +730,13 @@ function displayPages(
               })()
             : resolvedRect;
         const bodyRight = columnOffset(endColumn + 1);
+        const strokePadding = object.kind === 'shape' ? (object.style.strokeWidth ?? 1) / 2 : 0;
+        const visibleBounds = rotatedObjectBounds(rect, object.rotation, strokePadding);
         if (
-          rect.x + rect.width <= bodyOriginX ||
-          rect.y + rect.height <= bodyOriginY ||
-          rect.x >= bodyRight ||
-          rect.y >= bodyBottom
+          visibleBounds.x + visibleBounds.width <= bodyOriginX ||
+          visibleBounds.y + visibleBounds.height <= bodyOriginY ||
+          visibleBounds.x >= bodyRight ||
+          visibleBounds.y >= bodyBottom
         ) {
           return [];
         }

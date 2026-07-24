@@ -244,56 +244,86 @@ const DRAW_COMMAND_KINDS = new Set([
 /** Diagnoses unsupported commands before an output adapter consumes a display list. */
 export function validatePrintDisplayCommands(commands: readonly unknown[]): readonly Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
-  const visit = (command: unknown, index: number): void => {
+  const active = new WeakSet<object>();
+  const report = (index: number, message: string, kind?: unknown): void => {
+    diagnostics.push({
+      code: 'DRAW_COMMAND_UNSUPPORTED',
+      severity: 'error',
+      domain: 'output',
+      stage: 'validate',
+      message,
+      ...(kind === undefined ? {} : { details: { index, kind: String(kind) } }),
+    });
+  };
+  const finiteRect = (value: unknown): boolean => {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+    const rect = value as Readonly<Record<string, unknown>>;
+    return (
+      Number.isFinite(rect.x) &&
+      Number.isFinite(rect.y) &&
+      Number.isFinite(rect.width) &&
+      Number.isFinite(rect.height) &&
+      (rect.width as number) >= 0 &&
+      (rect.height as number) >= 0
+    );
+  };
+  const visit = (command: unknown, index: number, depth = 0): void => {
     if (command === null || typeof command !== 'object' || Array.isArray(command)) {
-      diagnostics.push({
-        code: 'DRAW_COMMAND_UNSUPPORTED',
-        severity: 'error',
-        domain: 'output',
-        stage: 'validate',
-        message: `Draw command ${index} is not an object`,
-      });
+      report(index, `Draw command ${index} is not an object`);
       return;
     }
+    if (depth > 64 || active.has(command)) {
+      report(index, `Draw command ${index} has cyclic or excessive nesting`);
+      return;
+    }
+    active.add(command);
     const candidate = command as Readonly<Record<string, unknown>>;
-    if (typeof candidate.kind !== 'string' || !DRAW_COMMAND_KINDS.has(candidate.kind)) {
-      diagnostics.push({
-        code: 'DRAW_COMMAND_UNSUPPORTED',
-        severity: 'error',
-        domain: 'output',
-        stage: 'validate',
-        message: `Draw command ${index} has unsupported kind ${String(candidate.kind)}`,
-        details: { index, kind: String(candidate.kind) },
-      });
-      return;
-    }
-    if (candidate.kind === 'group') {
-      const origin = candidate.origin as Readonly<Record<string, unknown>> | undefined;
-      if (
-        !Number.isFinite(candidate.rotation) ||
-        (candidate.rotation as number) < 0 ||
-        (candidate.rotation as number) >= 360 ||
-        origin === undefined ||
-        !Number.isFinite(origin.x) ||
-        !Number.isFinite(origin.y) ||
-        !Array.isArray(candidate.commands)
-      ) {
-        diagnostics.push({
-          code: 'DRAW_COMMAND_UNSUPPORTED',
-          severity: 'error',
-          domain: 'output',
-          stage: 'validate',
-          message: `Draw command ${index} has an invalid group transform`,
-          details: { index, kind: candidate.kind },
-        });
+    try {
+      if (typeof candidate.kind !== 'string' || !DRAW_COMMAND_KINDS.has(candidate.kind)) {
+        report(
+          index,
+          `Draw command ${index} has unsupported kind ${String(candidate.kind)}`,
+          candidate.kind,
+        );
         return;
       }
-      candidate.commands.forEach(visit);
-    } else if (candidate.kind === 'clip' && Array.isArray(candidate.commands)) {
-      candidate.commands.forEach(visit);
+      if (candidate.kind === 'group') {
+        const origin = candidate.origin;
+        const validOrigin =
+          origin !== null &&
+          typeof origin === 'object' &&
+          !Array.isArray(origin) &&
+          Number.isFinite((origin as Readonly<Record<string, unknown>>).x) &&
+          Number.isFinite((origin as Readonly<Record<string, unknown>>).y);
+        if (
+          !Number.isFinite(candidate.rotation) ||
+          (candidate.rotation as number) < 0 ||
+          (candidate.rotation as number) >= 360 ||
+          !validOrigin ||
+          !Array.isArray(candidate.commands)
+        ) {
+          report(index, `Draw command ${index} has an invalid group transform`, candidate.kind);
+          return;
+        }
+        candidate.commands.forEach((nested, nestedIndex) => {
+          visit(nested, nestedIndex, depth + 1);
+        });
+      } else if (candidate.kind === 'clip') {
+        if (!finiteRect(candidate.rect) || !Array.isArray(candidate.commands)) {
+          report(index, `Draw command ${index} has an invalid clip`, candidate.kind);
+          return;
+        }
+        candidate.commands.forEach((nested, nestedIndex) => {
+          visit(nested, nestedIndex, depth + 1);
+        });
+      }
+    } finally {
+      active.delete(command);
     }
   };
-  commands.forEach(visit);
+  commands.forEach((command, index) => {
+    visit(command, index);
+  });
   return Object.freeze(diagnostics.map((diagnostic) => Object.freeze(diagnostic)));
 }
 

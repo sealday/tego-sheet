@@ -105,7 +105,7 @@ export function objectToDisplayCommands(
     kind: 'text',
     text: object.text,
     x: rect.x,
-    y: rect.y,
+    y: rect.y + Math.min(rect.height, object.style.fontSize),
     maxWidth: rect.width,
     fontFamily: object.style.fontFamily,
     fontSize: object.style.fontSize,

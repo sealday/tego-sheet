@@ -105,7 +105,7 @@ describe('renderer-neutral persistent object commands', () => {
                 kind: 'text',
                 text: 'Clipped text',
                 x: 10,
-                y: 20,
+                y: 32,
                 maxWidth: 40,
               }),
             ],

@@ -313,6 +313,57 @@ describe('template render pipeline', () => {
     );
   });
 
+  it('keeps rotated object bounds that cross into the printable page', async () => {
+    const objectSource = {
+      ...source,
+      workbook: {
+        ...source.workbook,
+        sheets: [
+          {
+            ...source.workbook.sheets[0]!,
+            objects: [
+              {
+                id: 'rotated-edge',
+                kind: 'shape',
+                shape: 'line',
+                anchor: {
+                  type: 'absolute',
+                  rect: { x: 181, y: 0, width: 2, height: 100 },
+                },
+                rotation: 90,
+                zIndex: 1,
+                locked: false,
+                templateRepeat: 'shared',
+                style: { stroke: '#123456', strokeWidth: 4 },
+                accessibility: { name: 'Rotated edge' },
+              },
+            ],
+          },
+        ],
+      },
+    } as unknown as SpreadsheetDocument;
+    const compiled = compileSpreadsheetTemplate(objectSource, {
+      ...template,
+      bindings: [],
+    }).template!;
+    const result = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: {},
+        profileId: 'profile-1',
+        missingValue: 'error',
+      },
+      environment,
+    );
+
+    expect(
+      result.document?.print.displayList.pages.flatMap((page) =>
+        page.commands.filter((command) => command.kind === 'group'),
+      ),
+    ).toEqual([expect.objectContaining({ kind: 'group', rotation: 90 })]);
+  });
+
   it('projects persistent object anchors through sorted and filtered print rows', async () => {
     const objectSource = {
       ...source,
@@ -402,7 +453,7 @@ describe('template render pipeline', () => {
       ) ?? [];
 
     expect(objectCommands).toEqual([
-      expect.objectContaining({ kind: 'text', text: 'Sorted object', y: 30 }),
+      expect.objectContaining({ kind: 'text', text: 'Sorted object', y: 40 }),
     ]);
   });
 
@@ -510,8 +561,8 @@ describe('template render pipeline', () => {
       ) ?? [];
 
     expect(spanningCommands).toEqual([
-      { pageIndex: 0, y: 30, maxWidth: 40 },
-      { pageIndex: 1, y: -10, maxWidth: 40 },
+      { pageIndex: 0, y: 40, maxWidth: 40 },
+      { pageIndex: 1, y: 0, maxWidth: 40 },
     ]);
   });
 
