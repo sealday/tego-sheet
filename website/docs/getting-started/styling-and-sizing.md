@@ -42,5 +42,5 @@ spreadsheet chrome. Use the `className` and `style` props when an instance needs
 If a container changes size without a window resize—for example, after a split pane moves—call
 `TegoSheetHandle.recalculateLayout()` after the layout settles.
 
-See the [TegoSheet props API](/docs/api/interfaces/TegoSheetProps) and the
+See the [TegoSheet props API](/docs/api/type-aliases/TegoSheetProps) and the
 [layout guide](../guides/frozen-panes-and-layout).

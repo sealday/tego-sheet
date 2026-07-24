@@ -546,6 +546,7 @@ describe('strict TypeDoc generation', () => {
     );
 
     expect(options).toMatchObject({
+      cleanOutputDir: false,
       docsPath: '/repo/website/content',
       entryPoints: ['src/index.ts'],
       excludePrivate: true,

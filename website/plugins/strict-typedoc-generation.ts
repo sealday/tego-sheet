@@ -107,6 +107,9 @@ export function toTypeDocGenerationOptions(
     numberPrefixParser:
       typeof docs?.numberPrefixParser === 'boolean' ? docs.numberPrefixParser : true,
     ...options,
+    // The output directory also contains four reviewed hand-written API guides.
+    // `clearOutput` removes only generated artifacts, so TypeDoc must not clear it a second time.
+    cleanOutputDir: false,
     plugin: [...new Set([...requiredPlugins, ...configuredPlugins])],
   };
 
