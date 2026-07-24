@@ -20,6 +20,7 @@ import type {
   SheetColumn,
   SheetFilter,
   SheetFilterItem,
+  SheetGroup,
   SheetRange,
   SheetRow,
   SheetObject,
@@ -31,6 +32,7 @@ import { BUILTIN_FORMULA_COMPATIBILITY, parseFormula, type FormulaAst } from '..
 import type {
   DocumentId,
   DocumentSheetId,
+  GroupId,
   ObjectId,
   ResourceId,
   StyleId,
@@ -56,6 +58,8 @@ export interface DocumentLimits {
   readonly maxViews?: number;
   /** Maximum total number of floating objects. */
   readonly maxObjects?: number;
+  /** Maximum total number of outline groups. */
+  readonly maxGroups?: number;
   /** Maximum UTF-8 byte size of the input document. */
   readonly maxBytes?: number;
 }
@@ -91,6 +95,7 @@ const DEFAULT_LIMITS = {
   maxColumns: 1_000_000,
   maxViews: 10_000,
   maxObjects: 100_000,
+  maxGroups: 10_000,
   maxBytes: 64 * 1024 * 1024,
 } as const;
 const NAMESPACE_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)+$/i;
@@ -132,6 +137,7 @@ interface ResolvedDocumentLimits {
   readonly maxColumns: number;
   readonly maxViews: number;
   readonly maxObjects: number;
+  readonly maxGroups: number;
   readonly maxBytes: number;
 }
 
@@ -143,6 +149,7 @@ const LIMIT_NAMES = [
   'maxColumns',
   'maxViews',
   'maxObjects',
+  'maxGroups',
   'maxBytes',
 ] as const;
 
@@ -170,7 +177,11 @@ function resolveLimits(
 
 class InputCaptureError extends Error {
   constructor(
-    readonly code: 'DOCUMENT_SCHEMA_INVALID' | 'DOCUMENT_LIMIT_EXCEEDED' | 'INVALID_EXTENSION_DATA',
+    readonly code:
+      | 'DOCUMENT_SCHEMA_INVALID'
+      | 'DOCUMENT_LIMIT_EXCEEDED'
+      | 'GROUP_LIMIT_EXCEEDED'
+      | 'INVALID_EXTENSION_DATA',
     readonly path: string,
     message: string,
   ) {
@@ -189,6 +200,7 @@ interface InputCaptureContext {
   columns: number;
   views: number;
   objects: number;
+  groups: number;
 }
 
 function captureInput(input: unknown, limits: ResolvedDocumentLimits): unknown {
@@ -203,6 +215,7 @@ function captureInput(input: unknown, limits: ResolvedDocumentLimits): unknown {
     columns: 0,
     views: 0,
     objects: 0,
+    groups: 0,
   };
 
   const consume = (text: string): void => {
@@ -321,6 +334,16 @@ function captureInput(input: unknown, limits: ResolvedDocumentLimits): unknown {
               'DOCUMENT_LIMIT_EXCEEDED',
               '$.workbook.sheets',
               '$.workbook.sheets exceeds its configured object limit',
+            );
+          }
+        }
+        if (/^\$\.workbook\.sheets\[\d+\]\.groups$/.test(path)) {
+          context.groups += length;
+          if (context.groups > context.limits.maxGroups) {
+            throw new InputCaptureError(
+              'GROUP_LIMIT_EXCEEDED',
+              '$.workbook.sheets',
+              '$.workbook.sheets exceeds its configured outline group limit',
             );
           }
         }
@@ -825,6 +848,99 @@ function layoutAt<T extends SheetRow | SheetColumn>(
         : { styleId: stringAt(item.styleId, `${entryPath}.styleId`, context) as StyleId }),
     } as T;
   });
+}
+
+const MAX_GROUP_LEVEL = 8;
+
+function groupsAt(
+  value: unknown,
+  path: string,
+  context: ParseContext,
+  rowCount: number | undefined,
+  columnCount: number | undefined,
+): SheetGroup[] {
+  const seenIds = new Set<string>();
+  const groups = arrayAt(value ?? [], path, context).map((entry, index) => {
+    const entryPath = `${path}[${index}]`;
+    const item = recordAt(entry, entryPath, context);
+    const id = stringAt(item?.id, `${entryPath}.id`, context);
+    if (id.length === 0) {
+      addDiagnostic(
+        context,
+        'DOCUMENT_SCHEMA_INVALID',
+        `${entryPath}.id`,
+        'Outline group id must not be empty',
+      );
+    }
+    if (seenIds.has(id)) {
+      addDiagnostic(context, 'DUPLICATE_ID', `${entryPath}.id`, `Duplicate stable ID ${id}`);
+    }
+    seenIds.add(id);
+    const axis: SheetGroup['axis'] =
+      item?.axis === 'row' || item?.axis === 'column' ? item.axis : 'row';
+    if (item?.axis !== axis) {
+      addDiagnostic(
+        context,
+        'DOCUMENT_SCHEMA_INVALID',
+        `${entryPath}.axis`,
+        'Outline group axis must be row or column',
+      );
+    }
+    const start = indexAt(item?.start, `${entryPath}.start`, context);
+    const end = indexAt(item?.end, `${entryPath}.end`, context);
+    indexAt(item?.level, `${entryPath}.level`, context);
+    const collapsed = booleanAt(item?.collapsed, `${entryPath}.collapsed`, context);
+    const logicalCount = axis === 'row' ? rowCount : columnCount;
+    if (start > end || (logicalCount !== undefined && end >= logicalCount)) {
+      addDiagnostic(
+        context,
+        'GROUP_LIMIT_EXCEEDED',
+        entryPath,
+        'Outline group range must be non-empty and inside the logical worksheet size',
+        'data',
+      );
+    }
+    return { id: id as GroupId, axis, start, end, level: 1, collapsed };
+  });
+
+  const output: SheetGroup[] = [];
+  for (const axis of ['row', 'column'] as const) {
+    const axisGroups = groups
+      .filter((group) => group.axis === axis)
+      .sort(
+        (left, right) =>
+          left.start - right.start || right.end - left.end || compareCodeUnits(left.id, right.id),
+      );
+    for (const [index, group] of axisGroups.entries()) {
+      let level = 1;
+      for (let candidateIndex = 0; candidateIndex < index; candidateIndex += 1) {
+        const candidate = axisGroups[candidateIndex] as SheetGroup;
+        const overlaps = candidate.start <= group.end && group.start <= candidate.end;
+        const contains = candidate.start <= group.start && candidate.end >= group.end;
+        if (overlaps && !contains) {
+          addDiagnostic(
+            context,
+            'GROUP_LIMIT_EXCEEDED',
+            path,
+            'Outline groups on one axis must be disjoint or properly nested',
+            'data',
+          );
+        }
+        if (contains) level += 1;
+      }
+      if (level > MAX_GROUP_LEVEL) {
+        addDiagnostic(
+          context,
+          'GROUP_LIMIT_EXCEEDED',
+          path,
+          `Outline nesting cannot exceed ${MAX_GROUP_LEVEL} levels`,
+          'data',
+        );
+      }
+      output.push({ ...group, level });
+    }
+  }
+  return output;
 }
 
 function filterAt(value: unknown, path: string, context: ParseContext): SheetFilter | undefined {
@@ -1400,6 +1516,15 @@ function sheetAt(value: unknown, path: string, context: ParseContext): Sheet {
   });
   const rows = layoutAt<SheetRow>(record?.rows, `${path}.rows`, context, 'height');
   const columns = layoutAt<SheetColumn>(record?.columns, `${path}.columns`, context, 'width');
+  const rowCount =
+    record?.rowCount === undefined
+      ? undefined
+      : indexAt(record.rowCount, `${path}.rowCount`, context);
+  const columnCount =
+    record?.columnCount === undefined
+      ? undefined
+      : indexAt(record.columnCount, `${path}.columnCount`, context);
+  const groups = groupsAt(record?.groups, `${path}.groups`, context, rowCount, columnCount);
   const freeze =
     record?.freeze === undefined ? undefined : pointAt(record.freeze, `${path}.freeze`, context);
   const filter = filterAt(record?.filter, `${path}.filter`, context);
@@ -1455,14 +1580,11 @@ function sheetAt(value: unknown, path: string, context: ParseContext): Sheet {
     name: displayStringAt(record?.name, `${path}.name`, context),
     cells,
     merges,
-    ...(record?.rowCount === undefined
-      ? {}
-      : { rowCount: indexAt(record.rowCount, `${path}.rowCount`, context) }),
-    ...(record?.columnCount === undefined
-      ? {}
-      : { columnCount: indexAt(record.columnCount, `${path}.columnCount`, context) }),
+    ...(rowCount === undefined ? {} : { rowCount }),
+    ...(columnCount === undefined ? {} : { columnCount }),
     rows,
     columns,
+    groups,
     ...(freeze === undefined ? {} : { freeze }),
     ...(filter === undefined ? {} : { filter }),
     visibility,
@@ -1892,6 +2014,7 @@ function canonicalizeDocument(document: SpreadsheetDocument): SpreadsheetDocumen
         cells: [...sheet.cells].sort(compareSparseCells),
         rows: [...sheet.rows].sort((left, right) => left.index - right.index),
         columns: [...sheet.columns].sort((left, right) => left.index - right.index),
+        groups: [...sheet.groups],
         filterViews: [...sheet.filterViews].sort((left, right) =>
           compareCodeUnits(left.id, right.id),
         ),

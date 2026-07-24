@@ -2,6 +2,7 @@ import type { JsonValue } from '../../core/types/json';
 import type {
   DocumentId,
   DocumentSheetId,
+  GroupId,
   ObjectId,
   ResourceId,
   StyleId,
@@ -127,6 +128,22 @@ export interface SheetColumn {
   readonly hidden?: boolean;
   /** Default style inherited by cells in the column. */
   readonly styleId?: StyleId;
+}
+
+/** Persistent row or column outline definition. */
+export interface SheetGroup {
+  /** Stable identity used by toggle and ungroup commands. */
+  readonly id: GroupId;
+  /** Worksheet axis covered by this group. */
+  readonly axis: 'row' | 'column';
+  /** Inclusive first logical row or column. */
+  readonly start: number;
+  /** Inclusive last logical row or column. */
+  readonly end: number;
+  /** One-based nesting depth derived from containment. */
+  readonly level: number;
+  /** Whether covered entries are hidden in derived presentation. */
+  readonly collapsed: boolean;
 }
 
 /** One normalized value filter. */
@@ -414,6 +431,8 @@ export interface Sheet {
   readonly rows: readonly SheetRow[];
   /** Sparse column layout in ascending index order. */
   readonly columns: readonly SheetColumn[];
+  /** Canonically ordered persistent outline groups. */
+  readonly groups: readonly SheetGroup[];
   /** First unfrozen row and column. */
   readonly freeze?: CellPoint;
   /** Optional normalized filter and sort state. */
@@ -554,6 +573,14 @@ export interface SheetInput {
   columnCount?: number;
   rows?: { index: number; height?: number; hidden?: boolean; styleId?: string }[];
   columns?: { index: number; width?: number; hidden?: boolean; styleId?: string }[];
+  groups?: {
+    id: string;
+    axis: 'row' | 'column';
+    start: number;
+    end: number;
+    level: number;
+    collapsed: boolean;
+  }[];
   freeze?: CellPoint;
   filter?: {
     range?: { start: CellPoint; end: CellPoint };

@@ -6,6 +6,7 @@ declare const templateIdBrand: unique symbol;
 declare const resourceIdBrand: unique symbol;
 declare const bindingIdBrand: unique symbol;
 declare const objectIdBrand: unique symbol;
+declare const groupIdBrand: unique symbol;
 
 /** Stable opaque identifier for a spreadsheet document. */
 export type DocumentId = string & {
@@ -46,4 +47,9 @@ export type BindingId = string & {
 export type ObjectId = string & {
   /** Type-only brand that distinguishes object identifiers. */
   readonly [objectIdBrand]: true;
+};
+/** Stable opaque identifier for a worksheet outline group. */
+export type GroupId = string & {
+  /** Type-only brand that distinguishes outline group identifiers. */
+  readonly [groupIdBrand]: true;
 };
