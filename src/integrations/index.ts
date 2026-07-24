@@ -1,3 +1,4 @@
+export * from './collaboration';
 export * from './comments';
 export * from './history';
 export * from './permission';
