@@ -168,17 +168,19 @@ export function diffDocumentVersions(
     }
   }
   const templatesChanged = countChangedEntries(from.document.templates, to.document.templates);
-  const printProfilesChanged = from.document.templates.reduce((sum, template) => {
-    const next = to.document.templates.find(({ id }) => id === template.id);
-    return (
-      sum +
-      (next === undefined
-        ? template.printProfiles.length
-        : canonical(template.printProfiles) === canonical(next.printProfiles)
-          ? 0
-          : 1)
-    );
-  }, 0);
+  const fromPrintProfiles = from.document.templates.flatMap((template) =>
+    template.printProfiles.map((profile) => ({
+      id: `${template.id}:${profile.id}`,
+      value: profile,
+    })),
+  );
+  const toPrintProfiles = to.document.templates.flatMap((template) =>
+    template.printProfiles.map((profile) => ({
+      id: `${template.id}:${profile.id}`,
+      value: profile,
+    })),
+  );
+  const printProfilesChanged = countChangedEntries(fromPrintProfiles, toPrintProfiles);
   const summary = Object.freeze({
     cellsChanged: sheets.reduce((sum, sheet) => sum + sheet.cellsChanged, 0),
     formulasChanged: sheets.reduce((sum, sheet) => sum + sheet.formulasChanged, 0),

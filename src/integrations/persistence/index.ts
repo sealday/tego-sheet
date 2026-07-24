@@ -68,6 +68,7 @@ export interface PersistenceController {
   enqueue(transaction: SerializableTransactionEnvelope): void;
   save(reason?: SaveReason): Promise<SaveResult>;
   retry(): Promise<SaveResult>;
+  resolveConflict(revision: string): void;
   hasPendingChanges(): boolean;
   dispose(): void;
 }
@@ -152,6 +153,7 @@ export function createPersistenceController(
       });
       return;
     }
+    if (state.status === 'conflict') return;
     state =
       pending.size === 0
         ? Object.freeze({
@@ -181,15 +183,27 @@ export function createPersistenceController(
       .save(request, activeAbort.signal)
       .then((result): SaveResult => {
         if (result.status === 'saved') {
-          revision = identifier(result.revision, 'Persistence acknowledgement revision');
           const acknowledged = new Set<string>();
           for (const id of result.persistedTransactionIds) {
             if (acknowledged.has(id) || !inFlightIds.includes(id)) {
               throw new TypeError(`Persistence acknowledgement contains invalid transaction ${id}`);
             }
             acknowledged.add(id);
-            pending.delete(id);
           }
+          if (
+            acknowledged.size !== inFlightIds.length ||
+            inFlightIds.some((id) => !acknowledged.has(id))
+          ) {
+            throw new TypeError(
+              'Persistence acknowledgement must include the complete in-flight batch',
+            );
+          }
+          const acknowledgedRevision = identifier(
+            result.revision,
+            'Persistence acknowledgement revision',
+          );
+          for (const id of acknowledged) pending.delete(id);
+          revision = acknowledgedRevision;
           retryRequest = undefined;
           return deepFreeze({
             status: 'saved',
@@ -208,6 +222,7 @@ export function createPersistenceController(
             currentRevision,
             pending: frozenIds(pending.values()),
           });
+          retryRequest = undefined;
           return Object.freeze({ status: 'conflict', currentRevision });
         }
         const diagnostic: Diagnostic = Object.freeze({
@@ -230,13 +245,13 @@ export function createPersistenceController(
         });
       })
       .catch((cause: unknown): never => {
+        const cancelled = activeAbort?.signal.aborted ?? false;
         const diagnostic: Diagnostic = Object.freeze({
-          code: activeAbort?.signal.aborted ? 'PERSISTENCE_CANCELLED' : 'PERSISTENCE_SAVE_FAILED',
+          code: cancelled ? 'PERSISTENCE_CANCELLED' : 'PERSISTENCE_SAVE_FAILED',
           severity: 'error',
           domain: 'persistence',
           stage: 'save',
-          message: cause instanceof Error ? cause.message : 'Persistence save failed',
-          cause,
+          message: cancelled ? 'Persistence save was cancelled' : 'Persistence save failed',
         });
         state = Object.freeze({
           status: 'error',
@@ -244,7 +259,10 @@ export function createPersistenceController(
           pending: frozenIds(pending.values()),
           diagnostic,
         });
-        throw cause;
+        if (cause instanceof TypeError && cause.message.startsWith('Persistence acknowledgement')) {
+          throw cause;
+        }
+        throw new TypeError(diagnostic.message);
       })
       .finally(() => {
         activePromise = undefined;
@@ -269,6 +287,9 @@ export function createPersistenceController(
     async save(reason: SaveReason = 'manual'): Promise<SaveResult> {
       if (disposed) throw new TypeError('Persistence controller is disposed');
       if (activePromise !== undefined) return activePromise;
+      if (state.status === 'conflict') {
+        throw new TypeError('Persistence conflict must be explicitly resolved before saving');
+      }
       if (pending.size === 0) {
         return Object.freeze({
           status: 'saved',
@@ -295,6 +316,22 @@ export function createPersistenceController(
       if (activePromise !== undefined) return activePromise;
       if (retryRequest === undefined) throw new TypeError('No persistence request is retryable');
       return execute(retryRequest);
+    },
+    resolveConflict(nextRevision: string): void {
+      if (disposed) throw new TypeError('Persistence controller is disposed');
+      if (activePromise !== undefined) {
+        throw new TypeError('Cannot resolve a persistence conflict during an active save');
+      }
+      if (state.status !== 'conflict') {
+        throw new TypeError('No persistence conflict is available to resolve');
+      }
+      revision = identifier(nextRevision, 'Persistence resolved revision');
+      retryRequest = undefined;
+      state = Object.freeze({
+        status: 'dirty',
+        revision,
+        pending: frozenIds(pending.values()),
+      });
     },
     hasPendingChanges(): boolean {
       return pending.size > 0;

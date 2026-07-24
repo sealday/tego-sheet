@@ -1,6 +1,6 @@
 import type { WorkbookCommand } from '../../core/commands/workbook-command';
 import type { SpreadsheetDocument } from '../../document';
-import type { PermissionSnapshot } from '../permission';
+import type { PermissionSnapshot, PermissionTarget } from '../permission';
 
 export type AiContextInclude = 'values' | 'formulas' | 'formats' | 'headers' | 'template-bindings';
 
@@ -92,6 +92,96 @@ const forbiddenCommandTypes = new Set<string>(['undo', 'redo']);
 function identifier(value: string, label: string): string {
   if (!identifierPattern.test(value)) throw new TypeError(`${label} is invalid`);
   return value;
+}
+
+function rangeTarget(
+  sheetId: string,
+  start: { readonly row: number; readonly column: number },
+  end = start,
+): PermissionTarget {
+  return {
+    type: 'range',
+    range: { sheetId, start, end },
+  };
+}
+
+function commandPermissionTargets(
+  command: WorkbookCommand,
+  documentId: string,
+): readonly PermissionTarget[] {
+  switch (command.type) {
+    case 'set-cell-text':
+    case 'set-cell-input':
+      return [rangeTarget(command.address.sheet, command.address)];
+    case 'clear-contents':
+    case 'set-cell-metadata':
+    case 'set-style':
+    case 'set-border':
+    case 'clear-format':
+    case 'merge':
+    case 'unmerge':
+    case 'set-validation':
+    case 'remove-validation':
+    case 'set-filter':
+      return [
+        rangeTarget(
+          command.selection.sheet,
+          command.selection.range.start,
+          command.selection.range.end,
+        ),
+      ];
+    case 'paint-format':
+      return [
+        rangeTarget(command.target.sheet, command.target.range.start, command.target.range.end),
+      ];
+    case 'paste-internal':
+    case 'paste-external':
+      return [
+        rangeTarget(command.target.sheet, command.target.range.start, command.target.range.end),
+      ];
+    case 'autofill':
+      return [
+        rangeTarget(command.target.sheet, command.target.range.start, command.target.range.end),
+      ];
+    case 'set-sheet-object':
+      return [
+        {
+          type: 'object',
+          sheetId: command.sheet,
+          objectId: command.object.id,
+        },
+      ];
+    case 'remove-sheet-object':
+      return [{ type: 'object', sheetId: command.sheet, objectId: command.objectId }];
+    case 'add-sheet':
+      return [{ type: 'document', documentId }];
+    case 'undo':
+    case 'redo':
+      return [{ type: 'document', documentId }];
+    case 'insert-row':
+    case 'delete-row':
+    case 'insert-column':
+    case 'delete-column':
+    case 'set-row-height':
+    case 'set-row-hidden':
+    case 'set-column-width':
+    case 'set-column-hidden':
+    case 'set-freeze':
+    case 'delete-sheet':
+    case 'rename-sheet':
+    case 'group':
+    case 'ungroup':
+    case 'toggle-group':
+    case 'clear-filter':
+    case 'sort':
+    case 'set-conditional-format':
+    case 'remove-conditional-format':
+    case 'set-filter-view':
+    case 'remove-filter-view':
+    case 'set-table':
+    case 'remove-table':
+      return [{ type: 'sheet', sheetId: command.sheet }];
+  }
 }
 
 function inRange(row: number, column: number, range: AiContextRange): boolean {
@@ -204,12 +294,19 @@ function snapshotProposal(value: unknown, allowed: ReadonlySet<string>): AiComma
       throw new TypeError(`AI command ${String(type)} is not allowed`);
     }
   }
-  return Object.freeze({
+  return deepFreeze({
     id: identifier(proposal.id, 'AI proposal ID'),
     summary: proposal.summary.slice(0, 2_000),
     assumptions: Object.freeze(proposal.assumptions.map((entry) => entry.slice(0, 2_000))),
-    commands: Object.freeze(proposal.commands as WorkbookCommand[]),
+    commands: proposal.commands as WorkbookCommand[],
   });
+}
+
+function deepFreeze<Value>(value: Value): Value {
+  if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  Object.freeze(value);
+  for (const child of Object.values(value)) deepFreeze(child);
+  return value;
 }
 
 /** Creates a dry-run proposal session that cannot apply without a fresh explicit accept call. */
@@ -257,6 +354,12 @@ export async function createAiProposalSession<ApplyResult>(
         })
       ) {
         throw new TypeError('AI proposal permission is stale or denied');
+      }
+      const deniedTarget = proposal.commands
+        .flatMap((command) => commandPermissionTargets(command, options.documentId))
+        .find((target) => !permissions.can('ai:apply', target));
+      if (deniedTarget !== undefined) {
+        throw new TypeError('AI proposal target permission is denied');
       }
       settled = true;
       return options.apply(proposal.commands);

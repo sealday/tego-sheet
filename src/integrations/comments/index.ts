@@ -171,9 +171,27 @@ export function createCommentAnchorOutboxCoordinator(options: {
       if (!identifierPattern.test(documentId)) throw new TypeError('Comment documentId is invalid');
       const stored = await options.outbox.list(documentId);
       if (stored.length > 10_000) throw new RangeError('Comment outbox resume limit is 10000');
+      const snapshots = stored.map(snapshotBatch);
+      const operationIds = new Set<string>();
+      for (const [index, batch] of snapshots.entries()) {
+        if (batch.documentId !== documentId) {
+          throw new TypeError('Comment outbox batch documentId does not match resume document');
+        }
+        if (
+          batch.fromDocumentRevision === batch.toDocumentRevision ||
+          operationIds.has(batch.operationId)
+        ) {
+          throw new TypeError('Comment outbox revision chain or operation order is invalid');
+        }
+        const previous = snapshots[index - 1];
+        if (previous !== undefined && previous.toDocumentRevision !== batch.fromDocumentRevision) {
+          throw new TypeError('Comment outbox revision chain is not contiguous');
+        }
+        operationIds.add(batch.operationId);
+      }
       const acknowledgements: CommentAnchorUpdateAck[] = [];
-      for (const batch of stored) {
-        acknowledgements.push(await submitStored(snapshotBatch(batch), signal));
+      for (const batch of snapshots) {
+        acknowledgements.push(await submitStored(batch, signal));
       }
       return Object.freeze(acknowledgements);
     },

@@ -133,4 +133,24 @@ describe('permission integration contract', () => {
 
     expect(observed).toEqual(['permission-1']);
   });
+
+  it('publishes permission removal after clear is visible', () => {
+    const store = createPermissionStore();
+    const observed: Array<string | undefined> = [];
+    store.replace(
+      createPermissionSnapshot({
+        revision: 'permission-1',
+        actorId: 'actor-1',
+        grants: [],
+      }),
+    );
+    store.subscribe((snapshot) => {
+      observed.push(snapshot?.revision);
+      expect(store.getSnapshot()).toBe(snapshot);
+    });
+
+    store.clear();
+
+    expect(observed).toEqual([undefined]);
+  });
 });

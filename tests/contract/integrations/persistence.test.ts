@@ -75,7 +75,7 @@ describe('persistence integration contract', () => {
     });
     controller.enqueue(transaction('tx-1'));
 
-    await expect(controller.save()).rejects.toThrow('offline');
+    await expect(controller.save()).rejects.toThrow('Persistence save failed');
     expect(controller.state.status).toBe('error');
     await expect(controller.retry()).resolves.toMatchObject({ status: 'saved' });
     expect(save.mock.calls[0]?.[0].requestId).toBe('stable-request');
@@ -101,6 +101,39 @@ describe('persistence integration contract', () => {
       currentRevision: 'revision-remote',
       pending: ['tx-1'],
     });
+    await expect(controller.save()).rejects.toThrow(/resolve/u);
+    controller.enqueue(transaction('tx-2'));
+    expect(controller.state.status).toBe('conflict');
+
+    controller.resolveConflict('revision-remote');
+    expect(controller.state).toEqual({
+      status: 'dirty',
+      revision: 'revision-remote',
+      pending: ['tx-1', 'tx-2'],
+    });
+  });
+
+  it('rejects incomplete saved acknowledgements without advancing revision or pending state', async () => {
+    const controller = createPersistenceController({
+      documentId: 'document-1',
+      initialRevision: 'revision-1',
+      adapter: {
+        save: async () => ({
+          status: 'saved',
+          revision: 'revision-2',
+          persistedTransactionIds: [],
+        }),
+      },
+      requestId: () => 'request-1',
+    });
+    controller.enqueue(transaction('tx-1'));
+
+    await expect(controller.save()).rejects.toThrow(/complete in-flight batch/u);
+    expect(controller.state).toMatchObject({
+      status: 'error',
+      revision: 'revision-1',
+      pending: ['tx-1'],
+    });
   });
 
   it('cancels in-flight work on disposal and rejects future saves', async () => {
@@ -120,7 +153,7 @@ describe('persistence integration contract', () => {
     const saving = controller.save();
     controller.dispose();
 
-    await expect(saving).rejects.toThrow('cancelled');
+    await expect(saving).rejects.toThrow('Persistence save was cancelled');
     await expect(controller.save()).rejects.toThrow(/disposed/u);
   });
 });

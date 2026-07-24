@@ -70,7 +70,7 @@ export interface PermissionStore {
   replace(snapshot: PermissionSnapshot): void;
   clear(): void;
   can(action: PermissionAction, target: PermissionTarget): boolean;
-  subscribe(listener: (snapshot: PermissionSnapshot) => void): () => void;
+  subscribe(listener: (snapshot: PermissionSnapshot | undefined) => void): () => void;
 }
 
 const actions = new Set<PermissionAction>([
@@ -247,7 +247,7 @@ export function evaluatePermission(
 /** Creates an atomic snapshot store used by UI selectors and commit guards. */
 export function createPermissionStore(): PermissionStore {
   let current: PermissionSnapshot | undefined;
-  const listeners = new Set<(snapshot: PermissionSnapshot) => void>();
+  const listeners = new Set<(snapshot: PermissionSnapshot | undefined) => void>();
   return Object.freeze({
     getSnapshot: (): PermissionSnapshot | undefined => current,
     replace(snapshot: PermissionSnapshot): void {
@@ -257,11 +257,13 @@ export function createPermissionStore(): PermissionStore {
     },
     clear(): void {
       current = undefined;
+      const notificationTargets = new Set(listeners);
+      for (const listener of notificationTargets) listener(undefined);
     },
     can(action: PermissionAction, target: PermissionTarget): boolean {
       return current?.can(action, target) ?? false;
     },
-    subscribe(listener: (snapshot: PermissionSnapshot) => void): () => void {
+    subscribe(listener: (snapshot: PermissionSnapshot | undefined) => void): () => void {
       listeners.add(listener);
       let active = true;
       return (): void => {

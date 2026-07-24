@@ -117,4 +117,32 @@ describe('comments integration contract', () => {
     ]);
     expect(stored.size).toBe(0);
   });
+
+  it('validates the entire document revision chain before resuming any batch', async () => {
+    const submit = vi.fn(async (item: CommentAnchorUpdateBatch) => ({
+      operationId: item.operationId,
+    }));
+    const coordinator = createCommentAnchorOutboxCoordinator({
+      outbox: {
+        put: vi.fn(),
+        remove: vi.fn(),
+        list: vi.fn(async () => [
+          batch,
+          {
+            ...batch,
+            operationId: 'operation-2',
+            documentId: 'document-other',
+            fromDocumentRevision: 'revision-wrong',
+            toDocumentRevision: 'revision-3',
+          },
+        ]),
+      },
+      adapter: { submit },
+    });
+
+    await expect(coordinator.resume('document-1', new AbortController().signal)).rejects.toThrow(
+      /documentId|revision chain/u,
+    );
+    expect(submit).not.toHaveBeenCalled();
+  });
 });

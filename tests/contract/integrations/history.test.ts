@@ -34,6 +34,37 @@ function document(name: string, value: number) {
   return parsed.document;
 }
 
+function withPrintProfile(base: ReturnType<typeof document>) {
+  const parsed = parseSpreadsheetDocument({
+    ...base,
+    templates: [
+      {
+        id: 'template-1',
+        name: 'Invoice',
+        bindings: [],
+        printProfiles: [
+          {
+            id: 'profile-1',
+            name: 'Default',
+            targets: [],
+            page: {
+              size: { kind: 'named', name: 'A4' },
+              orientation: 'portrait',
+              margins: { top: 1, right: 1, bottom: 1, left: 1 },
+              scale: { mode: 'actual-size' },
+            },
+            manualBreaks: [],
+            showGridlines: false,
+            showHeadings: false,
+          },
+        ],
+      },
+    ],
+  });
+  if (!parsed.ok) throw new Error('history print fixture failed');
+  return parsed.document;
+}
+
 describe('version history integration contract', () => {
   it('diffs by stable identity so a sheet rename is not deletion plus creation', () => {
     const result = diffDocumentVersions(
@@ -115,5 +146,16 @@ describe('version history integration contract', () => {
       replacement,
     });
     expect(Object.isFrozen(proposal)).toBe(true);
+  });
+
+  it('counts print profiles added with a new template', () => {
+    const result = diffDocumentVersions(
+      { id: 'version-1', document: document('Sheet', 1) },
+      { id: 'version-2', document: withPrintProfile(document('Sheet', 1)) },
+      { signal: new AbortController().signal },
+    );
+
+    expect(result.summary.templatesChanged).toBe(1);
+    expect(result.summary.printProfilesChanged).toBe(1);
   });
 });
