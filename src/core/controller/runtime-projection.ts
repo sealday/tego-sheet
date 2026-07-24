@@ -23,6 +23,7 @@ import type { FormulaValue } from '../../formula/ast';
 import { formulaAddressKey } from '../../formula/dependency-graph';
 import { parseSpreadsheetDocument } from '../../document/parse-document';
 import { legacyValidationRule } from '../../validation/document-rule';
+import { projectStructuredTableRows } from '../../analysis/tables';
 
 type ValidationId = NonNullable<Cell['validationId']>;
 
@@ -221,6 +222,25 @@ export function projectDocumentToLegacy(
                         },
                 }),
           };
+    const structuredTableRows = projectStructuredTableRows(
+      sheet.tables,
+      {
+        revision: `document:${document.id}:${sheet.id}`,
+        read(row, column) {
+          const candidate = rows[String(row)];
+          if (typeof candidate !== 'object' || candidate === null || !('cells' in candidate)) {
+            return undefined;
+          }
+          const cells = candidate.cells;
+          if (typeof cells !== 'object' || cells === null) return undefined;
+          const cell = (cells as Record<string, unknown>)[String(column)];
+          if (typeof cell !== 'object' || cell === null) return undefined;
+          const value = cell as Record<string, unknown>;
+          return value.value ?? value.text;
+        },
+      },
+      { maximumRows: 1_000_000 },
+    );
     return {
       name: sheet.name,
       styles,
@@ -230,6 +250,7 @@ export function projectDocumentToLegacy(
       validations: [...validations.values()],
       ...(sheet.freeze === undefined ? {} : { freeze: a1(sheet.freeze) }),
       ...(filter === undefined ? {} : { autofilter: filter }),
+      ...(structuredTableRows.length === 0 ? {} : { structuredTableRows }),
     } as unknown as SheetData;
   });
   return sheets;

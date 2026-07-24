@@ -261,6 +261,78 @@ describe('template render pipeline', () => {
     expect(result.document?.print.pages).toHaveLength(2);
   });
 
+  it('prints persistent structured table filters and sorting in the screen projection order', async () => {
+    const tableSource = {
+      ...source,
+      workbook: {
+        ...source.workbook,
+        sheets: [
+          {
+            ...source.workbook.sheets[0]!,
+            cells: ['header', '1', '2', '3', '4'].map((value, row) => ({
+              row,
+              column: 0,
+              cell: { input: { type: 'string' as const, value } },
+            })),
+            rows: [],
+            tables: [
+              {
+                id: 'table-values',
+                name: 'Values',
+                range: {
+                  sheetId: 'sheet-1',
+                  start: { row: 0, column: 0 },
+                  end: { row: 4, column: 0 },
+                },
+                columns: [{ id: 'table-value', name: 'Value' }],
+                filter: {
+                  filters: [{ column: 0, operator: 'in', values: ['2', '3', '4'] }],
+                  sort: { column: 0, direction: 'desc' },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    } as unknown as SpreadsheetDocument;
+    const tableTemplate: SpreadsheetTemplate = {
+      ...template,
+      bindings: [],
+      printProfiles: [
+        {
+          ...template.printProfiles[0]!,
+          targets: [
+            {
+              type: 'range',
+              range: {
+                sheetId: 'sheet-1' as never,
+                start: { row: 0, column: 0 },
+                end: { row: 4, column: 0 },
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const compiled = compileSpreadsheetTemplate(tableSource, tableTemplate).template!;
+    const result = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: {},
+        profileId: 'profile-1',
+        missingValue: 'error',
+      },
+      environment,
+    );
+    const texts =
+      result.document?.print.displayList.pages.flatMap((page) =>
+        page.commands.flatMap((command) => (command.kind === 'text' ? [command.text] : [])),
+      ) ?? [];
+
+    expect(texts).toEqual(['header', '4', '3', '2']);
+  });
+
   it('renders persistent floating text objects through the shared display list', async () => {
     const objectSource = {
       ...source,

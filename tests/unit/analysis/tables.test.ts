@@ -15,6 +15,7 @@ import {
 } from '../../../src/analysis/tables';
 import { SpreadsheetDocumentController } from '../../../src/core/controller/spreadsheet-document-controller';
 import { sheetId } from '../../../src/core';
+import { createSheetGridModel } from '../../../src/engine';
 
 function fixture(
   tables: SpreadsheetDocumentInput['workbook']['sheets'][number]['tables'] = [
@@ -75,6 +76,23 @@ function parseOk(input: SpreadsheetDocumentInput): SpreadsheetDocument {
   expect(result.ok, JSON.stringify(result.diagnostics)).toBe(true);
   if (!result.ok) throw new Error('fixture must parse');
   return result.document;
+}
+
+function selection(
+  sheet: ReturnType<typeof sheetId>,
+  row: number,
+  column: number,
+  endRow = row,
+  endColumn = column,
+) {
+  return {
+    sheet,
+    active: { row, column },
+    range: {
+      start: { row, column },
+      end: { row: endRow, column: endColumn },
+    },
+  } as const;
 }
 
 describe('TBL-01 persistent structured tables', () => {
@@ -344,6 +362,26 @@ describe('TBL-01 persistent structured tables', () => {
     ).toThrowError(/row limit exceeded/iu);
   });
 
+  it('uses the structured table projection in the production screen grid', () => {
+    const input = fixture([
+      {
+        ...fixture().workbook.sheets[0]!.tables![0]!,
+        filter: {
+          filters: [{ column: 0, operator: 'in', values: ['West'] }],
+          sort: { column: 1, direction: 'desc' },
+        },
+      },
+    ]);
+    const controller = new SpreadsheetDocumentController(parseOk(input));
+    const model = createSheetGridModel(controller.getSnapshot().projection[0]!);
+
+    expect(Array.from({ length: 3 }, (_, visual) => model.logicalRowAtVisualIndex(visual))).toEqual(
+      [0, 2, 1],
+    );
+    expect(model.rowHeight(1)).toBe(0);
+    expect(model.rowHeight(2)).toBeGreaterThan(0);
+  });
+
   it.each([
     {
       name: 'filter',
@@ -423,7 +461,76 @@ describe('TBL-01 persistent structured tables', () => {
     });
   });
 
-  it('auto-expands through the set-cell-input command path', () => {
+  it.each([
+    {
+      name: 'set-cell-text',
+      dispatch(controller: SpreadsheetDocumentController) {
+        return controller.dispatch(
+          {
+            type: 'set-cell-text',
+            address: { sheet: sheetId('sheet-1'), row: 3, column: 1 },
+            text: '8',
+          },
+          'ref',
+        );
+      },
+    },
+    {
+      name: 'set-cell-input',
+      dispatch(controller: SpreadsheetDocumentController) {
+        return controller.dispatch(
+          {
+            type: 'set-cell-input',
+            address: { sheet: sheetId('sheet-1'), row: 3, column: 1 },
+            input: { type: 'number', value: 8 },
+          },
+          'ref',
+        );
+      },
+    },
+    {
+      name: 'paste-external',
+      dispatch(controller: SpreadsheetDocumentController) {
+        return controller.dispatch(
+          {
+            type: 'paste-external',
+            target: selection(sheetId('sheet-1'), 3, 0),
+            values: [['North', '8']],
+          },
+          'ref',
+        );
+      },
+    },
+    {
+      name: 'paste-internal',
+      dispatch(controller: SpreadsheetDocumentController) {
+        return controller.dispatch(
+          {
+            type: 'paste-internal',
+            source: selection(sheetId('sheet-1'), 2, 0, 2, 1),
+            target: selection(sheetId('sheet-1'), 3, 0, 3, 1),
+            mode: 'value',
+            cut: false,
+          },
+          'ref',
+        );
+      },
+    },
+    {
+      name: 'autofill',
+      dispatch(controller: SpreadsheetDocumentController) {
+        return controller.dispatch(
+          {
+            type: 'autofill',
+            source: selection(sheetId('sheet-1'), 2, 0, 2, 1),
+            target: selection(sheetId('sheet-1'), 3, 0, 3, 1),
+            mode: 'value',
+          },
+          'ref',
+        );
+      },
+    },
+  ])('auto-expands $name in the same undoable transaction', ({ dispatch }) => {
     const controller = new SpreadsheetDocumentController(
       parseOk(
         fixture([
@@ -435,20 +542,18 @@ describe('TBL-01 persistent structured tables', () => {
       ),
     );
 
-    expect(
-      controller.dispatch(
-        {
-          type: 'set-cell-input',
-          address: { sheet: sheetId('sheet-1'), row: 3, column: 1 },
-          input: { type: 'number', value: 8 },
-        },
-        'ref',
-      ).status,
-    ).toBe('committed');
+    expect(dispatch(controller).status).toBe('committed');
     expect(controller.getDocument().workbook.sheets[0]?.tables[0]?.range.end).toEqual({
       row: 3,
       column: 1,
     });
+    expect(controller.undo('ref').status).toBe('committed');
+    expect(controller.getDocument().workbook.sheets[0]?.tables[0]?.range.end).toEqual({
+      row: 2,
+      column: 1,
+    });
+    expect(controller.redo('ref').status).toBe('committed');
+    expect(controller.getDocument().workbook.sheets[0]?.tables[0]?.range.end.row).toBe(3);
   });
 
   it('rejects template repeat and table auto-expand ownership of the same boundary', () => {
@@ -514,13 +619,26 @@ describe('TBL-01 persistent structured tables', () => {
   });
 
   it('rewrites structured-reference display names by stable IDs when a table is renamed', () => {
-    const controller = new SpreadsheetDocumentController(parseOk(fixture()));
+    const input = fixture();
+    input.workbook.sheets.push({
+      id: 'sheet-qualified',
+      name: 'Sales[Amount]',
+      rowCount: 1,
+      columnCount: 1,
+      cells: [{ row: 0, column: 0, cell: { input: { type: 'number', value: 1 } } }],
+      merges: [],
+      tables: [],
+    });
+    const controller = new SpreadsheetDocumentController(parseOk(input));
     const table = controller.getDocument().workbook.sheets[0]!.tables[0]!;
     controller.dispatch(
       {
         type: 'set-cell-input',
         address: { sheet: sheetId('sheet-1'), row: 1, column: 3 },
-        input: { type: 'formula', source: '="Sales[Amount]"' },
+        input: {
+          type: 'formula',
+          source: `="Sales[Amount]"&'Sales[Amount]'!A1+SUM(Sales[Amount])`,
+        },
       },
       'ref',
     );
@@ -550,7 +668,12 @@ describe('TBL-01 persistent structured tables', () => {
         expect.objectContaining({
           row: 1,
           column: 3,
-          cell: { input: { type: 'formula', source: '="Sales[Amount]"' } },
+          cell: {
+            input: {
+              type: 'formula',
+              source: `="Sales[Amount]"&'Sales[Amount]'!A1+SUM(Revenue[NetAmount])`,
+            },
+          },
         }),
       ]),
     );

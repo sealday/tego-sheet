@@ -134,6 +134,14 @@ export interface StructuredTableViewResult {
   readonly rowIndices: readonly number[];
 }
 
+/** One table-body row segment projected into stable screen and print order. */
+export interface StructuredTableRowProjection {
+  readonly startRow: number;
+  readonly endRow: number;
+  readonly rowOrder: readonly number[];
+  readonly hiddenRows: readonly number[];
+}
+
 /** Bounded scalar reader used to execute a table view against one immutable revision. */
 export interface StructuredTableValueSource {
   readonly revision: string;
@@ -204,4 +212,34 @@ export function executeStructuredTableView(
     sourceRevision: source.revision,
     rowIndices: Object.freeze(rows.map(({ row }) => row)),
   });
+}
+
+/** Projects every active table filter/sort into non-overlapping worksheet row segments. */
+export function projectStructuredTableRows(
+  tables: readonly StructuredTable[],
+  source: StructuredTableValueSource,
+  options: { readonly maximumRows?: number; readonly signal?: AbortSignal } = {},
+): readonly StructuredTableRowProjection[] {
+  return Object.freeze(
+    tables.flatMap((table) => {
+      if (table.filter === undefined) return [];
+      const startRow = table.range.start.row + (table.headerRows ?? 1);
+      const endRow = table.range.end.row - (table.totalsRow === true ? 1 : 0);
+      if (startRow > endRow) return [];
+      const visible = executeStructuredTableView(table, source, options).rowIndices;
+      const included = new Set(visible);
+      const hiddenRows = Array.from(
+        { length: endRow - startRow + 1 },
+        (_, index) => startRow + index,
+      ).filter((row) => !included.has(row));
+      return [
+        Object.freeze({
+          startRow,
+          endRow,
+          rowOrder: Object.freeze([...visible, ...hiddenRows]),
+          hiddenRows: Object.freeze(hiddenRows),
+        }),
+      ];
+    }),
+  );
 }

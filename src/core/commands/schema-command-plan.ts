@@ -1,6 +1,7 @@
 import type { WorkbookCommand } from './workbook-command';
 import {
   assertClipboardResourceLimit,
+  externalPasteRange,
   internalPasteRange,
   pasteInternal,
 } from '../operations/clipboard';
@@ -389,7 +390,7 @@ function removeSheetObject(
   sheet.objects = (sheet.objects ?? []).filter((object) => object.id !== command.objectId);
 }
 
-function replaceOutsideFormulaStrings(
+function replaceOutsideFormulaQuotedSegments(
   source: string,
   pattern: RegExp,
   replacement: string,
@@ -398,18 +399,19 @@ function replaceOutsideFormulaStrings(
   let segmentStart = 0;
   let index = 0;
   while (index < source.length) {
-    if (source[index] !== '"') {
+    const quote = source[index];
+    if (quote !== '"' && quote !== "'") {
       index += 1;
       continue;
     }
     output += source.slice(segmentStart, index).replace(pattern, replacement);
     let stringEnd = index + 1;
     while (stringEnd < source.length) {
-      if (source[stringEnd] !== '"') {
+      if (source[stringEnd] !== quote) {
         stringEnd += 1;
         continue;
       }
-      if (source[stringEnd + 1] === '"') {
+      if (source[stringEnd + 1] === quote) {
         stringEnd += 2;
         continue;
       }
@@ -458,7 +460,7 @@ function setStructuredTable(
           replacements.forEach(({ fromTable, fromColumn, toTable, toColumn }) => {
             const escapedTable = fromTable.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
             const escapedColumn = fromColumn.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
-            formula = replaceOutsideFormulaStrings(
+            formula = replaceOutsideFormulaQuotedSegments(
               formula,
               new RegExp(`\\b${escapedTable}\\[${escapedColumn}\\]`, 'giu'),
               `${toTable}[${toColumn}]`,
@@ -609,6 +611,7 @@ function transformInternalPaste(
           snapshots.get(cellKey(row, column)),
         )
       : undefined;
+  const tableWrites: { row: number; column: number }[] = [];
   if (
     command.type === 'paste-internal' &&
     command.cut &&
@@ -636,14 +639,19 @@ function transformInternalPaste(
         autofillInput !== undefined && command.mode !== 'format'
           ? autofillInput(row, column)
           : undefined;
-      setCell(
-        targetSheet,
-        row,
-        column,
+      const nextCell =
         mapped === undefined || filledInput === undefined
           ? mapped
-          : { ...mapped, input: filledInput },
-      );
+          : { ...mapped, input: filledInput };
+      setCell(targetSheet, row, column, nextCell);
+      if (
+        command.mode !== 'format' &&
+        sourceCell !== undefined &&
+        nextCell !== undefined &&
+        nextCell.input.type !== 'blank'
+      ) {
+        tableWrites.push({ row, column });
+      }
       if (
         command.mode !== 'format' &&
         (command.type === 'autofill' || sourceCell?.input.type === 'custom')
@@ -656,6 +664,38 @@ function transformInternalPaste(
         const validations = authoritativeValidations.get(targetSheet.id) ?? new Map();
         validations.set(cellKey(row, column), sourceCell?.validationId ?? null);
         authoritativeValidations.set(targetSheet.id, validations);
+      }
+    }
+  }
+  expandStructuredTablesForWrites(targetSheet, tableWrites);
+}
+
+function expandStructuredTablesForWrites(
+  sheet: SheetInput,
+  writes: readonly { readonly row: number; readonly column: number }[],
+): void {
+  const ordered = [...writes].sort(
+    (left, right) => left.row - right.row || left.column - right.column,
+  );
+  for (const write of ordered) {
+    for (const table of sheet.tables ?? []) {
+      const expansion = planStructuredTableAutoExpand(
+        table as unknown as StructuredTable,
+        {
+          sheetId: sheet.id,
+          row: write.row,
+          column: write.column,
+        } as DocumentCellAddress,
+        (sheet.tables ?? [])
+          .filter((candidate) => candidate.id !== table.id)
+          .map(({ range }) => range as unknown as DocumentCellRange),
+      );
+      if (expansion.status === 'expanded') {
+        table.range = {
+          sheetId: expansion.table.range.sheetId,
+          start: { ...expansion.table.range.start },
+          end: { ...expansion.table.range.end },
+        };
       }
     }
   }
@@ -674,25 +714,8 @@ function setTypedCellInput(
     ...current,
     input: structuredClone(command.input),
   });
-  for (const table of sheet.tables ?? []) {
-    const expansion = planStructuredTableAutoExpand(
-      table as unknown as StructuredTable,
-      {
-        sheetId: sheet.id,
-        row: command.address.row,
-        column: command.address.column,
-      } as DocumentCellAddress,
-      (sheet.tables ?? [])
-        .filter((candidate) => candidate.id !== table.id)
-        .map(({ range }) => range as unknown as DocumentCellRange),
-    );
-    if (expansion.status === 'expanded') {
-      table.range = {
-        sheetId: expansion.table.range.sheetId,
-        start: { ...expansion.table.range.start },
-        end: { ...expansion.table.range.end },
-      };
-    }
+  if (command.input.type !== 'blank') {
+    expandStructuredTablesForWrites(sheet, [command.address]);
   }
   const keys = authoritativeInputs.get(sheet.id) ?? new Set<string>();
   keys.add(cellKey(command.address.row, command.address.column));
@@ -869,6 +892,13 @@ export function prepareSchemaCommand(
     case 'set-column-hidden':
       mutateExplicitHidden(input, command, sheetIds);
       break;
+    case 'set-cell-text': {
+      const sheet = input.workbook.sheets[sheetIndex(sheetIds, command.address.sheet)];
+      if (sheet !== undefined && command.text !== '') {
+        expandStructuredTablesForWrites(sheet, [command.address]);
+      }
+      break;
+    }
     case 'set-cell-input':
       setTypedCellInput(input, command, sheetIds, authoritativeInputs);
       break;
@@ -891,6 +921,22 @@ export function prepareSchemaCommand(
         authoritativeValidations,
       );
       break;
+    case 'paste-external': {
+      const sheet = input.workbook.sheets[sheetIndex(sheetIds, command.target.sheet)];
+      if (sheet !== undefined) {
+        const range = externalPasteRange(command.target.range, command.values);
+        const normalized = command.values.length === 0 ? [['']] : command.values;
+        const writes = normalized.flatMap((values, row) =>
+          values.flatMap((value, column) =>
+            value === ''
+              ? []
+              : [{ row: range.start.row + row, column: range.start.column + column }],
+          ),
+        );
+        expandStructuredTablesForWrites(sheet, writes);
+      }
+      break;
+    }
     case 'set-filter-view':
       setFilterView(input, sheetIds, command);
       break;

@@ -152,12 +152,32 @@ function identityRowOrder(count: number): RowOrder {
   };
 }
 
-function mappedRangeRuns(
+interface RowProjectionSegment {
+  readonly startRow: number;
+  readonly endRow: number;
+  readonly rowOrder: readonly number[];
+}
+
+interface RuntimeStructuredTableSegment extends RowProjectionSegment {
+  readonly hiddenRows: readonly number[];
+}
+
+function runtimeStructuredTableRows(
+  sheet: Readonly<SheetData>,
+): readonly RuntimeStructuredTableSegment[] {
+  const value = (
+    sheet as SheetData & {
+      readonly structuredTableRows?: readonly RuntimeStructuredTableSegment[];
+    }
+  ).structuredTableRows;
+  return Array.isArray(value) ? value : [];
+}
+
+function segmentedMappedRuns(
   inputStart: number,
   inputEnd: number,
   count: number,
-  mappedStart: number,
-  mappedEnd: number,
+  segments: readonly RowProjectionSegment[],
   map: (index: number) => number,
   label: string,
 ): readonly (readonly [number, number])[] {
@@ -165,63 +185,143 @@ function mappedRangeRuns(
   assertIndex(inputEnd, count, `${label} range end`);
   if (inputStart > inputEnd) throw new RangeError(`${label} range must be normalized`);
   const intervals: Array<[number, number]> = [];
-  if (inputStart < mappedStart) {
-    intervals.push([inputStart, Math.min(inputEnd, mappedStart - 1)]);
+  let cursor = inputStart;
+  for (const segment of segments) {
+    if (segment.endRow < inputStart || segment.startRow > inputEnd) continue;
+    if (cursor < segment.startRow) {
+      intervals.push([cursor, Math.min(inputEnd, segment.startRow - 1)]);
+    }
+    const overlapStart = Math.max(inputStart, segment.startRow);
+    const overlapEnd = Math.min(inputEnd, segment.endRow);
+    for (let row = overlapStart; row <= overlapEnd; row += 1) {
+      const mapped = map(row);
+      intervals.push([mapped, mapped]);
+    }
+    cursor = overlapEnd + 1;
   }
-  const overlapStart = Math.max(inputStart, mappedStart);
-  const overlapEnd = Math.min(inputEnd, mappedEnd);
-  for (let index = overlapStart; index <= overlapEnd; index += 1) {
-    const mapped = map(index);
-    intervals.push([mapped, mapped]);
-  }
-  if (inputEnd > mappedEnd) {
-    intervals.push([Math.max(inputStart, mappedEnd + 1), inputEnd]);
-  }
-  intervals.sort((first, second) => first[0] - second[0]);
+  if (cursor <= inputEnd) intervals.push([cursor, inputEnd]);
+  intervals.sort((left, right) => left[0] - right[0]);
   const runs: Array<[number, number]> = [];
   for (const interval of intervals) {
     const previous = runs.at(-1);
     if (previous !== undefined && interval[0] <= previous[1] + 1) {
       previous[1] = Math.max(previous[1], interval[1]);
-    } else runs.push([...interval]);
+    } else {
+      runs.push([...interval]);
+    }
   }
   return runs;
 }
 
-function mappedRangeBounds(
-  inputStart: number,
-  inputEnd: number,
-  count: number,
-  mappedStart: number,
-  mappedEnd: number,
-  map: (index: number) => number,
-  label: string,
-): readonly [number, number] {
-  assertIndex(inputStart, count, `${label} range start`);
-  assertIndex(inputEnd, count, `${label} range end`);
-  if (inputStart > inputEnd) throw new RangeError(`${label} range must be normalized`);
-  if (inputStart === inputEnd) {
-    const mapped = map(inputStart);
-    return [mapped, mapped];
+function createSegmentedRowOrder(count: number, input: readonly RowProjectionSegment[]): RowOrder {
+  const segments = [...input].sort(
+    (left, right) => left.startRow - right.startRow || left.endRow - right.endRow,
+  );
+  const logicalByVisual = new Map<number, number>();
+  const visualByLogical = new Map<number, number>();
+  let previousEnd = -1;
+  for (const segment of segments) {
+    const expected = segment.endRow - segment.startRow + 1;
+    const members = new Set(segment.rowOrder);
+    if (
+      segment.startRow < 0 ||
+      segment.endRow >= count ||
+      segment.startRow > segment.endRow ||
+      segment.startRow <= previousEnd ||
+      segment.rowOrder.length !== expected ||
+      members.size !== expected ||
+      segment.rowOrder.some(
+        (row) => !Number.isSafeInteger(row) || row < segment.startRow || row > segment.endRow,
+      )
+    ) {
+      throw new RangeError('derived row segments must be non-overlapping range permutations');
+    }
+    segment.rowOrder.forEach((logical, index) => {
+      const visual = segment.startRow + index;
+      logicalByVisual.set(visual, logical);
+      visualByLogical.set(logical, visual);
+    });
+    previousEnd = segment.endRow;
   }
-  let first = count;
-  let last = -1;
-  const include = (index: number): void => {
-    first = Math.min(first, index);
-    last = Math.max(last, index);
+  const runs = (start: number, end: number, map: (index: number) => number, label: string) =>
+    segmentedMappedRuns(start, end, count, segments, map, label);
+  const bounds = (
+    start: number,
+    end: number,
+    map: (index: number) => number,
+    label: string,
+  ): readonly [number, number] => {
+    const projected = runs(start, end, map, label);
+    return [projected[0]![0], projected.at(-1)![1]];
   };
-  if (inputStart < mappedStart) {
-    include(inputStart);
-    include(Math.min(inputEnd, mappedStart - 1));
+  return {
+    logicalAtVisual(visualRow) {
+      assertIndex(visualRow, count, 'visual row');
+      return logicalByVisual.get(visualRow) ?? visualRow;
+    },
+    visualOfLogical(logicalRow) {
+      assertIndex(logicalRow, count, 'logical row');
+      return visualByLogical.get(logicalRow) ?? logicalRow;
+    },
+    visualRange(logicalStart, logicalEnd) {
+      return bounds(
+        logicalStart,
+        logicalEnd,
+        (row) => visualByLogical.get(row) ?? row,
+        'logical row',
+      );
+    },
+    visualRuns(logicalStart, logicalEnd) {
+      return runs(
+        logicalStart,
+        logicalEnd,
+        (row) => visualByLogical.get(row) ?? row,
+        'logical row',
+      );
+    },
+    logicalRange(visualStart, visualEnd) {
+      return bounds(visualStart, visualEnd, (row) => logicalByVisual.get(row) ?? row, 'visual row');
+    },
+    reordered: segments.some((segment) =>
+      segment.rowOrder.some((row, index) => row !== segment.startRow + index),
+    ),
+  };
+}
+
+function legacyRowProjection(
+  sheet: Readonly<SheetData>,
+  count: number,
+  locale: LocaleDefinition,
+): RowProjectionSegment | undefined {
+  const sort = sheet.autofilter?.sort;
+  const reference = sheet.autofilter?.ref;
+  if (sort?.ci === undefined || sort.order === undefined || reference === undefined) {
+    return undefined;
   }
-  const overlapStart = Math.max(inputStart, mappedStart);
-  const overlapEnd = Math.min(inputEnd, mappedEnd);
-  for (let index = overlapStart; index <= overlapEnd; index += 1) include(map(index));
-  if (inputEnd > mappedEnd) {
-    include(Math.max(inputStart, mappedEnd + 1));
-    include(inputEnd);
+  try {
+    const parsed = parseA1Range(reference);
+    const startRow = Math.min(count, parsed.start.row + 1);
+    const endRow = Math.min(count - 1, parsed.end.row);
+    if (startRow > endRow) return undefined;
+    const range = {
+      start: { row: parsed.start.row, column: parsed.start.column },
+      end: { row: endRow, column: parsed.end.column },
+    };
+    const sorted = sortRows(sheet, sort.ci, sort.order, locale, range);
+    const included = new Set(sorted);
+    return {
+      startRow,
+      endRow,
+      rowOrder: [
+        ...sorted,
+        ...Array.from({ length: endRow - startRow + 1 }, (_, index) => startRow + index).filter(
+          (row) => !included.has(row),
+        ),
+      ],
+    };
+  } catch {
+    return undefined;
   }
-  return [first, last];
 }
 
 function createRowOrder(
@@ -230,140 +330,40 @@ function createRowOrder(
   locale: LocaleDefinition,
   derived?: SheetGridSizing['derivedRows'],
 ): RowOrder {
-  if (derived !== undefined) {
-    const start = Math.max(0, derived.start);
-    const end = Math.min(count - 1, derived.end);
-    const expected = end - start + 1;
-    const order = [...derived.rowOrder];
-    const members = new Set(order);
-    if (
-      expected < 0 ||
-      order.length !== expected ||
-      members.size !== expected ||
-      order.some((row) => !Number.isSafeInteger(row) || row < start || row > end)
-    ) {
-      throw new RangeError('derived row order must be a permutation of its range');
-    }
-    const visualByLogical = new Map(order.map((row, index) => [row, start + index]));
-    return {
-      logicalAtVisual(visualRow) {
-        assertIndex(visualRow, count, 'visual row');
-        return visualRow < start || visualRow > end
-          ? visualRow
-          : (order[visualRow - start] as number);
-      },
-      visualOfLogical(logicalRow) {
-        assertIndex(logicalRow, count, 'logical row');
-        return visualByLogical.get(logicalRow) ?? logicalRow;
-      },
-      visualRange(logicalStart, logicalEnd) {
-        return mappedRangeBounds(
-          logicalStart,
-          logicalEnd,
-          count,
-          start,
-          end,
-          (logicalRow) => visualByLogical.get(logicalRow) ?? logicalRow,
-          'logical row',
-        );
-      },
-      visualRuns(logicalStart, logicalEnd) {
-        return mappedRangeRuns(
-          logicalStart,
-          logicalEnd,
-          count,
-          start,
-          end,
-          (logicalRow) => visualByLogical.get(logicalRow) ?? logicalRow,
-          'logical row',
-        );
-      },
-      logicalRange(visualStart, visualEnd) {
-        return mappedRangeBounds(
-          visualStart,
-          visualEnd,
-          count,
-          start,
-          end,
-          (visualRow) => order[visualRow - start] ?? visualRow,
-          'visual row',
-        );
-      },
-      reordered: order.some((row, index) => row !== start + index),
-    };
+  const derivedSegment =
+    derived === undefined
+      ? undefined
+      : {
+          startRow: Math.max(0, derived.start),
+          endRow: Math.min(count - 1, derived.end),
+          rowOrder: derived.rowOrder,
+        };
+  const tableSegments = runtimeStructuredTableRows(sheet).filter(
+    (segment) =>
+      derivedSegment === undefined ||
+      segment.endRow < derivedSegment.startRow ||
+      segment.startRow > derivedSegment.endRow,
+  );
+  const legacySegment = legacyRowProjection(sheet, count, locale);
+  const retainedLegacy =
+    legacySegment === undefined ||
+    [derivedSegment, ...tableSegments].some(
+      (segment) =>
+        segment !== undefined &&
+        segment.startRow <= legacySegment.endRow &&
+        legacySegment.startRow <= segment.endRow,
+    )
+      ? []
+      : [legacySegment];
+  const segments = [
+    ...retainedLegacy,
+    ...tableSegments,
+    ...(derivedSegment === undefined ? [] : [derivedSegment]),
+  ];
+  if (segments.length > 0) {
+    return createSegmentedRowOrder(count, segments);
   }
-  const sort = sheet.autofilter?.sort;
-  const reference = sheet.autofilter?.ref;
-  if (sort?.ci === undefined || sort.order === undefined || reference === undefined) {
-    return identityRowOrder(count);
-  }
-  try {
-    const parsed = parseA1Range(reference);
-    const start = Math.min(count, parsed.start.row + 1);
-    const end = Math.min(count - 1, parsed.end.row);
-    if (start > end) return identityRowOrder(count);
-    const range = {
-      start: { row: parsed.start.row, column: parsed.start.column },
-      end: { row: end, column: parsed.end.column },
-    };
-    const sorted = sortRows(sheet, sort.ci, sort.order, locale, range);
-    const included = new Set(sorted);
-    const order = [
-      ...sorted,
-      ...Array.from({ length: end - start + 1 }, (_, index) => start + index).filter(
-        (row) => !included.has(row),
-      ),
-    ];
-    const visualByLogical = new Map(order.map((row, index) => [row, start + index]));
-    return {
-      logicalAtVisual(visualRow) {
-        assertIndex(visualRow, count, 'visual row');
-        return visualRow < start || visualRow > end
-          ? visualRow
-          : (order[visualRow - start] as number);
-      },
-      visualOfLogical(logicalRow) {
-        assertIndex(logicalRow, count, 'logical row');
-        return visualByLogical.get(logicalRow) ?? logicalRow;
-      },
-      visualRange(logicalStart, logicalEnd) {
-        return mappedRangeBounds(
-          logicalStart,
-          logicalEnd,
-          count,
-          start,
-          end,
-          (logicalRow) => visualByLogical.get(logicalRow) ?? logicalRow,
-          'logical row',
-        );
-      },
-      visualRuns(logicalStart, logicalEnd) {
-        return mappedRangeRuns(
-          logicalStart,
-          logicalEnd,
-          count,
-          start,
-          end,
-          (logicalRow) => visualByLogical.get(logicalRow) ?? logicalRow,
-          'logical row',
-        );
-      },
-      logicalRange(visualStart, visualEnd) {
-        return mappedRangeBounds(
-          visualStart,
-          visualEnd,
-          count,
-          start,
-          end,
-          (visualRow) => order[visualRow - start] ?? visualRow,
-          'visual row',
-        );
-      },
-      reordered: order.some((row, index) => row !== start + index),
-    };
-  } catch {
-    return identityRowOrder(count);
-  }
+  return identityRowOrder(count);
 }
 
 function remapRows(
@@ -505,8 +505,12 @@ export function createSheetGridModel(
   sizing: Readonly<SheetGridSizing> = {},
 ): GridModelPort {
   const baseRowCount = collectionLength(sheet.rows?.len, DEFAULT_ROW_COUNT, 'row');
+  const tableRowEnd = Math.max(
+    -1,
+    ...runtimeStructuredTableRows(sheet).map(({ endRow }) => endRow),
+  );
   const rowCount = collectionLength(
-    Math.max(baseRowCount, (sizing.derivedRows?.end ?? -1) + 1),
+    Math.max(baseRowCount, (sizing.derivedRows?.end ?? -1) + 1, tableRowEnd + 1),
     DEFAULT_ROW_COUNT,
     'row',
   );
@@ -543,7 +547,11 @@ export function createSheetGridModel(
     (data) => data.height,
     'row',
     defaultRowHeight > 0 ? 'last' : 'none',
-    [...filtered, ...(sizing.derivedRows?.hiddenRows ?? [])].map(order.visualOfLogical),
+    [
+      ...filtered,
+      ...runtimeStructuredTableRows(sheet).flatMap(({ hiddenRows }) => hiddenRows),
+      ...(sizing.derivedRows?.hiddenRows ?? []),
+    ].map(order.visualOfLogical),
   );
   const columns = createSparseAxis<ColumnData>(
     sheet.cols,

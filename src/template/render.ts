@@ -6,7 +6,7 @@ import type {
   Sheet,
   SpreadsheetDocument,
 } from '../document';
-import { createFormulaEngine } from '../formula';
+import { createFormulaEngine, formulaAddressKey } from '../formula';
 import {
   createPresentationCache,
   createPresentationResolver,
@@ -51,6 +51,7 @@ import {
   projectPersistedVisualizations,
   type ChartValueSource,
 } from '../analysis';
+import { projectStructuredTableRows } from '../analysis/tables';
 
 const DEFAULT_LIMITS: RenderLimits = Object.freeze({
   maxExpandedCells: 250_000,
@@ -286,29 +287,48 @@ function paper(profile: TemplatePrintProfile): { readonly width: number; readonl
     : { width: definition.height, height: definition.width };
 }
 
-interface ViewProjection {
+interface ViewProjectionSegment {
   readonly hiddenRows: ReadonlySet<number>;
   readonly rowOrder: readonly number[];
   readonly startRow: number;
   readonly endRow: number;
 }
 
+type ViewProjection = readonly ViewProjectionSegment[];
+
 function projectedTargetRows(
   range: DocumentCellRange,
   projection: ViewProjection | undefined,
 ): readonly number[] {
-  const rows = Array.from(
-    { length: range.end.row - range.start.row + 1 },
-    (_, index) => range.start.row + index,
+  if (projection === undefined || projection.length === 0) {
+    return Array.from(
+      { length: range.end.row - range.start.row + 1 },
+      (_, index) => range.start.row + index,
+    );
+  }
+  const segments = [...projection].sort(
+    (left, right) => left.startRow - right.startRow || left.endRow - right.endRow,
   );
-  if (projection === undefined) return rows;
-  return [
-    ...rows.filter((row) => row < projection.startRow),
-    ...projection.rowOrder.filter(
-      (row) => row >= range.start.row && row <= range.end.row && !projection.hiddenRows.has(row),
-    ),
-    ...rows.filter((row) => row > projection.endRow),
-  ];
+  const rows: number[] = [];
+  let row = range.start.row;
+  while (row <= range.end.row) {
+    const segment = segments.find(({ startRow, endRow }) => row >= startRow && row <= endRow);
+    if (segment === undefined) {
+      rows.push(row);
+      row += 1;
+      continue;
+    }
+    rows.push(
+      ...segment.rowOrder.filter(
+        (candidate) =>
+          candidate >= range.start.row &&
+          candidate <= range.end.row &&
+          !segment.hiddenRows.has(candidate),
+      ),
+    );
+    row = segment.endRow + 1;
+  }
+  return rows;
 }
 
 function projectedBreakIndex(
@@ -1089,21 +1109,63 @@ export async function renderSpreadsheetTemplate(
         ?.filterViews.find(({ id }) => id === viewId);
       return view === undefined ? [] : [view];
     });
+    const activeViewProjections = new Map(
+      activeFilterViews.map((view) => {
+        const projected = applyDocumentFilterView({
+          document: expansion.document!,
+          formulaValues: calculation.values,
+          view,
+          locale: environment.locale,
+          limits: { maxRows: limits.maxExpandedRows },
+        });
+        return [
+          view.range.sheetId,
+          {
+            ...projected,
+            startRow: view.range.start.row + 1,
+            endRow: view.range.end.row,
+          },
+        ];
+      }),
+    );
     const viewProjections = new Map(
-      activeFilterViews.map((view) => [
-        view.range.sheetId,
-        {
-          ...applyDocumentFilterView({
-            document: expansion.document!,
-            formulaValues: calculation.values,
-            view,
-            locale: environment.locale,
-            limits: { maxRows: limits.maxExpandedRows },
-          }),
-          startRow: view.range.start.row + 1,
-          endRow: view.range.end.row,
-        },
-      ]),
+      expansion.document.workbook.sheets.flatMap((sheet) => {
+        const tableCells = new Map(
+          sheet.cells.map(({ row, column, cell }) => [`${row}:${column}`, cell.input]),
+        );
+        const tableSegments = projectStructuredTableRows(
+          sheet.tables ?? [],
+          {
+            revision: `${request.currentDocumentHash}:print:${sheet.id}`,
+            read(row, column) {
+              const cell = tableCells.get(`${row}:${column}`);
+              if (cell === undefined || cell.type === 'blank') return undefined;
+              if (cell.type === 'formula') {
+                const value = calculation.values.get(
+                  formulaAddressKey({ sheetId: sheet.id, row, column }),
+                );
+                return value === undefined || value.type === 'blank' || value.type === 'array'
+                  ? undefined
+                  : value.value;
+              }
+              return cell.value;
+            },
+          },
+          { maximumRows: limits.maxExpandedRows, signal: request.signal },
+        ).map((segment) => ({
+          ...segment,
+          hiddenRows: new Set(segment.hiddenRows),
+        }));
+        const active = activeViewProjections.get(sheet.id);
+        const nonOverlappingTables =
+          active === undefined
+            ? tableSegments
+            : tableSegments.filter(
+                (segment) => segment.endRow < active.startRow || segment.startRow > active.endRow,
+              );
+        const segments = [...nonOverlappingTables, ...(active === undefined ? [] : [active])];
+        return segments.length === 0 ? [] : [[sheet.id, segments] as const];
+      }),
     );
     const resolvedTargets = targets(
       expansion.document,
