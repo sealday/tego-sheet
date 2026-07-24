@@ -224,6 +224,31 @@ describe('DATA-01 advanced cleanup safety', () => {
     ).rejects.toMatchObject({ code: 'REPLACE_BUDGET_EXCEEDED' });
   });
 
+  it('does not charge generated-text budget for literal no-op matches', async () => {
+    const controller = seededController([
+      { row: 0, column: 0, input: { type: 'string', value: 'a' } },
+      { row: 1, column: 0, input: { type: 'string', value: 'a' } },
+    ]);
+    const planner = createDataTransformPlanner({
+      maxCells: 2,
+      maxSamples: 2,
+      maxGeneratedTextLength: 1,
+    });
+    await expect(
+      planner.preview(controller.getSnapshot(), {
+        type: 'find-replace',
+        range: {
+          sheetId: documentSheetId,
+          start: { row: 0, column: 0 },
+          end: { row: 1, column: 0 },
+        },
+        find: 'z',
+        replacement: 'x',
+        match: 'literal',
+      }),
+    ).resolves.toMatchObject({ sampleChanges: [], estimatedCellCount: 0 });
+  });
+
   it('rejects an oversized exact bounded quantifier before evaluation', async () => {
     const controller = seededController([
       { row: 0, column: 0, input: { type: 'string', value: 'a' } },

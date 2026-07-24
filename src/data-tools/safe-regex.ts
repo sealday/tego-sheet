@@ -140,8 +140,10 @@ export function createSafeRegexBudget(source: string, limits: SafeRegexLimits): 
       pattern.lastIndex = 0;
       const started = performance.now();
       let outputLength = value.length;
+      let matched = false;
       let match: RegExpExecArray | null;
       while ((match = pattern.exec(value)) !== null) {
+        matched = true;
         outputLength += replacement.length - match[0].length;
         if (
           !Number.isSafeInteger(outputLength) ||
@@ -156,6 +158,16 @@ export function createSafeRegexBudget(source: string, limits: SafeRegexLimits): 
         if (match[0] === '') {
           pattern.lastIndex = advanceUnicodeIndex(value, pattern.lastIndex);
         }
+      }
+      if (!matched) {
+        elapsed += performance.now() - started;
+        if (elapsed > limits.maximumMilliseconds) {
+          throw new DataTransformError(
+            'REPLACE_BUDGET_EXCEEDED',
+            'Replacement exceeds the configured regex time budget',
+          );
+        }
+        return value;
       }
       outputCodeUnits += outputLength;
       pattern.lastIndex = 0;

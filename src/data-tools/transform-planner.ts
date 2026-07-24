@@ -294,6 +294,7 @@ function replaceText(
           }
           return count;
         })();
+  if (matchCount === 0) return value;
   const outputLength =
     value.length + matchCount * (transform.replacement.length - transform.find.length);
   if (
