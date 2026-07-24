@@ -73,4 +73,92 @@ describe('Canvas object layer', () => {
       args: ['#2563eb'],
     });
   });
+
+  it('draws decoded image resources using the command fit', () => {
+    const sheet = { rows: { len: 2 }, cols: { len: 2 } };
+    const viewport = createViewportMetrics(createSheetGridModel(sheet), {
+      width: 320,
+      height: 180,
+    });
+    const harness = createCanvasHarness();
+    const engine = new CanvasEngine(harness.canvas, {
+      animationFrame: harness.animationFrame,
+      measurement: harness.measurement,
+    });
+    const source = {};
+    const objects = [
+      {
+        object: { id: 'image' },
+        bounds: { x: 60, y: 40, width: 80, height: 40 },
+        commands: [
+          {
+            kind: 'image',
+            resourceId: 'resource',
+            rect: { x: 60, y: 40, width: 80, height: 40 },
+            fit: 'contain',
+          },
+        ],
+        imageResources: {
+          resource: { source, width: 20, height: 20 },
+        },
+        diagnostics: [],
+      },
+    ] as unknown as readonly ScreenObjectProjection[];
+
+    engine.render({ sheet, viewport, objects });
+    harness.animationFrame.flush();
+
+    expect(harness.operations).toContainEqual({
+      name: 'drawImage',
+      args: [source, 80, 40, 40, 40],
+    });
+  });
+
+  it('restores grouped Canvas state when a nested command throws', () => {
+    const sheet = { rows: { len: 2 }, cols: { len: 2 } };
+    const viewport = createViewportMetrics(createSheetGridModel(sheet), {
+      width: 320,
+      height: 180,
+    });
+    const harness = createCanvasHarness();
+    const onRenderError = vi.fn();
+    const engine = new CanvasEngine(harness.canvas, {
+      animationFrame: harness.animationFrame,
+      measurement: harness.measurement,
+      onRenderError,
+    });
+    const originalPath = globalThis.Path2D;
+    globalThis.Path2D = class {
+      constructor() {
+        throw new Error('bad path');
+      }
+    } as never;
+    const objects = [
+      {
+        object: { id: 'broken' },
+        bounds: { x: 60, y: 40, width: 80, height: 40 },
+        commands: [
+          {
+            kind: 'group',
+            rotation: 45,
+            origin: { x: 100, y: 60 },
+            commands: [{ kind: 'path', data: 'invalid', fill: '#000000' }],
+          },
+        ],
+        diagnostics: [],
+      },
+    ] as unknown as readonly ScreenObjectProjection[];
+
+    try {
+      engine.render({ sheet, viewport, objects });
+      harness.animationFrame.flush();
+    } finally {
+      globalThis.Path2D = originalPath;
+    }
+
+    expect(onRenderError).toHaveBeenCalledOnce();
+    expect(harness.operations.filter(({ name }) => name === 'save')).toHaveLength(
+      harness.operations.filter(({ name }) => name === 'restore').length,
+    );
+  });
 });

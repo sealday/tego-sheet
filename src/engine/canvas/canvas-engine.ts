@@ -14,6 +14,7 @@ import { paintObjects } from './object-painter';
 import { paintSelection } from './selection-painter';
 import { paintTemplateDecorations } from './template-decoration-painter';
 import type { ScreenObjectProjection } from '../../objects';
+import type { FrozenQuadrantKind } from '../geometry/frozen-pane-geometry';
 
 export interface TemplateCanvasDecoration {
   readonly range: CellRange;
@@ -34,6 +35,11 @@ export interface CanvasRenderSnapshot {
   readonly showGrid?: boolean;
   /** Visible persistent objects already projected through shared display geometry. */
   readonly objects?: readonly ScreenObjectProjection[];
+  /** Objects independently projected for each frozen-pane coordinate space. */
+  readonly objectPanes?: readonly {
+    readonly kind: FrozenQuadrantKind;
+    readonly objects: readonly ScreenObjectProjection[];
+  }[];
   /** Transient object selection; never serialized into the document. */
   readonly selectedObjectId?: string;
   /** Shared presentation batch for the visible document revision. */
@@ -146,8 +152,14 @@ export class CanvasEngine {
             (pane.kind === 'left' || pane.kind === 'body' ? viewport.scroll.y : 0),
         },
       );
+      this.draw.withClip(pane, () => {
+        const paneObjects =
+          snapshot.objectPanes?.find(({ kind }) => kind === pane.kind)?.objects ??
+          snapshot.objects ??
+          [];
+        paintObjects(this.draw, paneObjects, snapshot.selectedObjectId);
+      });
     }
-    paintObjects(this.draw, snapshot.objects ?? [], snapshot.selectedObjectId);
     paintHeaders(
       this.draw,
       viewport,

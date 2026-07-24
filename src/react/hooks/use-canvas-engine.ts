@@ -2,6 +2,8 @@ import { useLayoutEffect, useRef, type RefObject } from 'react';
 import type { LocaleDefinition, SheetId, SheetOptions } from '../../core';
 import type { ControllerEpoch } from './use-controller-epoch';
 import { createEngineAdapter, type EngineAdapter } from '../adapters/engine-adapter';
+import type { Diagnostic } from '../../document';
+import type { RenderEnvironment } from '../../template';
 
 export interface UseCanvasEngineOptions {
   readonly activeSheet: SheetId | null;
@@ -17,6 +19,8 @@ export interface UseCanvasEngineOptions {
   readonly locale?: LocaleDefinition;
   readonly onRenderError?: (cause: unknown) => void;
   readonly onSelectionChange?: (selection: import('../../core').Selection | null) => void;
+  readonly renderEnvironment?: RenderEnvironment;
+  readonly onObjectDiagnostics?: (diagnostics: readonly Diagnostic[]) => void;
 }
 
 export interface EngineAdapterSlot {
@@ -66,6 +70,8 @@ export function useCanvasEngine(options: UseCanvasEngineOptions): void {
     sheetOptions,
     showGrid,
     onSelectionChange,
+    renderEnvironment,
+    onObjectDiagnostics,
   } = options;
   const { controller, isActive } = epoch;
   const onRenderErrorRef = useRef(onRenderError);
@@ -94,6 +100,8 @@ export function useCanvasEngine(options: UseCanvasEngineOptions): void {
           if (handler === undefined) throw cause;
           handler(cause);
         },
+        renderEnvironment,
+        onObjectDiagnostics,
       });
       engineSlot.set(adapter);
       adapter.refresh(controller.getSnapshot());
@@ -128,6 +136,8 @@ export function useCanvasEngine(options: UseCanvasEngineOptions): void {
     isActive,
     locale,
     onReady,
+    onObjectDiagnostics,
+    renderEnvironment,
     rootRef,
     sheetOptions,
   ]);

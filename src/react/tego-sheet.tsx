@@ -525,7 +525,10 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
     sheet: null as SheetId | null,
   }));
   const [selection, setSelection] = useState<Selection | null>(null);
-  const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+  const [selectedObject, setSelectedObject] = useState<{
+    readonly sheet: SheetId;
+    readonly objectId: string;
+  } | null>(null);
   const [accessibilityViewportRevision, refreshAccessibilityViewport] = useReducer(
     (value: number) => value + 1,
     0,
@@ -801,6 +804,8 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
     rootRef,
     sheetOptions: initialOptions,
     showGrid: props.options?.showGrid,
+    renderEnvironment: props.renderEnvironment,
+    onObjectDiagnostics: props.onDiagnostics,
   });
   const reconciliationVersion = props.controlled.getNotificationVersion();
   const transientAuthorityRef = useRef({
@@ -974,9 +979,10 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
           ({ id }) => id === (activeSheet as string),
         );
   const activeSelectedObjectId =
-    selectedObjectId !== null &&
-    activeDocumentSheet?.objects.some(({ id }) => id === selectedObjectId) === true
-      ? selectedObjectId
+    selectedObject !== null &&
+    selectedObject.sheet === activeSheet &&
+    activeDocumentSheet?.objects.some(({ id }) => id === selectedObject.objectId) === true
+      ? selectedObject.objectId
       : null;
   useLayoutEffect(() => {
     engineSlot.get()?.setSelectedObject(activeSelectedObjectId);
@@ -1422,8 +1428,9 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
                 <AccessibilityObjects
                   objects={visibleObjectProjections}
                   selectedObjectId={activeSelectedObjectId}
+                  readOnly={renderRuntime.readOnly || props.epoch.snapshot.readOnly}
                   onSelect={(objectId) => {
-                    setSelectedObjectId(objectId);
+                    if (activeSheet !== null) setSelectedObject({ sheet: activeSheet, objectId });
                     engineSlot.get()?.setSelectedObject(objectId);
                   }}
                   onChange={(object) => {

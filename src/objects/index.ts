@@ -5,6 +5,7 @@ export { transformObjectByKeyboard } from './interaction';
 export type { ObjectKeyboardTransform } from './interaction';
 export { projectObjectsToScreen } from './screen';
 export type { ObjectScreenContext, ObjectScreenDiagnostic, ScreenObjectProjection } from './screen';
+export type { ResolvedScreenResource } from './screen';
 export type {
   ObjectAnchor,
   ObjectBase,

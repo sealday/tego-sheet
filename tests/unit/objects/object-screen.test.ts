@@ -85,6 +85,59 @@ describe('screen object projection', () => {
     expect(projections[1]?.bounds).toEqual({ x: 15, y: 15, width: 30, height: 40 });
   });
 
+  it('emits a real image command only for a resolved decoded image', () => {
+    const decoded = {};
+    const [projection] = projectObjectsToScreen(
+      [
+        {
+          id: 'logo',
+          kind: 'image',
+          anchor: { type: 'absolute', rect: { x: 10, y: 20, width: 40, height: 30 } },
+          zIndex: 1,
+          locked: false,
+          templateRepeat: 'shared',
+          resourceId: 'logo-resource',
+          fit: 'contain',
+          accessibility: { name: 'Logo' },
+        },
+      ] as never,
+      {
+        geometry,
+        resources: [
+          {
+            id: 'logo-resource',
+            kind: 'image',
+            mimeType: 'image/png',
+            url: 'data:image/png;base64,AAAA',
+          },
+        ] as never,
+        resolvedResources: {
+          'logo-resource': {
+            type: 'image',
+            mimeType: 'image/png',
+            width: 1,
+            height: 1,
+            decoded,
+          },
+        },
+        viewport: { x: 0, y: 0, width: 100, height: 100 },
+      },
+    );
+
+    expect(projection?.commands).toEqual([
+      {
+        kind: 'image',
+        resourceId: 'logo-resource',
+        rect: { x: 10, y: 20, width: 40, height: 30 },
+        fit: 'contain',
+      },
+    ]);
+    expect(projection?.imageResources).toEqual({
+      'logo-resource': { source: decoded, width: 1, height: 1 },
+    });
+    expect(projection?.diagnostics).toEqual([]);
+  });
+
   it('keeps rotated objects whose rotated bounds intersect the viewport', () => {
     const [projection] = projectObjectsToScreen(
       [
@@ -155,7 +208,7 @@ describe('screen object projection', () => {
     ]);
   });
 
-  it('accepts safe document-owned image metadata without resolving the URL during projection', () => {
+  it('keeps safe but unresolved image metadata as a diagnosed placeholder', () => {
     const [projection] = projectObjectsToScreen(
       [
         {
@@ -180,14 +233,17 @@ describe('screen object projection', () => {
       },
     );
 
-    expect(projection?.diagnostics).toEqual([]);
-    expect(projection?.commands).toEqual([
-      {
-        kind: 'image',
+    expect(projection?.diagnostics).toEqual([
+      expect.objectContaining({
+        code: 'OBJECT_RESOURCE_MISSING',
+        objectId: 'picture',
         resourceId: 'image',
-        rect: common.anchor.rect,
-        fit: 'contain',
-      },
+      }),
+    ]);
+    expect(projection?.commands).toEqual([
+      { kind: 'fill-rect', rect: common.anchor.rect, color: '#f3f4f6' },
+      { kind: 'stroke-rect', rect: common.anchor.rect, color: '#9ca3af', width: 1 },
+      expect.objectContaining({ kind: 'text', text: 'Image unavailable' }),
     ]);
   });
 });

@@ -11,6 +11,8 @@ export interface AccessibilityObjectsProps {
   readonly objects: readonly ScreenObjectProjection[];
   /** Transient selected object identifier. */
   readonly selectedObjectId: string | null;
+  /** Whether the active spreadsheet snapshot forbids object mutations. */
+  readonly readOnly: boolean;
   /** Selects an object without modifying its persistent data. */
   readonly onSelect: (objectId: string) => void;
   /** Dispatches one immutable object update through the document controller. */
@@ -21,6 +23,7 @@ export interface AccessibilityObjectsProps {
 export function AccessibilityObjects({
   objects,
   selectedObjectId,
+  readOnly,
   onSelect,
   onChange,
 }: AccessibilityObjectsProps) {
@@ -34,7 +37,7 @@ export function AccessibilityObjects({
           aria-label={object.accessibility.name}
           aria-description={object.accessibility.description}
           aria-selected={selectedObjectId === object.id}
-          aria-readonly={object.locked}
+          aria-readonly={readOnly || object.locked}
           data-object-id={object.id}
           data-locked={object.locked}
           onClick={() => onSelect(object.id)}
@@ -44,6 +47,7 @@ export function AccessibilityObjects({
             if (transform === undefined) return;
             event.preventDefault();
             onSelect(object.id);
+            if (readOnly) return;
             const next = transformObjectByKeyboard(object, transform);
             if (next !== undefined) onChange(next);
           }}

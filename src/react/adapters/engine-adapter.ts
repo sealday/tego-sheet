@@ -7,7 +7,7 @@ import {
   type SheetOptions,
 } from '../../core';
 import type { SpreadsheetControllerSnapshot } from '../../core/controller/spreadsheet-document-controller';
-import type { DocumentSheetId, FilterView } from '../../document';
+import type { Diagnostic, DocumentSheetId, FilterView, ResourceMetadata } from '../../document';
 import {
   CanvasEngine,
   clampScroll,
@@ -28,8 +28,18 @@ import {
 } from '../../engine';
 import { createPresentationCache, createPresentationResolver } from '../../presentation';
 import { createPresentationValidationResolver } from './presentation-adapter';
-import { projectSheetObjectsToViewport } from './object-adapter';
+import { projectSheetObjectPanesToViewport } from './object-adapter';
 import { applyDocumentFilterView } from '../../views';
+import {
+  createDataUrlResourceResolver,
+  createResourceResolverRegistry,
+  resolveTemplateResources,
+  type DecodedResourceImage,
+  type RenderEnvironment,
+  type ResolvedResourceStore,
+  type ResourceRef,
+} from '../../template';
+import type { ResolvedScreenResource } from '../../objects';
 
 export interface EngineAdapterOptions {
   readonly root: HTMLElement;
@@ -40,6 +50,8 @@ export interface EngineAdapterOptions {
   readonly locale?: LocaleDefinition;
   readonly getActiveFilterView?: (sheet: SheetId) => FilterView | undefined;
   readonly getFilterViewRevision?: () => number;
+  readonly renderEnvironment?: RenderEnvironment;
+  readonly onObjectDiagnostics?: (diagnostics: readonly Diagnostic[]) => void;
 }
 
 export interface EngineAdapter {
@@ -120,6 +132,14 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
   let liveReadOnly: boolean | null = null;
   let showGrid = options.showGrid;
   let templateDecorations: readonly TemplateCanvasDecoration[] = [];
+  let resolvedObjectResources: Readonly<Record<string, ResolvedScreenResource>> = Object.freeze(
+    Object.create(null),
+  );
+  let objectResourceStore: ResolvedResourceStore | null = null;
+  let objectResourceFingerprint = '';
+  let objectResourceGeneration = 0;
+  let objectResourceController: AbortController | null = null;
+  let objectDiagnosticFingerprint = '';
   const presentationCache = createPresentationCache({
     maximumEntries: 10_000,
     maximumBytes: 8 * 1024 * 1024,
@@ -171,14 +191,25 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
         ? {}
         : { activeFilterView: options.getActiveFilterView(activeSheet) }),
     });
+    const objectPanes = projectSheetObjectPanesToViewport(
+      documentSheet.objects,
+      latestSnapshot.document.resources.items,
+      viewport,
+      resolvedObjectResources,
+    );
+    reportObjectDiagnostics(
+      options.onObjectDiagnostics,
+      documentSheet.id,
+      objectPanes.flatMap(({ objects }) => objects.flatMap(({ diagnostics }) => diagnostics)),
+      (fingerprint) => {
+        objectDiagnosticFingerprint = fingerprint;
+      },
+      objectDiagnosticFingerprint,
+    );
     const renderSnapshot: CanvasRenderSnapshot = {
       sheet,
       viewport,
-      objects: projectSheetObjectsToViewport(
-        documentSheet.objects,
-        latestSnapshot.document.resources.items,
-        viewport,
-      ),
+      objectPanes,
       presentations: {
         resolve: ({ row, column }) =>
           resolver.resolve({
@@ -256,6 +287,60 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
       );
     }
     if (paintNow) paint();
+  };
+
+  const resolveObjectResources = (snapshot: SpreadsheetControllerSnapshot): void => {
+    const referenced = new Set(
+      snapshot.document.workbook.sheets.flatMap((sheet) =>
+        sheet.objects.flatMap((object) => (object.kind === 'image' ? [object.resourceId] : [])),
+      ),
+    );
+    const refs = snapshot.document.resources.items
+      .filter((resource) => referenced.has(resource.id))
+      .flatMap(resourceReference);
+    const fingerprint = JSON.stringify(refs);
+    if (fingerprint === objectResourceFingerprint) return;
+    objectResourceFingerprint = fingerprint;
+    const generation = ++objectResourceGeneration;
+    objectResourceController?.abort();
+    objectResourceController = null;
+    if (refs.length === 0) {
+      resolvedObjectResources = Object.freeze(Object.create(null));
+      if (objectResourceStore !== null) {
+        void objectResourceStore.dispose();
+        objectResourceStore = null;
+      }
+      return;
+    }
+    const controller = new AbortController();
+    objectResourceController = controller;
+    const registry = createResourceResolverRegistry([
+      createDataUrlResourceResolver(),
+      ...(options.renderEnvironment?.resourceRegistry?.resolvers.filter(
+        ({ id }) => id !== 'core:data-url',
+      ) ?? []),
+    ]);
+    const decodeImage = options.renderEnvironment?.decodeImage ?? decodeBrowserImage;
+    void resolveTemplateResources(refs, {
+      registry,
+      signal: controller.signal,
+      purpose: options.renderEnvironment?.resourcePurpose ?? 'preview',
+      decodeImage,
+    }).then(async (result) => {
+      if (disposed || generation !== objectResourceGeneration || controller.signal.aborted) {
+        await result.store?.dispose();
+        return;
+      }
+      objectResourceController = null;
+      const previous = objectResourceStore;
+      objectResourceStore = result.store ?? null;
+      resolvedObjectResources =
+        result.store === undefined
+          ? Object.freeze(Object.create(null))
+          : Object.freeze({ ...result.store.byReference });
+      await previous?.dispose();
+      paint();
+    });
   };
 
   const ensureVisible = (
@@ -383,11 +468,13 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
     refresh(snapshot) {
       if (disposed) return;
       latestSnapshot = snapshot;
+      resolveObjectResources(snapshot);
       rebuild(false);
     },
     render(snapshot, sheet) {
       if (disposed) return;
       latestSnapshot = snapshot;
+      resolveObjectResources(snapshot);
       activeSheet = sheet;
       rebuild();
     },
@@ -442,8 +529,108 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
       viewport = null;
       selection = null;
       selectedObjectId = null;
+      objectResourceGeneration += 1;
+      objectResourceController?.abort();
+      objectResourceController = null;
+      if (objectResourceStore !== null) void objectResourceStore.dispose();
+      objectResourceStore = null;
+      resolvedObjectResources = Object.freeze(Object.create(null));
       presentationCache.clear();
       engine.dispose();
     },
   };
+}
+
+function resourceReference(resource: ResourceMetadata): readonly ResourceRef[] {
+  if (resource.url?.trim().toLowerCase().startsWith('data:image/')) {
+    return [
+      {
+        id: resource.id,
+        type: 'image',
+        resolverId: 'core:data-url',
+        key: resource.url,
+        ...(resource.mimeType === undefined ? {} : { expectedMime: resource.mimeType }),
+      },
+    ];
+  }
+  const metadata =
+    typeof resource.metadata === 'object' &&
+    resource.metadata !== null &&
+    !Array.isArray(resource.metadata)
+      ? (resource.metadata as Readonly<Record<string, unknown>>)
+      : undefined;
+  const resolverId = metadata?.['resolverId'];
+  const key = metadata?.['key'];
+  if (typeof resolverId !== 'string' || typeof key !== 'string') return [];
+  return [
+    {
+      id: resource.id,
+      type: 'image',
+      resolverId,
+      key,
+      ...(resource.mimeType === undefined ? {} : { expectedMime: resource.mimeType }),
+    },
+  ];
+}
+
+async function decodeBrowserImage(
+  bytes: Uint8Array,
+  mimeType: string,
+  signal: AbortSignal,
+): Promise<DecodedResourceImage> {
+  if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+  if (typeof createImageBitmap !== 'function') {
+    throw new Error('No browser image decoder is available');
+  }
+  const bitmap = await createImageBitmap(new Blob([Uint8Array.from(bytes)], { type: mimeType }));
+  if (signal.aborted) {
+    bitmap.close();
+    throw new DOMException('Aborted', 'AbortError');
+  }
+  return {
+    width: bitmap.width,
+    height: bitmap.height,
+    representation: bitmap,
+    dispose: () => bitmap.close(),
+  };
+}
+
+function reportObjectDiagnostics(
+  callback: EngineAdapterOptions['onObjectDiagnostics'],
+  sheetId: string,
+  diagnostics: readonly {
+    readonly code: string;
+    readonly message: string;
+    readonly objectId: string;
+    readonly resourceId: string;
+  }[],
+  updateFingerprint: (fingerprint: string) => void,
+  previousFingerprint: string,
+): void {
+  if (callback === undefined) return;
+  const unique = [
+    ...new Map(
+      diagnostics.map((diagnostic) => [
+        `${diagnostic.code}\u0000${diagnostic.objectId}\u0000${diagnostic.resourceId}`,
+        diagnostic,
+      ]),
+    ).values(),
+  ];
+  const fingerprint = JSON.stringify(unique);
+  if (fingerprint === previousFingerprint) return;
+  updateFingerprint(fingerprint);
+  callback(
+    unique.map((diagnostic) => ({
+      code: diagnostic.code,
+      severity: 'warning',
+      domain: 'resource',
+      stage: 'render',
+      message: diagnostic.message,
+      location: {
+        sheetId: sheetId as DocumentSheetId,
+        objectId: diagnostic.objectId as never,
+        resourceId: diagnostic.resourceId as never,
+      },
+    })),
+  );
 }

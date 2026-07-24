@@ -30,6 +30,7 @@ describe('object accessibility layer', () => {
       <AccessibilityObjects
         objects={[projection('editable'), projection('locked', true)]}
         selectedObjectId="editable"
+        readOnly={false}
         onSelect={vi.fn()}
         onChange={vi.fn()}
       />,
@@ -52,6 +53,7 @@ describe('object accessibility layer', () => {
       <AccessibilityObjects
         objects={[projection('editable'), projection('locked', true)]}
         selectedObjectId={null}
+        readOnly={false}
         onSelect={onSelect}
         onChange={onChange}
       />,
@@ -72,6 +74,27 @@ describe('object accessibility layer', () => {
         anchor: { type: 'absolute', rect: { x: 10, y: 20, width: 41, height: 30 } },
       }),
     );
+    view.unmount();
+  });
+
+  it('announces global read-only state and suppresses keyboard mutations', () => {
+    const onSelect = vi.fn();
+    const onChange = vi.fn();
+    const view = render(
+      <AccessibilityObjects
+        objects={[projection('editable')]}
+        selectedObjectId={null}
+        readOnly
+        onSelect={onSelect}
+        onChange={onChange}
+      />,
+    );
+
+    const object = view.getByRole('option', { name: 'Revenue chart' });
+    expect(object.getAttribute('aria-readonly')).toBe('true');
+    fireEvent.keyDown(object, { key: 'ArrowRight' });
+    expect(onSelect).toHaveBeenCalledWith('editable');
+    expect(onChange).not.toHaveBeenCalled();
     view.unmount();
   });
 });

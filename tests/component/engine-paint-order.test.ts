@@ -5,6 +5,8 @@ import { createSelectionState } from '../../src/engine';
 import { createEngineAdapter } from '../../src/react/adapters/engine-adapter';
 import { createEventDispatcher } from '../../src/react/adapters/event-dispatcher';
 import { createCanvasHarness } from '../helpers/canvas-harness';
+import { createFontMetrics } from '../../src/presentation';
+import type { SpreadsheetDocument } from '../../src/document';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -211,5 +213,98 @@ it('paints template value, repeat, print, and invalid decorations with canvas ge
   expect(
     canvas.operations.filter(({ name }) => name === 'set:strokeStyle').map(({ args }) => args[0]),
   ).toEqual(expect.arrayContaining(['#2563eb', '#dc2626', '#059669']));
+  engine.dispose();
+});
+
+it('resolves a data URL image through the resource pipeline and repaints with drawImage', async () => {
+  const frames: FrameRequestCallback[] = [];
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    frames.push(callback);
+    return frames.length;
+  });
+  vi.stubGlobal('cancelAnimationFrame', vi.fn());
+  const root = document.createElement('div');
+  Object.defineProperties(root, {
+    clientWidth: { configurable: true, value: 500 },
+    clientHeight: { configurable: true, value: 300 },
+  });
+  const canvas = createCanvasHarness();
+  const base = testDocument({ rows: { len: 2 }, cols: { len: 3 } });
+  const png = new Uint8Array(45);
+  png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  new DataView(png.buffer).setUint32(8, 13);
+  png.set(new TextEncoder().encode('IHDR'), 12);
+  new DataView(png.buffer).setUint32(16, 1);
+  new DataView(png.buffer).setUint32(20, 1);
+  png.set(new TextEncoder().encode('IEND'), 37);
+  const documentWithImage = {
+    ...base,
+    workbook: {
+      ...base.workbook,
+      sheets: [
+        {
+          ...base.workbook.sheets[0]!,
+          objects: [
+            {
+              id: 'logo',
+              kind: 'image',
+              anchor: { type: 'absolute', rect: { x: 10, y: 20, width: 40, height: 30 } },
+              zIndex: 1,
+              locked: false,
+              templateRepeat: 'shared',
+              resourceId: 'logo-resource',
+              fit: 'contain',
+              accessibility: { name: 'Logo' },
+            },
+          ],
+        },
+      ],
+    },
+    resources: {
+      items: [
+        {
+          id: 'logo-resource',
+          kind: 'image',
+          mimeType: 'image/png',
+          url: `data:image/png;base64,${btoa(String.fromCharCode(...png))}`,
+        },
+      ],
+    },
+  } as unknown as SpreadsheetDocument;
+  const controller = new SpreadsheetDocumentController(documentWithImage);
+  const sheet = controller.getSheetIds()[0]!;
+  const source = {};
+  const onObjectDiagnostics = vi.fn();
+  const engine = createEngineAdapter({
+    root,
+    canvas: canvas.canvas as unknown as HTMLCanvasElement,
+    onObjectDiagnostics,
+    renderEnvironment: {
+      locale: 'en-US',
+      timeZone: 'UTC',
+      dateSystem: 'excel-1900',
+      clock: new Date('2026-07-24T00:00:00.000Z'),
+      fontMetrics: createFontMetrics({
+        fonts: { Arial: { averageAdvance: 6, lineHeight: 12 } },
+        fallbackFont: 'Arial',
+        fallback: { averageAdvance: 6, lineHeight: 12 },
+      }),
+      decodeImage: async () => ({ width: 1, height: 1, representation: source }),
+    },
+  });
+
+  engine.render(controller.getSnapshot(), sheet);
+  frames.shift()!(0);
+  expect(onObjectDiagnostics).toHaveBeenCalledWith([
+    expect.objectContaining({ code: 'OBJECT_RESOURCE_MISSING' }),
+  ]);
+  await vi.waitFor(() => expect(frames.length).toBeGreaterThan(0));
+  frames.shift()!(1);
+
+  expect(canvas.operations).toContainEqual({
+    name: 'drawImage',
+    args: [source, 75, 45, 30, 30],
+  });
+  expect(onObjectDiagnostics).toHaveBeenLastCalledWith([]);
   engine.dispose();
 });

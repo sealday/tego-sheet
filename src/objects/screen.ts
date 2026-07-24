@@ -26,6 +26,31 @@ export interface ScreenObjectProjection {
   readonly commands: readonly PrintDisplayCommand[];
   /** Recoverable rendering diagnostics. */
   readonly diagnostics: readonly ObjectScreenDiagnostic[];
+  /** Decoded image representations referenced by this projection's commands. */
+  readonly imageResources?: Readonly<
+    Record<
+      string,
+      {
+        readonly source: unknown;
+        readonly width: number;
+        readonly height: number;
+      }
+    >
+  >;
+}
+
+/** Resource-pipeline result required before Canvas may render an image. */
+export interface ResolvedScreenResource {
+  /** Validated logical resource type. */
+  readonly type: string;
+  /** Validated canonical MIME type. */
+  readonly mimeType: string;
+  /** Host-decoded Canvas-compatible representation. */
+  readonly decoded?: unknown;
+  /** Validated decoded pixel width. */
+  readonly width?: number;
+  /** Validated decoded pixel height. */
+  readonly height?: number;
 }
 
 /** Inputs required to project persistent objects into the visible screen layer. */
@@ -34,6 +59,8 @@ export interface ObjectScreenContext {
   readonly geometry: ObjectGeometry;
   /** Persistent document resource metadata. */
   readonly resources: readonly ResourceMetadata[];
+  /** Validated and decoded resources keyed by persistent resource ID. */
+  readonly resolvedResources?: Readonly<Record<string, ResolvedScreenResource>>;
   /** Visible screen rectangle expressed in the same geometry coordinates. */
   readonly viewport: DisplayRect;
 }
@@ -52,7 +79,15 @@ export function projectObjectsToScreen(
 
       if (object.kind === 'image') {
         const resource = resources.get(object.resourceId);
-        if (resource === undefined || !isSafeImageResource(resource)) {
+        const resolved = context.resolvedResources?.[object.resourceId];
+        if (
+          resource === undefined ||
+          !isSafeImageResource(resource) ||
+          resolved?.type !== 'image' ||
+          resolved.decoded === undefined ||
+          resolved.width === undefined ||
+          resolved.height === undefined
+        ) {
           return {
             object,
             bounds,
@@ -65,7 +100,9 @@ export function projectObjectsToScreen(
                 message:
                   resource === undefined
                     ? `Object ${object.id} references missing resource ${object.resourceId}`
-                    : `Object ${object.id} references an unsafe image resource ${object.resourceId}`,
+                    : !isSafeImageResource(resource)
+                      ? `Object ${object.id} references an unsafe image resource ${object.resourceId}`
+                      : `Object ${object.id} references unresolved image resource ${object.resourceId}`,
               },
             ],
           };
@@ -83,13 +120,29 @@ export function projectObjectsToScreen(
               : Object.create(null),
         }),
         diagnostics: [],
+        ...(object.kind === 'image'
+          ? {
+              imageResources: {
+                [object.resourceId]: {
+                  source: context.resolvedResources![object.resourceId]!.decoded,
+                  width: context.resolvedResources![object.resourceId]!.width!,
+                  height: context.resolvedResources![object.resourceId]!.height!,
+                },
+              },
+            }
+          : {}),
       };
     })
     .filter((projection): projection is ScreenObjectProjection => projection !== undefined)
     .sort(
       (left, right) =>
-        left.object.zIndex - right.object.zIndex || left.object.id.localeCompare(right.object.id),
+        left.object.zIndex - right.object.zIndex ||
+        compareCodeUnits(left.object.id, right.object.id),
     );
+}
+
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function unavailableImageCommands(rect: DisplayRect): readonly PrintDisplayCommand[] {

@@ -9,15 +9,18 @@ export function paintObjects(
   selectedObjectId?: string,
 ): void {
   for (const projection of objects) {
-    paintCommands(draw.context, projection.commands);
+    paintCommands(draw.context, projection.commands, projection.imageResources);
     if (projection.object.id === selectedObjectId) {
       const { bounds } = projection;
       draw.context.save();
-      draw.context.strokeStyle = '#2563eb';
-      draw.context.lineWidth = 1;
-      draw.context.setLineDash([4, 2]);
-      draw.context.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
-      draw.context.restore();
+      try {
+        draw.context.strokeStyle = '#2563eb';
+        draw.context.lineWidth = 1;
+        draw.context.setLineDash([4, 2]);
+        draw.context.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
+      } finally {
+        draw.context.restore();
+      }
     }
   }
 }
@@ -25,6 +28,7 @@ export function paintObjects(
 function paintCommands(
   context: CanvasRenderingContext2D,
   commands: readonly PrintDisplayCommand[],
+  imageResources?: ScreenObjectProjection['imageResources'],
 ): void {
   for (const command of commands) {
     if (command.kind === 'fill-rect') {
@@ -58,7 +62,13 @@ function paintCommands(
       continue;
     }
     if (command.kind === 'image') {
-      paintImagePlaceholder(context, command.rect);
+      const image = imageResources?.[command.resourceId];
+      if (image === undefined) {
+        paintImagePlaceholder(context, command.rect);
+      } else {
+        const placement = imagePlacement(image.width, image.height, command.rect, command.fit);
+        context.drawImage(image.source as CanvasImageSource, ...placement);
+      }
       continue;
     }
     if (command.kind === 'path') {
@@ -67,22 +77,49 @@ function paintCommands(
     }
     if (command.kind === 'clip') {
       context.save();
-      context.beginPath();
-      context.rect(command.rect.x, command.rect.y, command.rect.width, command.rect.height);
-      context.clip();
-      paintCommands(context, command.commands);
-      context.restore();
+      try {
+        context.beginPath();
+        context.rect(command.rect.x, command.rect.y, command.rect.width, command.rect.height);
+        context.clip();
+        paintCommands(context, command.commands, imageResources);
+      } finally {
+        context.restore();
+      }
       continue;
     }
     if (command.kind === 'group') {
       context.save();
-      context.translate(command.origin.x, command.origin.y);
-      context.rotate((command.rotation * Math.PI) / 180);
-      context.translate(-command.origin.x, -command.origin.y);
-      paintCommands(context, command.commands);
-      context.restore();
+      try {
+        context.translate(command.origin.x, command.origin.y);
+        context.rotate((command.rotation * Math.PI) / 180);
+        context.translate(-command.origin.x, -command.origin.y);
+        paintCommands(context, command.commands, imageResources);
+      } finally {
+        context.restore();
+      }
     }
   }
+}
+
+function imagePlacement(
+  sourceWidth: number,
+  sourceHeight: number,
+  target: PrintDisplayCommandRect,
+  fit: 'contain' | 'cover' | 'fill',
+): readonly [number, number, number, number] {
+  if (fit === 'fill') return [target.x, target.y, target.width, target.height];
+  const scale =
+    fit === 'contain'
+      ? Math.min(target.width / sourceWidth, target.height / sourceHeight)
+      : Math.max(target.width / sourceWidth, target.height / sourceHeight);
+  const width = sourceWidth * scale;
+  const height = sourceHeight * scale;
+  return [
+    target.x + (target.width - width) / 2,
+    target.y + (target.height - height) / 2,
+    width,
+    height,
+  ];
 }
 
 function paintImagePlaceholder(
