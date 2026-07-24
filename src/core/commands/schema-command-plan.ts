@@ -19,6 +19,7 @@ import {
   transformDocumentCoordinates,
 } from '../coordinates/coordinate-transform';
 import { parseFormula, renameFormulaSheet, renderFormula } from '../../formula';
+import { createTypedAutofillResolver } from '../operations/typed-autofill';
 
 type ValidationId = NonNullable<Cell['validationId']>;
 type MutableSheetGroup = NonNullable<SheetInput['groups']>[number];
@@ -432,6 +433,12 @@ function transformInternalPaste(
       snapshots.set(cellKey(row, column), structuredClone(getCell(sourceSheet, row, column)));
     }
   }
+  const autofillInput =
+    command.type === 'autofill'
+      ? createTypedAutofillResolver(source, range, (row, column) =>
+          snapshots.get(cellKey(row, column)),
+        )
+      : undefined;
   if (
     command.type === 'paste-internal' &&
     command.cut &&
@@ -454,8 +461,23 @@ function transformInternalPaste(
       const sourceCell = snapshots.get(cellKey(sourceRow, sourceColumn));
       const targetCell = getCell(targetSheet, row, column);
       if (command.type === 'paste-internal' && command.cut && sourceCell === undefined) continue;
-      setCell(targetSheet, row, column, mapPasteCell(targetCell, sourceCell, command.mode));
-      if (sourceCell?.input.type === 'custom' && command.mode !== 'format') {
+      const mapped = mapPasteCell(targetCell, sourceCell, command.mode);
+      const filledInput =
+        autofillInput !== undefined && command.mode !== 'format'
+          ? autofillInput(row, column)
+          : undefined;
+      setCell(
+        targetSheet,
+        row,
+        column,
+        mapped === undefined || filledInput === undefined
+          ? mapped
+          : { ...mapped, input: filledInput },
+      );
+      if (
+        command.mode !== 'format' &&
+        (command.type === 'autofill' || sourceCell?.input.type === 'custom')
+      ) {
         const keys = authoritativeInputs.get(targetSheet.id) ?? new Set<string>();
         keys.add(cellKey(row, column));
         authoritativeInputs.set(targetSheet.id, keys);

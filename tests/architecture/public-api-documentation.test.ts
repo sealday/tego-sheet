@@ -24,6 +24,7 @@ const expectedPublicExports = [
   'AutoFilterItemData',
   'AutoFilterSortData',
   'AutofillCommand',
+  'AutofillTransform',
   'BUILTIN_FORMULA_COMPATIBILITY',
   'BUILTIN_NUMBER_FORMAT_COMPATIBILITY',
   'BindingId',

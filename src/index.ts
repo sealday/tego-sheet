@@ -292,6 +292,7 @@ export type {
 } from './views';
 export { analyzeDataAnomalies, createDataTransformPlanner, DataTransformError } from './data-tools';
 export type {
+  AutofillTransform,
   DataAnomalyAnalysis,
   DataAnomalyAnalysisOptions,
   DataAnomalyAnalysisRequest,

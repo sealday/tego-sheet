@@ -1,4 +1,4 @@
-import { shiftFormulaReferences } from '../coordinates/a1';
+import { parseFormula, renderFormula, translateFormula } from '../../formula';
 import { rangeSize } from '../coordinates/ranges';
 import { cloneSheet, getCellData } from '../model/cells';
 import type { CellPoint, CellRange } from '../types/coordinates';
@@ -9,7 +9,18 @@ import { semanticEqual } from '../serialization/semantic-equal';
 const NUMERIC_SUFFIX = /[\\.\d]+$/;
 
 export function autofillText(text: string, step: number, delta: CellPoint): string {
-  if (text.startsWith('=')) return shiftFormulaReferences(text, delta);
+  if (text.startsWith('=')) {
+    try {
+      return renderFormula(
+        translateFormula(parseFormula(text), {
+          rowDelta: delta.row,
+          columnDelta: delta.column,
+        }),
+      );
+    } catch {
+      return '=#REF!';
+    }
+  }
   const match = NUMERIC_SUFFIX.exec(text);
   if (match === null) return text;
   const numeric = Number(match[0]);

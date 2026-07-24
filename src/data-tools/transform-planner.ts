@@ -13,6 +13,7 @@ import type {
   SparseCell,
 } from '../document';
 import type { SheetId } from '../core';
+import { createTypedAutofillResolver } from '../core/operations/typed-autofill';
 import { DataTransformError } from './errors';
 import { indexSparseRange, yieldForCancellation } from './range-index';
 import { createSafeRegexBudget, type SafeRegexBudget } from './safe-regex';
@@ -69,8 +70,21 @@ export interface FillSeriesTransform {
   readonly seed: readonly string[];
 }
 
+/** Revision-bound typed and formula-aware autofill request. */
+export interface AutofillTransform {
+  /** Transform discriminator. */
+  readonly type: 'autofill';
+  /** Inclusive cells providing typed seeds. */
+  readonly source: DocumentCellRange;
+  /** Inclusive destination range receiving the inferred pattern. */
+  readonly target: DocumentCellRange;
+  /** Content categories copied into the target. */
+  readonly mode: 'all' | 'value';
+}
+
 /** Supported deterministic data-cleanup requests. */
 export type DataTransform =
+  | AutofillTransform
   | FindReplaceTransform
   | SplitTextTransform
   | RemoveDuplicatesTransform
@@ -160,6 +174,14 @@ function snapshotRange(range: DocumentCellRange): DocumentCellRange {
 }
 
 function snapshotTransform(transform: DataTransform): DataTransform {
+  if (transform.type === 'autofill') {
+    return Object.freeze({
+      type: transform.type,
+      source: snapshotRange(transform.source),
+      target: snapshotRange(transform.target),
+      mode: transform.mode,
+    });
+  }
   const range = snapshotRange(transform.range);
   if (transform.type === 'find-replace') {
     return Object.freeze({
@@ -499,21 +521,43 @@ export function createDataTransformPlanner(limits: {
     async preview(snapshot, transformInput, options = {}) {
       throwIfAborted(options.signal);
       const transform = snapshotTransform(transformInput);
-      const rowCount = transform.range.end.row - transform.range.start.row + 1;
-      const columnCount = transform.range.end.column - transform.range.start.column + 1;
-      if (rowCount < 1 || columnCount < 1 || rowCount > Math.floor(limits.maxCells / columnCount)) {
+      const affectedRange = transform.type === 'autofill' ? transform.target : transform.range;
+      const rowCount = affectedRange.end.row - affectedRange.start.row + 1;
+      const columnCount = affectedRange.end.column - affectedRange.start.column + 1;
+      const affectedCellCount = rowCount * columnCount;
+      const sourceCellCount =
+        transform.type === 'autofill'
+          ? (transform.source.end.row - transform.source.start.row + 1) *
+            (transform.source.end.column - transform.source.start.column + 1)
+          : 0;
+      if (
+        rowCount < 1 ||
+        columnCount < 1 ||
+        affectedCellCount > limits.maxCells - sourceCellCount
+      ) {
         throw new DataTransformError(
           'TRANSFORM_TOO_LARGE',
           'Data transform exceeds the configured cell limit',
         );
       }
+      if (
+        transform.type === 'autofill' &&
+        (transform.source.sheetId !== transform.target.sheetId ||
+          transform.source.end.row < transform.source.start.row ||
+          transform.source.end.column < transform.source.start.column)
+      ) {
+        throw new DataTransformError(
+          'TRANSFORM_TOO_LARGE',
+          'Enhanced autofill requires same-sheet value or all-mode normalized ranges',
+        );
+      }
       const sheet = snapshot.document.workbook.sheets.find(
-        ({ id }) => id === transform.range.sheetId,
+        ({ id }) => id === affectedRange.sheetId,
       );
       if (sheet === undefined) {
         throw new DataTransformError('TRANSFORM_TOO_LARGE', 'Data transform sheet does not exist');
       }
-      const sheetId = transform.range.sheetId as string as SheetId;
+      const sheetId = affectedRange.sheetId as string as SheetId;
       const indexedRange =
         transform.type === 'split-text'
           ? {
@@ -524,14 +568,20 @@ export function createDataTransformPlanner(limits: {
                 column: transform.range.end.column + transform.maximumColumns - 1,
               },
             }
-          : transform.range;
+          : affectedRange;
       if (!Number.isSafeInteger(indexedRange.end.column)) {
         throw new DataTransformError(
           'TEXT_SPLIT_OVERFLOW',
           'Text split output exceeds the supported column range',
         );
       }
-      const cells = await indexSparseRange(sheet.cells, indexedRange, options.signal);
+      const cells =
+        transform.type === 'autofill'
+          ? new Map([
+              ...(await indexSparseRange(sheet.cells, transform.source, options.signal)),
+              ...(await indexSparseRange(sheet.cells, transform.target, options.signal)),
+            ])
+          : await indexSparseRange(sheet.cells, indexedRange, options.signal);
       const changes: { row: number; column: number; before: string; after: string }[] = [];
       const warnings: Diagnostic[] = [];
       const commands: DocumentCommandEnvelope[] = [];
@@ -546,7 +596,56 @@ export function createDataTransformPlanner(limits: {
         commands.push(command);
       };
 
-      if (transform.type === 'find-replace') {
+      if (transform.type === 'autofill') {
+        const autofillInput = createTypedAutofillResolver(
+          transform.source,
+          transform.target,
+          (row, column) => cells.get(cellKey(row, column))?.cell,
+        );
+        let inspected = 0;
+        for (let row = transform.target.start.row; row <= transform.target.end.row; row += 1) {
+          for (
+            let column = transform.target.start.column;
+            column <= transform.target.end.column;
+            column += 1
+          ) {
+            inspected += 1;
+            await yieldForCancellation(inspected, options.signal);
+            const existing = cells.get(cellKey(row, column));
+            const input = autofillInput(row, column);
+            const before = existing === undefined ? '' : inputText(existing.cell.input);
+            const after = input === undefined ? '' : inputText(input);
+            if (before === after) continue;
+            if (changes.length < limits.maxSamples) changes.push({ row, column, before, after });
+          }
+        }
+        appendCommand(
+          Object.freeze({
+            schemaVersion: 1,
+            id: 'transform-autofill-1',
+            command: Object.freeze({
+              type: 'autofill',
+              source: Object.freeze({
+                sheet: sheetId,
+                active: Object.freeze({ ...transform.source.start }),
+                range: Object.freeze({
+                  start: Object.freeze({ ...transform.source.start }),
+                  end: Object.freeze({ ...transform.source.end }),
+                }),
+              }),
+              target: Object.freeze({
+                sheet: sheetId,
+                active: Object.freeze({ ...transform.target.start }),
+                range: Object.freeze({
+                  start: Object.freeze({ ...transform.target.start }),
+                  end: Object.freeze({ ...transform.target.end }),
+                }),
+              }),
+              mode: transform.mode,
+            }),
+          }),
+        );
+      } else if (transform.type === 'find-replace') {
         const pattern = replacementPattern(transform, regexLimits);
         let inspected = 0;
         for (const entry of cells.values()) {
@@ -732,7 +831,7 @@ export function createDataTransformPlanner(limits: {
         );
       }
       for (const region of options.context?.templateRegions ?? []) {
-        if (!rangesIntersect(transform.range, region) || changes.length === 0) continue;
+        if (!rangesIntersect(affectedRange, region) || changes.length === 0) continue;
         warnings.push(
           rangeDiagnostic(
             'TEMPLATE_REGION_CONFLICT',
@@ -754,8 +853,8 @@ export function createDataTransformPlanner(limits: {
       return Object.freeze({
         planId,
         baseRevision: snapshot.revision,
-        affectedRange: snapshotRange(transform.range),
-        estimatedCellCount: commands.length,
+        affectedRange: snapshotRange(affectedRange),
+        estimatedCellCount: transform.type === 'autofill' ? affectedCellCount : commands.length,
         warnings: Object.freeze([...warnings]),
         sampleChanges: Object.freeze(
           changes.slice(0, limits.maxSamples).map((change) => Object.freeze({ ...change })),

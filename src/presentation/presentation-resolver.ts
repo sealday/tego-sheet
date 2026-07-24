@@ -432,6 +432,12 @@ export function createPresentationResolver(
       }).hiddenRows,
     ]),
   );
+  const collapsedGroupsBySheet = new Map(
+    options.document.workbook.sheets.map((sheet) => [
+      sheet.id,
+      sheet.groups.filter(({ collapsed }) => collapsed),
+    ]),
+  );
   const activeViewKey = activeViews.map(({ id }) => id).join(',');
   const resolver: PresentationResolver = {
     resolve(address: DocumentCellAddress) {
@@ -498,6 +504,14 @@ export function createPresentationResolver(
       const hidden =
         sheet.rows.some((row) => row.index === address.row && row.hidden === true) ||
         sheet.columns.some((column) => column.index === address.column && column.hidden === true) ||
+        (collapsedGroupsBySheet
+          .get(address.sheetId)
+          ?.some((group) =>
+            group.axis === 'row'
+              ? address.row >= group.start && address.row <= group.end
+              : address.column >= group.start && address.column <= group.end,
+          ) ??
+          false) ||
         (filterViewHiddenRows.get(address.sheetId)?.has(address.row) ?? false);
       const description = validation.status === 'valid' ? undefined : validation.message;
       const presentation = freezePresentation({

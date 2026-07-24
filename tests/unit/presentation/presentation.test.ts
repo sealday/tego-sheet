@@ -14,7 +14,7 @@ import { parseSpreadsheetDocument } from '../../../src/document';
 import { CanvasEngine, createSheetGridModel, createViewportMetrics } from '../../../src/engine';
 import { createCanvasHarness } from '../../helpers/canvas-harness';
 
-function documentFixture() {
+function documentFixture(collapsedOutline = false) {
   const parsed = parseSpreadsheetDocument({
     schemaVersion: 2,
     id: 'presentation-document',
@@ -80,6 +80,20 @@ function documentFixture() {
             { index: 2, styleId: 'row-style' },
           ],
           columns: [{ index: 0, styleId: 'column-style' }],
+          ...(collapsedOutline
+            ? {
+                groups: [
+                  {
+                    id: 'collapsed-row',
+                    axis: 'row' as const,
+                    start: 2,
+                    end: 2,
+                    level: 1,
+                    collapsed: true,
+                  },
+                ],
+              }
+            : {}),
           conditionalFormatting: [
             {
               type: 'cell-is',
@@ -122,8 +136,8 @@ function documentFixture() {
   return parsed.document;
 }
 
-function resolverFixture(maximumEntries = 100) {
-  const document = documentFixture();
+function resolverFixture(maximumEntries = 100, collapsedOutline = false) {
+  const document = documentFixture(collapsedOutline);
   const formulaEngine = createFormulaEngine();
   const program = formulaEngine.compile(document);
   formulaEngine.recalculate(program, [], {
@@ -164,6 +178,20 @@ function resolverFixture(maximumEntries = 100) {
 }
 
 describe('shared cell presentation', () => {
+  it('derives collapsed outline visibility for screen and print without row truth mutation', () => {
+    const { document, resolver } = resolverFixture(100, true);
+    expect(resolver.resolve({ sheetId: 'sheet-1' as never, row: 2, column: 0 }).visibility).toEqual(
+      {
+        hidden: true,
+        printable: true,
+      },
+    );
+    expect(document.workbook.sheets[0]?.rows).toEqual([
+      { index: 1, hidden: true },
+      { index: 2, styleId: 'row-style' },
+    ]);
+  });
+
   it('resolves typed value, formatted text, style, validation, annotations and visibility once', () => {
     const { resolver } = resolverFixture();
 

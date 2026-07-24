@@ -7,6 +7,7 @@ export type {
 } from './anomaly-analysis';
 export { createDataTransformPlanner, DataTransformError } from './transform-planner';
 export type {
+  AutofillTransform,
   DataToolPreviewContext,
   DataTransform,
   DataTransformCommitResult,
