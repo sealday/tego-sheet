@@ -115,6 +115,7 @@ export function compileSolverModel(request: SolverModelRequest): CompiledSolverM
     throw new RangeError('Solver constraint limit is 100000');
   }
   const variableIds = new Set<string>();
+  const variableAddresses = new Set<string>();
   const variables = request.variables.map((variable, index): SolverVariable => {
     const id = identifier(variable.id, `Solver variable ${index} ID`);
     if (variableIds.has(id)) throw new TypeError(`Duplicate solver variable ID ${id}`);
@@ -130,9 +131,18 @@ export function compileSolverModel(request: SolverModelRequest): CompiledSolverM
     if (minimum !== undefined && maximum !== undefined && minimum > maximum) {
       throw new RangeError(`Solver variable ${id} bounds are invalid`);
     }
+    if (variable.integer !== undefined && typeof variable.integer !== 'boolean') {
+      throw new TypeError(`Solver variable ${id} integer must be boolean`);
+    }
+    const variableAddress = address(variable.address, `Solver variable ${id}`);
+    const addressKey = `${variableAddress.sheetId}:${variableAddress.row}:${variableAddress.column}`;
+    if (variableAddresses.has(addressKey)) {
+      throw new TypeError(`Duplicate solver variable address ${addressKey}`);
+    }
+    variableAddresses.add(addressKey);
     return Object.freeze({
       id,
-      address: address(variable.address, `Solver variable ${id}`),
+      address: variableAddress,
       ...(minimum === undefined ? {} : { minimum }),
       ...(maximum === undefined ? {} : { maximum }),
       ...(variable.integer === undefined ? {} : { integer: variable.integer === true }),
@@ -163,6 +173,9 @@ export function compileSolverModel(request: SolverModelRequest): CompiledSolverM
   if (request.objective.goal === 'target' && targetValue === undefined) {
     throw new TypeError('Target solver objectives require targetValue');
   }
+  if (request.objective.goal !== 'target' && targetValue !== undefined) {
+    throw new TypeError('Only target solver objectives accept targetValue');
+  }
   return Object.freeze({
     documentId: identifier(request.documentId, 'Solver documentId'),
     revision: identifier(request.revision, 'Solver revision'),
@@ -190,6 +203,7 @@ function isSolverResult(value: unknown, model: CompiledSolverModel): value is So
     return false;
   }
   const variables = new Set(model.variables.map(({ id }) => id));
+  const variableDefinitions = new Map(model.variables.map((variable) => [variable.id, variable]));
   const candidateIds = new Set<string>();
   for (const candidate of result.candidates) {
     if (
@@ -198,6 +212,15 @@ function isSolverResult(value: unknown, model: CompiledSolverModel): value is So
       !variables.has(candidate.variableId) ||
       candidateIds.has(candidate.variableId) ||
       !Number.isFinite(candidate.value)
+    ) {
+      return false;
+    }
+    const definition = variableDefinitions.get(candidate.variableId);
+    if (
+      definition === undefined ||
+      (definition.minimum !== undefined && candidate.value < definition.minimum) ||
+      (definition.maximum !== undefined && candidate.value > definition.maximum) ||
+      (definition.integer === true && !Number.isSafeInteger(candidate.value))
     ) {
       return false;
     }
@@ -217,7 +240,16 @@ function isSolverResult(value: unknown, model: CompiledSolverModel): value is So
     }
     residualIds.add(residual.constraintId);
   }
-  return true;
+  const status = result.status;
+  const completeCandidates = candidateIds.size === variables.size;
+  const completeResiduals = residualIds.size === constraints.size;
+  if (status === 'optimal' || status === 'feasible') {
+    return result.objectiveValue !== undefined && completeCandidates && completeResiduals;
+  }
+  if (status === 'infeasible' || status === 'unbounded') {
+    return result.objectiveValue === undefined && candidateIds.size === 0 && completeResiduals;
+  }
+  return result.objectiveValue === undefined && candidateIds.size === 0 && residualIds.size === 0;
 }
 
 /** Executes a compiled model through the public isolated-worker solver adapter contract. */

@@ -50,6 +50,8 @@ export interface PivotRefreshLimits {
   readonly maximumFields: number;
   readonly maximumCardinality: number;
   readonly maximumResultCells: number;
+  /** Comparisons and materialized values allowed after aggregation. */
+  readonly maximumPostProcessingSteps: number;
 }
 
 /** Options for a cancellable Pivot refresh. */
@@ -62,7 +64,11 @@ export interface PivotRefreshOptions {
 
 /** Atomic refresh outcome; cancellation may retain the last successful result. */
 export type PivotRefreshOutcome =
-  | { readonly status: 'ready'; readonly stale: false; readonly result: PivotResult }
+  | {
+      readonly status: 'ready';
+      readonly stale: false;
+      readonly result: PivotResult;
+    }
   | {
       readonly status: 'cancelled';
       readonly stale: true;
@@ -74,6 +80,7 @@ const defaultLimits: Readonly<PivotRefreshLimits> = Object.freeze({
   maximumFields: 1_000,
   maximumCardinality: 10_000,
   maximumResultCells: 100_000,
+  maximumPostProcessingSteps: 10_000_000,
 });
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 
@@ -98,6 +105,13 @@ function cancelled(previous: PivotResult | undefined): PivotRefreshOutcome {
     stale: true,
     ...(previous === undefined ? {} : { result: previous }),
   });
+}
+
+function matchingPrevious(
+  definitionId: string,
+  previous: PivotResult | undefined,
+): PivotResult | undefined {
+  return previous?.definitionId === definitionId ? previous : undefined;
 }
 
 function checkedLimit(value: number | undefined, fallback: number, label: string): number {
@@ -158,13 +172,63 @@ function finalizeAggregate(state: AggregateState, aggregate: PivotAggregate): nu
   return state.maximum ?? 0;
 }
 
+interface PostProcessingBudget {
+  readonly signal: AbortSignal;
+  readonly maximum: number;
+  steps: number;
+}
+
+async function postProcessingStep(budget: PostProcessingBudget): Promise<boolean> {
+  budget.steps += 1;
+  if (budget.steps > budget.maximum) {
+    throw new RangeError('Pivot post-processing limit exceeded');
+  }
+  if (budget.steps % 256 === 0) await Promise.resolve();
+  return !budget.signal.aborted;
+}
+
+async function stableBudgetedSort<Value>(
+  values: readonly Value[],
+  compare: (left: Value, right: Value) => number,
+  budget: PostProcessingBudget,
+): Promise<Value[] | undefined> {
+  let source = [...values];
+  let target = Array.from<Value>({ length: source.length });
+  for (let width = 1; width < source.length; width *= 2) {
+    for (let start = 0; start < source.length; start += width * 2) {
+      let left = start;
+      let right = Math.min(start + width, source.length);
+      const leftEnd = right;
+      const rightEnd = Math.min(start + width * 2, source.length);
+      let output = start;
+      while (left < leftEnd || right < rightEnd) {
+        if (!(await postProcessingStep(budget))) return undefined;
+        if (
+          right >= rightEnd ||
+          (left < leftEnd && compare(source[left] as Value, source[right] as Value) <= 0)
+        ) {
+          target[output] = source[left] as Value;
+          left += 1;
+        } else {
+          target[output] = source[right] as Value;
+          right += 1;
+        }
+        output += 1;
+      }
+    }
+    [source, target] = [target, source];
+  }
+  return source;
+}
+
 /** Aggregates a source snapshot without mutating the workbook or the previous result. */
 export async function refreshPivot(
   source: PivotSourceSnapshot,
   definition: PivotDefinition,
   options: PivotRefreshOptions,
 ): Promise<PivotRefreshOutcome> {
-  if (options.signal.aborted) return cancelled(options.previous);
+  const previous = matchingPrevious(definition.id, options.previous);
+  if (options.signal.aborted) return cancelled(previous);
   const limits: PivotRefreshLimits = {
     maximumRows: checkedLimit(
       options.limits?.maximumRows,
@@ -185,6 +249,11 @@ export async function refreshPivot(
       options.limits?.maximumResultCells,
       defaultLimits.maximumResultCells,
       'Pivot result cell limit',
+    ),
+    maximumPostProcessingSteps: checkedLimit(
+      options.limits?.maximumPostProcessingSteps,
+      defaultLimits.maximumPostProcessingSteps,
+      'Pivot post-processing limit',
     ),
   };
   if (source.rows.length > limits.maximumRows) {
@@ -219,6 +288,9 @@ export async function refreshPivot(
     if (!identifierPattern.test(value.id) || valueIds.has(value.id)) {
       throw new TypeError(`Pivot value ID ${value.id} is invalid or duplicated`);
     }
+    if (!['sum', 'count', 'average', 'min', 'max'].includes(value.aggregate)) {
+      throw new TypeError(`Pivot aggregate ${String(value.aggregate)} is invalid`);
+    }
     valueIds.add(value.id);
   }
   const filters = definition.filters.map((filter) => ({
@@ -229,7 +301,7 @@ export async function refreshPivot(
   const rowKeys = new Map<string, readonly PivotScalar[]>();
   const columnKeys = new Map<string, readonly PivotScalar[]>();
   for (let sourceRow = 0; sourceRow < source.rows.length; sourceRow += 1) {
-    if (options.signal.aborted) return cancelled(options.previous);
+    if (options.signal.aborted) return cancelled(previous);
     const row = source.rows[sourceRow]!;
     if (row.length !== source.fields.length) {
       throw new TypeError(`Pivot source row ${sourceRow} has an invalid field count`);
@@ -284,35 +356,52 @@ export async function refreshPivot(
     }
   }
   options.onProgress?.(source.rows.length, source.rows.length);
-  const cells = [...groups.values()]
-    .sort(
-      (left, right) =>
-        compareKey(left.rowKey, right.rowKey) || compareKey(left.columnKey, right.columnKey),
-    )
-    .map((group): PivotResultCell => {
-      const values: Record<string, number> = {};
-      for (const definition_ of valueDefinitions) {
-        values[definition_.id] = finalizeAggregate(
-          group.values.get(definition_.id) ?? {
-            sum: 0,
-            count: 0,
-            numericCount: 0,
-          },
-          definition_.aggregate,
-        );
-      }
-      return Object.freeze({
+  if (options.signal.aborted) return cancelled(previous);
+  const budget: PostProcessingBudget = {
+    signal: options.signal,
+    maximum: limits.maximumPostProcessingSteps,
+    steps: 0,
+  };
+  const sortedGroups = await stableBudgetedSort(
+    [...groups.values()],
+    (left, right) =>
+      compareKey(left.rowKey, right.rowKey) || compareKey(left.columnKey, right.columnKey),
+    budget,
+  );
+  if (sortedGroups === undefined) return cancelled(previous);
+  const cells: PivotResultCell[] = [];
+  for (const group of sortedGroups) {
+    const values: Record<string, number> = {};
+    for (const definition_ of valueDefinitions) {
+      if (!(await postProcessingStep(budget))) return cancelled(previous);
+      values[definition_.id] = finalizeAggregate(
+        group.values.get(definition_.id) ?? {
+          sum: 0,
+          count: 0,
+          numericCount: 0,
+        },
+        definition_.aggregate,
+      );
+    }
+    if (!(await postProcessingStep(budget))) return cancelled(previous);
+    cells.push(
+      Object.freeze({
         rowKey: group.rowKey,
         columnKey: group.columnKey,
         values: Object.freeze(values),
         sourceRows: Object.freeze([...group.sourceRows]),
-      });
-    });
+      }),
+    );
+  }
+  const sortedRowKeys = await stableBudgetedSort([...rowKeys.values()], compareKey, budget);
+  if (sortedRowKeys === undefined) return cancelled(previous);
+  const sortedColumnKeys = await stableBudgetedSort([...columnKeys.values()], compareKey, budget);
+  if (sortedColumnKeys === undefined) return cancelled(previous);
   const result: PivotResult = Object.freeze({
     definitionId: definition.id,
     sourceRevision: source.revision,
-    rowKeys: Object.freeze([...rowKeys.values()].sort(compareKey)),
-    columnKeys: Object.freeze([...columnKeys.values()].sort(compareKey)),
+    rowKeys: Object.freeze(sortedRowKeys),
+    columnKeys: Object.freeze(sortedColumnKeys),
     cells: Object.freeze(cells),
   });
   return Object.freeze({ status: 'ready', stale: false, result });

@@ -53,6 +53,18 @@ describe('solver adapter boundary', () => {
         })),
       }),
     ).toThrow(/limit/u);
+    expect(() =>
+      compileSolverModel({
+        ...request,
+        variables: [{ ...request.variables[0]!, integer: 'yes' as never }],
+      }),
+    ).toThrow(/integer/u);
+    expect(() =>
+      compileSolverModel({
+        ...request,
+        objective: { ...request.objective, targetValue: 10 },
+      }),
+    ).toThrow(/targetValue/u);
   });
 
   it('runs only through an isolated-worker adapter and validates its result', async () => {
@@ -104,7 +116,10 @@ describe('solver adapter boundary', () => {
   });
 
   it('rejects trusted-main solver execution', async () => {
-    const registry = createAdapterRegistry({ apiVersion: '1.0', environment: 'browser' });
+    const registry = createAdapterRegistry({
+      apiVersion: '1.0',
+      environment: 'browser',
+    });
     await registry.register({
       manifest: {
         id: 'main-solver',
@@ -123,5 +138,96 @@ describe('solver adapter boundary', () => {
         signal: new AbortController().signal,
       }),
     ).rejects.toThrow(/isolated-worker/u);
+  });
+
+  it('rejects incomplete, out-of-bounds, non-integral, and status-inconsistent results', async () => {
+    const cases = [
+      {
+        status: 'optimal',
+        objectiveValue: 12,
+        candidates: [],
+        residuals: [{ constraintId: 'capacity', value: 0 }],
+      },
+      {
+        status: 'optimal',
+        objectiveValue: 12,
+        candidates: [{ variableId: 'x', value: 11 }],
+        residuals: [{ constraintId: 'capacity', value: 0 }],
+      },
+      {
+        status: 'optimal',
+        candidates: [{ variableId: 'x', value: 4 }],
+        residuals: [{ constraintId: 'capacity', value: 0 }],
+      },
+      {
+        status: 'cancelled',
+        objectiveValue: 12,
+        candidates: [{ variableId: 'x', value: 4 }],
+        residuals: [{ constraintId: 'capacity', value: 0 }],
+      },
+    ];
+
+    for (const output of cases) {
+      const registry = createAdapterRegistry({
+        apiVersion: '1.0',
+        environment: 'browser',
+        isolatedWorkerTransport: {
+          invoke: vi.fn(async () => output),
+          terminate: vi.fn(async () => undefined),
+        },
+      });
+      await registry.register({
+        manifest: {
+          id: 'strict-worker-solver',
+          apiVersion: '1.0',
+          kind: 'solver',
+          environments: ['browser'],
+          execution: 'isolated-worker',
+          priority: 0,
+          capabilities: ['solve'],
+        },
+        descriptor: { workerId: 'strict-solver-worker' },
+      });
+      await expect(
+        runSolver(registry, compileSolverModel(request), {
+          signal: new AbortController().signal,
+        }),
+      ).rejects.toThrow();
+    }
+
+    const integerModel = compileSolverModel({
+      ...request,
+      variables: [{ ...request.variables[0]!, integer: true }],
+    });
+    const registry = createAdapterRegistry({
+      apiVersion: '1.0',
+      environment: 'browser',
+      isolatedWorkerTransport: {
+        invoke: vi.fn(async () => ({
+          status: 'feasible',
+          objectiveValue: 12,
+          candidates: [{ variableId: 'x', value: 4.5 }],
+          residuals: [{ constraintId: 'capacity', value: 0 }],
+        })),
+        terminate: vi.fn(async () => undefined),
+      },
+    });
+    await registry.register({
+      manifest: {
+        id: 'integer-worker-solver',
+        apiVersion: '1.0',
+        kind: 'solver',
+        environments: ['browser'],
+        execution: 'isolated-worker',
+        priority: 0,
+        capabilities: ['solve'],
+      },
+      descriptor: { workerId: 'integer-solver-worker' },
+    });
+    await expect(
+      runSolver(registry, integerModel, {
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow();
   });
 });

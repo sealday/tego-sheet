@@ -90,6 +90,76 @@ describe('pivot refresh', () => {
     });
   });
 
+  it('does not retain a previous result from another definition', async () => {
+    const initial = await refreshPivot(source, definition, {
+      signal: new AbortController().signal,
+    });
+    if (initial.status !== 'ready') throw new Error('expected initial pivot result');
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      refreshPivot(
+        source,
+        { ...definition, id: 'pivot-2' },
+        { signal: controller.signal, previous: initial.result },
+      ),
+    ).resolves.toEqual({
+      status: 'cancelled',
+      stale: true,
+    });
+  });
+
+  it('rejects unknown aggregates at the runtime boundary', async () => {
+    await expect(
+      refreshPivot(
+        source,
+        {
+          ...definition,
+          values: [
+            {
+              id: 'sales',
+              field: 'amount',
+              aggregate: 'median',
+            },
+          ],
+        } as unknown as typeof definition,
+        { signal: new AbortController().signal },
+      ),
+    ).rejects.toThrow(/aggregate/u);
+  });
+
+  it('bounds and can cancel deterministic post-processing', async () => {
+    const manyGroups = {
+      revision: 'source-many',
+      fields: ['group', 'amount'],
+      rows: Array.from({ length: 20 }, (_, index) => [`group-${index}`, index] as const),
+    };
+    const manyDefinition = {
+      id: 'pivot-many',
+      rows: ['group'],
+      columns: [],
+      values: [{ id: 'total', field: 'amount', aggregate: 'sum' as const }],
+      filters: [],
+    };
+
+    await expect(
+      refreshPivot(manyGroups, manyDefinition, {
+        signal: new AbortController().signal,
+        limits: { maximumPostProcessingSteps: 5 },
+      }),
+    ).rejects.toThrow(/post-processing/u);
+
+    const controller = new AbortController();
+    const outcome = await refreshPivot(manyGroups, manyDefinition, {
+      signal: controller.signal,
+      onProgress(completed, total) {
+        if (completed === total) controller.abort();
+      },
+    });
+    expect(outcome).toEqual({ status: 'cancelled', stale: true });
+  });
+
   it('fails closed when result or source budgets are exceeded', async () => {
     await expect(
       refreshPivot(source, definition, {
