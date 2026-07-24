@@ -60,6 +60,54 @@ function imageDocument() {
 }
 
 describe('ImageAdapter', () => {
+  it('preserves grouped rotation and clipping in standalone SVG output', async () => {
+    const fixture = outputGeneratedDocument();
+    const page = fixture.print.displayList.pages[0]!;
+    const [blob] = await new ImageAdapter().render(
+      {
+        ...fixture,
+        print: {
+          ...fixture.print,
+          displayList: {
+            diagnostics: [],
+            pages: [
+              {
+                ...page,
+                commands: [
+                  {
+                    kind: 'group',
+                    rotation: 45,
+                    origin: { x: 30, y: 35 },
+                    commands: [
+                      {
+                        kind: 'clip',
+                        rect: { x: 10, y: 20, width: 40, height: 30 },
+                        commands: [
+                          {
+                            kind: 'fill-rect',
+                            rect: { x: 10, y: 20, width: 40, height: 30 },
+                            color: '#ffeecc',
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+              fixture.print.displayList.pages[1]!,
+            ],
+          },
+        },
+      } as never,
+      { format: 'svg', pages: [0], background: 'transparent' },
+    );
+    const svg = await blob!.text();
+
+    expect(svg).toContain('<g transform="rotate(45 30 35)">');
+    expect(svg).toContain('clip-path="url(#tego-clip-page-0-0-0)"');
+    expect(svg).toContain('fill="#ffeecc"');
+  });
+
   it('emits requested standalone SVG pages in exact order and without active content', async () => {
     const blobs = await new ImageAdapter().render(imageDocument(), {
       format: 'svg',

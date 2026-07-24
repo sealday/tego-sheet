@@ -242,7 +242,7 @@ export type ObjectAnchor =
       };
     };
 
-/** Persistent image or plain-text floating worksheet object. */
+/** Persistent image, bounded vector shape, or plain-text floating worksheet object. */
 export type SheetObject =
   | {
       /** Stable object identifier. */
@@ -261,6 +261,42 @@ export type SheetObject =
       readonly resourceId: ResourceId;
       /** Image fitting policy. */
       readonly fit?: 'contain' | 'cover' | 'fill';
+      /** Clockwise rotation normalized to the half-open range [0, 360). */
+      readonly rotation?: number;
+      /** Accessible object label. */
+      readonly accessibility: {
+        /** Accessible object name. */
+        readonly name: string;
+        /** Optional accessible object description. */
+        readonly description?: string;
+      };
+    }
+  | {
+      /** Stable object identifier. */
+      readonly id: ObjectId;
+      /** Bounded renderer-neutral vector shape. */
+      readonly kind: 'shape';
+      /** Supported primitive shape. */
+      readonly shape: 'rectangle' | 'ellipse' | 'line';
+      /** Logical object position. */
+      readonly anchor: ObjectAnchor;
+      /** Stable paint order. */
+      readonly zIndex: number;
+      /** Whether interactive editing is locked. */
+      readonly locked: boolean;
+      /** Template repetition policy. */
+      readonly templateRepeat: 'shared' | 'per-item' | 'forbidden';
+      /** Clockwise rotation normalized to the half-open range [0, 360). */
+      readonly rotation?: number;
+      /** Deterministic shape presentation. */
+      readonly style: {
+        /** Optional fill color; omitted for a transparent interior. */
+        readonly fill?: string;
+        /** Optional border or line color. */
+        readonly stroke?: string;
+        /** Optional non-negative border or line width. */
+        readonly strokeWidth?: number;
+      };
       /** Accessible object label. */
       readonly accessibility: {
         /** Accessible object name. */
@@ -284,6 +320,8 @@ export type SheetObject =
       readonly templateRepeat: 'shared' | 'per-item' | 'forbidden';
       /** Plain text that is never interpreted as markup. */
       readonly text: string;
+      /** Clockwise rotation normalized to the half-open range [0, 360). */
+      readonly rotation?: number;
       /** Deterministic text presentation. */
       readonly style: {
         /** CSS-compatible text color. */

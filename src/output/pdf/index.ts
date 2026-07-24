@@ -118,7 +118,9 @@ function requiresEmbeddedFont(text: string): boolean {
 function usedFontFamilies(commands: readonly PrintDisplayCommand[], families: Set<string>): void {
   for (const command of commands) {
     if (command.kind === 'text') families.add(command.fontFamily);
-    else if (command.kind === 'clip') usedFontFamilies(command.commands, families);
+    else if (command.kind === 'clip' || command.kind === 'group') {
+      usedFontFamilies(command.commands, families);
+    }
   }
 }
 
@@ -364,6 +366,14 @@ function drawCommands(
             points(command.rect.height),
           )
           .clip();
+        drawCommands(pdf, command.commands, document, fonts, deadline, signal);
+        pdf.restore();
+        break;
+      case 'group':
+        pdf.save();
+        pdf.rotate(command.rotation, {
+          origin: [points(command.origin.x), points(command.origin.y)],
+        });
         drawCommands(pdf, command.commands, document, fonts, deadline, signal);
         pdf.restore();
         break;

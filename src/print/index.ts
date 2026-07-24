@@ -8,6 +8,7 @@ export type {
   PrintDisplayPageInput,
   PrintClipCommand,
   PrintFillRectCommand,
+  PrintGroupCommand,
   PrintImageCommand,
   PrintLineCommand,
   PrintLinkCommand,

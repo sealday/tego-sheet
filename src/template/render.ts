@@ -720,43 +720,38 @@ function displayPages(
         ) {
           return [];
         }
-        return objectToDisplayCommands(object, {
+        const pageRect = {
+          x: profile.page.margins.left + headingSize + (rect.x - bodyOriginX) * page.scale,
+          y: profile.page.margins.top + headingSize + (rect.y - bodyOriginY) * page.scale,
+          width: rect.width * page.scale,
+          height: rect.height * page.scale,
+        };
+        const displayObject =
+          object.kind === 'text-box'
+            ? {
+                ...object,
+                anchor: { type: 'absolute' as const, rect: pageRect },
+                style: { ...object.style, fontSize: object.style.fontSize * page.scale },
+              }
+            : object.kind === 'shape'
+              ? {
+                  ...object,
+                  anchor: { type: 'absolute' as const, rect: pageRect },
+                  style: {
+                    ...object.style,
+                    ...(object.style.strokeWidth === undefined
+                      ? {}
+                      : { strokeWidth: object.style.strokeWidth * page.scale }),
+                  },
+                }
+              : {
+                  ...object,
+                  anchor: { type: 'absolute' as const, rect: pageRect },
+                };
+        return objectToDisplayCommands(displayObject, {
           geometry,
           resources: resources.byReference,
-        })
-          .map((command) =>
-            command.kind === 'image'
-              ? { ...command, rect }
-              : { ...command, x: rect.x, y: rect.y, maxWidth: rect.width },
-          )
-          .map((command) => {
-            const x =
-              profile.page.margins.left +
-              headingSize +
-              ((command.kind === 'image' ? command.rect.x : command.x) - bodyOriginX) * page.scale;
-            const y =
-              profile.page.margins.top +
-              headingSize +
-              ((command.kind === 'image' ? command.rect.y : command.y) - bodyOriginY) * page.scale;
-            if (command.kind === 'image') {
-              return {
-                ...command,
-                rect: {
-                  x,
-                  y,
-                  width: command.rect.width * page.scale,
-                  height: command.rect.height * page.scale,
-                },
-              };
-            }
-            return {
-              ...command,
-              x,
-              y,
-              maxWidth: command.maxWidth * page.scale,
-              fontSize: command.fontSize * page.scale,
-            };
-          });
+        });
       });
     return {
       width: page.width,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SpreadsheetDocument } from '../../../src/document';
 import { createFontMetrics } from '../../../src/presentation';
+import type { PrintDisplayCommand } from '../../../src/print';
 import { compileSpreadsheetTemplate } from '../../../src/template/compiler';
 import { renderSpreadsheetTemplate } from '../../../src/template/render';
 import type { SpreadsheetTemplate } from '../../../src/template/model';
@@ -121,6 +122,14 @@ const environment = {
     fallback: { averageAdvance: 6, lineHeight: 12 },
   }),
 };
+
+function flattenCommands(commands: readonly PrintDisplayCommand[]): readonly PrintDisplayCommand[] {
+  return commands.flatMap((command) =>
+    command.kind === 'clip' || command.kind === 'group'
+      ? [command, ...flattenCommands(command.commands)]
+      : [command],
+  );
+}
 
 describe('template render pipeline', () => {
   it('consumes an explicit session view snapshot in print without persisting selection', async () => {
@@ -293,7 +302,9 @@ describe('template render pipeline', () => {
     );
 
     expect(result.diagnostics.filter(({ severity }) => severity === 'error')).toEqual([]);
-    expect(result.document?.print.displayList.pages[0]?.commands).toContainEqual(
+    expect(
+      flattenCommands(result.document?.print.displayList.pages[0]?.commands ?? []),
+    ).toContainEqual(
       expect.objectContaining({
         kind: 'text',
         text: 'Persistent notice',
@@ -383,7 +394,7 @@ describe('template render pipeline', () => {
     );
     const objectCommands =
       result.document?.print.displayList.pages.flatMap((page) =>
-        page.commands.filter(
+        flattenCommands(page.commands).filter(
           (command) =>
             command.kind === 'text' &&
             (command.text === 'Sorted object' || command.text === 'Filtered object'),
@@ -491,7 +502,7 @@ describe('template render pipeline', () => {
     );
     const spanningCommands =
       result.document?.print.displayList.pages.flatMap((page, pageIndex) =>
-        page.commands.flatMap((command) =>
+        flattenCommands(page.commands).flatMap((command) =>
           command.kind === 'text' && command.text === 'Spanning object'
             ? [{ pageIndex, y: command.y, maxWidth: command.maxWidth }]
             : [],

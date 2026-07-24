@@ -22,6 +22,54 @@ function withFontFsType(bytes: Uint8Array, fsType: number): number[] {
 }
 
 describe('PdfAdapter', () => {
+  it('translates grouped rotation and clipped shape commands into PDF graphics state', async () => {
+    const fixture = outputGeneratedDocument();
+    const page = fixture.print.displayList.pages[0]!;
+    const blob = await new PdfAdapter().render(
+      {
+        ...fixture,
+        print: {
+          ...fixture.print,
+          displayList: {
+            diagnostics: [],
+            pages: [
+              {
+                ...page,
+                commands: [
+                  {
+                    kind: 'group',
+                    rotation: 90,
+                    origin: { x: 30, y: 35 },
+                    commands: [
+                      {
+                        kind: 'clip',
+                        rect: { x: 10, y: 20, width: 40, height: 30 },
+                        commands: [
+                          {
+                            kind: 'fill-rect',
+                            rect: { x: 10, y: 20, width: 40, height: 30 },
+                            color: '#ffeecc',
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+              fixture.print.displayList.pages[1]!,
+            ],
+          },
+        },
+      } as never,
+      { pages: [0], tagged: false },
+    );
+    const content = await pdfText(blob);
+
+    expect(content).toContain('0 1 -1 0');
+    expect(content.match(/\bq\b/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(content.match(/\bW\b/g)?.length).toBeGreaterThanOrEqual(1);
+  });
+
   it('translates exact selected page geometry, vector content, searchable text, links, and metadata', async () => {
     const fixture = outputGeneratedDocument();
     const source = {

@@ -23,6 +23,7 @@ export type PrintDisplayCommand =
   | PrintImageCommand
   | PrintPathCommand
   | PrintClipCommand
+  | PrintGroupCommand
   | PrintLinkCommand;
 
 /** Filled rectangular display-list operation. */
@@ -123,6 +124,23 @@ export interface PrintClipCommand {
   readonly commands: readonly PrintDisplayCommand[];
 }
 
+/** Nested command group rotated around one stable device-independent origin. */
+export interface PrintGroupCommand {
+  /** Stable operation discriminator. */
+  readonly kind: 'group';
+  /** Clockwise rotation in normalized degrees. */
+  readonly rotation: number;
+  /** Rotation origin in device-independent units. */
+  readonly origin: {
+    /** Horizontal rotation origin. */
+    readonly x: number;
+    /** Vertical rotation origin. */
+    readonly y: number;
+  };
+  /** Commands evaluated inside the transformed graphics state. */
+  readonly commands: readonly PrintDisplayCommand[];
+}
+
 /** Accessible link region in generated output. */
 export interface PrintLinkCommand {
   /** Stable operation discriminator. */
@@ -196,10 +214,12 @@ function finiteNonNegative(value: number, name: string): void {
 }
 
 function freezeCommand(command: PrintDisplayCommand): PrintDisplayCommand {
-  if (command.kind === 'clip') {
+  if (command.kind === 'clip' || command.kind === 'group') {
     return Object.freeze({
       ...command,
-      rect: Object.freeze({ ...command.rect }),
+      ...(command.kind === 'clip'
+        ? { rect: Object.freeze({ ...command.rect }) }
+        : { origin: Object.freeze({ ...command.origin }) }),
       commands: Object.freeze(command.commands.map(freezeCommand)),
     });
   }
@@ -217,6 +237,7 @@ const DRAW_COMMAND_KINDS = new Set([
   'image',
   'path',
   'clip',
+  'group',
   'link',
 ]);
 
@@ -246,7 +267,29 @@ export function validatePrintDisplayCommands(commands: readonly unknown[]): read
       });
       return;
     }
-    if (candidate.kind === 'clip' && Array.isArray(candidate.commands)) {
+    if (candidate.kind === 'group') {
+      const origin = candidate.origin as Readonly<Record<string, unknown>> | undefined;
+      if (
+        !Number.isFinite(candidate.rotation) ||
+        (candidate.rotation as number) < 0 ||
+        (candidate.rotation as number) >= 360 ||
+        origin === undefined ||
+        !Number.isFinite(origin.x) ||
+        !Number.isFinite(origin.y) ||
+        !Array.isArray(candidate.commands)
+      ) {
+        diagnostics.push({
+          code: 'DRAW_COMMAND_UNSUPPORTED',
+          severity: 'error',
+          domain: 'output',
+          stage: 'validate',
+          message: `Draw command ${index} has an invalid group transform`,
+          details: { index, kind: candidate.kind },
+        });
+        return;
+      }
+      candidate.commands.forEach(visit);
+    } else if (candidate.kind === 'clip' && Array.isArray(candidate.commands)) {
       candidate.commands.forEach(visit);
     }
   };

@@ -224,7 +224,7 @@ async function imageCommands(
   for (const command of commands) {
     if (command.kind === 'text') {
       output.push(await outlineText(command, resources, fonts));
-    } else if (command.kind === 'clip') {
+    } else if (command.kind === 'clip' || command.kind === 'group') {
       output.push(
         Object.freeze({
           ...command,
@@ -396,6 +396,14 @@ async function paintCommands(
         context.beginPath();
         context.rect(command.rect.x, command.rect.y, command.rect.width, command.rect.height);
         context.clip();
+        await paintCommands(context, command.commands, request);
+        context.restore();
+        break;
+      case 'group':
+        context.save();
+        context.translate(command.origin.x, command.origin.y);
+        context.rotate((command.rotation * Math.PI) / 180);
+        context.translate(-command.origin.x, -command.origin.y);
         await paintCommands(context, command.commands, request);
         context.restore();
         break;

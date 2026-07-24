@@ -74,6 +74,69 @@ afterEach(() => {
 });
 
 describe('IsolatedBrowserPrintAdapter', () => {
+  it('serializes grouped rotation, vector shapes, and text clipping exactly', () => {
+    const source = generatedDocument();
+    const rotated = {
+      ...source,
+      print: {
+        ...source.print,
+        displayList: {
+          diagnostics: [],
+          pages: [
+            {
+              ...source.print.displayList.pages[0]!,
+              commands: [
+                {
+                  kind: 'group',
+                  rotation: 90,
+                  origin: { x: 30, y: 35 },
+                  commands: [
+                    {
+                      kind: 'path',
+                      data: 'M 30 20 A 20 15 0 1 0 30 50 A 20 15 0 1 0 30 20 Z',
+                      fill: '#ffeecc',
+                      stroke: '#112233',
+                      width: 2,
+                    },
+                    {
+                      kind: 'clip',
+                      rect: { x: 10, y: 20, width: 40, height: 30 },
+                      commands: [
+                        {
+                          kind: 'text',
+                          text: 'Clipped',
+                          x: 10,
+                          y: 20,
+                          maxWidth: 40,
+                          fontFamily: 'Arial',
+                          fontSize: 12,
+                          color: '#111111',
+                          horizontalAlign: 'left',
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            source.print.displayList.pages[1]!,
+          ],
+        },
+      },
+    } as GeneratedDocumentForBrowserPrint;
+
+    const [page] = serializeGeneratedDocumentSvgPages(rotated);
+
+    expect(page?.svg).toContain('<g transform="rotate(90 30 35)">');
+    expect(page?.svg).toContain(
+      '<path d="M 30 20 A 20 15 0 1 0 30 50 A 20 15 0 1 0 30 20 Z" fill="#ffeecc" stroke="#112233" stroke-width="2"/>',
+    );
+    expect(page?.svg).toContain('<clipPath id="tego-clip-page-0-0-1">');
+    expect(page?.svg.indexOf('transform="rotate')).toBeLessThan(
+      page?.svg.indexOf('clip-path=') ?? 0,
+    );
+  });
+
   it('serializes a resolved raster resource into both preview and browser-print SVG', () => {
     const source = generatedDocument();
     const documentWithImage = {

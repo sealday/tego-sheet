@@ -284,13 +284,19 @@ export type {
   FilterViewPredicate,
   FilterViewSession,
 } from './views';
-export { createDataTransformPlanner, DataTransformError } from './data-tools';
+export { analyzeDataAnomalies, createDataTransformPlanner, DataTransformError } from './data-tools';
 export type {
+  DataAnomalyAnalysis,
+  DataAnomalyAnalysisOptions,
+  DataAnomalyAnalysisRequest,
+  DataAnomalyCheck,
+  DataToolPreviewContext,
   DataTransform,
   DataTransformCommitResult,
   DataTransformPreview,
   DataTransformPreviewOptions,
   FindReplaceTransform,
+  FillSeriesTransform,
   RemoveDuplicatesTransform,
   SplitTextTransform,
 } from './data-tools';
@@ -370,6 +376,7 @@ export type {
   PrintDisplayPageInput,
   PrintClipCommand,
   PrintFillRectCommand,
+  PrintGroupCommand,
   PrintImageCommand,
   PrintLineCommand,
   PrintLinkCommand,

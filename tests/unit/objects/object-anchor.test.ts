@@ -251,6 +251,11 @@ describe('OBJ-01 shared object anchors', () => {
         },
         { resources: {}, geometry },
       ),
-    ).toMatchObject([{ kind: 'text', text: '<b>plain text</b>' }]);
+    ).toMatchObject([
+      {
+        kind: 'clip',
+        commands: [{ kind: 'text', text: '<b>plain text</b>' }],
+      },
+    ]);
   });
 });

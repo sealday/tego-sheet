@@ -182,6 +182,8 @@ function serializeCommands(
           const clipId = `tego-clip-${commandPath}`;
           return `<defs><clipPath id="${clipId}"><rect ${rectAttributes(command.rect)}/></clipPath></defs><g clip-path="url(#${clipId})">${serializeCommands(command.commands, commandPath, resources)}</g>`;
         }
+        case 'group':
+          return `<g transform="rotate(${number(command.rotation)} ${number(command.origin.x)} ${number(command.origin.y)})">${serializeCommands(command.commands, commandPath, resources)}</g>`;
         case 'link': {
           const href = safeLinkHref(command.href);
           const body = `<rect ${rectAttributes(command.rect)} fill="transparent" aria-label="${escapeMarkup(command.label)}"/>`;

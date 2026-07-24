@@ -1270,12 +1270,17 @@ function sheetObjectsAt(value: unknown, path: string, context: ParseContext): Sh
       );
     }
     const accessibility = recordAt(source?.accessibility, `${entryPath}.accessibility`, context);
+    const rotation =
+      source?.rotation === undefined
+        ? undefined
+        : ((finiteAt(source.rotation, `${entryPath}.rotation`, context) % 360) + 360) % 360;
     const common = {
       id: stringAt(source?.id, `${entryPath}.id`, context) as ObjectId,
       anchor: objectAnchorAt(source?.anchor, `${entryPath}.anchor`, context),
       zIndex: indexAt(source?.zIndex, `${entryPath}.zIndex`, context),
       locked: booleanAt(source?.locked, `${entryPath}.locked`, context),
       templateRepeat: repeat,
+      ...(rotation === undefined ? {} : { rotation }),
       accessibility: {
         name: displayStringAt(accessibility?.name, `${entryPath}.accessibility.name`, context),
         ...(accessibility?.description === undefined
@@ -1312,12 +1317,49 @@ function sheetObjectsAt(value: unknown, path: string, context: ParseContext): Sh
         ...(fit === undefined ? {} : { fit }),
       };
     }
+    if (source?.kind === 'shape') {
+      const shape =
+        source.shape === 'rectangle' || source.shape === 'ellipse' || source.shape === 'line'
+          ? source.shape
+          : 'rectangle';
+      if (source.shape !== shape) {
+        addDiagnostic(
+          context,
+          'DOCUMENT_SCHEMA_INVALID',
+          `${entryPath}.shape`,
+          `${entryPath}.shape must be rectangle, ellipse, or line`,
+        );
+      }
+      const style = recordAt(source.style, `${entryPath}.style`, context);
+      return {
+        ...common,
+        kind: 'shape',
+        shape,
+        style: {
+          ...(style?.fill === undefined
+            ? {}
+            : { fill: stringAt(style.fill, `${entryPath}.style.fill`, context) }),
+          ...(style?.stroke === undefined
+            ? {}
+            : { stroke: stringAt(style.stroke, `${entryPath}.style.stroke`, context) }),
+          ...(style?.strokeWidth === undefined
+            ? {}
+            : {
+                strokeWidth: nonNegativeFiniteAt(
+                  style.strokeWidth,
+                  `${entryPath}.style.strokeWidth`,
+                  context,
+                ),
+              }),
+        },
+      };
+    }
     if (source?.kind !== 'text-box') {
       addDiagnostic(
         context,
         'DOCUMENT_SCHEMA_INVALID',
         `${entryPath}.kind`,
-        `${entryPath}.kind must be image or text-box`,
+        `${entryPath}.kind must be image, shape, or text-box`,
       );
     }
     const style = recordAt(source?.style, `${entryPath}.style`, context);
