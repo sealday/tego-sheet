@@ -9,9 +9,12 @@ import type { WorkbookChangeKind } from '../types/changes';
 import type { WorkbookData } from '../types/workbook';
 import type {
   Cell,
+  DocumentCellAddress,
+  DocumentCellRange,
   SheetInput,
   SpreadsheetDocument,
   SpreadsheetDocumentInput,
+  StructuredTable,
 } from '../../document/model/document';
 import { parseSpreadsheetDocument } from '../../document/parse-document';
 import {
@@ -20,6 +23,7 @@ import {
 } from '../coordinates/coordinate-transform';
 import { parseFormula, renameFormulaSheet, renderFormula } from '../../formula';
 import { canonicalAutofillTargetRange, createTypedAutofillResolver } from './typed-autofill';
+import { planStructuredTableAutoExpand } from '../../analysis/tables';
 
 type ValidationId = NonNullable<Cell['validationId']>;
 type MutableSheetGroup = NonNullable<SheetInput['groups']>[number];
@@ -385,6 +389,40 @@ function removeSheetObject(
   sheet.objects = (sheet.objects ?? []).filter((object) => object.id !== command.objectId);
 }
 
+function replaceOutsideFormulaStrings(
+  source: string,
+  pattern: RegExp,
+  replacement: string,
+): string {
+  let output = '';
+  let segmentStart = 0;
+  let index = 0;
+  while (index < source.length) {
+    if (source[index] !== '"') {
+      index += 1;
+      continue;
+    }
+    output += source.slice(segmentStart, index).replace(pattern, replacement);
+    let stringEnd = index + 1;
+    while (stringEnd < source.length) {
+      if (source[stringEnd] !== '"') {
+        stringEnd += 1;
+        continue;
+      }
+      if (source[stringEnd + 1] === '"') {
+        stringEnd += 2;
+        continue;
+      }
+      stringEnd += 1;
+      break;
+    }
+    output += source.slice(index, stringEnd);
+    segmentStart = stringEnd;
+    index = stringEnd;
+  }
+  return output + source.slice(segmentStart).replace(pattern, replacement);
+}
+
 function setStructuredTable(
   input: SpreadsheetDocumentInput,
   sheetIds: readonly SheetId[],
@@ -420,7 +458,8 @@ function setStructuredTable(
           replacements.forEach(({ fromTable, fromColumn, toTable, toColumn }) => {
             const escapedTable = fromTable.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
             const escapedColumn = fromColumn.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
-            formula = formula.replace(
+            formula = replaceOutsideFormulaStrings(
+              formula,
               new RegExp(`\\b${escapedTable}\\[${escapedColumn}\\]`, 'giu'),
               `${toTable}[${toColumn}]`,
             );
@@ -635,6 +674,26 @@ function setTypedCellInput(
     ...current,
     input: structuredClone(command.input),
   });
+  for (const table of sheet.tables ?? []) {
+    const expansion = planStructuredTableAutoExpand(
+      table as unknown as StructuredTable,
+      {
+        sheetId: sheet.id,
+        row: command.address.row,
+        column: command.address.column,
+      } as DocumentCellAddress,
+      (sheet.tables ?? [])
+        .filter((candidate) => candidate.id !== table.id)
+        .map(({ range }) => range as unknown as DocumentCellRange),
+    );
+    if (expansion.status === 'expanded') {
+      table.range = {
+        sheetId: expansion.table.range.sheetId,
+        start: { ...expansion.table.range.start },
+        end: { ...expansion.table.range.end },
+      };
+    }
+  }
   const keys = authoritativeInputs.get(sheet.id) ?? new Set<string>();
   keys.add(cellKey(command.address.row, command.address.column));
   authoritativeInputs.set(sheet.id, keys);

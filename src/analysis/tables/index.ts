@@ -142,6 +142,22 @@ export function executeStructuredTableView(
   source: StructuredTableValueSource,
   options: { readonly maximumRows?: number; readonly signal?: AbortSignal } = {},
 ): StructuredTableViewResult {
+  const filterColumns = [
+    ...(table.filter?.filters.map(({ column }) => column) ?? []),
+    ...(table.filter?.sort === undefined || table.filter.sort === null
+      ? []
+      : [table.filter.sort.column]),
+  ];
+  if (
+    filterColumns.some(
+      (column) =>
+        !Number.isSafeInteger(column) ||
+        column < table.range.start.column ||
+        column > table.range.end.column,
+    )
+  ) {
+    throw new RangeError('Structured table filter or sort column must be within the table range');
+  }
   const maximumRows = options.maximumRows ?? 100_000;
   if (!Number.isSafeInteger(maximumRows) || maximumRows <= 0) {
     throw new RangeError('Structured table row limit must be a positive safe integer');

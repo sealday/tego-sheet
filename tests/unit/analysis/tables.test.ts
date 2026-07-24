@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   parseSpreadsheetDocument,
   serializeSpreadsheetDocument,
@@ -344,6 +344,59 @@ describe('TBL-01 persistent structured tables', () => {
     ).toThrowError(/row limit exceeded/iu);
   });
 
+  it.each([
+    {
+      name: 'filter',
+      filter: {
+        filters: [{ column: 2, operator: 'in' as const, values: ['East'] }],
+      },
+    },
+    {
+      name: 'sort',
+      filter: {
+        filters: [],
+        sort: { column: 2, direction: 'asc' as const },
+      },
+    },
+  ])(
+    'rejects a table $name column outside the table range during parsing and execution',
+    ({ filter }) => {
+      const input = fixture([
+        {
+          ...fixture().workbook.sheets[0]!.tables![0]!,
+          filter,
+        },
+      ]);
+      const parsed = parseSpreadsheetDocument(input);
+      expect(parsed.ok).toBe(false);
+      if (parsed.ok) throw new Error('out-of-range table filter metadata must fail');
+      expect(parsed.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: 'INVALID_RANGE',
+            message: expect.stringMatching(/column.*table range/iu),
+          }),
+        ]),
+      );
+
+      const table = {
+        ...parseOk(fixture()).workbook.sheets[0]!.tables[0]!,
+        filter,
+      };
+      const read = vi.fn();
+      expect(() => executeStructuredTableView(table, { revision: 'table-r1', read })).toThrowError(
+        /column.*table range/iu,
+      );
+      expect(read).not.toHaveBeenCalled();
+
+      const controller = new SpreadsheetDocumentController(parseOk(fixture()));
+      expect(() =>
+        controller.dispatch({ type: 'set-table', sheet: sheetId('sheet-1'), table }, 'ref'),
+      ).toThrowError(/column.*table range/iu);
+      expect(controller.getDocument().workbook.sheets[0]?.tables[0]?.filter).toBeUndefined();
+    },
+  );
+
   it('plans direct bounded auto expansion and rejects occupied rows atomically', () => {
     const table = {
       ...parseOk(fixture()).workbook.sheets[0]!.tables[0]!,
@@ -367,6 +420,34 @@ describe('TBL-01 persistent structured tables', () => {
     expect(planStructuredTableAutoExpand(table, append, [], 4)).toEqual({
       status: 'rejected',
       code: 'TABLE_CELL_LIMIT_EXCEEDED',
+    });
+  });
+
+  it('auto-expands through the set-cell-input command path', () => {
+    const controller = new SpreadsheetDocumentController(
+      parseOk(
+        fixture([
+          {
+            ...fixture().workbook.sheets[0]!.tables![0]!,
+            autoExpand: true,
+          },
+        ]),
+      ),
+    );
+
+    expect(
+      controller.dispatch(
+        {
+          type: 'set-cell-input',
+          address: { sheet: sheetId('sheet-1'), row: 3, column: 1 },
+          input: { type: 'number', value: 8 },
+        },
+        'ref',
+      ).status,
+    ).toBe('committed');
+    expect(controller.getDocument().workbook.sheets[0]?.tables[0]?.range.end).toEqual({
+      row: 3,
+      column: 1,
     });
   });
 
@@ -435,6 +516,14 @@ describe('TBL-01 persistent structured tables', () => {
   it('rewrites structured-reference display names by stable IDs when a table is renamed', () => {
     const controller = new SpreadsheetDocumentController(parseOk(fixture()));
     const table = controller.getDocument().workbook.sheets[0]!.tables[0]!;
+    controller.dispatch(
+      {
+        type: 'set-cell-input',
+        address: { sheet: sheetId('sheet-1'), row: 1, column: 3 },
+        input: { type: 'formula', source: '="Sales[Amount]"' },
+      },
+      'ref',
+    );
 
     expect(
       controller.dispatch(
@@ -457,6 +546,11 @@ describe('TBL-01 persistent structured tables', () => {
           row: 0,
           column: 3,
           cell: { input: { type: 'formula', source: '=SUM(Revenue[NetAmount])' } },
+        }),
+        expect.objectContaining({
+          row: 1,
+          column: 3,
+          cell: { input: { type: 'formula', source: '="Sales[Amount]"' } },
         }),
       ]),
     );
