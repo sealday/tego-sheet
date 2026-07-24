@@ -205,6 +205,32 @@ export function remapWorkbookCommand(
               sheetId: remapDocumentSheet(series.values.sheetId, mapping),
             },
           })),
+          ...(command.chart.anchor === undefined
+            ? {}
+            : {
+                anchor:
+                  command.chart.anchor.type === 'absolute'
+                    ? command.chart.anchor
+                    : command.chart.anchor.type === 'one-cell'
+                      ? {
+                          ...command.chart.anchor,
+                          cell: {
+                            ...command.chart.anchor.cell,
+                            sheetId: remapDocumentSheet(command.chart.anchor.cell.sheetId, mapping),
+                          },
+                        }
+                      : {
+                          ...command.chart.anchor,
+                          from: {
+                            ...command.chart.anchor.from,
+                            sheetId: remapDocumentSheet(command.chart.anchor.from.sheetId, mapping),
+                          },
+                          to: {
+                            ...command.chart.anchor.to,
+                            sheetId: remapDocumentSheet(command.chart.anchor.to.sheetId, mapping),
+                          },
+                        },
+              }),
         },
       };
     case 'set-sparkline':
