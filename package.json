@@ -60,6 +60,11 @@
       "import": "./dist/interchange.js",
       "require": "./dist/interchange.cjs"
     },
+    "./sdk": {
+      "types": "./dist/sdk/index.d.ts",
+      "import": "./dist/sdk.js",
+      "require": "./dist/sdk.cjs"
+    },
     "./output/pdf": {
       "types": "./dist/output/pdf/index.d.ts",
       "import": "./dist/output/pdf.js",

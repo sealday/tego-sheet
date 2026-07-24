@@ -34,6 +34,7 @@ test('metadata describes React peers and explicit output dependencies and export
     './locales/nl',
     './locales/zh-cn',
     './interchange',
+    './sdk',
     './output/pdf',
     './output/xlsx',
     './output/image',

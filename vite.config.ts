@@ -49,6 +49,7 @@ export default defineConfig({
         'locales/nl': resolve(import.meta.dirname, 'src/locales/nl.ts'),
         'locales/zh-cn': resolve(import.meta.dirname, 'src/locales/zh-cn.ts'),
         interchange: resolve(import.meta.dirname, 'src/interchange/index.ts'),
+        sdk: resolve(import.meta.dirname, 'src/sdk/index.ts'),
         'output/pdf': resolve(import.meta.dirname, 'src/output/pdf/index.ts'),
         'output/xlsx': resolve(import.meta.dirname, 'src/output/xlsx/index.ts'),
         'output/image': resolve(import.meta.dirname, 'src/output/image/index.ts'),

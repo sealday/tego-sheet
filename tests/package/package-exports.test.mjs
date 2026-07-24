@@ -14,6 +14,7 @@ const expectedExports = [
   './locales/nl',
   './locales/zh-cn',
   './interchange',
+  './sdk',
   './output/pdf',
   './output/xlsx',
   './output/image',
@@ -54,6 +55,7 @@ test('the built root has only the approved runtime exports and internal subpaths
         'TemplateDesigner',
         'TemplateExpressionError',
         'TemplatePreview',
+        'analyzeDataAnomalies',
         'applyFilterView',
         'bindAdvancedFormula',
         'compileSpreadsheetTemplate',
@@ -236,6 +238,31 @@ test('the interchange subpath exposes only Worker-safe reader and writer contrac
         throw new Error('Unexpected interchange exports: ' + Object.keys(interchange).join(','));
       }
       if ('document' in globalThis) throw new Error('interchange created a DOM global');
+    `,
+    ],
+    { cwd: consumer, stdio: 'pipe' },
+  );
+});
+
+test('the SDK subpath exposes only public adapter lifecycle and trust runtimes', () => {
+  execFileSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '--eval',
+      `
+      const sdk = await import('tego-sheet/sdk');
+      const expected = [
+        'ADAPTER_KINDS',
+        'AdapterSdkError',
+        'DEFAULT_ADAPTER_SCOPE_LIMITS',
+        'createAdapterRegistry',
+        'createCapabilityGrant',
+      ];
+      if (JSON.stringify(Object.keys(sdk)) !== JSON.stringify(expected)) {
+        throw new Error('Unexpected SDK exports: ' + Object.keys(sdk).join(','));
+      }
+      if ('document' in globalThis) throw new Error('SDK created a DOM global');
     `,
     ],
     { cwd: consumer, stdio: 'pipe' },
