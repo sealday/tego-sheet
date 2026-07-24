@@ -302,6 +302,208 @@ describe('template render pipeline', () => {
     );
   });
 
+  it('projects persistent object anchors through sorted and filtered print rows', async () => {
+    const objectSource = {
+      ...source,
+      workbook: {
+        ...source.workbook,
+        sheets: [
+          {
+            ...source.workbook.sheets[0]!,
+            cells: ['header', '1', '2', '3', '4'].map((value, row) => ({
+              row,
+              column: 0,
+              cell: { input: { type: 'string' as const, value } },
+            })),
+            rows: [],
+            filterViews: [
+              {
+                id: 'descending',
+                name: 'Descending',
+                range: {
+                  sheetId: 'sheet-1',
+                  start: { row: 0, column: 0 },
+                  end: { row: 4, column: 0 },
+                },
+                sorts: [{ column: 0, direction: 'descending' }],
+                filters: [{ column: 0, operator: 'greaterThanOrEqual', value: '2' }],
+                visibility: 'document',
+              },
+            ],
+            objects: [
+              {
+                id: 'sorted',
+                kind: 'text-box',
+                anchor: {
+                  type: 'one-cell',
+                  cell: { sheetId: 'sheet-1', row: 4, column: 0 },
+                  offset: { x: 0, y: 0 },
+                  size: { width: 40, height: 10 },
+                },
+                zIndex: 1,
+                locked: false,
+                templateRepeat: 'shared',
+                text: 'Sorted object',
+                style: { color: '#111111', fontFamily: 'Arial', fontSize: 10 },
+                accessibility: { name: 'Sorted object' },
+              },
+              {
+                id: 'filtered',
+                kind: 'text-box',
+                anchor: {
+                  type: 'one-cell',
+                  cell: { sheetId: 'sheet-1', row: 1, column: 0 },
+                  offset: { x: 0, y: 0 },
+                  size: { width: 40, height: 10 },
+                },
+                zIndex: 2,
+                locked: false,
+                templateRepeat: 'shared',
+                text: 'Filtered object',
+                style: { color: '#111111', fontFamily: 'Arial', fontSize: 10 },
+                accessibility: { name: 'Filtered object' },
+              },
+            ],
+          },
+        ],
+      },
+    } as unknown as SpreadsheetDocument;
+    const viewTemplate = { ...template, bindings: [] };
+    const compiled = compileSpreadsheetTemplate(objectSource, viewTemplate).template!;
+    const result = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: {},
+        profileId: 'profile-1',
+        missingValue: 'error',
+        activeFilterViews: [{ sheetId: 'sheet-1' as never, viewId: 'descending' }],
+      },
+      environment,
+    );
+    const objectCommands =
+      result.document?.print.displayList.pages.flatMap((page) =>
+        page.commands.filter(
+          (command) =>
+            command.kind === 'text' &&
+            (command.text === 'Sorted object' || command.text === 'Filtered object'),
+        ),
+      ) ?? [];
+
+    expect(objectCommands).toEqual([
+      expect.objectContaining({ kind: 'text', text: 'Sorted object', y: 30 }),
+    ]);
+  });
+
+  it('maps two-cell object markers across projected page boundaries', async () => {
+    const objectSource = {
+      ...source,
+      workbook: {
+        ...source.workbook,
+        sheets: [
+          {
+            ...source.workbook.sheets[0]!,
+            cells: ['header', '1', '2', '3', '4'].map((value, row) => ({
+              row,
+              column: 0,
+              cell: { input: { type: 'string' as const, value } },
+            })),
+            rows: [],
+            filterViews: [
+              {
+                id: 'descending',
+                name: 'Descending',
+                range: {
+                  sheetId: 'sheet-1',
+                  start: { row: 0, column: 0 },
+                  end: { row: 4, column: 0 },
+                },
+                sorts: [{ column: 0, direction: 'descending' }],
+                filters: [{ column: 0, operator: 'greaterThanOrEqual', value: '2' }],
+                visibility: 'document',
+              },
+            ],
+            objects: [
+              {
+                id: 'spanning',
+                kind: 'text-box',
+                anchor: {
+                  type: 'two-cell',
+                  from: {
+                    sheetId: 'sheet-1',
+                    row: 2,
+                    column: 0,
+                    offset: { x: 0, y: 0 },
+                  },
+                  to: {
+                    sheetId: 'sheet-1',
+                    row: 4,
+                    column: 0,
+                    offset: { x: 40, y: 0 },
+                  },
+                },
+                zIndex: 1,
+                locked: false,
+                templateRepeat: 'shared',
+                text: 'Spanning object',
+                style: { color: '#111111', fontFamily: 'Arial', fontSize: 10 },
+                accessibility: { name: 'Spanning object' },
+              },
+            ],
+          },
+        ],
+      },
+    } as unknown as SpreadsheetDocument;
+    const viewTemplate: SpreadsheetTemplate = {
+      ...template,
+      bindings: [],
+      printProfiles: [
+        {
+          ...template.printProfiles[0]!,
+          targets: [
+            {
+              type: 'range',
+              range: {
+                sheetId: 'sheet-1' as never,
+                start: { row: 0, column: 0 },
+                end: { row: 4, column: 0 },
+              },
+            },
+          ],
+          page: {
+            ...template.printProfiles[0]!.page,
+            paper: { type: 'custom', width: 240, height: 60 },
+          },
+        },
+      ],
+    };
+    const compiled = compileSpreadsheetTemplate(objectSource, viewTemplate).template!;
+    const result = await renderSpreadsheetTemplate(
+      {
+        template: compiled,
+        currentDocumentHash: compiled.sourceDocumentHash,
+        data: {},
+        profileId: 'profile-1',
+        missingValue: 'error',
+        activeFilterViews: [{ sheetId: 'sheet-1' as never, viewId: 'descending' }],
+      },
+      environment,
+    );
+    const spanningCommands =
+      result.document?.print.displayList.pages.flatMap((page, pageIndex) =>
+        page.commands.flatMap((command) =>
+          command.kind === 'text' && command.text === 'Spanning object'
+            ? [{ pageIndex, y: command.y, maxWidth: command.maxWidth }]
+            : [],
+        ),
+      ) ?? [];
+
+    expect(spanningCommands).toEqual([
+      { pageIndex: 0, y: 30, maxWidth: 40 },
+      { pageIndex: 1, y: -10, maxWidth: 40 },
+    ]);
+  });
+
   it('rejects stale compiled sources without partial output', async () => {
     const compiled = compileSpreadsheetTemplate(source, template).template!;
     const result = await renderSpreadsheetTemplate(

@@ -105,6 +105,89 @@ describe('saved views and objects in Workbook 2.0', () => {
     });
   });
 
+  it.each([
+    {
+      name: 'absolute',
+      anchor: { type: 'absolute', rect: { x: 10, y: 20, width: 30, height: 40 } },
+      command: { type: 'delete-row', sheet: 'sheet-1' as SheetId, index: 1, count: 2 },
+      after: { type: 'absolute', rect: { x: 10, y: 20, width: 30, height: 40 } },
+    },
+    {
+      name: 'one-cell',
+      anchor: {
+        type: 'one-cell',
+        cell: { sheetId: 'sheet-1', row: 2, column: 1 },
+        offset: { x: 4, y: 5 },
+        size: { width: 100, height: 40 },
+      },
+      command: { type: 'delete-row', sheet: 'sheet-1' as SheetId, index: 1, count: 2 },
+      after: {
+        type: 'one-cell',
+        cell: { sheetId: 'sheet-1', row: 1, column: 1 },
+        offset: { x: 4, y: 5 },
+        size: { width: 100, height: 40 },
+      },
+    },
+    {
+      name: 'two-cell',
+      anchor: {
+        type: 'two-cell',
+        from: {
+          sheetId: 'sheet-1',
+          row: 1,
+          column: 1,
+          offset: { x: 0, y: 0 },
+        },
+        to: {
+          sheetId: 'sheet-1',
+          row: 4,
+          column: 3,
+          offset: { x: 10, y: 10 },
+        },
+      },
+      command: { type: 'delete-column', sheet: 'sheet-1' as SheetId, index: 1, count: 2 },
+      after: {
+        type: 'two-cell',
+        from: {
+          sheetId: 'sheet-1',
+          row: 1,
+          column: 1,
+          offset: { x: 0, y: 0 },
+        },
+        to: {
+          sheetId: 'sheet-1',
+          row: 4,
+          column: 1,
+          offset: { x: 10, y: 10 },
+        },
+      },
+    },
+  ])('preserves $name anchor transforms through undo and redo', ({ anchor, command, after }) => {
+    const serialized = JSON.parse(
+      serializeSpreadsheetDocument(fixture()),
+    ) as SpreadsheetDocumentInput;
+    const sheet = serialized.workbook.sheets[0]!;
+    sheet.objects = [{ ...sheet.objects![0]!, anchor }] as never;
+    const parsed = parseSpreadsheetDocument(serialized);
+    if (!parsed.ok) throw new Error(JSON.stringify(parsed.diagnostics));
+    const controller = createDocumentController(parsed.document);
+
+    expect(
+      controller.execute({
+        schemaVersion: 1,
+        id: `transform-${anchor.type}`,
+        command: command as never,
+      }),
+    ).toMatchObject({ status: 'committed' });
+    expect(controller.getSnapshot().document.workbook.sheets[0]!.objects[0]!.anchor).toEqual(after);
+    expect(controller.undo()).toMatchObject({ status: 'committed' });
+    expect(controller.getSnapshot().document.workbook.sheets[0]!.objects[0]!.anchor).toEqual(
+      anchor,
+    );
+    expect(controller.redo()).toMatchObject({ status: 'committed' });
+    expect(controller.getSnapshot().document.workbook.sheets[0]!.objects[0]!.anchor).toEqual(after);
+  });
+
   it('rejects view/object limit overflow and dangling resources atomically', () => {
     const serialized = JSON.parse(
       serializeSpreadsheetDocument(fixture()),
@@ -128,6 +211,90 @@ describe('saved views and objects in Workbook 2.0', () => {
     expect(parseSpreadsheetDocument(serialized)).toMatchObject({
       ok: false,
       diagnostics: [expect.objectContaining({ code: 'DANGLING_REFERENCE' })],
+    });
+  });
+
+  it('reports crossed two-cell marker geometry with a stable object diagnostic', () => {
+    const serialized = JSON.parse(
+      serializeSpreadsheetDocument(fixture()),
+    ) as SpreadsheetDocumentInput;
+    const sheet = serialized.workbook.sheets[0]!;
+    sheet.objects = [
+      {
+        ...sheet.objects![0]!,
+        anchor: {
+          type: 'two-cell',
+          from: {
+            sheetId: 'sheet-1',
+            row: 4,
+            column: 3,
+            offset: { x: 10, y: 10 },
+          },
+          to: {
+            sheetId: 'sheet-1',
+            row: 2,
+            column: 1,
+            offset: { x: 0, y: 0 },
+          },
+        },
+      },
+    ] as never;
+
+    expect(parseSpreadsheetDocument(serialized)).toMatchObject({
+      ok: false,
+      diagnostics: [
+        expect.objectContaining({
+          code: 'OBJECT_ANCHOR_INVALID',
+          details: { path: '$.workbook.sheets[0].objects[0].anchor' },
+        }),
+      ],
+    });
+  });
+
+  it.each([
+    {
+      from: {
+        sheetId: 'sheet-1',
+        row: 2,
+        column: 1,
+        offset: { x: 0, y: 10 },
+      },
+      to: {
+        sheetId: 'sheet-1',
+        row: 2,
+        column: 2,
+        offset: { x: 0, y: 0 },
+      },
+    },
+    {
+      from: {
+        sheetId: 'sheet-1',
+        row: 1,
+        column: 2,
+        offset: { x: 10, y: 0 },
+      },
+      to: {
+        sheetId: 'sheet-1',
+        row: 2,
+        column: 2,
+        offset: { x: 0, y: 0 },
+      },
+    },
+  ])('rejects crossed same-row or same-column marker offsets', ({ from, to }) => {
+    const serialized = JSON.parse(
+      serializeSpreadsheetDocument(fixture()),
+    ) as SpreadsheetDocumentInput;
+    const sheet = serialized.workbook.sheets[0]!;
+    sheet.objects = [
+      {
+        ...sheet.objects![0]!,
+        anchor: { type: 'two-cell', from, to },
+      },
+    ] as never;
+
+    expect(parseSpreadsheetDocument(serialized)).toMatchObject({
+      ok: false,
+      diagnostics: [expect.objectContaining({ code: 'OBJECT_ANCHOR_INVALID' })],
     });
   });
 

@@ -1563,6 +1563,22 @@ function validateReferences(document: SpreadsheetDocument, context: ParseContext
           'Object anchors must reference their owning sheet',
         );
       }
+      if (
+        object.anchor.type === 'two-cell' &&
+        (object.anchor.from.row > object.anchor.to.row ||
+          (object.anchor.from.row === object.anchor.to.row &&
+            object.anchor.from.offset.y > object.anchor.to.offset.y) ||
+          object.anchor.from.column > object.anchor.to.column ||
+          (object.anchor.from.column === object.anchor.to.column &&
+            object.anchor.from.offset.x > object.anchor.to.offset.x))
+      ) {
+        addDiagnostic(
+          context,
+          'OBJECT_ANCHOR_INVALID',
+          `${base}.anchor`,
+          'Two-cell object markers must not cross',
+        );
+      }
       if (object.kind === 'image' && !resourceIds.has(object.resourceId)) {
         addDiagnostic(
           context,

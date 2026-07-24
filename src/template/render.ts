@@ -303,6 +303,50 @@ function projectedBreakIndex(
   return index < 0 ? undefined : index;
 }
 
+interface ProjectedRowGeometry {
+  readonly rows: readonly number[];
+  readonly offsets: readonly number[];
+  markerOffset(row: number): number | undefined;
+}
+
+/** Builds the global visual row geometry shared by every page and object for one print target. */
+function createProjectedRowGeometry(
+  sheet: Sheet,
+  range: DocumentCellRange,
+  projection: ViewProjection | undefined,
+): ProjectedRowGeometry {
+  const rows = projectedTargetRows(range, projection);
+  const rangeOrigin = Array.from({ length: range.start.row }, (_, index) =>
+    rowHeight(sheet, index),
+  ).reduce((sum, value) => sum + value, 0);
+  const offsets = [rangeOrigin];
+  const markerOffsets = new Map<number, number>();
+  for (const row of rows) {
+    markerOffsets.set(row, offsets.at(-1)!);
+    offsets.push(offsets.at(-1)! + rowHeight(sheet, row));
+  }
+  return {
+    rows,
+    offsets,
+    markerOffset(row) {
+      if (row < range.start.row) {
+        return Array.from({ length: row }, (_, index) => rowHeight(sheet, index)).reduce(
+          (sum, value) => sum + value,
+          0,
+        );
+      }
+      if (row > range.end.row) {
+        const trailingExtent = Array.from(
+          { length: row - range.end.row - 1 },
+          (_, index) => range.end.row + 1 + index,
+        ).reduce((sum, candidate) => sum + rowHeight(sheet, candidate), 0);
+        return offsets.at(-1)! + trailingExtent;
+      }
+      return markerOffsets.get(row);
+    },
+  };
+}
+
 function paginationTargets(
   resolved: readonly ResolvedTarget[],
   profile: TemplatePrintProfile,
@@ -427,15 +471,20 @@ function displayPages(
   data: unknown,
   date: Date,
 ): readonly PrintDisplayPageInput[] {
+  const projectedGeometry = new Map(
+    resolved.map((target) => [
+      target.id,
+      createProjectedRowGeometry(target.sheet, target.range, viewProjections.get(target.sheet.id)),
+    ]),
+  );
   return pages.map((page) => {
     const target = resolved.find(({ id }) => id === page.targetId)!;
     const startColumn = target.range.start.column + page.columnStart;
     const endColumn = target.range.start.column + page.columnEnd;
     const viewProjection = viewProjections.get(target.sheet.id);
-    const bodyRows = projectedTargetRows(target.range, viewProjection).slice(
-      page.rowStart,
-      page.rowEnd + 1,
-    );
+    const rowGeometry = projectedGeometry.get(target.id)!;
+    const projectedRows = rowGeometry.rows;
+    const bodyRows = projectedRows.slice(page.rowStart, page.rowEnd + 1);
     const startRow = bodyRows.length === 0 ? target.range.start.row : Math.min(...bodyRows);
     const endRow = bodyRows.length === 0 ? target.range.start.row : Math.max(...bodyRows);
     const bodyColumns = Array.from(
@@ -620,7 +669,7 @@ function displayPages(
         },
       ];
     });
-    const rowOffset = (row: number): number =>
+    const physicalRowOffset = (row: number): number =>
       Array.from({ length: row }, (_, index) => rowHeight(target.sheet, index)).reduce(
         (sum, value) => sum + value,
         0,
@@ -631,13 +680,38 @@ function displayPages(
         0,
       );
     const bodyOriginX = columnOffset(startColumn);
-    const bodyOriginY = rowOffset(startRow);
+    const bodyOriginY = rowGeometry.offsets[page.rowStart]!;
+    const bodyBottom = rowGeometry.offsets[page.rowEnd + 1]!;
     const objectOverlays = [...(target.sheet.objects ?? [])]
       .sort((left, right) => left.zIndex - right.zIndex || left.id.localeCompare(right.id))
       .flatMap((object): readonly PrintDisplayCommand[] => {
-        const rect = resolveObjectAnchor(object.anchor, { rowOffset, columnOffset });
+        const primaryRow =
+          object.anchor.type === 'absolute'
+            ? undefined
+            : object.anchor.type === 'one-cell'
+              ? object.anchor.cell.row
+              : object.anchor.from.row;
+        const primaryRowOffset =
+          primaryRow === undefined ? undefined : rowGeometry.markerOffset(primaryRow);
+        // A filtered primary anchor has no visual row, so the complete object is omitted.
+        if (primaryRow !== undefined && primaryRowOffset === undefined) return [];
+        const rowOffset = (row: number): number =>
+          rowGeometry.markerOffset(row) ?? primaryRowOffset ?? physicalRowOffset(row);
+        const geometry = { rowOffset, columnOffset };
+        const resolvedRect = resolveObjectAnchor(object.anchor, geometry);
+        const rect =
+          object.anchor.type === 'two-cell' && viewProjection !== undefined
+            ? (() => {
+                const fromY = rowOffset(object.anchor.from.row) + object.anchor.from.offset.y;
+                const toY = rowOffset(object.anchor.to.row) + object.anchor.to.offset.y;
+                return {
+                  ...resolvedRect,
+                  y: Math.min(fromY, toY),
+                  height: Math.abs(toY - fromY),
+                };
+              })()
+            : resolvedRect;
         const bodyRight = columnOffset(endColumn + 1);
-        const bodyBottom = rowOffset(endRow + 1);
         if (
           rect.x + rect.width <= bodyOriginX ||
           rect.y + rect.height <= bodyOriginY ||
@@ -647,36 +721,42 @@ function displayPages(
           return [];
         }
         return objectToDisplayCommands(object, {
-          geometry: { rowOffset, columnOffset },
+          geometry,
           resources: resources.byReference,
-        }).map((command) => {
-          const x =
-            profile.page.margins.left +
-            headingSize +
-            ((command.kind === 'image' ? command.rect.x : command.x) - bodyOriginX) * page.scale;
-          const y =
-            profile.page.margins.top +
-            headingSize +
-            ((command.kind === 'image' ? command.rect.y : command.y) - bodyOriginY) * page.scale;
-          if (command.kind === 'image') {
+        })
+          .map((command) =>
+            command.kind === 'image'
+              ? { ...command, rect }
+              : { ...command, x: rect.x, y: rect.y, maxWidth: rect.width },
+          )
+          .map((command) => {
+            const x =
+              profile.page.margins.left +
+              headingSize +
+              ((command.kind === 'image' ? command.rect.x : command.x) - bodyOriginX) * page.scale;
+            const y =
+              profile.page.margins.top +
+              headingSize +
+              ((command.kind === 'image' ? command.rect.y : command.y) - bodyOriginY) * page.scale;
+            if (command.kind === 'image') {
+              return {
+                ...command,
+                rect: {
+                  x,
+                  y,
+                  width: command.rect.width * page.scale,
+                  height: command.rect.height * page.scale,
+                },
+              };
+            }
             return {
               ...command,
-              rect: {
-                x,
-                y,
-                width: command.rect.width * page.scale,
-                height: command.rect.height * page.scale,
-              },
+              x,
+              y,
+              maxWidth: command.maxWidth * page.scale,
+              fontSize: command.fontSize * page.scale,
             };
-          }
-          return {
-            ...command,
-            x,
-            y,
-            maxWidth: command.maxWidth * page.scale,
-            fontSize: command.fontSize * page.scale,
-          };
-        });
+          });
       });
     return {
       width: page.width,
