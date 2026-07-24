@@ -226,6 +226,45 @@ function commandPermissionRequests(
           target: { type: 'object', sheetId: command.sheet, objectId: command.objectId },
         },
       ];
+    case 'set-chart': {
+      const sourceSheets = new Set<string>();
+      if (command.chart.categories !== undefined) {
+        sourceSheets.add(command.chart.categories.sheetId);
+      }
+      for (const series of command.chart.series) {
+        sourceSheets.add(series.values.sheetId);
+      }
+      return [
+        {
+          action: 'object:edit',
+          target: { type: 'object', sheetId: command.sheet, objectId: command.chart.id },
+        },
+        ...Array.from(sourceSheets, (sheetId) => ({
+          action: 'sheet:view' as const,
+          target: { type: 'sheet' as const, sheetId },
+        })),
+      ];
+    }
+    case 'remove-chart':
+      return [
+        {
+          action: 'object:edit',
+          target: { type: 'object', sheetId: command.sheet, objectId: command.chartId },
+        },
+      ];
+    case 'set-sparkline':
+      return [
+        {
+          action: 'range:edit',
+          target: rangeTarget(command.sparkline.target.sheetId, command.sparkline.target),
+        },
+        {
+          action: 'sheet:view',
+          target: { type: 'sheet', sheetId: command.sparkline.source.sheetId },
+        },
+      ];
+    case 'remove-sparkline':
+      return [{ action: 'sheet:edit', target: { type: 'sheet', sheetId: command.sheet } }];
     case 'add-sheet':
       return [{ action: 'document:edit', target: { type: 'document', documentId } }];
     case 'undo':

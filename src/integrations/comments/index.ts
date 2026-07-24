@@ -287,7 +287,7 @@ export function createCommentStore(options: {
     refresh();
     return result;
   };
-  return Object.freeze({
+  const store: CommentStore = {
     list(): readonly CommentThread[] {
       return snapshot;
     },
@@ -354,7 +354,8 @@ export function createCommentStore(options: {
       }
       return Object.freeze(updates);
     },
-  });
+  };
+  return Object.freeze(store);
 }
 
 /** Projects comments into an explicit print policy without mutating thread state. */

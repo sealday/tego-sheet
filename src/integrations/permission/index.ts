@@ -285,23 +285,23 @@ export function deriveWorkbookCommandPermissionRequests(
         target: { type: 'object', sheetId: command.sheet, objectId: command.objectId },
       };
       break;
-    case 'set-chart':
+    case 'set-chart': {
+      const sourceSheets = new Set<string>();
+      if (command.chart.categories !== undefined) {
+        sourceSheets.add(command.chart.categories.sheetId);
+      }
+      for (const series of command.chart.series) {
+        sourceSheets.add(series.values.sheetId);
+      }
       return Object.freeze([
         documentRequest,
         {
           action: 'object:edit',
           target: { type: 'object', sheetId: command.sheet, objectId: command.chart.id },
         },
-        ...Array.from(
-          new Set(
-            [
-              command.chart.categories?.sheetId,
-              ...command.chart.series.map(({ values }) => values.sheetId),
-            ].filter((sheetId): sheetId is string => sheetId !== undefined),
-          ),
-          sheetViewRequest,
-        ),
+        ...Array.from(sourceSheets, sheetViewRequest),
       ]);
+    }
     case 'remove-chart':
       targetRequest = {
         action: 'object:edit',

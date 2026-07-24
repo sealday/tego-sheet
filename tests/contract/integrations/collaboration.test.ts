@@ -1,11 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   createCollaborationOutboxCoordinator,
+  createCollaborationSession,
+  createControllerRemoteTransactionBoundary,
   createPresenceStore,
   createRemoteOperationProcessor,
   type CollaborationOutboundOperation,
 } from '../../../src/integrations/collaboration';
 import type { SerializableTransactionEnvelope } from '../../../src/core/controller/spreadsheet-document-controller';
+import { SpreadsheetDocumentController } from '../../../src/core/controller/spreadsheet-document-controller';
+import { testDocument } from '../../helpers/workbook-builders';
 
 const transaction: SerializableTransactionEnvelope = {
   schemaVersion: 1,
@@ -409,5 +413,181 @@ describe('collaboration integration contract', () => {
     expect(store.list()).toEqual([]);
     store.close();
     expect(() => store.replace([])).toThrow(/closed/u);
+  });
+
+  it('publishes presence expiry without requiring a workbook or UI read', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(0);
+      const listener = vi.fn();
+      const store = createPresenceStore();
+      store.subscribe(listener);
+      store.replace([
+        {
+          actorId: 'actor-2',
+          sheetId: 'sheet-1',
+          selections: [],
+          display: { label: 'Remote', color: '#ff0000' },
+          expiresAt: 100,
+        },
+      ]);
+
+      vi.advanceTimersByTime(101);
+
+      expect(store.getSnapshot()).toEqual([]);
+      expect(listener).toHaveBeenCalledTimes(2);
+      store.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('commits remote transactions through the reversible production controller boundary', () => {
+    const document = testDocument([{ name: 'A' }]);
+    const controller = new SpreadsheetDocumentController(document);
+    const sheet = controller.getSheetIds()[0]!;
+    const processor = createRemoteOperationProcessor({
+      initialRevision: 'revision-1',
+      permissionGate: () => true,
+      transactionBoundary: createControllerRemoteTransactionBoundary(controller),
+    });
+    const result = processor.process({
+      operationId: 'operation-controller',
+      actorId: 'actor-2',
+      baseRevision: 'revision-1',
+      revision: 'revision-2',
+      transaction: {
+        schemaVersion: 1,
+        id: 'transaction-controller',
+        baseRevision: 0,
+        commands: [
+          {
+            schemaVersion: 1,
+            id: 'command-controller',
+            command: {
+              type: 'set-cell-text',
+              address: { sheet, row: 0, column: 0 },
+              text: 'remote',
+            },
+          },
+        ],
+      },
+    });
+
+    expect(result).toEqual({ status: 'applied', revision: 'revision-2' });
+    expect(controller.getCellText({ sheet, row: 0, column: 0 })).toBe('remote');
+    controller.dispose();
+  });
+
+  it('connects host subscriptions and routes operation/presence events', async () => {
+    let listener:
+      | ((
+          event: import('../../../src/integrations/collaboration').CollaborationInboundEvent,
+        ) => void)
+      | undefined;
+    const presence = createPresenceStore({ now: () => 0 });
+    const processor = createRemoteOperationProcessor({
+      initialRevision: 'revision-0',
+      permissionGate: () => true,
+      transactionBoundary: {
+        prepare: () => ({ commit: vi.fn(), rollback: vi.fn() }),
+      },
+    });
+    const session = createCollaborationSession({
+      processor,
+      presence,
+      port: {
+        connect: async () => ({
+          revision: 'revision-1',
+          capabilities: { protocolVersions: [1], collaborativeUndo: true },
+        }),
+        subscribe: (next) => {
+          listener = next;
+          return () => {
+            listener = undefined;
+          };
+        },
+      },
+    });
+    await session.connect(new AbortController().signal);
+    listener?.({
+      type: 'presence',
+      presence: [
+        {
+          actorId: 'actor-2',
+          sheetId: 'sheet-1',
+          selections: [],
+          display: { label: 'Remote', color: '#ff0000' },
+          expiresAt: 100,
+        },
+      ],
+    });
+    expect(presence.getSnapshot()).toHaveLength(1);
+    session.disconnect();
+    expect(presence.getSnapshot()).toEqual([]);
+    expect(session.state.status).toBe('disconnected');
+  });
+
+  it('returns to disconnected after a failed handshake and requests resync for bad events', async () => {
+    const presence = createPresenceStore({ now: () => 0 });
+    const processor = createRemoteOperationProcessor({
+      initialRevision: 'revision-0',
+      permissionGate: () => true,
+      transactionBoundary: {
+        prepare: () => ({ commit: vi.fn(), rollback: vi.fn() }),
+      },
+    });
+    const failed = createCollaborationSession({
+      processor,
+      presence,
+      port: {
+        connect: async () => {
+          throw new Error('offline');
+        },
+        subscribe: vi.fn(),
+      },
+    });
+    await expect(failed.connect(new AbortController().signal)).rejects.toThrow(/offline/u);
+    expect(failed.getSnapshot()).toEqual({ status: 'disconnected' });
+
+    let listener:
+      | ((
+          event: import('../../../src/integrations/collaboration').CollaborationInboundEvent,
+        ) => void)
+      | undefined;
+    const session = createCollaborationSession({
+      processor,
+      presence,
+      port: {
+        connect: async () => ({
+          revision: 'revision-1',
+          capabilities: { protocolVersions: [1], collaborativeUndo: true },
+        }),
+        subscribe: (next) => {
+          listener = next;
+          return () => undefined;
+        },
+      },
+    });
+    await session.connect(new AbortController().signal);
+
+    expect(() =>
+      listener?.({
+        type: 'presence',
+        presence: [
+          {
+            actorId: 'actor-2',
+            sheetId: 'sheet-1',
+            selections: [],
+            display: { label: 'Remote', color: 'invalid' },
+            expiresAt: 100,
+          },
+        ],
+      }),
+    ).not.toThrow();
+    expect(session.getSnapshot()).toEqual({
+      status: 'resync-required',
+      revision: 'revision-1',
+    });
   });
 });

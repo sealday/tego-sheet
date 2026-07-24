@@ -24,6 +24,7 @@ import type { SheetTabsRenderer, ToolbarRenderer } from '../ui/slot-types';
 import type { PermissionStore } from '../integrations/permission';
 import type { PersistenceSession } from '../integrations/persistence';
 import type { CommentPrintPolicy, CommentStore } from '../integrations/comments';
+import type { CollaborationSession, PresenceStore } from '../integrations/collaboration';
 
 export type { SheetTabsRenderer, ToolbarRenderer } from '../ui/slot-types';
 
@@ -85,6 +86,10 @@ interface TegoSheetSharedProps extends TegoSheetCallbacks {
   readonly commentStore?: CommentStore;
   /** Explicit comment print projection policy; defaults to excluding comments. */
   readonly commentPrintPolicy?: CommentPrintPolicy;
+  /** Optional ephemeral collaboration presence projected as semantic participants. */
+  readonly presenceStore?: PresenceStore;
+  /** Optional collaboration connection session projected as accessible live status. */
+  readonly collaborationSession?: CollaborationSession;
   /** Per-instance locale identifier and message dictionary for built-in chrome. */
   readonly locale?: LocaleDefinition;
   /** Per-instance worksheet behavior and layout settings. */

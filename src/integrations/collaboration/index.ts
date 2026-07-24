@@ -1,4 +1,7 @@
-import type { SerializableTransactionEnvelope } from '../../core/controller/spreadsheet-document-controller';
+import type {
+  SerializableTransactionEnvelope,
+  SpreadsheetDocumentController,
+} from '../../core/controller/spreadsheet-document-controller';
 
 export interface RemoteOperation {
   readonly operationId: string;
@@ -112,7 +115,33 @@ export interface RemotePresence {
 export interface PresenceStore {
   replace(presence: readonly RemotePresence[]): void;
   list(): readonly RemotePresence[];
+  getSnapshot(): readonly RemotePresence[];
+  subscribe(listener: () => void): () => void;
   close(): void;
+}
+
+export type CollaborationInboundEvent =
+  | { readonly type: 'operation'; readonly operation: RemoteOperation }
+  | { readonly type: 'presence'; readonly presence: readonly RemotePresence[] };
+
+export interface CollaborationSessionPort {
+  connect(signal: AbortSignal): Promise<{
+    readonly revision: string;
+    readonly capabilities: CollaborationCapabilities;
+  }>;
+  subscribe(listener: (event: CollaborationInboundEvent) => void, signal: AbortSignal): () => void;
+}
+
+export interface CollaborationSession {
+  readonly state:
+    | { readonly status: 'disconnected' }
+    | { readonly status: 'connecting' }
+    | { readonly status: 'connected'; readonly revision: string }
+    | { readonly status: 'resync-required'; readonly revision: string };
+  connect(signal: AbortSignal): Promise<void>;
+  disconnect(): void;
+  getSnapshot(): CollaborationSession['state'];
+  subscribe(listener: () => void): () => void;
 }
 
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/;
@@ -245,6 +274,32 @@ export function createRemoteOperationProcessor(
       connected = true;
     },
   });
+}
+
+/** Adapts the production document controller to a reversible remote transaction boundary. */
+export function createControllerRemoteTransactionBoundary(
+  controller: SpreadsheetDocumentController,
+): RemoteTransactionBoundary {
+  const boundary: RemoteTransactionBoundary = {
+    prepare(transaction): PreparedRemoteTransaction | undefined {
+      const preview = controller.dryRun(transaction, { source: 'ref' });
+      if (preview.status === 'rejected') return undefined;
+      const checkpoint = controller.checkpoint();
+      let commitAttempted = false;
+      return Object.freeze({
+        commit(): void {
+          commitAttempted = true;
+          const result = controller.transact(transaction, { source: 'ref' });
+          if (result.status === 'rejected')
+            throw new TypeError(result.message ?? 'Remote rejected');
+        },
+        rollback(): void {
+          if (commitAttempted) controller.restore(checkpoint);
+        },
+      });
+    },
+  };
+  return Object.freeze(boundary);
 }
 
 function snapshotOutboundOperation(
@@ -482,7 +537,38 @@ function snapshotPresence(presence: RemotePresence): RemotePresence {
 export function createPresenceStore(options: { readonly now?: () => number } = {}): PresenceStore {
   let closed = false;
   let current: readonly RemotePresence[] = Object.freeze([]);
-  return Object.freeze({
+  let expiryTimer: ReturnType<typeof setTimeout> | undefined;
+  const listeners = new Set<() => void>();
+  const publish = (): void => {
+    for (const listener of listeners) listener();
+  };
+  const now = (): number => options.now?.() ?? Date.now();
+  const clearExpiryTimer = (): void => {
+    if (expiryTimer !== undefined) clearTimeout(expiryTimer);
+    expiryTimer = undefined;
+  };
+  const scheduleExpiry = (): void => {
+    clearExpiryTimer();
+    if (options.now !== undefined) return;
+    const expiresAt = current.reduce(
+      (nearest, presence) => Math.min(nearest, presence.expiresAt),
+      Number.POSITIVE_INFINITY,
+    );
+    if (!Number.isFinite(expiresAt)) return;
+    expiryTimer = setTimeout(
+      () => {
+        expiryTimer = undefined;
+        const next = Object.freeze(current.filter((presence) => presence.expiresAt > now()));
+        if (next.length !== current.length) {
+          current = next;
+          publish();
+        }
+        scheduleExpiry();
+      },
+      Math.max(0, expiresAt - now()),
+    );
+  };
+  const store: PresenceStore = {
     replace(presence: readonly RemotePresence[]): void {
       if (closed) throw new TypeError('Presence store is closed');
       if (presence.length > 10_000) throw new RangeError('Presence participant limit is 10000');
@@ -497,16 +583,123 @@ export function createPresenceStore(options: { readonly now?: () => number } = {
           return snapshot;
         }),
       );
+      publish();
+      scheduleExpiry();
     },
     list(): readonly RemotePresence[] {
       if (closed) return Object.freeze([]);
-      const now = options.now?.() ?? Date.now();
-      current = Object.freeze(current.filter(({ expiresAt }) => expiresAt > now));
+      const next = Object.freeze(current.filter(({ expiresAt }) => expiresAt > now()));
+      if (next.length !== current.length) {
+        current = next;
+        publish();
+      }
+      scheduleExpiry();
       return current;
+    },
+    getSnapshot(): readonly RemotePresence[] {
+      return current;
+    },
+    subscribe(listener): () => void {
+      if (closed) return () => undefined;
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     },
     close(): void {
       closed = true;
+      clearExpiryTimer();
       current = Object.freeze([]);
+      publish();
+      listeners.clear();
     },
-  });
+  };
+  return Object.freeze(store);
+}
+
+/** Connects host subscriptions to the validated processor and ephemeral presence store. */
+export function createCollaborationSession(options: {
+  readonly port: CollaborationSessionPort;
+  readonly processor: RemoteOperationProcessor;
+  readonly presence: PresenceStore;
+}): CollaborationSession {
+  let state: CollaborationSession['state'] = Object.freeze({ status: 'disconnected' });
+  let unsubscribe: (() => void) | undefined;
+  let connectionAbort: AbortController | undefined;
+  let detachExternalAbort: (() => void) | undefined;
+  const listeners = new Set<() => void>();
+  const publish = (next: CollaborationSession['state']): void => {
+    state = Object.freeze(next);
+    for (const listener of listeners) listener();
+  };
+  const disconnect = (): void => {
+    detachExternalAbort?.();
+    detachExternalAbort = undefined;
+    connectionAbort?.abort();
+    connectionAbort = undefined;
+    unsubscribe?.();
+    unsubscribe = undefined;
+    options.processor.disconnect();
+    options.presence.replace([]);
+    publish({ status: 'disconnected' });
+  };
+  const session: CollaborationSession = {
+    get state() {
+      return state;
+    },
+    async connect(signal): Promise<void> {
+      disconnect();
+      publish({ status: 'connecting' });
+      const controller = new AbortController();
+      connectionAbort = controller;
+      const abort = (): void => disconnect();
+      if (signal.aborted) {
+        disconnect();
+        throw new TypeError('Collaboration connect was cancelled');
+      }
+      signal.addEventListener('abort', abort, { once: true });
+      detachExternalAbort = () => signal.removeEventListener('abort', abort);
+      try {
+        const handshake = await options.port.connect(controller.signal);
+        if (controller.signal.aborted) throw new TypeError('Collaboration connect was cancelled');
+        if (!handshake.capabilities.protocolVersions.includes(1)) {
+          throw new TypeError('Collaboration protocol capability is unavailable');
+        }
+        options.processor.resetAfterResync(handshake.revision);
+        unsubscribe = options.port.subscribe((event) => {
+          try {
+            if (event.type === 'presence') {
+              options.presence.replace(event.presence);
+              return;
+            }
+            const outcome = options.processor.process(event.operation);
+            if (outcome.status === 'resync-required') {
+              publish({ status: 'resync-required', revision: options.processor.revision });
+            } else if (outcome.status === 'applied') {
+              publish({ status: 'connected', revision: outcome.revision });
+            }
+          } catch {
+            connectionAbort?.abort();
+            connectionAbort = undefined;
+            unsubscribe?.();
+            unsubscribe = undefined;
+            options.processor.disconnect();
+            options.presence.replace([]);
+            publish({ status: 'resync-required', revision: options.processor.revision });
+          }
+        }, controller.signal);
+        publish({ status: 'connected', revision: options.processor.revision });
+      } catch (error) {
+        disconnect();
+        throw error;
+      }
+    },
+    disconnect,
+    getSnapshot(): CollaborationSession['state'] {
+      return state;
+    },
+    subscribe(listener): () => void {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+  return Object.freeze(session);
 }

@@ -77,6 +77,7 @@ import {
 } from '../integrations/permission';
 
 const emptyCommentThreads = Object.freeze([]);
+const emptyPresence = Object.freeze([]);
 
 function callbacksFromProps(props: TegoSheetProps): TegoSheetCallbacks {
   return {
@@ -600,6 +601,20 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
     props.commentStore?.subscribe ?? (() => () => undefined),
     props.commentStore?.getSnapshot ?? (() => emptyCommentThreads),
     props.commentStore?.getSnapshot ?? (() => emptyCommentThreads),
+  );
+  const remotePresence = useSyncExternalStore(
+    props.presenceStore?.subscribe ?? (() => () => undefined),
+    props.presenceStore?.getSnapshot ?? (() => emptyPresence),
+    props.presenceStore?.getSnapshot ?? (() => emptyPresence),
+  );
+  const collaborationState = useSyncExternalStore(
+    props.collaborationSession?.subscribe ?? (() => () => undefined),
+    props.collaborationSession === undefined
+      ? () => undefined
+      : props.collaborationSession.getSnapshot,
+    props.collaborationSession === undefined
+      ? () => undefined
+      : props.collaborationSession.getSnapshot,
   );
   useEffect(() => {
     if (props.persistenceSession === undefined) return;
@@ -1402,6 +1417,11 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
           {persistenceState.status}
         </span>
       )}
+      {collaborationState === undefined ? null : (
+        <span className="tego-sheet__collaboration-status" aria-live="polite">
+          {collaborationState.status}
+        </span>
+      )}
       {commentThreads.map((thread, index) =>
         thread.anchor.type === 'orphaned' ? null : (
           <span
@@ -1414,6 +1434,14 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
           </span>
         ),
       )}
+      {remotePresence.map((presence) => (
+        <span
+          key={presence.actorId}
+          className="tego-sheet__remote-presence"
+          data-presence-actor={presence.actorId}
+          aria-label={`${presence.display.label} editing ${presence.sheetId}`}
+        />
+      ))}
       <SheetChrome
         toolbar={toolbarProps}
         toolbarRenderer={props.toolbar}

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { WorkbookCommand } from '../../../src/core/commands/workbook-command';
+import { sheetId } from '../../../src/core';
 import { parseSpreadsheetDocument } from '../../../src/document';
 import { createAiProposalSession, projectAiContext } from '../../../src/integrations/ai';
 import { createPermissionSnapshot } from '../../../src/integrations/permission';
@@ -312,14 +313,14 @@ describe('AI command integration contract', () => {
       {
         type: 'paint-format',
         source: {
-          sheet: 'sheet-1',
+          sheet: sheetId('sheet-1'),
           range: {
             start: { row: 0, column: 1 },
             end: { row: 0, column: 1 },
           },
         },
         target: {
-          sheet: 'sheet-1',
+          sheet: sheetId('sheet-1'),
           range: {
             start: { row: 0, column: 0 },
             end: { row: 0, column: 0 },
@@ -329,14 +330,14 @@ describe('AI command integration contract', () => {
       {
         type: 'autofill',
         source: {
-          sheet: 'sheet-1',
+          sheet: sheetId('sheet-1'),
           range: {
             start: { row: 0, column: 1 },
             end: { row: 0, column: 1 },
           },
         },
         target: {
-          sheet: 'sheet-1',
+          sheet: sheetId('sheet-1'),
           range: {
             start: { row: 0, column: 0 },
             end: { row: 0, column: 0 },
