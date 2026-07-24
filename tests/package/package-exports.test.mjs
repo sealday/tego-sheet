@@ -15,6 +15,7 @@ const expectedExports = [
   './locales/zh-cn',
   './interchange',
   './sdk',
+  './integrations',
   './output/pdf',
   './output/xlsx',
   './output/image',
@@ -82,6 +83,7 @@ test('the built root has only the approved runtime exports and internal subpaths
         'createResourceResolverRegistry',
         'createResourceResolverRegistryFromKernel',
         'createSpreadsheetDocument',
+        'createStructuredTableResolver',
         'createTsvReader',
         'createTsvWriter',
         'createValidationEngine',
@@ -269,6 +271,37 @@ test('the SDK subpath exposes only approved public extension runtimes', () => {
         throw new Error('Unexpected SDK exports: ' + Object.keys(sdk).join(','));
       }
       if ('document' in globalThis) throw new Error('SDK created a DOM global');
+    `,
+    ],
+    { cwd: consumer, stdio: 'pipe' },
+  );
+});
+
+test('the integrations subpath exposes only host-owned protocol runtimes', () => {
+  execFileSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '--eval',
+      `
+      const integrations = await import('tego-sheet/integrations');
+      const expected = [
+        'createAiProposalSession',
+        'createCommentAnchorOutboxCoordinator',
+        'createPermissionSnapshot',
+        'createPermissionStore',
+        'createPersistenceController',
+        'createPresenceStore',
+        'createRemoteOperationProcessor',
+        'createRestoreVersionProposal',
+        'diffDocumentVersions',
+        'evaluatePermission',
+        'projectAiContext',
+        'transformCommentAnchor',
+      ];
+      if (JSON.stringify(Object.keys(integrations)) !== JSON.stringify(expected)) {
+        throw new Error('Unexpected integrations exports: ' + Object.keys(integrations).join(','));
+      }
     `,
     ],
     { cwd: consumer, stdio: 'pipe' },

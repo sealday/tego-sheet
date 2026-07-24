@@ -31,6 +31,8 @@ const publishedPackagePaths = new Set([
   'tego-sheet/locales/de',
   'tego-sheet/locales/nl',
   'tego-sheet/interchange',
+  'tego-sheet/sdk',
+  'tego-sheet/integrations',
   'tego-sheet/output/pdf',
   'tego-sheet/output/xlsx',
   'tego-sheet/output/image',

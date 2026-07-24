@@ -134,6 +134,7 @@ it('[ARCH-1] exposes only the approved React and Workbook 2.0 runtime API', () =
     'createResourceResolverRegistry',
     'createResourceResolverRegistryFromKernel',
     'createSpreadsheetDocument',
+    'createStructuredTableResolver',
     'createTsvReader',
     'createTsvWriter',
     'createValidationEngine',
@@ -179,6 +180,7 @@ it('[ARCH-1] publishes only the approved package entry points', () => {
 
   expect(Object.keys(packageJson.exports ?? {}).sort()).toEqual([
     '.',
+    './integrations',
     './interchange',
     './locales/de',
     './locales/en',
@@ -188,6 +190,7 @@ it('[ARCH-1] publishes only the approved package entry points', () => {
     './output/pdf',
     './output/xlsx',
     './package.json',
+    './sdk',
     './styles.css',
   ]);
   expect(packageJson.files).toEqual(['dist', 'docs/migration-from-x-data-spreadsheet.md']);

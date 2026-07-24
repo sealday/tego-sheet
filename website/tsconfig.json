@@ -15,6 +15,8 @@
       "tego-sheet/output/pdf": ["../dist/output/pdf/index.d.ts"],
       "tego-sheet/output/xlsx": ["../dist/output/xlsx/index.d.ts"],
       "tego-sheet/output/image": ["../dist/output/image/index.d.ts"],
+      "tego-sheet/sdk": ["../dist/sdk/index.d.ts"],
+      "tego-sheet/integrations": ["../dist/integrations/index.d.ts"],
       "tego-sheet/interchange": ["../dist/interchange/index.d.ts"]
     },
     "strict": true

@@ -65,6 +65,11 @@
       "import": "./dist/sdk.js",
       "require": "./dist/sdk.cjs"
     },
+    "./integrations": {
+      "types": "./dist/integrations/index.d.ts",
+      "import": "./dist/integrations.js",
+      "require": "./dist/integrations.cjs"
+    },
     "./output/pdf": {
       "types": "./dist/output/pdf/index.d.ts",
       "import": "./dist/output/pdf.js",
