@@ -41,11 +41,11 @@ const permissions = createPermissionSnapshot({
       target: { type: 'document', documentId: 'document-1' },
     },
     {
-      action: 'range:edit',
+      action: 'ai:apply',
       target: { type: 'document', documentId: 'document-1' },
     },
     {
-      action: 'ai:apply',
+      action: 'range:edit',
       target: {
         type: 'range',
         range: {
@@ -231,8 +231,83 @@ describe('AI command integration contract', () => {
     expect(apply).not.toHaveBeenCalled();
   });
 
-  it('requires native permissions for every target modified by an internal cut', async () => {
+  it('requires native read and edit permissions for internal paste sources', async () => {
     const apply = vi.fn();
+    const proposal = (cut: boolean) => ({
+      id: cut ? 'proposal-cut-permission' : 'proposal-copy-permission',
+      summary: cut ? 'Move B1 to A1' : 'Copy B1 to A1',
+      assumptions: [],
+      commands: [
+        {
+          type: 'paste-internal' as const,
+          source: {
+            sheet: 'sheet-1',
+            range: {
+              start: { row: 0, column: 1 },
+              end: { row: 0, column: 1 },
+            },
+          },
+          target: {
+            sheet: 'sheet-1',
+            range: {
+              start: { row: 0, column: 0 },
+              end: { row: 0, column: 0 },
+            },
+          },
+          mode: 'all' as const,
+          cut,
+        },
+      ],
+    });
+    const targetOnly = createPermissionSnapshot({
+      revision: 'permission-1',
+      actorId: 'actor-1',
+      grants: [
+        {
+          action: 'ai:propose',
+          target: { type: 'document', documentId: 'document-1' },
+        },
+        {
+          action: 'ai:apply',
+          target: { type: 'document', documentId: 'document-1' },
+        },
+        {
+          action: 'range:edit',
+          target: {
+            type: 'range',
+            range: {
+              sheetId: 'sheet-1',
+              start: { row: 0, column: 0 },
+              end: { row: 0, column: 0 },
+            },
+          },
+        },
+      ],
+    });
+    const copySession = await createAiProposalSession({
+      documentId: 'document-1',
+      documentRevision: 'revision-1',
+      permissionSnapshot: targetOnly,
+      signal: new AbortController().signal,
+      request: {
+        instruction: 'copy B1 to A1',
+        locale: 'en-US',
+        allowedCommandTypes: ['paste-internal'],
+      },
+      context: projectAiContext(document(), {
+        documentRevision: 'revision-1',
+        ranges: [],
+        include: [],
+        redactions: [],
+      }),
+      adapter: { propose: async () => proposal(false) },
+      dryRun: () => ({ status: 'ready', diagnostics: [] }),
+      apply,
+      getCurrentRevision: () => 'revision-1',
+      getPermissionSnapshot: () => targetOnly,
+    });
+    expect(() => copySession.accept()).toThrow(/target permission/u);
+
     const aiOnly = createPermissionSnapshot({
       revision: 'permission-1',
       actorId: 'actor-1',
@@ -267,6 +342,10 @@ describe('AI command integration contract', () => {
             },
           },
         },
+        {
+          action: 'sheet:view',
+          target: { type: 'sheet', sheetId: 'sheet-1' },
+        },
       ],
     });
     const session = await createAiProposalSession({
@@ -286,32 +365,7 @@ describe('AI command integration contract', () => {
         redactions: [],
       }),
       adapter: {
-        propose: async () => ({
-          id: 'proposal-native-permission',
-          summary: 'Move B1 to A1',
-          assumptions: [],
-          commands: [
-            {
-              type: 'paste-internal',
-              source: {
-                sheet: 'sheet-1',
-                range: {
-                  start: { row: 0, column: 1 },
-                  end: { row: 0, column: 1 },
-                },
-              },
-              target: {
-                sheet: 'sheet-1',
-                range: {
-                  start: { row: 0, column: 0 },
-                  end: { row: 0, column: 0 },
-                },
-              },
-              mode: 'all',
-              cut: true,
-            },
-          ],
-        }),
+        propose: async () => proposal(true),
       },
       dryRun: () => ({ status: 'ready', diagnostics: [] }),
       apply,

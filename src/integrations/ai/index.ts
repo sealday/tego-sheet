@@ -150,6 +150,10 @@ function commandPermissionRequests(
             command.target.range.end,
           ),
         },
+        {
+          action: 'sheet:view',
+          target: { type: 'sheet', sheetId: command.source.sheet },
+        },
       ];
     case 'paste-internal': {
       const requests: CommandPermissionRequest[] = [
@@ -160,6 +164,10 @@ function commandPermissionRequests(
             command.target.range.start,
             command.target.range.end,
           ),
+        },
+        {
+          action: 'sheet:view',
+          target: { type: 'sheet', sheetId: command.source.sheet },
         },
       ];
       if (command.cut) {
@@ -194,6 +202,10 @@ function commandPermissionRequests(
             command.target.range.start,
             command.target.range.end,
           ),
+        },
+        {
+          action: 'sheet:view',
+          target: { type: 'sheet', sheetId: command.source.sheet },
         },
       ];
     case 'set-sheet-object':
