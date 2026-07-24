@@ -432,9 +432,23 @@ function setStructuredTable(
       });
     }
   }
+  const { filter: _filter, ...tableWithoutFilter } = structuredClone(command.table);
   const snapshot = {
-    ...structuredClone(command.table),
+    ...tableWithoutFilter,
     columns: command.table.columns.map((column) => ({ ...column })),
+    ...(command.table.filter === undefined
+      ? {}
+      : {
+          filter: {
+            filters: command.table.filter.filters.map((filter) => ({
+              ...filter,
+              values: [...filter.values],
+            })),
+            ...(command.table.filter.sort === undefined
+              ? {}
+              : { sort: structuredClone(command.table.filter.sort) }),
+          },
+        }),
   };
   if (index < 0) tables.push(snapshot);
   else tables[index] = snapshot;

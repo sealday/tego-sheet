@@ -179,6 +179,8 @@ export interface StructuredTableColumn {
   readonly id: TableColumnId;
   /** Case-insensitive formula-facing column name. */
   readonly name: string;
+  /** Optional application-facing scalar type hint. */
+  readonly dataType?: 'text' | 'number' | 'boolean' | 'date' | 'mixed';
 }
 
 /** Persistent header-inclusive structured worksheet table. */
@@ -191,6 +193,16 @@ export interface StructuredTable {
   readonly range: DocumentCellRange;
   /** Ordered columns whose count exactly matches the table range width. */
   readonly columns: readonly StructuredTableColumn[];
+  /** Number of leading header rows. The first release supports exactly one. */
+  readonly headerRows?: 1;
+  /** Whether the final row is a totals row rather than part of the data body. */
+  readonly totalsRow?: boolean;
+  /** Stable built-in or host-defined table style name. */
+  readonly style?: string;
+  /** Whether appending directly below the table may expand its range. */
+  readonly autoExpand?: boolean;
+  /** Persistent table-local filter and sort state. */
+  readonly filter?: Omit<SheetFilter, 'range'>;
 }
 
 /** One saved-view comparison over an absolute worksheet column. */
@@ -623,7 +635,19 @@ export interface SheetInput {
       start: CellPoint;
       end: CellPoint;
     };
-    columns: { id: string; name: string }[];
+    columns: {
+      id: string;
+      name: string;
+      dataType?: 'text' | 'number' | 'boolean' | 'date' | 'mixed';
+    }[];
+    headerRows?: 1;
+    totalsRow?: boolean;
+    style?: string;
+    autoExpand?: boolean;
+    filter?: {
+      filters: { column: number; operator: 'all' | 'in'; values: string[] }[];
+      sort?: { column: number; direction: 'asc' | 'desc' } | null;
+    };
   }[];
 }
 

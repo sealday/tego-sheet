@@ -1,4 +1,5 @@
 import type { SpreadsheetDocument } from '../../document';
+import type { DocumentCellAddress, DocumentCellRange, StructuredTable } from '../../document';
 import type {
   FormulaTableBindingRequest,
   FormulaTableBindingResolver,
@@ -41,11 +42,11 @@ export function createStructuredTableResolver(
           range: {
             sheetId: table.range.sheetId,
             start: {
-              row: table.range.start.row + 1,
+              row: table.range.start.row + (table.headerRows ?? 1),
               column: table.range.start.column + columnIndex,
             },
             end: {
-              row: table.range.end.row,
+              row: table.range.end.row - (table.totalsRow === true ? 1 : 0),
               column: table.range.start.column + columnIndex,
             },
           },
@@ -57,4 +58,60 @@ export function createStructuredTableResolver(
       };
     },
   });
+}
+
+/** Result of deciding whether a direct append may expand a structured table. */
+export type StructuredTableAutoExpandResult =
+  | { readonly status: 'unchanged'; readonly table: StructuredTable }
+  | { readonly status: 'expanded'; readonly table: StructuredTable }
+  | {
+      readonly status: 'rejected';
+      readonly code:
+        | 'TABLE_AUTO_EXPAND_DISABLED'
+        | 'TABLE_AUTO_EXPAND_OUTSIDE_BOUNDARY'
+        | 'TABLE_RANGE_OVERLAP'
+        | 'TABLE_CELL_LIMIT_EXCEEDED';
+    };
+
+function overlaps(left: DocumentCellRange, right: DocumentCellRange): boolean {
+  return (
+    left.sheetId === right.sheetId &&
+    left.start.row <= right.end.row &&
+    right.start.row <= left.end.row &&
+    left.start.column <= right.end.column &&
+    right.start.column <= left.end.column
+  );
+}
+
+/** Plans a bounded one-row auto expansion without mutating the source table. */
+export function planStructuredTableAutoExpand(
+  table: StructuredTable,
+  append: DocumentCellAddress,
+  occupiedRanges: readonly DocumentCellRange[] = [],
+  maximumCells = 1_000_000,
+): StructuredTableAutoExpandResult {
+  if (table.autoExpand !== true) {
+    return { status: 'rejected', code: 'TABLE_AUTO_EXPAND_DISABLED' };
+  }
+  if (
+    append.sheetId !== table.range.sheetId ||
+    append.row !== table.range.end.row + 1 ||
+    append.column < table.range.start.column ||
+    append.column > table.range.end.column
+  ) {
+    return { status: 'rejected', code: 'TABLE_AUTO_EXPAND_OUTSIDE_BOUNDARY' };
+  }
+  const range = {
+    ...table.range,
+    end: { row: append.row, column: table.range.end.column },
+  };
+  const cellCount =
+    (range.end.row - range.start.row + 1) * (range.end.column - range.start.column + 1);
+  if (!Number.isSafeInteger(maximumCells) || maximumCells <= 0 || cellCount > maximumCells) {
+    return { status: 'rejected', code: 'TABLE_CELL_LIMIT_EXCEEDED' };
+  }
+  if (occupiedRanges.some((occupied) => overlaps(range, occupied))) {
+    return { status: 'rejected', code: 'TABLE_RANGE_OVERLAP' };
+  }
+  return { status: 'expanded', table: Object.freeze({ ...table, range: Object.freeze(range) }) };
 }

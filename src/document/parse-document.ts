@@ -25,6 +25,7 @@ import type {
   SheetRow,
   SheetObject,
   StructuredTable,
+  StructuredTableColumn,
   SpreadsheetDocument,
   StoredSpreadsheetTemplate,
 } from './model/document';
@@ -1593,12 +1594,29 @@ function structuredTablesAt(
       );
     }
     const columns = arrayAt(source?.columns, `${entryPath}.columns`, context).map(
-      (column, columnIndex) => {
+      (column, columnIndex): StructuredTableColumn => {
         const columnPath = `${entryPath}.columns[${columnIndex}]`;
         const item = recordAt(column, columnPath, context);
+        const dataType =
+          item?.dataType === 'text' ||
+          item?.dataType === 'number' ||
+          item?.dataType === 'boolean' ||
+          item?.dataType === 'date' ||
+          item?.dataType === 'mixed'
+            ? item.dataType
+            : undefined;
+        if (item?.dataType !== undefined && dataType === undefined) {
+          addDiagnostic(
+            context,
+            'DOCUMENT_SCHEMA_INVALID',
+            `${columnPath}.dataType`,
+            'Structured table column dataType is unsupported',
+          );
+        }
         return {
           id: stringAt(item?.id, `${columnPath}.id`, context) as TableColumnId,
           name: stringAt(item?.name, `${columnPath}.name`, context),
+          ...(dataType === undefined ? {} : { dataType }),
         };
       },
     );
@@ -1624,11 +1642,46 @@ function structuredTablesAt(
       }
       columnNames.add(key);
     });
+    if (source?.headerRows !== undefined && source.headerRows !== 1) {
+      addDiagnostic(
+        context,
+        'INVALID_TABLE_HEADER',
+        `${entryPath}.headerRows`,
+        'Structured tables currently require exactly one header row',
+      );
+    }
+    const tableFilter = filterAt(source?.filter, `${entryPath}.filter`, context);
+    if (tableFilter?.range !== undefined) {
+      addDiagnostic(
+        context,
+        'DOCUMENT_SCHEMA_INVALID',
+        `${entryPath}.filter.range`,
+        'Structured table filters inherit the table range',
+      );
+    }
     return {
       id: stringAt(source?.id, `${entryPath}.id`, context) as TableId,
       name,
       range: { sheetId, ...range },
       columns,
+      ...(source?.headerRows === undefined ? {} : { headerRows: 1 as const }),
+      ...(source?.totalsRow === undefined
+        ? {}
+        : { totalsRow: booleanAt(source.totalsRow, `${entryPath}.totalsRow`, context) }),
+      ...(source?.style === undefined
+        ? {}
+        : { style: stringAt(source.style, `${entryPath}.style`, context) }),
+      ...(source?.autoExpand === undefined
+        ? {}
+        : { autoExpand: booleanAt(source.autoExpand, `${entryPath}.autoExpand`, context) }),
+      ...(tableFilter === undefined
+        ? {}
+        : {
+            filter: {
+              filters: tableFilter.filters,
+              ...(tableFilter.sort === undefined ? {} : { sort: tableFilter.sort }),
+            },
+          }),
     };
   });
   duplicateDiagnostics(context, tables, path);
@@ -2087,6 +2140,33 @@ function validateReferences(document: SpreadsheetDocument, context: ParseContext
         'Template references a sheet which does not exist',
       );
     }
+    template.bindings.forEach((binding, bindingIndex) => {
+      if (
+        binding.type !== 'repeat-rows' &&
+        binding.type !== 'repeat-columns' &&
+        binding.type !== 'repeat-range' &&
+        binding.type !== 'repeat-page' &&
+        binding.type !== 'repeat-sheet'
+      ) {
+        return;
+      }
+      const sheet = document.workbook.sheets.find(({ id }) => id === binding.range.sheetId);
+      const conflict = sheet?.tables.find(
+        (table) =>
+          table.autoExpand === true &&
+          table.range.end.row === binding.range.end.row &&
+          table.range.start.column <= binding.range.end.column &&
+          binding.range.start.column <= table.range.end.column,
+      );
+      if (conflict !== undefined) {
+        addDiagnostic(
+          context,
+          'TABLE_TEMPLATE_BOUNDARY_CONFLICT',
+          `$.templates[${index}].bindings[${bindingIndex}].range`,
+          `Template repeat and structured table ${conflict.name} cannot both control the same expansion boundary`,
+        );
+      }
+    });
   });
 }
 

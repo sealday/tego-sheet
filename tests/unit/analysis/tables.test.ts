@@ -2,11 +2,16 @@ import { describe, expect, it } from 'vitest';
 import {
   parseSpreadsheetDocument,
   serializeSpreadsheetDocument,
+  type BindingId,
+  type DocumentSheetId,
   type SpreadsheetDocument,
   type SpreadsheetDocumentInput,
 } from '../../../src/document';
 import { createFormulaEngine } from '../../../src/formula';
-import { createStructuredTableResolver } from '../../../src/analysis/tables';
+import {
+  createStructuredTableResolver,
+  planStructuredTableAutoExpand,
+} from '../../../src/analysis/tables';
 import { SpreadsheetDocumentController } from '../../../src/core/controller/spreadsheet-document-controller';
 import { sheetId } from '../../../src/core';
 
@@ -265,6 +270,110 @@ describe('TBL-01 persistent structured tables', () => {
     expect(program.bindings.get('sheet-1!D1')).toEqual([
       { kind: 'table-column', tableId: 'table-sales', columnId: 'column-amount' },
     ]);
+  });
+
+  it('persists table presentation, behavior, filter, and typed-column metadata', () => {
+    const document = parseOk(
+      fixture([
+        {
+          ...fixture().workbook.sheets[0]!.tables![0]!,
+          columns: [
+            { id: 'column-region', name: 'Region', dataType: 'text' },
+            { id: 'column-amount', name: 'Amount', dataType: 'number' },
+          ],
+          headerRows: 1,
+          totalsRow: true,
+          style: 'medium-2',
+          autoExpand: true,
+          filter: {
+            filters: [{ column: 1, operator: 'in', values: ['4', '6'] }],
+            sort: { column: 1, direction: 'desc' },
+          },
+        },
+      ]),
+    );
+    const roundTrip = parseOk(JSON.parse(serializeSpreadsheetDocument(document)));
+
+    expect(roundTrip.workbook.sheets[0]?.tables[0]).toMatchObject({
+      headerRows: 1,
+      totalsRow: true,
+      style: 'medium-2',
+      autoExpand: true,
+      filter: {
+        filters: [{ column: 1, operator: 'in', values: ['4', '6'] }],
+        sort: { column: 1, direction: 'desc' },
+      },
+    });
+    expect(
+      createStructuredTableResolver(roundTrip).resolve({
+        tableName: 'Sales',
+        columnName: 'Amount',
+        currentSheetId: 'sheet-1',
+      }),
+    ).toMatchObject({ range: { start: { row: 1 }, end: { row: 1 } } });
+  });
+
+  it('plans direct bounded auto expansion and rejects occupied rows atomically', () => {
+    const table = {
+      ...parseOk(fixture()).workbook.sheets[0]!.tables[0]!,
+      autoExpand: true,
+    };
+    const append = { sheetId: table.range.sheetId, row: 3, column: 1 };
+
+    expect(planStructuredTableAutoExpand(table, append)).toMatchObject({
+      status: 'expanded',
+      table: { range: { end: { row: 3, column: 1 } } },
+    });
+    expect(
+      planStructuredTableAutoExpand(table, append, [
+        {
+          sheetId: table.range.sheetId,
+          start: { row: 3, column: 0 },
+          end: { row: 3, column: 1 },
+        },
+      ]),
+    ).toEqual({ status: 'rejected', code: 'TABLE_RANGE_OVERLAP' });
+    expect(planStructuredTableAutoExpand(table, append, [], 4)).toEqual({
+      status: 'rejected',
+      code: 'TABLE_CELL_LIMIT_EXCEEDED',
+    });
+  });
+
+  it('rejects template repeat and table auto-expand ownership of the same boundary', () => {
+    const input = fixture([
+      {
+        ...fixture().workbook.sheets[0]!.tables![0]!,
+        autoExpand: true,
+      },
+    ]);
+    input.templates.push({
+      id: 'template-table',
+      name: 'Table report',
+      bindings: [
+        {
+          id: 'repeat-table' as BindingId,
+          type: 'repeat-rows',
+          range: {
+            sheetId: 'sheet-1' as DocumentSheetId,
+            start: { row: 1, column: 0 },
+            end: { row: 2, column: 1 },
+          },
+          source: 'items',
+          empty: 'remove',
+          pageBreak: 'auto',
+        },
+      ],
+      printProfiles: [],
+    });
+
+    const result = parseSpreadsheetDocument(input);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('boundary conflict must be rejected');
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'TABLE_TEMPLATE_BOUNDARY_CONFLICT' }),
+      ]),
+    );
   });
 
   it('commits table changes atomically and restores them through undo and redo', () => {
