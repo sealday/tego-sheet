@@ -313,6 +313,64 @@ describe('OBJ-01 standard XLSX DrawingML interchange', () => {
     ).rejects.toMatchObject({ code: 'ARCHIVE_LIMIT_EXCEEDED' });
   });
 
+  it('deduplicates byte-equivalent images reached through different media paths', async () => {
+    const blob = await new XlsxAdapter().render(objectDocument() as never, {
+      formulaMode: 'values-only',
+      compatibility: 'excel',
+    });
+    const entries = await archiveParts(blob);
+    const drawingPath = 'xl/drawings/drawing1.xml';
+    const relationshipsPath = 'xl/drawings/_rels/drawing1.xml.rels';
+    const drawing = strFromU8(entries[drawingPath]!);
+    const relationships = strFromU8(entries[relationshipsPath]!);
+    const imageAnchor = /<xdr:absoluteAnchor>[\s\S]*?<\/xdr:absoluteAnchor>/.exec(drawing)?.[0];
+    expect(imageAnchor).toBeDefined();
+    const repeated = zipSync({
+      ...entries,
+      'xl/media/equivalent.png': entries['xl/media/image1.png']!,
+      [drawingPath]: strToU8(
+        drawing.replace(
+          '</xdr:wsDr>',
+          `${imageAnchor!.replace('r:embed="rId1"', 'r:embed="rId2"')}</xdr:wsDr>`,
+        ),
+      ),
+      [relationshipsPath]: strToU8(
+        relationships.replace(
+          '</Relationships>',
+          '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/equivalent.png"/></Relationships>',
+        ),
+      ),
+    });
+
+    const imported = await createXlsxReader().read(repeated);
+    const images = imported.document.workbook.sheets[0]!.objects.filter(
+      (object) => object.kind === 'image',
+    );
+    expect(images).toHaveLength(2);
+    expect(
+      new Set(images.map((object) => (object.kind === 'image' ? object.resourceId : ''))).size,
+    ).toBe(1);
+    expect(imported.document.resources.items).toHaveLength(1);
+  });
+
+  it.each([
+    ['objects', { maxObjects: 4 }],
+    ['resources', { maxResources: 0 }],
+    ['resource bytes', { maxResourceBytes: 0 }],
+  ])(
+    'fails before materializing DrawingML when the %s budget is exceeded',
+    async (_name, limits) => {
+      const blob = await new XlsxAdapter().render(objectDocument() as never, {
+        formulaMode: 'values-only',
+        compatibility: 'excel',
+      });
+
+      await expect(createXlsxReader(limits).read(blob)).rejects.toMatchObject({
+        code: 'ARCHIVE_LIMIT_EXCEEDED',
+      });
+    },
+  );
+
   it('degrades two-cell editAs modes instead of inventing geometry from hardcoded grid sizes', async () => {
     const blob = await new XlsxAdapter().render(objectDocument() as never, {
       formulaMode: 'values-only',

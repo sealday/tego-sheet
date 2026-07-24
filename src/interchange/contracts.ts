@@ -24,6 +24,12 @@ export interface InterchangeLimits {
   readonly maxColumns?: number;
   /** Maximum non-empty cells. */
   readonly maxCells?: number;
+  /** Maximum DrawingML objects materialized across the workbook. */
+  readonly maxObjects?: number;
+  /** Maximum unique embedded resources materialized across the workbook. */
+  readonly maxResources?: number;
+  /** Maximum aggregate bytes of unique embedded resources. */
+  readonly maxResourceBytes?: number;
   /** Maximum emitted text bytes. */
   readonly maxOutputBytes?: number;
 }
@@ -164,6 +170,9 @@ export const DEFAULT_INTERCHANGE_LIMITS = Object.freeze({
   maxRows: 1_048_576,
   maxColumns: 16_384,
   maxCells: 1_000_000,
+  maxObjects: 10_000,
+  maxResources: 10_000,
+  maxResourceBytes: 64 * 1024 * 1024,
   maxOutputBytes: 64 * 1024 * 1024,
 });
 

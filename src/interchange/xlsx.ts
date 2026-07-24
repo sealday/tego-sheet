@@ -610,9 +610,12 @@ export function createXlsxReader(configuredLimits: InterchangeLimits = {}): Work
         (total, bytes) => total + bytes.byteLength,
         0,
       );
-      const drawingResourcePool = createXlsxDrawingResourcePool(
-        limits.maxUncompressedBytes - archiveUncompressedBytes,
-      );
+      const drawingResourcePool = createXlsxDrawingResourcePool({
+        maxObjects: limits.maxObjects,
+        maxResources: limits.maxResources,
+        maxResourceBytes: limits.maxResourceBytes,
+        maxMaterializedBytes: limits.maxUncompressedBytes - archiveUncompressedBytes,
+      });
       const printProfiles: SpreadsheetDocumentInput['templates'][number]['printProfiles'][number][] =
         [];
       let totalCells = 0;

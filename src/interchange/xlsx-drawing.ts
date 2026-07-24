@@ -19,17 +19,40 @@ export interface ParsedWorksheetDrawing {
 
 export interface XlsxDrawingResourcePool {
   readonly byMediaPath: Map<string, ResourceMetadata>;
+  readonly content: {
+    readonly bytes: Uint8Array;
+    readonly mimeType: 'image/png' | 'image/jpeg';
+    readonly resource: ResourceMetadata;
+  }[];
+  objectCount: number;
+  resourceCount: number;
+  resourceBytes: number;
   materializedBytes: number;
+  readonly maxObjects: number;
+  readonly maxResources: number;
+  readonly maxResourceBytes: number;
   readonly maxMaterializedBytes: number;
 }
 
 export function createXlsxDrawingResourcePool(
-  maxMaterializedBytes = Number.MAX_SAFE_INTEGER,
+  limits: Readonly<{
+    readonly maxObjects?: number;
+    readonly maxResources?: number;
+    readonly maxResourceBytes?: number;
+    readonly maxMaterializedBytes?: number;
+  }> = {},
 ): XlsxDrawingResourcePool {
   return {
     byMediaPath: new Map(),
+    content: [],
+    objectCount: 0,
+    resourceCount: 0,
+    resourceBytes: 0,
     materializedBytes: 0,
-    maxMaterializedBytes,
+    maxObjects: limits.maxObjects ?? Number.MAX_SAFE_INTEGER,
+    maxResources: limits.maxResources ?? Number.MAX_SAFE_INTEGER,
+    maxResourceBytes: limits.maxResourceBytes ?? Number.MAX_SAFE_INTEGER,
+    maxMaterializedBytes: limits.maxMaterializedBytes ?? Number.MAX_SAFE_INTEGER,
   };
 }
 
@@ -177,6 +200,22 @@ function base64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+function base64Length(byteLength: number): number {
+  return 4 * Math.ceil(byteLength / 3);
+}
+
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) return false;
+  for (let index = 0; index < left.byteLength; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
+}
+
+function limitExceeded(message: string): never {
+  throw new InterchangeError('ARCHIVE_LIMIT_EXCEEDED', message);
+}
+
 function imageMime(path: string, bytes: Uint8Array): 'image/png' | 'image/jpeg' | undefined {
   if (
     path.toLowerCase().endsWith('.png') &&
@@ -290,6 +329,21 @@ function anchorEntries(xml: string): readonly {
     .sort((left, right) => left.index - right.index);
 }
 
+function reserveDrawingObjects(xml: string, resourcePool: XlsxDrawingResourcePool): void {
+  const openingAnchor = /<(?:[\w.-]+:)?(?:absoluteAnchor|oneCellAnchor|twoCellAnchor)\b/gi;
+  let count = 0;
+  while (openingAnchor.exec(xml) !== null) {
+    count += 1;
+    if (
+      !Number.isSafeInteger(resourcePool.objectCount + count) ||
+      resourcePool.objectCount + count > resourcePool.maxObjects
+    ) {
+      limitExceeded('XLSX DrawingML object count exceeds its workbook budget');
+    }
+  }
+  resourcePool.objectCount += count;
+}
+
 export function parseWorksheetDrawing(
   entries: Readonly<Record<string, Uint8Array>>,
   worksheetPart: string,
@@ -330,7 +384,9 @@ export function parseWorksheetDrawing(
       : relationships(archiveXml(entries, drawingRelationshipsPath, limits));
   const objects: SheetObject[] = [];
   const resources: ResourceMetadata[] = [];
-  for (const [zIndex, entry] of anchorEntries(drawingXml).entries()) {
+  reserveDrawingObjects(drawingXml, resourcePool);
+  const entriesInDrawing = anchorEntries(drawingXml);
+  for (const [zIndex, entry] of entriesInDrawing.entries()) {
     if (
       entry.type === 'twoCellAnchor' &&
       entry.attributes.editAs !== undefined &&
@@ -384,17 +440,29 @@ export function parseWorksheetDrawing(
       }
       let resource = resourcePool.byMediaPath.get(mediaPath);
       if (resource === undefined) {
-        const url = `data:${mimeType};base64,${base64(bytes)}`;
-        const materializedBytes = url.length * 2;
+        resource = resourcePool.content.find(
+          (candidate) => candidate.mimeType === mimeType && sameBytes(candidate.bytes, bytes),
+        )?.resource;
+      }
+      if (resource === undefined) {
+        const prefix = `data:${mimeType};base64,`;
+        const materializedBytes = (prefix.length + base64Length(bytes.byteLength)) * 2;
+        if (resourcePool.resourceCount + 1 > resourcePool.maxResources) {
+          limitExceeded('XLSX drawing resource count exceeds its workbook budget');
+        }
+        if (
+          !Number.isSafeInteger(resourcePool.resourceBytes + bytes.byteLength) ||
+          resourcePool.resourceBytes + bytes.byteLength > resourcePool.maxResourceBytes
+        ) {
+          limitExceeded('XLSX drawing resource bytes exceed their workbook budget');
+        }
         if (
           !Number.isSafeInteger(resourcePool.materializedBytes + materializedBytes) ||
           resourcePool.materializedBytes + materializedBytes > resourcePool.maxMaterializedBytes
         ) {
-          throw new InterchangeError(
-            'ARCHIVE_LIMIT_EXCEEDED',
-            'XLSX image materialization exceeds its memory budget',
-          );
+          limitExceeded('XLSX image materialization exceeds its memory budget');
         }
+        const url = `${prefix}${base64(bytes)}`;
         resource = {
           id: `xlsx-resource-${resourcePool.byMediaPath.size + 1}` as ResourceId,
           kind: 'image',
@@ -402,10 +470,13 @@ export function parseWorksheetDrawing(
           byteLength: bytes.byteLength,
           url,
         };
-        resourcePool.byMediaPath.set(mediaPath, resource);
+        resourcePool.content.push({ bytes, mimeType, resource });
+        resourcePool.resourceCount += 1;
+        resourcePool.resourceBytes += bytes.byteLength;
         resourcePool.materializedBytes += materializedBytes;
         resources.push(resource);
       }
+      resourcePool.byMediaPath.set(mediaPath, resource);
       const resourceId = resource.id;
       objects.push({ ...common, kind: 'image', resourceId, fit: 'fill' } as SheetObject);
       continue;
