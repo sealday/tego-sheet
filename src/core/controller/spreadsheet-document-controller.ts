@@ -853,7 +853,11 @@ export class SpreadsheetDocumentController {
       } else if (
         command.type === 'group' ||
         command.type === 'ungroup' ||
-        command.type === 'toggle-group'
+        command.type === 'toggle-group' ||
+        command.type === 'insert-row' ||
+        command.type === 'delete-row' ||
+        command.type === 'insert-column' ||
+        command.type === 'delete-column'
       ) {
         candidate = plan.document;
         this.documentHistory.record(

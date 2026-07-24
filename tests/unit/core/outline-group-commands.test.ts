@@ -111,6 +111,13 @@ describe('versioned outline group commands', () => {
     const controller = controllerFixture();
     expect(controller.execute(groupCommand('outer', 1, 8))).toMatchObject({ status: 'committed' });
     expect(controller.execute(groupCommand('inner', 2, 4))).toMatchObject({ status: 'committed' });
+    expect(
+      controller.execute({
+        schemaVersion: 1,
+        id: 'collapse-outer',
+        command: { type: 'toggle-group', sheet, id: 'outer' as GroupId },
+      }),
+    ).toMatchObject({ status: 'committed' });
 
     expect(
       controller.execute({
@@ -122,6 +129,9 @@ describe('versioned outline group commands', () => {
     expect(controller.getSnapshot().document.workbook.sheets[0]?.groups).toEqual([
       expect.objectContaining({ id: 'outer', start: 1, end: 10, level: 1 }),
       expect.objectContaining({ id: 'inner', start: 2, end: 6, level: 2 }),
+    ]);
+    expect(controller.getSnapshot().document.workbook.sheets[0]?.rows).toEqual([
+      { index: 11, hidden: true },
     ]);
 
     expect(
