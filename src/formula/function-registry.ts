@@ -103,12 +103,75 @@ function excelSerial(
   return serial + (hour * 3600 + minute * 60 + second) / 86_400;
 }
 
+function dateSerial(
+  year: number,
+  month: number,
+  day: number,
+  dateSystem: 'excel-1900' | 'excel-1904',
+): number {
+  if (![year, month, day].every(Number.isFinite)) return Number.NaN;
+  const timestamp = Date.UTC(Math.trunc(year), Math.trunc(month) - 1, Math.trunc(day));
+  const epoch = dateSystem === 'excel-1900' ? Date.UTC(1899, 11, 31) : Date.UTC(1904, 0, 1);
+  let serial = Math.floor((timestamp - epoch) / 86_400_000);
+  if (dateSystem === 'excel-1900' && serial >= 60) serial += 1;
+  return serial;
+}
+
+function serialDateParts(
+  serial: number,
+  dateSystem: 'excel-1900' | 'excel-1904',
+): readonly [year: number, month: number, day: number] | undefined {
+  if (!Number.isFinite(serial)) return undefined;
+  const day = Math.floor(serial);
+  if (dateSystem === 'excel-1900' && day === 60) return [1900, 2, 29];
+  const adjusted = dateSystem === 'excel-1900' && day > 60 ? day - 1 : day;
+  const epoch = dateSystem === 'excel-1900' ? Date.UTC(1899, 11, 31) : Date.UTC(1904, 0, 1);
+  const date = new Date(epoch + adjusted * 86_400_000);
+  return [date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate()];
+}
+
 const numberResult = (value: number): FormulaValue =>
   Number.isFinite(value)
     ? { type: 'number', value }
     : { type: 'error', value: Number.isNaN(value) ? '#VALUE!' : '#NUM!' };
 
+function numericArgument(value: ScalarFormulaValue | undefined): number | undefined {
+  return value === undefined ? undefined : numeric(value);
+}
+
+function textArgument(value: ScalarFormulaValue | undefined): string {
+  return value === undefined || value.type === 'blank' ? '' : String(value.value);
+}
+
+function excelRound(value: number, digits: number): number {
+  const scale = 10 ** Math.trunc(digits);
+  if (!Number.isFinite(scale) || scale === 0) return value;
+  const scaled = value * scale;
+  return (Math.sign(scaled) * Math.round(Math.abs(scaled) + Number.EPSILON)) / scale;
+}
+
+function directionalRound(value: number, digits: number, direction: 'up' | 'down'): number {
+  const scale = 10 ** Math.trunc(digits);
+  if (!Number.isFinite(scale) || scale === 0) return value;
+  const magnitude = Math.abs(value * scale);
+  const rounded = direction === 'up' ? Math.ceil(magnitude) : Math.floor(magnitude);
+  return (Math.sign(value) * rounded) / scale;
+}
+
 const builtins: readonly FormulaFunctionDefinition[] = [
+  {
+    name: 'ABS',
+    parameters: { minimum: 1, maximum: 1 },
+    returns: 'number',
+    volatility: 'stable',
+    mode: 'sync',
+    evaluate: ([value]) => {
+      const converted = numericArgument(value);
+      return converted === undefined
+        ? { type: 'error', value: '#VALUE!' }
+        : numberResult(Math.abs(converted));
+    },
+  },
   {
     name: 'AND',
     parameters: { minimum: 1 },
@@ -133,6 +196,39 @@ const builtins: readonly FormulaFunctionDefinition[] = [
     },
   },
   {
+    name: 'COUNT',
+    parameters: { minimum: 1 },
+    returns: 'number',
+    volatility: 'stable',
+    mode: 'sync',
+    evaluate: (values) => ({
+      type: 'number',
+      value: values.filter(({ type }) => type === 'number').length,
+    }),
+  },
+  {
+    name: 'COUNTA',
+    parameters: { minimum: 1 },
+    returns: 'number',
+    volatility: 'stable',
+    mode: 'sync',
+    evaluate: (values) => ({
+      type: 'number',
+      value: values.filter(({ type }) => type !== 'blank').length,
+    }),
+  },
+  {
+    name: 'COUNTBLANK',
+    parameters: { minimum: 1 },
+    returns: 'number',
+    volatility: 'stable',
+    mode: 'sync',
+    evaluate: (values) => ({
+      type: 'number',
+      value: values.filter(({ type }) => type === 'blank').length,
+    }),
+  },
+  {
     name: 'CONCAT',
     parameters: { minimum: 1 },
     returns: 'string',
@@ -142,6 +238,34 @@ const builtins: readonly FormulaFunctionDefinition[] = [
       type: 'string',
       value: values.map((value) => (value.type === 'blank' ? '' : String(value.value))).join(''),
     }),
+  },
+  {
+    name: 'DATE',
+    parameters: { minimum: 3, maximum: 3 },
+    returns: 'number',
+    volatility: 'stable',
+    mode: 'sync',
+    evaluate: ([year, month, day], context) => {
+      const parts = [numericArgument(year), numericArgument(month), numericArgument(day)];
+      return parts.includes(undefined)
+        ? { type: 'error', value: '#VALUE!' }
+        : numberResult(dateSerial(parts[0]!, parts[1]!, parts[2]!, context.dateSystem));
+    },
+  },
+  {
+    name: 'DAY',
+    parameters: { minimum: 1, maximum: 1 },
+    returns: 'number',
+    volatility: 'stable',
+    mode: 'sync',
+    evaluate: ([value], context) => {
+      const converted = numericArgument(value);
+      const parts =
+        converted === undefined ? undefined : serialDateParts(converted, context.dateSystem);
+      return parts === undefined
+        ? { type: 'error', value: '#VALUE!' }
+        : { type: 'number', value: parts[2] };
+    },
   },
   {
     name: 'IF',
@@ -155,6 +279,35 @@ const builtins: readonly FormulaFunctionDefinition[] = [
         : (falsyValue ?? { type: 'blank' }),
   },
   {
+    name: 'LEFT',
+    parameters: { minimum: 1, maximum: 2 },
+    returns: 'string',
+    volatility: 'stable',
+    mode: 'sync',
+    evaluate: ([value, count]) => {
+      const length = count === undefined ? 1 : numericArgument(count);
+      return length === undefined || length < 0
+        ? { type: 'error', value: '#VALUE!' }
+        : { type: 'string', value: textArgument(value).slice(0, Math.trunc(length)) };
+    },
+  },
+  {
+    name: 'LEN',
+    parameters: { minimum: 1, maximum: 1 },
+    returns: 'number',
+    volatility: 'stable',
+    mode: 'sync',
+    evaluate: ([value]) => ({ type: 'number', value: textArgument(value).length }),
+  },
+  {
+    name: 'LOWER',
+    parameters: { minimum: 1, maximum: 1 },
+    returns: 'string',
+    volatility: 'stable',
+    mode: 'sync',
+    evaluate: ([value]) => ({ type: 'string', value: textArgument(value).toLowerCase() }),
+  },
+  {
     name: 'MAX',
     parameters: { minimum: 1 },
     returns: 'number',
@@ -163,12 +316,55 @@ const builtins: readonly FormulaFunctionDefinition[] = [
     evaluate: (values) => numberResult(Math.max(...values.map((value) => numeric(value) ?? 0))),
   },
   {
+    name: 'MID',
+    parameters: { minimum: 3, maximum: 3 },
+    returns: 'string',
+    volatility: 'stable',
+    mode: 'sync',
+    evaluate: ([value, start, count]) => {
+      const startIndex = numericArgument(start);
+      const length = numericArgument(count);
+      return startIndex === undefined || length === undefined || startIndex < 1 || length < 0
+        ? { type: 'error', value: '#VALUE!' }
+        : {
+            type: 'string',
+            value: textArgument(value).slice(
+              Math.trunc(startIndex) - 1,
+              Math.trunc(startIndex) - 1 + Math.trunc(length),
+            ),
+          };
+    },
+  },
+  {
     name: 'MIN',
     parameters: { minimum: 1 },
     returns: 'number',
     volatility: 'stable',
     mode: 'sync',
     evaluate: (values) => numberResult(Math.min(...values.map((value) => numeric(value) ?? 0))),
+  },
+  {
+    name: 'MONTH',
+    parameters: { minimum: 1, maximum: 1 },
+    returns: 'number',
+    volatility: 'stable',
+    mode: 'sync',
+    evaluate: ([value], context) => {
+      const converted = numericArgument(value);
+      const parts =
+        converted === undefined ? undefined : serialDateParts(converted, context.dateSystem);
+      return parts === undefined
+        ? { type: 'error', value: '#VALUE!' }
+        : { type: 'number', value: parts[1] };
+    },
+  },
+  {
+    name: 'NOT',
+    parameters: { minimum: 1, maximum: 1 },
+    returns: 'boolean',
+    volatility: 'stable',
+    mode: 'sync',
+    evaluate: ([value]) => ({ type: 'boolean', value: !truthy(value ?? { type: 'blank' }) }),
   },
   {
     name: 'NOW',
@@ -190,6 +386,64 @@ const builtins: readonly FormulaFunctionDefinition[] = [
     evaluate: (values) => ({ type: 'boolean', value: values.some(truthy) }),
   },
   {
+    name: 'RIGHT',
+    parameters: { minimum: 1, maximum: 2 },
+    returns: 'string',
+    volatility: 'stable',
+    mode: 'sync',
+    evaluate: ([value, count]) => {
+      const length = count === undefined ? 1 : numericArgument(count);
+      return length === undefined || length < 0
+        ? { type: 'error', value: '#VALUE!' }
+        : {
+            type: 'string',
+            value: Math.trunc(length) === 0 ? '' : textArgument(value).slice(-Math.trunc(length)),
+          };
+    },
+  },
+  {
+    name: 'ROUND',
+    parameters: { minimum: 2, maximum: 2 },
+    returns: 'number',
+    volatility: 'stable',
+    mode: 'sync',
+    evaluate: ([value, digits]) => {
+      const converted = numericArgument(value);
+      const precision = numericArgument(digits);
+      return converted === undefined || precision === undefined
+        ? { type: 'error', value: '#VALUE!' }
+        : numberResult(excelRound(converted, precision));
+    },
+  },
+  {
+    name: 'ROUNDDOWN',
+    parameters: { minimum: 2, maximum: 2 },
+    returns: 'number',
+    volatility: 'stable',
+    mode: 'sync',
+    evaluate: ([value, digits]) => {
+      const converted = numericArgument(value);
+      const precision = numericArgument(digits);
+      return converted === undefined || precision === undefined
+        ? { type: 'error', value: '#VALUE!' }
+        : numberResult(directionalRound(converted, precision, 'down'));
+    },
+  },
+  {
+    name: 'ROUNDUP',
+    parameters: { minimum: 2, maximum: 2 },
+    returns: 'number',
+    volatility: 'stable',
+    mode: 'sync',
+    evaluate: ([value, digits]) => {
+      const converted = numericArgument(value);
+      const precision = numericArgument(digits);
+      return converted === undefined || precision === undefined
+        ? { type: 'error', value: '#VALUE!' }
+        : numberResult(directionalRound(converted, precision, 'up'));
+    },
+  },
+  {
     name: 'SUM',
     parameters: { minimum: 1 },
     returns: 'number',
@@ -197,6 +451,17 @@ const builtins: readonly FormulaFunctionDefinition[] = [
     mode: 'sync',
     evaluate: (values) =>
       numberResult(values.reduce((sum, value) => sum + (numeric(value) ?? 0), 0)),
+  },
+  {
+    name: 'TRIM',
+    parameters: { minimum: 1, maximum: 1 },
+    returns: 'string',
+    volatility: 'stable',
+    mode: 'sync',
+    evaluate: ([value]) => ({
+      type: 'string',
+      value: textArgument(value).trim().replace(/\s+/gu, ' '),
+    }),
   },
   {
     name: 'TODAY',
@@ -208,6 +473,29 @@ const builtins: readonly FormulaFunctionDefinition[] = [
       type: 'number',
       value: Math.floor(excelSerial(context.now, context.dateSystem, context.timeZone)),
     }),
+  },
+  {
+    name: 'UPPER',
+    parameters: { minimum: 1, maximum: 1 },
+    returns: 'string',
+    volatility: 'stable',
+    mode: 'sync',
+    evaluate: ([value]) => ({ type: 'string', value: textArgument(value).toUpperCase() }),
+  },
+  {
+    name: 'YEAR',
+    parameters: { minimum: 1, maximum: 1 },
+    returns: 'number',
+    volatility: 'stable',
+    mode: 'sync',
+    evaluate: ([value], context) => {
+      const converted = numericArgument(value);
+      const parts =
+        converted === undefined ? undefined : serialDateParts(converted, context.dateSystem);
+      return parts === undefined
+        ? { type: 'error', value: '#VALUE!' }
+        : { type: 'number', value: parts[0] };
+    },
   },
 ];
 

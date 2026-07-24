@@ -96,6 +96,8 @@ export interface FormulaEngineOptions {
   readonly functions?: FormulaFunctionRegistry;
   /** Maximum formula evaluations allowed in one recalculation. */
   readonly maximumEvaluations?: number;
+  /** Maximum AST and range-cell evaluation steps allowed in one recalculation. */
+  readonly maximumCalculationSteps?: number;
   /** Optional stable named-range registry used during parsing and dependency binding. */
   readonly names?: FormulaNameRegistry;
   /** Injectable structured-table binding used by the evaluator before TBL-01 persistence lands. */
@@ -358,6 +360,7 @@ function containsVolatile(ast: FormulaAst, registry: FormulaFunctionRegistry): b
 export function createFormulaEngine(options: FormulaEngineOptions = {}): FormulaEngine {
   const registry = options.functions ?? createFormulaFunctionRegistry();
   const maximumEvaluations = options.maximumEvaluations ?? 100_000;
+  const maximumCalculationSteps = options.maximumCalculationSteps ?? 1_000_000;
   const maximumSpillCells = options.maximumSpillCells ?? 100_000;
   const formulaProgramStates = new WeakMap<FormulaProgram, FormulaProgramState>();
 
@@ -557,6 +560,7 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
       const evaluated: string[] = [];
       const evaluating = new Set<string>();
       let evaluationCount = 0;
+      let calculationSteps = 0;
       const calculationNow = environment.clock.now();
 
       const resolveAddress = (address: string): FormulaValue => {
@@ -637,6 +641,20 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
           : resolveAddress(formulaAddressKey({ sheetId, row, column }));
 
       const evaluateAst = (ast: FormulaAst): FormulaValue => {
+        calculationSteps += 1;
+        if (calculationSteps > maximumCalculationSteps) {
+          const address = [...evaluating].at(-1);
+          if (address !== undefined) {
+            program.diagnostics.set(address, [
+              {
+                code: 'FORMULA_EVALUATION_LIMIT_EXCEEDED',
+                message: `Calculation exceeded ${maximumCalculationSteps} evaluation steps`,
+                span: ast.span,
+              },
+            ]);
+          }
+          return { type: 'error', value: '#NUM!' };
+        }
         if (ast.kind === 'number') return { type: 'number', value: ast.value };
         if (ast.kind === 'string') return { type: 'string', value: ast.value };
         if (ast.kind === 'boolean') return { type: 'boolean', value: ast.value };
@@ -659,6 +677,20 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
               column <= Math.max(ast.start.column, ast.end.column);
               column += 1
             ) {
+              calculationSteps += 1;
+              if (calculationSteps > maximumCalculationSteps) {
+                const address = [...evaluating].at(-1);
+                if (address !== undefined) {
+                  program.diagnostics.set(address, [
+                    {
+                      code: 'FORMULA_EVALUATION_LIMIT_EXCEEDED',
+                      message: `Calculation exceeded ${maximumCalculationSteps} evaluation steps`,
+                      span: ast.span,
+                    },
+                  ]);
+                }
+                return { type: 'error', value: '#NUM!' };
+              }
               values_.push(scalar(evaluateReference(ast.start.sheetId, row, column)));
             }
             rows.push(values_);
