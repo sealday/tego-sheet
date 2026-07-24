@@ -2,6 +2,7 @@ import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, resolve, sep } from 'node:path';
+import { pipeline } from 'node:stream/promises';
 
 const arguments_ = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -44,25 +45,57 @@ async function resolveFile(requestUrl) {
     if (filePath !== publicDirectory && !filePath.startsWith(`${publicDirectory}${sep}`)) continue;
     try {
       if ((await stat(filePath)).isFile()) return filePath;
-    } catch {
-      // Try the next clean-URL candidate.
+    } catch (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+      ) {
+        continue;
+      }
+      throw error;
     }
   }
   return undefined;
 }
 
 const server = createServer(async (request, response) => {
-  const filePath = await resolveFile(request.url);
-  if (filePath === undefined) {
-    response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-    response.end('Not found');
-    return;
+  try {
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      response.writeHead(405, {
+        allow: 'GET, HEAD',
+        'content-type': 'text/plain; charset=utf-8',
+      });
+      response.end('Method not allowed');
+      return;
+    }
+    const filePath = await resolveFile(request.url);
+    if (filePath === undefined) {
+      response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+      response.end('Not found');
+      return;
+    }
+    response.writeHead(200, {
+      'cache-control': 'no-store',
+      'content-type': contentTypes[extname(filePath)] ?? 'application/octet-stream',
+    });
+    if (request.method === 'HEAD') {
+      response.end();
+      return;
+    }
+    await pipeline(createReadStream(filePath), response);
+  } catch (error) {
+    if (response.headersSent) {
+      response.destroy();
+      return;
+    }
+    const malformedRequest = error instanceof URIError;
+    response.writeHead(malformedRequest ? 400 : 500, {
+      'content-type': 'text/plain; charset=utf-8',
+    });
+    response.end(malformedRequest ? 'Bad request' : 'Internal server error');
   }
-  response.writeHead(200, {
-    'cache-control': 'no-store',
-    'content-type': contentTypes[extname(filePath)] ?? 'application/octet-stream',
-  });
-  createReadStream(filePath).pipe(response);
 });
 
 server.listen(port, host, () => {
