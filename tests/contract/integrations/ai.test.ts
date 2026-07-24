@@ -274,6 +274,7 @@ describe('AI command integration contract', () => {
             commands: [{ type: 'undo' }],
           }),
         },
+        validateCommands: () => undefined,
         dryRun,
         apply: vi.fn(),
         getCurrentRevision: () => 'revision-1',
@@ -315,12 +316,60 @@ describe('AI command integration contract', () => {
             commands: [command],
           }),
         },
+        validateCommands: () => undefined,
         dryRun,
         apply: vi.fn(),
         getCurrentRevision: () => 'revision-1',
         getPermissionSnapshot: () => permissions,
       }),
     ).rejects.toThrow(/schema|command/u);
+    expect(dryRun).not.toHaveBeenCalled();
+  });
+
+  it('runs the required generic command validator before dry-run', async () => {
+    const dryRun = vi.fn();
+    const validateCommands = vi.fn(() => {
+      throw new TypeError('set-cell-input input is required');
+    });
+
+    await expect(
+      createAiProposalSession({
+        documentId: 'document-1',
+        documentRevision: 'revision-1',
+        permissionSnapshot: permissions,
+        signal: new AbortController().signal,
+        request: {
+          instruction: 'set A1',
+          locale: 'en-US',
+          allowedCommandTypes: ['set-cell-input'],
+        },
+        context: projectAiContext(document(), {
+          documentRevision: 'revision-1',
+          ranges: [],
+          include: [],
+          redactions: [],
+        }),
+        adapter: {
+          propose: async () => ({
+            id: 'proposal-generic-invalid',
+            summary: 'Missing input',
+            assumptions: [],
+            commands: [
+              {
+                type: 'set-cell-input',
+                address: { sheet: 'sheet-1', row: 0, column: 0 },
+              },
+            ],
+          }),
+        },
+        validateCommands,
+        dryRun,
+        apply: vi.fn(),
+        getCurrentRevision: () => 'revision-1',
+        getPermissionSnapshot: () => permissions,
+      }),
+    ).rejects.toThrow(/input is required/u);
+    expect(validateCommands).toHaveBeenCalledTimes(1);
     expect(dryRun).not.toHaveBeenCalled();
   });
 
@@ -482,6 +531,7 @@ describe('AI command integration contract', () => {
           ],
         }),
       },
+      validateCommands: () => undefined,
       dryRun: vi.fn(() => ({ status: 'ready' as const, diagnostics: [] })),
       apply,
       getCurrentRevision: () => revision,
@@ -526,6 +576,7 @@ describe('AI command integration contract', () => {
         redactions: [],
       }),
       adapter: { propose: async () => source },
+      validateCommands: () => undefined,
       dryRun: vi.fn(() => ({ status: 'ready' as const, diagnostics: [] })),
       apply,
       getCurrentRevision: () => 'revision-1',
@@ -633,6 +684,7 @@ describe('AI command integration contract', () => {
         redactions: [],
       }),
       adapter: { propose: async () => proposal(false) },
+      validateCommands: () => undefined,
       dryRun: () => ({ status: 'ready', diagnostics: [] }),
       apply,
       getCurrentRevision: () => 'revision-1',
@@ -705,6 +757,7 @@ describe('AI command integration contract', () => {
             commands: [command],
           }),
         },
+        validateCommands: () => undefined,
         dryRun: () => ({ status: 'ready', diagnostics: [] }),
         apply,
         getCurrentRevision: () => 'revision-1',
@@ -772,6 +825,7 @@ describe('AI command integration contract', () => {
       adapter: {
         propose: async () => proposal(true),
       },
+      validateCommands: () => undefined,
       dryRun: () => ({ status: 'ready', diagnostics: [] }),
       apply,
       getCurrentRevision: () => 'revision-1',

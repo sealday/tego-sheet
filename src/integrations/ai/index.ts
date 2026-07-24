@@ -117,6 +117,8 @@ export interface CreateAiProposalSessionOptions<ApplyResult> {
   readonly request: AiRequest;
   readonly context: SanitizedDocumentContext;
   readonly adapter: AiCommandPort;
+  /** Canonical host validator run after isolation and before any preview side effects. */
+  readonly validateCommands: (commands: readonly WorkbookCommand[]) => void;
   readonly dryRun: (commands: readonly WorkbookCommand[]) => AiTransactionPreview;
   readonly apply: (commands: readonly WorkbookCommand[]) => ApplyResult;
   readonly getCurrentRevision: () => string;
@@ -331,6 +333,7 @@ export async function createAiProposalSession<ApplyResult>(
   const response = await options.adapter.propose(options.request, options.context, options.signal);
   if (options.signal.aborted) throw new TypeError('AI request was cancelled');
   const proposal = snapshotProposal(response, allowed);
+  options.validateCommands(proposal.commands);
   const preview = Object.freeze(options.dryRun(proposal.commands));
   if (preview.diagnostics.some(({ severity }) => severity === 'error')) {
     throw new TypeError('AI proposal dry-run produced errors');
@@ -403,8 +406,8 @@ export async function createControllerAiProposalSession(
     request: options.request,
     context,
     adapter: options.adapter,
+    validateCommands: (commands) => validateProposalCommands(snapshot.document, commands),
     dryRun(commands): AiTransactionPreview {
-      validateProposalCommands(snapshot.document, commands);
       transaction = Object.freeze({
         schemaVersion: 1,
         id: transactionId,
