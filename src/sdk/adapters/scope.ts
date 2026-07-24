@@ -6,7 +6,7 @@ import {
   type CapabilityGrant,
 } from '../trust';
 import { adapterDiagnostic, AdapterSdkError } from './diagnostics';
-import { jsonSnapshotBytes, snapshotJsonValue } from './json-safe';
+import { jsonSnapshotBytes, JsonSnapshotLimitError, snapshotJsonValue } from './json-safe';
 import type {
   AdapterDiagnostic,
   AdapterByKind,
@@ -44,6 +44,7 @@ interface ActiveInvocation {
   readonly execution: AdapterManifest['execution'];
   readonly workerId?: string;
   readonly completion: Promise<void>;
+  readonly cleanup: Promise<AdapterDiagnostic | undefined>;
 }
 
 interface ScopeConfiguration {
@@ -236,8 +237,21 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
       }
       let inputSnapshot: JsonValue;
       try {
-        inputSnapshot = snapshotJsonValue(input, 'adapter.input');
+        inputSnapshot = snapshotJsonValue(input, 'adapter.input', {
+          maxEstimatedBytes: limits.maxInputBytes,
+        });
       } catch (cause) {
+        if (cause instanceof JsonSnapshotLimitError) {
+          return fail('ADAPTER_LIMIT_EXCEEDED', 'Adapter input exceeds the scope byte limit', {
+            resolution,
+            cause,
+            details: {
+              actual: cause.actual,
+              limit: cause.limit,
+              resource: cause.resource,
+            },
+          });
+        }
         return fail('ADAPTER_INPUT_INVALID', 'Adapter input is not strict JSON data', {
           resolution,
           cause,
@@ -303,6 +317,10 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
         if (!callable(binding.implementation)) {
           throw new TypeError(`Adapter ${binding.manifest.id} is not generically callable`);
         }
+        /*
+         * trusted-main cancellation is cooperative because same-realm promises cannot be killed.
+         * Hard cancellation is available only through isolated-worker transport termination.
+         */
         return binding.implementation.invoke(
           Object.freeze({ capability, input: inputSnapshot }),
           Object.freeze({
@@ -318,23 +336,67 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
         () => undefined,
         () => undefined,
       );
+      let resolveCleanup!: (diagnostic: AdapterDiagnostic | undefined) => void;
+      const cleanup = new Promise<AdapterDiagnostic | undefined>((resolve) => {
+        resolveCleanup = resolve;
+      });
+      let cleanupTimeout: ReturnType<typeof setTimeout> | undefined;
       const ledger = Object.freeze({
         adapterId: binding.manifest.id,
         execution: binding.manifest.execution,
         ...(binding.descriptor === undefined ? {} : { workerId: binding.descriptor.workerId }),
         completion,
+        cleanup,
       });
       active.add(ledger);
-      void completion.finally(() => {
+      const finishCleanup = (diagnostic?: AdapterDiagnostic): void => {
+        if (cleanupTimeout !== undefined) clearTimeout(cleanupTimeout);
         active.delete(ledger);
-      });
+        invocationController.signal.removeEventListener('abort', beginBoundedCleanup);
+        resolveCleanup(diagnostic);
+      };
+      const beginBoundedCleanup = (): void => {
+        if (binding.manifest.execution !== 'trusted-main' || cleanupTimeout !== undefined) return;
+        cleanupTimeout = setTimeout(() => {
+          const diagnostic = adapterDiagnostic(
+            'ADAPTER_DISPOSE_FAILED',
+            'dispose',
+            `Trusted-main adapter ${binding.manifest.id} did not settle after cancellation; its ledger entry was released`,
+            {
+              manifest: { id: binding.manifest.id },
+              details: {
+                cleanupTimeoutMs: limits.maxDurationMs,
+                hardCancellationAvailable: false,
+              },
+            },
+          );
+          runtime.publish(diagnostic);
+          finishCleanup(diagnostic);
+        }, limits.maxDurationMs);
+      };
+      invocationController.signal.addEventListener('abort', beginBoundedCleanup, { once: true });
+      if (invocationController.signal.aborted) beginBoundedCleanup();
+      void completion.then(() => finishCleanup());
 
       try {
         const result = await settled;
         let resultSnapshot: JsonValue;
         try {
-          resultSnapshot = snapshotJsonValue(result, 'adapter.result');
+          resultSnapshot = snapshotJsonValue(result, 'adapter.result', {
+            maxEstimatedBytes: limits.maxOutputBytes,
+          });
         } catch (cause) {
+          if (cause instanceof JsonSnapshotLimitError) {
+            return fail('ADAPTER_LIMIT_EXCEEDED', 'Adapter result exceeds the scope byte limit', {
+              resolution,
+              cause,
+              details: {
+                actual: cause.actual,
+                limit: cause.limit,
+                resource: cause.resource,
+              },
+            });
+          }
           return fail('ADAPTER_RESULT_INVALID', 'Adapter result is not strict JSON data', {
             resolution,
             cause,
@@ -400,7 +462,9 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
             invocation.workerId === undefined ||
             runtime.transport === undefined
           ) {
-            return invocation.completion;
+            return invocation.cleanup.then((diagnostic) => {
+              if (diagnostic !== undefined) diagnostics.push(diagnostic);
+            });
           }
           let termination = terminations.get(invocation.workerId);
           if (termination === undefined) {

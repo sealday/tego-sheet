@@ -532,6 +532,92 @@ describe('AdapterScope invocation boundary', () => {
     }
   });
 
+  it('applies input and output byte budgets while snapshotting shallow untrusted data', async () => {
+    let inputDescriptorReads = 0;
+    const input = new Proxy(
+      Array.from({ length: 100 }, () => null),
+      {
+        getOwnPropertyDescriptor(target, property) {
+          inputDescriptorReads += 1;
+          return Reflect.getOwnPropertyDescriptor(target, property);
+        },
+      },
+    );
+    let outputDescriptorReads = 0;
+    const output = new Proxy(
+      Object.fromEntries(Array.from({ length: 100 }, (_, index) => [`key-${index}`, null])),
+      {
+        getOwnPropertyDescriptor(target, property) {
+          outputDescriptorReads += 1;
+          return Reflect.getOwnPropertyDescriptor(target, property);
+        },
+      },
+    );
+    const direct = vi.fn(async () => output);
+    const diagnostics = vi.fn();
+    const registry = createAdapterRegistry({
+      apiVersion: '1.0',
+      environment: 'browser',
+      diagnostics,
+    });
+    await registry.register(trustedSolver(direct));
+    const scope = registry.createScope({
+      signal: new AbortController().signal,
+      grant: createCapabilityGrant(['solve']),
+      limits: {
+        maxConcurrentInvocations: 1,
+        maxDurationMs: 1_000,
+        maxInputBytes: 32,
+        maxOutputBytes: 32,
+      },
+    });
+    const resolution = registry.resolve('solver');
+
+    await expect(
+      scope.invoke(resolution, {
+        capability: 'solve',
+        input,
+        validateResult: () => true,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ADAPTER_LIMIT_EXCEEDED',
+      diagnostic: {
+        message: 'Adapter input exceeds the scope byte limit',
+        details: {
+          actual: 201,
+          limit: 32,
+          resource: 'estimatedBytes',
+        },
+      },
+    });
+    expect(inputDescriptorReads).toBe(0);
+    expect(direct).not.toHaveBeenCalled();
+
+    await expect(
+      scope.invoke(resolution, {
+        capability: 'solve',
+        input: null,
+        validateResult: () => true,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ADAPTER_LIMIT_EXCEEDED',
+      diagnostic: {
+        message: 'Adapter result exceeds the scope byte limit',
+        details: {
+          limit: 32,
+          resource: 'estimatedBytes',
+        },
+      },
+    });
+    expect(outputDescriptorReads).toBe(0);
+    expect(diagnostics).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        code: 'ADAPTER_LIMIT_EXCEEDED',
+        message: 'Adapter result exceeds the scope byte limit',
+      }),
+    );
+  });
+
   it('routes isolated-worker declarations only through the injected transport', async () => {
     const direct = vi.fn();
     const transport: IsolatedWorkerTransport = {
@@ -725,6 +811,71 @@ describe('AdapterScope invocation boundary', () => {
 
       settleExecution('late result');
       await expect(disposal).resolves.toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds cleanup when a timed-out trusted adapter ignores cooperative cancellation', async () => {
+    vi.useFakeTimers();
+    try {
+      const diagnostics = vi.fn();
+      const registry = createAdapterRegistry({
+        apiVersion: '1.0',
+        environment: 'browser',
+        diagnostics,
+      });
+      await registry.register(trustedSolver(async () => new Promise(() => undefined)));
+      const scope = registry.createScope({
+        signal: new AbortController().signal,
+        grant: createCapabilityGrant(['solve']),
+        limits: {
+          maxConcurrentInvocations: 1,
+          maxDurationMs: 10,
+          maxInputBytes: 1_024,
+          maxOutputBytes: 1_024,
+        },
+      });
+      const resolution = registry.resolve('solver');
+      const pending = scope.invoke(resolution, {
+        capability: 'solve',
+        input: null,
+        validateResult: () => true,
+      });
+      const pendingResult = expect(pending).rejects.toMatchObject({
+        code: 'ADAPTER_INVOCATION_TIMEOUT',
+      });
+      await vi.advanceTimersByTimeAsync(10);
+      await pendingResult;
+
+      const disposal = scope.dispose();
+      let disposed = false;
+      void disposal.then(() => {
+        disposed = true;
+      });
+      await Promise.resolve();
+      expect(disposed).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(10);
+      await expect(disposal).resolves.toEqual([
+        expect.objectContaining({
+          code: 'ADAPTER_DISPOSE_FAILED',
+          stage: 'dispose',
+          message:
+            'Trusted-main adapter linear did not settle after cancellation; its ledger entry was released',
+          details: {
+            cleanupTimeoutMs: 10,
+            hardCancellationAvailable: false,
+          },
+        }),
+      ]);
+      expect(diagnostics).toHaveBeenCalledWith(
+        expect.objectContaining({
+          code: 'ADAPTER_DISPOSE_FAILED',
+          message:
+            'Trusted-main adapter linear did not settle after cancellation; its ledger entry was released',
+        }),
+      );
     } finally {
       vi.useRealTimers();
     }
