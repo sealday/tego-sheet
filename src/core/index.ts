@@ -204,6 +204,7 @@ export type { ValueValidationResult } from './operations/validation';
 export type {
   AddSheetCommand,
   AutofillCommand,
+  GroupCommand,
   ClearFilterCommand,
   ClearFormatCommand,
   ClearContentsCommand,
@@ -231,6 +232,8 @@ export type {
   SetFreezeCommand,
   SetStyleCommand,
   SetValidationCommand,
+  ToggleGroupCommand,
+  UngroupCommand,
   SortCommand,
   RemoveValidationCommand,
   RemoveFilterViewCommand,

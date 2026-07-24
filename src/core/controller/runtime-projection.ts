@@ -126,6 +126,13 @@ export function projectDocumentToLegacy(
     const cols: Record<string, unknown> & { len?: number } = {};
     if (sheet.rowCount !== undefined) rows.len = sheet.rowCount;
     if (sheet.columnCount !== undefined) cols.len = sheet.columnCount;
+    const collapsedRows = new Set<number>();
+    const collapsedColumns = new Set<number>();
+    for (const group of sheet.groups) {
+      if (!group.collapsed) continue;
+      const target = group.axis === 'row' ? collapsedRows : collapsedColumns;
+      for (let index = group.start; index <= group.end; index += 1) target.add(index);
+    }
     for (const row of sheet.rows) {
       rows[String(row.index)] = {
         ...(row.height === undefined ? {} : { height: row.height }),
@@ -138,6 +145,18 @@ export function projectDocumentToLegacy(
         ...(column.width === undefined ? {} : { width: column.width }),
         ...(column.hidden === undefined ? {} : { hide: column.hidden }),
         ...(column.styleId === undefined ? {} : { style: styleIndexes.get(column.styleId) }),
+      };
+    }
+    for (const index of collapsedRows) {
+      rows[String(index)] = {
+        ...(rows[String(index)] as Record<string, unknown> | undefined),
+        hide: true,
+      };
+    }
+    for (const index of collapsedColumns) {
+      cols[String(index)] = {
+        ...(cols[String(index)] as Record<string, unknown> | undefined),
+        hide: true,
       };
     }
     for (const sparse of sheet.cells) {
@@ -421,6 +440,7 @@ function mergeSheet(
     conditionalFormatting: previous.conditionalFormatting.map((format) => structuredClone(format)),
     filterViews: previous.filterViews.map((view) => structuredClone(view)),
     objects: previous.objects.map((object) => structuredClone(object)),
+    groups: previous.groups.map((group) => ({ ...group })),
     cells,
     merges: sameJson(beforeLegacy?.merges, afterLegacy?.merges)
       ? previous.merges.map((range) => ({

@@ -56,6 +56,10 @@ export function applyCommand(
 ): AppliedCommand | null {
   try {
     switch (command.type) {
+      case 'group':
+      case 'ungroup':
+      case 'toggle-group':
+        return null;
       case 'set-cell-text': {
         const runtimeSheet = state.get(command.address.sheet);
         if (runtimeSheet === null)

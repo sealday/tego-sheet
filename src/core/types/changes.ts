@@ -8,6 +8,7 @@ export type WorkbookChangeKind =
   | 'merge'
   | 'clipboard'
   | 'autofill'
+  | 'outline'
   | 'filter'
   | 'validation'
   | 'view'

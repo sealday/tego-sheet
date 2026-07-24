@@ -10,6 +10,7 @@ import type {
   FilterView,
   SheetObject,
 } from '../../document/model/document';
+import type { GroupId } from '../../document/model/ids';
 
 /** Sets the user-facing text of one cell. */
 export interface SetCellTextCommand {
@@ -241,6 +242,42 @@ export interface AutofillCommand {
   readonly mode: PasteMode;
 }
 
+/** Creates one persistent row or column outline group. */
+export interface GroupCommand {
+  /** Command discriminator. */
+  readonly type: 'group';
+  /** Worksheet receiving the group. */
+  readonly sheet: SheetId;
+  /** Stable group definition; nesting level is derived by the controller. */
+  readonly group: {
+    readonly id: GroupId;
+    readonly axis: 'row' | 'column';
+    readonly start: number;
+    readonly end: number;
+    readonly collapsed: boolean;
+  };
+}
+
+/** Removes one persistent outline group by stable ID. */
+export interface UngroupCommand {
+  /** Command discriminator. */
+  readonly type: 'ungroup';
+  /** Worksheet owning the group. */
+  readonly sheet: SheetId;
+  /** Stable group ID to remove. */
+  readonly id: GroupId;
+}
+
+/** Toggles one persistent outline group's collapsed state. */
+export interface ToggleGroupCommand {
+  /** Command discriminator. */
+  readonly type: 'toggle-group';
+  /** Worksheet owning the group. */
+  readonly sheet: SheetId;
+  /** Stable group ID to toggle. */
+  readonly id: GroupId;
+}
+
 /** Creates or replaces a worksheet filter. */
 export interface SetFilterCommand {
   /** Command discriminator. */
@@ -393,6 +430,9 @@ export type WorkbookCommand =
   | PasteInternalCommand
   | PasteExternalCommand
   | AutofillCommand
+  | GroupCommand
+  | UngroupCommand
+  | ToggleGroupCommand
   | SetFilterCommand
   | ClearFilterCommand
   | SortCommand

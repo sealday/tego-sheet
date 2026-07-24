@@ -165,6 +165,10 @@ export function remapWorkbookCommand(
                   },
         },
       };
+    case 'group':
+    case 'ungroup':
+    case 'toggle-group':
+      return { ...command, sheet: remapSheet(command.sheet, mapping) };
     case 'add-sheet':
     case 'undo':
     case 'redo':

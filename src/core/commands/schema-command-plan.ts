@@ -21,6 +21,11 @@ import {
 import { parseFormula, renameFormulaSheet, renderFormula } from '../../formula';
 
 type ValidationId = NonNullable<Cell['validationId']>;
+type MutableSheetGroup = NonNullable<SheetInput['groups']>[number];
+
+export class GroupLimitExceededError extends Error {
+  readonly code = 'GROUP_LIMIT_EXCEEDED';
+}
 
 export interface SchemaCommandPlan {
   readonly document: SpreadsheetDocument;
@@ -32,7 +37,7 @@ export interface SchemaProjectionCommit {
   readonly result: unknown;
   readonly kind: Extract<
     WorkbookChangeKind,
-    'cell' | 'clipboard' | 'autofill' | 'view' | 'object' | 'style'
+    'cell' | 'clipboard' | 'autofill' | 'view' | 'object' | 'style' | 'outline'
   >;
   readonly sheet: SheetId;
   readonly range?: CellRange;
@@ -57,6 +62,76 @@ export function plannedPasteTargetRange(
   );
 }
 
+function normalizeOutlineGroups(groups: readonly MutableSheetGroup[]): MutableSheetGroup[] {
+  const output: MutableSheetGroup[] = [];
+  for (const axis of ['row', 'column'] as const) {
+    const axisGroups = groups
+      .filter((group) => group.axis === axis)
+      .sort(
+        (left, right) =>
+          left.start - right.start || right.end - left.end || left.id.localeCompare(right.id),
+      );
+    for (const [index, group] of axisGroups.entries()) {
+      let level = 1;
+      for (let candidateIndex = 0; candidateIndex < index; candidateIndex += 1) {
+        const candidate = axisGroups[candidateIndex]!;
+        if (candidate.start <= group.start && candidate.end >= group.end) level += 1;
+      }
+      output.push({ ...group, level });
+    }
+  }
+  return output;
+}
+
+function transformOutlineGroups(
+  groups: readonly MutableSheetGroup[],
+  command: Extract<
+    WorkbookCommand,
+    { readonly type: 'insert-row' | 'delete-row' | 'insert-column' | 'delete-column' }
+  >,
+): MutableSheetGroup[] {
+  const axis = command.type.endsWith('row') ? 'row' : 'column';
+  const count = command.count ?? 1;
+  const deletionEnd = command.index + count - 1;
+  const output: MutableSheetGroup[] = [];
+  for (const group of groups) {
+    if (group.axis !== axis) {
+      output.push({ ...group });
+      continue;
+    }
+    if (command.type === 'insert-row' || command.type === 'insert-column') {
+      output.push({
+        ...group,
+        ...(command.index <= group.start
+          ? { start: group.start + count, end: group.end + count }
+          : command.index <= group.end
+            ? { end: group.end + count }
+            : {}),
+      });
+      continue;
+    }
+    if (group.end < command.index) {
+      output.push({ ...group });
+      continue;
+    }
+    if (group.start > deletionEnd) {
+      output.push({ ...group, start: group.start - count, end: group.end - count });
+      continue;
+    }
+    const beforeEnd = Math.min(group.end, command.index - 1);
+    const afterStart = Math.max(group.start, deletionEnd + 1);
+    const hasBefore = group.start <= beforeEnd;
+    const hasAfter = afterStart <= group.end;
+    if (!hasBefore && !hasAfter) continue;
+    output.push({
+      ...group,
+      start: hasBefore ? group.start : afterStart - count,
+      end: hasAfter ? group.end - count : beforeEnd,
+    });
+  }
+  return normalizeOutlineGroups(output);
+}
+
 function transformStructure(
   input: SpreadsheetDocumentInput,
   command: Extract<
@@ -75,6 +150,7 @@ function transformStructure(
     command.type === 'insert-row' || command.type === 'insert-column'
       ? CoordinateTransform.insert(axis, command.index, command.count ?? 1)
       : CoordinateTransform.delete(axis, command.index, command.count ?? 1);
+  sheet.groups = transformOutlineGroups(sheet.groups ?? [], command);
   const transformedDocument = transformDocumentCoordinates(input, sheet.id, transform);
   input.workbook = transformedDocument.workbook;
   input.templates = transformedDocument.templates;
@@ -411,6 +487,30 @@ function setTypedCellInput(
   authoritativeInputs.set(sheet.id, keys);
 }
 
+function mutateOutlineGroups(
+  input: SpreadsheetDocumentInput,
+  command: Extract<WorkbookCommand, { readonly type: 'group' | 'ungroup' | 'toggle-group' }>,
+  sheetIds: readonly SheetId[],
+): void {
+  const sheet = input.workbook.sheets[sheetIndex(sheetIds, command.sheet)];
+  if (sheet === undefined) return;
+  const groups = [...(sheet.groups ?? [])];
+  if (command.type === 'group') {
+    if (groups.some((group) => group.id === command.group.id)) {
+      throw new GroupLimitExceededError(`Duplicate outline group ID ${command.group.id}`);
+    }
+    groups.push({ ...command.group, level: 1 });
+  } else {
+    const index = groups.findIndex((group) => group.id === command.id);
+    if (index < 0) {
+      throw new GroupLimitExceededError(`Unknown outline group ID ${command.id}`);
+    }
+    if (command.type === 'ungroup') groups.splice(index, 1);
+    else groups[index] = { ...groups[index]!, collapsed: !groups[index]!.collapsed };
+  }
+  sheet.groups = normalizeOutlineGroups(groups);
+}
+
 export function prepareSchemaProjectionCommit(
   command: Extract<
     WorkbookCommand,
@@ -424,7 +524,10 @@ export function prepareSchemaProjectionCommit(
         | 'remove-conditional-format'
         | 'set-sheet-object'
         | 'remove-sheet-object'
-        | 'set-cell-input';
+        | 'set-cell-input'
+        | 'group'
+        | 'ungroup'
+        | 'toggle-group';
     }
   >,
   projection: WorkbookData,
@@ -439,6 +542,9 @@ export function prepareSchemaProjectionCommit(
       sheet: command.address.sheet,
       range: { start: point, end: point },
     };
+  }
+  if (command.type === 'group' || command.type === 'ungroup' || command.type === 'toggle-group') {
+    return { result: undefined, kind: 'outline', sheet: command.sheet };
   }
   if (command.type === 'set-filter-view' || command.type === 'remove-filter-view') {
     return { result: undefined, kind: 'view', sheet: command.sheet };
@@ -488,6 +594,11 @@ export function prepareSchemaCommand(
   const authoritativeInputs = new Map<string, Set<string>>();
   const authoritativeValidations = new Map<string, Map<string, ValidationId | null>>();
   switch (command.type) {
+    case 'group':
+    case 'ungroup':
+    case 'toggle-group':
+      mutateOutlineGroups(input, command, sheetIds);
+      break;
     case 'set-cell-input':
       setTypedCellInput(input, command, sheetIds, authoritativeInputs);
       break;
@@ -531,6 +642,10 @@ export function prepareSchemaCommand(
   }
   const parsed = parseSpreadsheetDocument(input);
   if (!parsed.ok) {
+    const groupFailure = parsed.diagnostics.find(
+      ({ code }) => code === 'GROUP_LIMIT_EXCEEDED' || code === 'DUPLICATE_ID',
+    );
+    if (groupFailure !== undefined) throw new GroupLimitExceededError(groupFailure.message);
     throw new TypeError(
       `Schema command plan produced an invalid spreadsheet document: ${JSON.stringify(parsed.diagnostics)}`,
     );

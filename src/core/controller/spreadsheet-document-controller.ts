@@ -34,6 +34,7 @@ import { SubscriptionStore } from './subscription-store';
 import { History, type HistoryCheckpoint } from './history';
 import { applyDocumentPatch, createDocumentPatch, type DocumentPatch } from './document-patch';
 import {
+  GroupLimitExceededError,
   plannedPasteTargetRange,
   prepareSchemaCommand,
   prepareSchemaProjectionCommit,
@@ -142,7 +143,8 @@ export type TransactionRejectionCode =
   | 'SPILL_CELL_READ_ONLY'
   | 'REVISION_CONFLICT'
   | 'TRANSACTION_INVARIANT_FAILED'
-  | 'TRANSACTION_LIMIT_EXCEEDED';
+  | 'TRANSACTION_LIMIT_EXCEEDED'
+  | 'GROUP_LIMIT_EXCEEDED';
 
 export interface TransactionRejection {
   readonly status: 'rejected';
@@ -848,6 +850,15 @@ export class SpreadsheetDocumentController {
         const entry = this.documentHistory.redo();
         if (entry === null) throw new Error('Schema history is not aligned for redo');
         candidate = this.applyPatchToDocument(this.currentDocument, entry.after);
+      } else if (
+        command.type === 'group' ||
+        command.type === 'ungroup' ||
+        command.type === 'toggle-group'
+      ) {
+        candidate = plan.document;
+        this.documentHistory.record(
+          this.createDocumentHistoryEntry(this.currentDocument, candidate),
+        );
       } else {
         candidate = projectLegacyToDocument(
           plannedProjection,
@@ -899,7 +910,10 @@ export class SpreadsheetDocumentController {
           command.type !== 'remove-conditional-format' &&
           command.type !== 'set-sheet-object' &&
           command.type !== 'remove-sheet-object' &&
-          command.type !== 'set-cell-input'
+          command.type !== 'set-cell-input' &&
+          command.type !== 'group' &&
+          command.type !== 'ungroup' &&
+          command.type !== 'toggle-group'
         ) {
           throw new Error(`Schema-only commit is not supported for ${command.type}`);
         }
@@ -1228,9 +1242,11 @@ export class SpreadsheetDocumentController {
       code:
         error instanceof ValidationBoundaryError
           ? error.code
-          : error instanceof TegoSheetException && error.code === 'INVALID_COMMAND'
-            ? 'COMMAND_SCHEMA_INVALID'
-            : 'TRANSACTION_INVARIANT_FAILED',
+          : error instanceof GroupLimitExceededError
+            ? 'GROUP_LIMIT_EXCEEDED'
+            : error instanceof TegoSheetException && error.code === 'INVALID_COMMAND'
+              ? 'COMMAND_SCHEMA_INVALID'
+              : 'TRANSACTION_INVARIANT_FAILED',
       message: error instanceof Error ? error.message : 'Transaction failed',
     };
   }

@@ -537,6 +537,28 @@ export function validateCommand(state: WorkbookState, command: WorkbookCommand):
       }
       return;
     }
+    case 'group':
+      validateSheet(state, command.sheet);
+      if (
+        typeof command.group.id !== 'string' ||
+        command.group.id.length === 0 ||
+        (command.group.axis !== 'row' && command.group.axis !== 'column') ||
+        !Number.isSafeInteger(command.group.start) ||
+        command.group.start < 0 ||
+        !Number.isSafeInteger(command.group.end) ||
+        command.group.end < command.group.start ||
+        typeof command.group.collapsed !== 'boolean'
+      ) {
+        throw invalidCommand('group requires a stable ID and a normalized outline range');
+      }
+      return;
+    case 'ungroup':
+    case 'toggle-group':
+      validateSheet(state, command.sheet);
+      if (typeof command.id !== 'string' || command.id.length === 0) {
+        throw invalidCommand(`${command.type} requires a stable group ID`);
+      }
+      return;
     case 'set-filter':
       validateSelection(state, command.selection);
       if (
