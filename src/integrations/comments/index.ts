@@ -1,4 +1,5 @@
 import type { CoordinateTransform } from '../../core/coordinates/coordinate-transform';
+import type { PermissionSnapshot } from '../permission';
 
 export interface CommentCellAddress {
   readonly sheetId: string;
@@ -64,6 +65,56 @@ export interface CommentAnchorTransformRequest {
   readonly transform: CoordinateTransform;
 }
 
+export interface CommentRichTextNode {
+  readonly text: string;
+  readonly bold?: boolean;
+  readonly italic?: boolean;
+  readonly code?: boolean;
+}
+
+export interface CommentMessage {
+  readonly id: string;
+  readonly authorId: string;
+  readonly content: readonly CommentRichTextNode[];
+}
+
+export interface CommentThread {
+  readonly id: string;
+  readonly revision: string;
+  readonly anchor: CommentAnchor;
+  readonly messages: readonly CommentMessage[];
+  readonly resolved: boolean;
+}
+
+export interface CommentStore {
+  list(): readonly CommentThread[];
+  getSnapshot(): readonly CommentThread[];
+  subscribe(listener: () => void): () => void;
+  create(input: {
+    readonly anchor: CommentAnchor;
+    readonly content: readonly CommentRichTextNode[];
+    readonly expectedDocumentRevision: string;
+    readonly currentDocumentRevision: string;
+  }): CommentThread;
+  reply(
+    threadId: string,
+    expectedThreadRevision: string,
+    content: readonly CommentRichTextNode[],
+  ): CommentThread;
+  resolve(threadId: string, expectedThreadRevision: string, resolved: boolean): CommentThread;
+  remove(threadId: string, expectedThreadRevision: string): void;
+  rebase(request: CommentAnchorTransformRequest): readonly CommentThread[];
+}
+
+export type CommentPrintPolicy = 'exclude' | 'markers' | 'full';
+
+export interface CommentPrintContent {
+  readonly threadId: string;
+  readonly marker: string;
+  readonly anchor: CommentAnchor;
+  readonly text?: string;
+}
+
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/;
 
 function deepFreeze<Value>(value: Value): Value {
@@ -103,6 +154,231 @@ function snapshotBatch(batch: CommentAnchorUpdateBatch): CommentAnchorUpdateBatc
     threads.add(update.threadId);
   }
   return deepFreeze(snapshot);
+}
+
+/** Reduces hostile rich text to the supported text/mark subset. */
+export function sanitizeCommentRichText(
+  input: readonly CommentRichTextNode[],
+): readonly CommentRichTextNode[] {
+  if (!Array.isArray(input) || input.length === 0 || input.length > 1_000) {
+    throw new RangeError('Comment rich-text node count must be from 1 through 1000');
+  }
+  let characters = 0;
+  const output = input.map((node) => {
+    if (node === null || typeof node !== 'object' || typeof node.text !== 'string') {
+      throw new TypeError('Comment rich-text node is invalid');
+    }
+    const text = [...node.text]
+      .filter((character) => {
+        const code = character.codePointAt(0) ?? 0;
+        return code >= 32 || character === '\n' || character === '\t';
+      })
+      .join('');
+    characters += [...text].length;
+    if (characters > 20_000) throw new RangeError('Comment rich text exceeds 20000 characters');
+    return Object.freeze({
+      text,
+      ...(node.bold === true ? { bold: true } : {}),
+      ...(node.italic === true ? { italic: true } : {}),
+      ...(node.code === true ? { code: true } : {}),
+    });
+  });
+  return Object.freeze(output);
+}
+
+function snapshotAnchor(anchor: CommentAnchor): CommentAnchor {
+  let snapshot: CommentAnchor;
+  try {
+    snapshot = JSON.parse(JSON.stringify(anchor)) as CommentAnchor;
+  } catch {
+    throw new TypeError('Comment anchor must be JSON serializable');
+  }
+  const location = snapshot.type === 'orphaned' ? snapshot.lastKnown : snapshot;
+  if (location.type === 'cell') {
+    if (
+      !identifierPattern.test(location.cell.sheetId) ||
+      !Number.isSafeInteger(location.cell.row) ||
+      location.cell.row < 0 ||
+      !Number.isSafeInteger(location.cell.column) ||
+      location.cell.column < 0
+    ) {
+      throw new TypeError('Comment cell anchor is invalid');
+    }
+  } else if (location.type === 'range') {
+    if (
+      !identifierPattern.test(location.range.sheetId) ||
+      !Number.isSafeInteger(location.range.start.row) ||
+      !Number.isSafeInteger(location.range.start.column) ||
+      !Number.isSafeInteger(location.range.end.row) ||
+      !Number.isSafeInteger(location.range.end.column) ||
+      location.range.start.row < 0 ||
+      location.range.start.column < 0 ||
+      location.range.end.row < location.range.start.row ||
+      location.range.end.column < location.range.start.column
+    ) {
+      throw new TypeError('Comment range anchor is invalid');
+    }
+  } else if (
+    !identifierPattern.test(location.sheetId) ||
+    !identifierPattern.test(location.objectId)
+  ) {
+    throw new TypeError('Comment object anchor is invalid');
+  }
+  return deepFreeze(snapshot);
+}
+
+/** Creates a local comment model; persistence and remote synchronization remain host-owned. */
+export function createCommentStore(options: {
+  readonly documentId: string;
+  readonly actorId: string;
+  readonly permissions: () => PermissionSnapshot | undefined;
+  readonly nextId: () => string;
+  readonly nextRevision: () => string;
+}): CommentStore {
+  if (!identifierPattern.test(options.documentId) || !identifierPattern.test(options.actorId)) {
+    throw new TypeError('Comment store identity is invalid');
+  }
+  const threads = new Map<string, CommentThread>();
+  const listeners = new Set<() => void>();
+  let snapshot: readonly CommentThread[] = Object.freeze([]);
+  const permission = (
+    action: 'comment:view' | 'comment:create' | 'comment:resolve',
+    threadId: string,
+  ): void => {
+    if (
+      !(
+        options.permissions()?.can(action, {
+          type: 'comment',
+          threadId,
+        }) ?? false
+      )
+    ) {
+      throw new TypeError(`Comment ${action} permission denied`);
+    }
+  };
+  const current = (threadId: string, revision: string): CommentThread => {
+    const thread = threads.get(threadId);
+    if (thread === undefined) throw new TypeError('Comment thread does not exist');
+    if (thread.revision !== revision) throw new TypeError('Comment thread revision conflict');
+    return thread;
+  };
+  const refresh = (): void => {
+    snapshot = Object.freeze(
+      [...threads.values()].filter((thread) => {
+        try {
+          permission('comment:view', thread.id);
+          return true;
+        } catch {
+          return false;
+        }
+      }),
+    );
+    for (const listener of listeners) listener();
+  };
+  const nextThread = (thread: Omit<CommentThread, 'revision'>): CommentThread => {
+    const result = deepFreeze({
+      ...thread,
+      revision: options.nextRevision(),
+    });
+    if (!identifierPattern.test(result.revision)) {
+      throw new TypeError('Comment thread revision is invalid');
+    }
+    threads.set(result.id, result);
+    refresh();
+    return result;
+  };
+  return Object.freeze({
+    list(): readonly CommentThread[] {
+      return snapshot;
+    },
+    getSnapshot(): readonly CommentThread[] {
+      return snapshot;
+    },
+    subscribe(listener): () => void {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    create(input): CommentThread {
+      if (input.expectedDocumentRevision !== input.currentDocumentRevision) {
+        throw new TypeError('Comment document revision conflict');
+      }
+      const id = options.nextId();
+      if (!identifierPattern.test(id) || threads.has(id)) {
+        throw new TypeError('Comment thread ID is invalid or duplicated');
+      }
+      permission('comment:create', id);
+      return nextThread({
+        id,
+        anchor: snapshotAnchor(input.anchor),
+        messages: Object.freeze([
+          deepFreeze({
+            id: `${id}:message-1`,
+            authorId: options.actorId,
+            content: sanitizeCommentRichText(input.content),
+          }),
+        ]),
+        resolved: false,
+      });
+    },
+    reply(threadId, expectedThreadRevision, content): CommentThread {
+      permission('comment:create', threadId);
+      const thread = current(threadId, expectedThreadRevision);
+      return nextThread({
+        ...thread,
+        messages: Object.freeze([
+          ...thread.messages,
+          deepFreeze({
+            id: `${threadId}:message-${thread.messages.length + 1}`,
+            authorId: options.actorId,
+            content: sanitizeCommentRichText(content),
+          }),
+        ]),
+      });
+    },
+    resolve(threadId, expectedThreadRevision, resolved): CommentThread {
+      permission('comment:resolve', threadId);
+      return nextThread({ ...current(threadId, expectedThreadRevision), resolved });
+    },
+    remove(threadId, expectedThreadRevision): void {
+      permission('comment:resolve', threadId);
+      current(threadId, expectedThreadRevision);
+      threads.delete(threadId);
+      refresh();
+    },
+    rebase(request): readonly CommentThread[] {
+      const updates: CommentThread[] = [];
+      for (const thread of threads.values()) {
+        const anchor = transformCommentAnchor(thread.anchor, request);
+        if (anchor === thread.anchor) continue;
+        updates.push(nextThread({ ...thread, anchor }));
+      }
+      return Object.freeze(updates);
+    },
+  });
+}
+
+/** Projects comments into an explicit print policy without mutating thread state. */
+export function projectCommentPrintContent(
+  threads: readonly CommentThread[],
+  policy: CommentPrintPolicy,
+): readonly CommentPrintContent[] {
+  if (policy === 'exclude') return Object.freeze([]);
+  return Object.freeze(
+    threads.map((thread, index) =>
+      deepFreeze({
+        threadId: thread.id,
+        marker: String(index + 1),
+        anchor: thread.anchor,
+        ...(policy === 'full'
+          ? {
+              text: thread.messages
+                .flatMap(({ content }) => content.map(({ text }) => text))
+                .join('\n'),
+            }
+          : {}),
+      }),
+    ),
+  );
 }
 
 /** Applies one row/column transform, preserving unrelated sheets and orphaning deleted targets. */

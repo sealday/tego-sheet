@@ -76,6 +76,8 @@ import {
   evaluatePermission,
 } from '../integrations/permission';
 
+const emptyCommentThreads = Object.freeze([]);
+
 function callbacksFromProps(props: TegoSheetProps): TegoSheetCallbacks {
   return {
     onActiveSheetChange: props.onActiveSheetChange,
@@ -593,6 +595,11 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
     props.persistenceSession === undefined
       ? () => undefined
       : () => props.persistenceSession?.state,
+  );
+  const commentThreads = useSyncExternalStore(
+    props.commentStore?.subscribe ?? (() => () => undefined),
+    props.commentStore?.getSnapshot ?? (() => emptyCommentThreads),
+    props.commentStore?.getSnapshot ?? (() => emptyCommentThreads),
   );
   useEffect(() => {
     if (props.persistenceSession === undefined) return;
@@ -1360,6 +1367,7 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
       data-grid-visible={props.options?.showGrid === false ? 'false' : 'true'}
       data-context-menu-enabled={props.options?.showContextMenu === false ? 'false' : 'true'}
       data-persistence-status={persistenceState?.status}
+      data-comment-print-policy={props.commentPrintPolicy ?? 'exclude'}
       role="grid"
       aria-rowcount={activeData === null ? undefined : accessibilityRows.length}
       aria-colcount={
@@ -1382,6 +1390,18 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
         <span className="tego-sheet__persistence-status" aria-live="polite">
           {persistenceState.status}
         </span>
+      )}
+      {commentThreads.map((thread, index) =>
+        thread.anchor.type === 'orphaned' ? null : (
+          <span
+            key={thread.id}
+            className="tego-sheet__comment-marker"
+            data-comment-marker={thread.id}
+            aria-label={`Comment ${index + 1}`}
+          >
+            {index + 1}
+          </span>
+        ),
       )}
       <SheetChrome
         toolbar={toolbarProps}

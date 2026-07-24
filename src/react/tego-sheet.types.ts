@@ -23,6 +23,7 @@ import type {
 import type { SheetTabsRenderer, ToolbarRenderer } from '../ui/slot-types';
 import type { PermissionStore } from '../integrations/permission';
 import type { PersistenceSession } from '../integrations/persistence';
+import type { CommentPrintPolicy, CommentStore } from '../integrations/comments';
 
 export type { SheetTabsRenderer, ToolbarRenderer } from '../ui/slot-types';
 
@@ -80,6 +81,10 @@ interface TegoSheetSharedProps extends TegoSheetCallbacks {
   readonly permissionStore?: PermissionStore;
   /** Optional host-owned persistence session attached to committed workbook transactions. */
   readonly persistenceSession?: PersistenceSession;
+  /** Optional host comment store used to project semantic cell/range markers. */
+  readonly commentStore?: CommentStore;
+  /** Explicit comment print projection policy; defaults to excluding comments. */
+  readonly commentPrintPolicy?: CommentPrintPolicy;
   /** Per-instance locale identifier and message dictionary for built-in chrome. */
   readonly locale?: LocaleDefinition;
   /** Per-instance worksheet behavior and layout settings. */
