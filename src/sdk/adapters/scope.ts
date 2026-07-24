@@ -39,6 +39,13 @@ export interface AdapterScopeResolution {
   readonly descriptor?: IsolatedWorkerAdapterDescriptor;
 }
 
+interface ActiveInvocation {
+  readonly adapterId: string;
+  readonly execution: AdapterManifest['execution'];
+  readonly workerId?: string;
+  readonly completion: Promise<void>;
+}
+
 function limitsSnapshot(overrides: Partial<AdapterScopeLimits> | undefined): AdapterScopeLimits {
   let limits: AdapterScopeLimits;
   try {
@@ -102,7 +109,7 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
   const limits = limitsSnapshot(runtime.options.limits);
   const grant = grantSnapshot(runtime.options.grant);
   const controller = new AbortController();
-  const active = new Set<Promise<void>>();
+  const active = new Set<ActiveInvocation>();
   let disposed = false;
   let disposePromise: Promise<readonly AdapterDiagnostic[]> | undefined;
 
@@ -231,11 +238,20 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
         );
       });
       const settled = Promise.race([execution, abortPromise]);
-      const ledger = settled.then(
+      const completion = execution.then(
         () => undefined,
         () => undefined,
       );
+      const ledger = Object.freeze({
+        adapterId: binding.manifest.id,
+        execution: binding.manifest.execution,
+        ...(binding.descriptor === undefined ? {} : { workerId: binding.descriptor.workerId }),
+        completion,
+      });
       active.add(ledger);
+      void completion.finally(() => {
+        active.delete(ledger);
+      });
 
       try {
         const result = await settled;
@@ -288,7 +304,6 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
       } finally {
         clearTimeout(timeout);
         controller.signal.removeEventListener('abort', abortInvocation);
-        active.delete(ledger);
       }
     },
 
@@ -297,10 +312,45 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
       disposed = true;
       runtime.options.signal.removeEventListener('abort', abortFromParent);
       controller.abort(disposedMarker);
-      disposePromise = Promise.all(active).then(() => {
+      disposePromise = (async () => {
+        const diagnostics: AdapterDiagnostic[] = [];
+        const terminations = new Map<string, Promise<void>>();
+        const waitForInvocation = (invocation: ActiveInvocation): Promise<void> => {
+          if (
+            invocation.execution !== 'isolated-worker' ||
+            invocation.workerId === undefined ||
+            runtime.transport === undefined
+          ) {
+            return invocation.completion;
+          }
+          let termination = terminations.get(invocation.workerId);
+          if (termination === undefined) {
+            const workerId = invocation.workerId;
+            termination = Promise.resolve()
+              .then(() => runtime.transport!.terminate(workerId))
+              .catch((cause) => {
+                const diagnostic = adapterDiagnostic(
+                  'ADAPTER_DISPOSE_FAILED',
+                  'dispose',
+                  `Isolated worker ${workerId} could not be terminated`,
+                  {
+                    manifest: { id: invocation.adapterId },
+                    cause,
+                  },
+                );
+                diagnostics.push(diagnostic);
+                runtime.publish(diagnostic);
+              });
+            terminations.set(workerId, termination);
+          }
+          return Promise.race([invocation.completion, termination]).finally(() => {
+            active.delete(invocation);
+          });
+        };
+        await Promise.all([...active].map(waitForInvocation));
         runtime.onDispose();
-        return Object.freeze([]);
-      });
+        return Object.freeze(diagnostics);
+      })();
       return disposePromise;
     },
   };

@@ -473,4 +473,116 @@ describe('AdapterScope invocation boundary', () => {
       }),
     ).rejects.toMatchObject({ code: 'ADAPTER_SCOPE_DISPOSED' });
   });
+
+  it('keeps a timed-out trusted invocation in the concurrency ledger until execution settles', async () => {
+    vi.useFakeTimers();
+    try {
+      let settleExecution!: (value: string) => void;
+      const execution = new Promise<string>((resolve) => {
+        settleExecution = resolve;
+      });
+      const registry = createAdapterRegistry({
+        apiVersion: '1.0',
+        environment: 'browser',
+      });
+      await registry.register(trustedSolver(async () => execution));
+      const scope = registry.createScope({
+        signal: new AbortController().signal,
+        grant: createCapabilityGrant(['solve']),
+        limits: {
+          maxConcurrentInvocations: 1,
+          maxDurationMs: 10,
+          maxInputBytes: 1_024,
+          maxOutputBytes: 1_024,
+        },
+      });
+      const resolution = registry.resolve('solver');
+      const pending = scope.invoke(resolution, {
+        capability: 'solve',
+        input: null,
+        validateResult: (value): value is string => typeof value === 'string',
+      });
+      const pendingResult = expect(pending).rejects.toMatchObject({
+        code: 'ADAPTER_INVOCATION_TIMEOUT',
+      });
+      await vi.advanceTimersByTimeAsync(10);
+      await pendingResult;
+
+      await expect(
+        scope.invoke(resolution, {
+          capability: 'solve',
+          input: null,
+          validateResult: () => true,
+        }),
+      ).rejects.toMatchObject({ code: 'ADAPTER_LIMIT_EXCEEDED' });
+
+      let disposed = false;
+      const disposal = scope.dispose().then((diagnostics) => {
+        disposed = true;
+        return diagnostics;
+      });
+      await Promise.resolve();
+      expect(disposed).toBe(false);
+
+      settleExecution('late result');
+      await expect(disposal).resolves.toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits for isolated worker termination acknowledgement during disposal', async () => {
+    let acknowledgeTermination!: () => void;
+    const termination = new Promise<void>((resolve) => {
+      acknowledgeTermination = resolve;
+    });
+    const transport: IsolatedWorkerTransport = {
+      invoke: vi.fn(() => new Promise(() => undefined)),
+      terminate: vi.fn(() => termination),
+    };
+    const registry = createAdapterRegistry({
+      apiVersion: '1.0',
+      environment: 'browser',
+      isolatedWorkerTransport: transport,
+    });
+    await registry.register({
+      manifest: {
+        id: 'isolated',
+        apiVersion: '1.0',
+        kind: 'solver',
+        environments: ['browser'],
+        execution: 'isolated-worker',
+        priority: 0,
+        capabilities: ['solve'],
+      },
+      descriptor: { workerId: 'solver-worker' },
+    });
+    const scope = registry.createScope({
+      signal: new AbortController().signal,
+      grant: createCapabilityGrant(['solve']),
+    });
+    const pending = scope.invoke(registry.resolve('solver'), {
+      capability: 'solve',
+      input: null,
+      validateResult: () => true,
+    });
+    const pendingResult = expect(pending).rejects.toMatchObject({
+      code: 'ADAPTER_INVOCATION_ABORTED',
+    });
+    await Promise.resolve();
+
+    let disposed = false;
+    const disposal = scope.dispose().then((diagnostics) => {
+      disposed = true;
+      return diagnostics;
+    });
+    await Promise.resolve();
+    expect(transport.terminate).toHaveBeenCalledTimes(1);
+    expect(transport.terminate).toHaveBeenCalledWith('solver-worker');
+    expect(disposed).toBe(false);
+
+    acknowledgeTermination();
+    await expect(disposal).resolves.toEqual([]);
+    await pendingResult;
+  });
 });
