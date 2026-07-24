@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { WorkbookCommand } from '../../../src/core/commands/workbook-command';
 import { parseSpreadsheetDocument } from '../../../src/document';
 import { createAiProposalSession, projectAiContext } from '../../../src/integrations/ai';
 import { createPermissionSnapshot } from '../../../src/integrations/permission';
@@ -307,6 +308,75 @@ describe('AI command integration contract', () => {
       getPermissionSnapshot: () => targetOnly,
     });
     expect(() => copySession.accept()).toThrow(/target permission/u);
+    const sourceReaders = [
+      {
+        type: 'paint-format',
+        source: {
+          sheet: 'sheet-1',
+          range: {
+            start: { row: 0, column: 1 },
+            end: { row: 0, column: 1 },
+          },
+        },
+        target: {
+          sheet: 'sheet-1',
+          range: {
+            start: { row: 0, column: 0 },
+            end: { row: 0, column: 0 },
+          },
+        },
+      },
+      {
+        type: 'autofill',
+        source: {
+          sheet: 'sheet-1',
+          range: {
+            start: { row: 0, column: 1 },
+            end: { row: 0, column: 1 },
+          },
+        },
+        target: {
+          sheet: 'sheet-1',
+          range: {
+            start: { row: 0, column: 0 },
+            end: { row: 0, column: 0 },
+          },
+        },
+        mode: 'all',
+      },
+    ] as const satisfies readonly WorkbookCommand[];
+    for (const command of sourceReaders) {
+      const session = await createAiProposalSession({
+        documentId: 'document-1',
+        documentRevision: 'revision-1',
+        permissionSnapshot: targetOnly,
+        signal: new AbortController().signal,
+        request: {
+          instruction: `run ${command.type}`,
+          locale: 'en-US',
+          allowedCommandTypes: [command.type],
+        },
+        context: projectAiContext(document(), {
+          documentRevision: 'revision-1',
+          ranges: [],
+          include: [],
+          redactions: [],
+        }),
+        adapter: {
+          propose: async () => ({
+            id: `proposal-${command.type}`,
+            summary: command.type,
+            assumptions: [],
+            commands: [command],
+          }),
+        },
+        dryRun: () => ({ status: 'ready', diagnostics: [] }),
+        apply,
+        getCurrentRevision: () => 'revision-1',
+        getPermissionSnapshot: () => targetOnly,
+      });
+      expect(() => session.accept()).toThrow(/target permission/u);
+    }
 
     const aiOnly = createPermissionSnapshot({
       revision: 'permission-1',
