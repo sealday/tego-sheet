@@ -56,6 +56,10 @@ const permissions = createPermissionSnapshot({
       target: { type: 'document', documentId: 'document-1' },
     },
     {
+      action: 'document:edit',
+      target: { type: 'document', documentId: 'document-1' },
+    },
+    {
       action: 'range:edit',
       target: {
         type: 'range',
@@ -114,6 +118,10 @@ describe('AI command integration contract', () => {
           },
           {
             action: 'ai:apply',
+            target: { type: 'document', documentId: source.id },
+          },
+          {
+            action: 'document:edit',
             target: { type: 'document', documentId: source.id },
           },
           {

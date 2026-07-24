@@ -6,12 +6,8 @@ import type {
   DocumentTransactionEnvelope,
   DocumentTransactionResult,
 } from '../../document-controller';
-import type {
-  PermissionAction,
-  PermissionSnapshot,
-  PermissionStore,
-  PermissionTarget,
-} from '../permission';
+import type { PermissionSnapshot, PermissionStore } from '../permission';
+import { deriveWorkbookCommandPermissionRequests } from '../permission';
 
 export type AiContextInclude = 'values' | 'formulas' | 'formats' | 'headers' | 'template-bindings';
 
@@ -129,208 +125,6 @@ const forbiddenCommandTypes = new Set<string>(['undo', 'redo']);
 function identifier(value: string, label: string): string {
   if (!identifierPattern.test(value)) throw new TypeError(`${label} is invalid`);
   return value;
-}
-
-function rangeTarget(
-  sheetId: string,
-  start: { readonly row: number; readonly column: number },
-  end = start,
-): PermissionTarget {
-  return {
-    type: 'range',
-    range: { sheetId, start, end },
-  };
-}
-
-interface CommandPermissionRequest {
-  readonly action: PermissionAction;
-  readonly target: PermissionTarget;
-}
-
-function commandPermissionRequests(
-  command: WorkbookCommand,
-  documentId: string,
-): readonly CommandPermissionRequest[] {
-  switch (command.type) {
-    case 'set-cell-text':
-    case 'set-cell-input':
-      return [
-        { action: 'range:edit', target: rangeTarget(command.address.sheet, command.address) },
-      ];
-    case 'clear-contents':
-    case 'set-cell-metadata':
-    case 'set-style':
-    case 'set-border':
-    case 'clear-format':
-    case 'merge':
-    case 'unmerge':
-    case 'set-validation':
-    case 'remove-validation':
-    case 'set-filter':
-      return [
-        {
-          action: 'range:edit',
-          target: rangeTarget(
-            command.selection.sheet,
-            command.selection.range.start,
-            command.selection.range.end,
-          ),
-        },
-      ];
-    case 'paint-format':
-      return [
-        {
-          action: 'range:edit',
-          target: rangeTarget(
-            command.target.sheet,
-            command.target.range.start,
-            command.target.range.end,
-          ),
-        },
-        {
-          action: 'sheet:view',
-          target: { type: 'sheet', sheetId: command.source.sheet },
-        },
-      ];
-    case 'paste-internal': {
-      const requests: CommandPermissionRequest[] = [
-        {
-          action: 'range:edit',
-          target: rangeTarget(
-            command.target.sheet,
-            command.target.range.start,
-            command.target.range.end,
-          ),
-        },
-        {
-          action: 'sheet:view',
-          target: { type: 'sheet', sheetId: command.source.sheet },
-        },
-      ];
-      if (command.cut) {
-        requests.push({
-          action: 'range:edit',
-          target: rangeTarget(
-            command.source.sheet,
-            command.source.range.start,
-            command.source.range.end,
-          ),
-        });
-      }
-      return requests;
-    }
-    case 'paste-external':
-      return [
-        {
-          action: 'range:edit',
-          target: rangeTarget(
-            command.target.sheet,
-            command.target.range.start,
-            command.target.range.end,
-          ),
-        },
-      ];
-    case 'autofill':
-      return [
-        {
-          action: 'range:edit',
-          target: rangeTarget(
-            command.target.sheet,
-            command.target.range.start,
-            command.target.range.end,
-          ),
-        },
-        {
-          action: 'sheet:view',
-          target: { type: 'sheet', sheetId: command.source.sheet },
-        },
-      ];
-    case 'set-sheet-object':
-      return [
-        {
-          action: 'object:edit',
-          target: {
-            type: 'object',
-            sheetId: command.sheet,
-            objectId: command.object.id,
-          },
-        },
-      ];
-    case 'remove-sheet-object':
-      return [
-        {
-          action: 'object:edit',
-          target: { type: 'object', sheetId: command.sheet, objectId: command.objectId },
-        },
-      ];
-    case 'set-chart': {
-      const sourceSheets = new Set<string>();
-      if (command.chart.categories !== undefined) {
-        sourceSheets.add(command.chart.categories.sheetId);
-      }
-      for (const series of command.chart.series) {
-        sourceSheets.add(series.values.sheetId);
-      }
-      return [
-        {
-          action: 'object:edit',
-          target: { type: 'object', sheetId: command.sheet, objectId: command.chart.id },
-        },
-        ...Array.from(sourceSheets, (sheetId) => ({
-          action: 'sheet:view' as const,
-          target: { type: 'sheet' as const, sheetId },
-        })),
-      ];
-    }
-    case 'remove-chart':
-      return [
-        {
-          action: 'object:edit',
-          target: { type: 'object', sheetId: command.sheet, objectId: command.chartId },
-        },
-      ];
-    case 'set-sparkline':
-      return [
-        {
-          action: 'range:edit',
-          target: rangeTarget(command.sparkline.target.sheetId, command.sparkline.target),
-        },
-        {
-          action: 'sheet:view',
-          target: { type: 'sheet', sheetId: command.sparkline.source.sheetId },
-        },
-      ];
-    case 'remove-sparkline':
-      return [{ action: 'sheet:edit', target: { type: 'sheet', sheetId: command.sheet } }];
-    case 'add-sheet':
-      return [{ action: 'document:edit', target: { type: 'document', documentId } }];
-    case 'undo':
-    case 'redo':
-      return [{ action: 'document:edit', target: { type: 'document', documentId } }];
-    case 'insert-row':
-    case 'delete-row':
-    case 'insert-column':
-    case 'delete-column':
-    case 'set-row-height':
-    case 'set-row-hidden':
-    case 'set-column-width':
-    case 'set-column-hidden':
-    case 'set-freeze':
-    case 'delete-sheet':
-    case 'rename-sheet':
-    case 'group':
-    case 'ungroup':
-    case 'toggle-group':
-    case 'clear-filter':
-    case 'sort':
-    case 'set-conditional-format':
-    case 'remove-conditional-format':
-    case 'set-filter-view':
-    case 'remove-filter-view':
-    case 'set-table':
-    case 'remove-table':
-      return [{ action: 'sheet:edit', target: { type: 'sheet', sheetId: command.sheet } }];
-  }
 }
 
 function inRange(row: number, column: number, range: AiContextRange): boolean {
@@ -515,7 +309,7 @@ export async function createAiProposalSession<ApplyResult>(
         throw new TypeError('AI proposal permission is stale or denied');
       }
       const deniedRequest = proposal.commands
-        .flatMap((command) => commandPermissionRequests(command, options.documentId))
+        .flatMap((command) => deriveWorkbookCommandPermissionRequests(command, options.documentId))
         .find(({ action, target }) => !permissions.can(action, target));
       if (deniedRequest !== undefined) {
         throw new TypeError('AI proposal target permission is denied');
