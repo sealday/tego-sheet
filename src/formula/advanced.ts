@@ -26,30 +26,84 @@ export interface FormulaNameRegistry {
   resolve(name: string, currentSheetId: string): FormulaNameDefinition | undefined;
 }
 
+/** Stable registration failure for conflicting formula names. */
+export class FormulaNameConflictError extends TypeError {
+  /** Machine-readable registration failure. */
+  readonly code = 'FORMULA_NAME_CONFLICT';
+
+  /** Creates one same-name, same-scope conflict. */
+  constructor(name: string) {
+    super(`Duplicate formula name ${name} in the same scope`);
+    this.name = 'FormulaNameConflictError';
+  }
+}
+
 /** Creates a case-insensitive stable-ID name registry. */
 export function createFormulaNameRegistry(): FormulaNameRegistry {
-  const definitions = new Map<string, FormulaNameDefinition>();
+  const workbookDefinitions = new Map<string, FormulaNameDefinition>();
+  const localDefinitions = new Map<string, Map<string, FormulaNameDefinition>>();
   return {
     register(definition) {
-      const key = definition.name.toLocaleLowerCase('en-US');
-      if (definitions.has(key)) throw new TypeError(`Duplicate formula name ${definition.name}`);
+      const nameKey = definition.name.toLocaleLowerCase('en-US');
+      const definitions =
+        definition.scope === 'workbook'
+          ? workbookDefinitions
+          : (localDefinitions.get(definition.scope.sheetId) ??
+            (() => {
+              const scoped = new Map<string, FormulaNameDefinition>();
+              localDefinitions.set(definition.scope.sheetId, scoped);
+              return scoped;
+            })());
+      if (definitions.has(nameKey)) throw new FormulaNameConflictError(definition.name);
       const snapshot = Object.freeze({
         ...definition,
         refersTo: Object.freeze(definition.refersTo),
       });
-      definitions.set(key, snapshot);
+      definitions.set(nameKey, snapshot);
       return () => {
-        definitions.delete(key);
+        if (definitions.get(nameKey) === snapshot) definitions.delete(nameKey);
       };
     },
     resolve(name, currentSheetId) {
-      const definition = definitions.get(name.toLocaleLowerCase('en-US'));
-      if (definition?.scope !== 'workbook' && definition?.scope.sheetId !== currentSheetId) {
-        return undefined;
-      }
-      return definition;
+      const key = name.toLocaleLowerCase('en-US');
+      return localDefinitions.get(currentSheetId)?.get(key) ?? workbookDefinitions.get(key);
     },
   };
+}
+
+/** Stable request passed to an injected structured-reference binding provider. */
+export interface FormulaTableBindingRequest {
+  /** Formula-facing table token. */
+  readonly tableName: string;
+  /** Formula-facing column token. */
+  readonly columnName: string;
+  /** Sheet containing the formula. */
+  readonly currentSheetId: string;
+}
+
+/** Result of resolving one structured table-column reference. */
+export type FormulaTableBindingResult =
+  | {
+      /** The stable table and column were resolved. */
+      readonly status: 'resolved';
+      /** Stable table identifier retained across renames. */
+      readonly tableId: string;
+      /** Stable column identifier retained across renames. */
+      readonly columnId: string;
+      /** Current rectangular cells represented by the column. */
+      readonly range: DocumentCellRange;
+    }
+  | {
+      /** The provider could not bind the requested reference. */
+      readonly status: 'invalid';
+      /** Stable human-readable diagnostic detail. */
+      readonly message: string;
+    };
+
+/** Injectable bridge used until persistent structured tables land in TBL-01. */
+export interface FormulaTableBindingResolver {
+  /** Resolves a display reference to stable identifiers and its current range. */
+  resolve(request: FormulaTableBindingRequest): FormulaTableBindingResult;
 }
 
 /** Stable identifiers available while binding an advanced formula. */

@@ -6,7 +6,11 @@ import type { FormulaFunctionContext, FormulaFunctionRegistry } from './function
 import { createFormulaFunctionRegistry } from './function-registry';
 import { parseFormula } from './parser';
 import { resolveFormulaReferences } from './reference-resolver';
-import { planFormulaSpill, type FormulaNameRegistry } from './advanced';
+import {
+  planFormulaSpill,
+  type FormulaNameRegistry,
+  type FormulaTableBindingResolver,
+} from './advanced';
 
 /** Explicit deterministic inputs for one recalculation. */
 export interface CalculationEnvironment {
@@ -94,6 +98,8 @@ export interface FormulaEngineOptions {
   readonly maximumEvaluations?: number;
   /** Optional stable named-range registry used during parsing and dependency binding. */
   readonly names?: FormulaNameRegistry;
+  /** Injectable structured-table binding used by the evaluator before TBL-01 persistence lands. */
+  readonly tables?: FormulaTableBindingResolver;
   /** Maximum projected cells for one dynamic-array formula. */
   readonly maximumSpillCells?: number;
 }
@@ -132,6 +138,56 @@ function bindNames(
     const reference = start === end ? start : `${start}:${end}`;
     return `${quotedSheetName(sheet.name)}!${reference}`;
   });
+}
+
+function bindStructuredReferences(
+  source: string,
+  document: SpreadsheetDocument,
+  currentSheetId: string,
+  tables: FormulaTableBindingResolver | undefined,
+): { readonly source: string; readonly diagnostics: readonly FormulaDiagnostic[] } {
+  if (tables === undefined) return { source, diagnostics: [] };
+  const diagnostics: FormulaDiagnostic[] = [];
+  const bound = source.replace(
+    /\b([A-Za-z_][A-Za-z0-9_.]*)\[([^\]]+)\]/gu,
+    (match, tableName: string, columnName: string, offset: number) => {
+      const result = tables.resolve({ tableName, columnName, currentSheetId });
+      if (result.status === 'invalid') {
+        diagnostics.push({
+          code: 'FORMULA_REFERENCE_INVALID',
+          message: result.message,
+          span: { start: offset, end: offset + match.length },
+        });
+        return '#REF!';
+      }
+      const sheet = document.workbook.sheets.find(({ id }) => id === result.range.sheetId);
+      if (sheet === undefined) {
+        diagnostics.push({
+          code: 'FORMULA_REFERENCE_INVALID',
+          message: `Structured reference ${tableName}[${columnName}] targets an unknown sheet`,
+          span: { start: offset, end: offset + match.length },
+        });
+        return '#REF!';
+      }
+      const start = `${columnLabel(result.range.start.column)}${result.range.start.row + 1}`;
+      const end = `${columnLabel(result.range.end.column)}${result.range.end.row + 1}`;
+      return `${quotedSheetName(sheet.name)}!${start === end ? start : `${start}:${end}`}`;
+    },
+  );
+  return { source: bound, diagnostics };
+}
+
+function bindFormulaSource(
+  source: string,
+  document: SpreadsheetDocument,
+  currentSheetId: string,
+  options: Pick<FormulaEngineOptions, 'names' | 'tables'>,
+): { readonly source: string; readonly diagnostics: readonly FormulaDiagnostic[] } {
+  const structured = bindStructuredReferences(source, document, currentSheetId, options.tables);
+  return {
+    source: bindNames(structured.source, document, currentSheetId, options.names),
+    diagnostics: structured.diagnostics,
+  };
 }
 
 function inputValue(input: CellInput): ScalarFormulaValue {
@@ -316,13 +372,15 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
           const address = formulaAddressKey({ sheetId: sheet.id, row, column });
           anchors.set(address, { sheetId: sheet.id, row, column });
           try {
+            const binding = bindFormulaSource(cell.input.source, document, sheet.id, options);
             const resolution = resolveFormulaReferences(
-              parseFormula(bindNames(cell.input.source, document, sheet.id, options.names)),
+              parseFormula(binding.source),
               document,
               sheet.id,
             );
             formulas.set(address, resolution.ast);
-            if (resolution.diagnostics.length > 0) diagnostics.set(address, resolution.diagnostics);
+            const combined = [...binding.diagnostics, ...resolution.diagnostics];
+            if (combined.length > 0) diagnostics.set(address, combined);
           } catch (cause) {
             diagnostics.set(address, [
               {
@@ -407,16 +465,20 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
             column: change.column,
           });
           try {
+            const binding = bindFormulaSource(
+              change.input.source,
+              program_.document,
+              change.sheetId,
+              options,
+            );
             const resolution = resolveFormulaReferences(
-              parseFormula(
-                bindNames(change.input.source, program_.document, change.sheetId, options.names),
-              ),
+              parseFormula(binding.source),
               program_.document,
               change.sheetId,
             );
             program.formulas.set(address, resolution.ast);
-            if (resolution.diagnostics.length > 0)
-              program.diagnostics.set(address, resolution.diagnostics);
+            const combined = [...binding.diagnostics, ...resolution.diagnostics];
+            if (combined.length > 0) program.diagnostics.set(address, combined);
             else program.diagnostics.delete(address);
           } catch (cause) {
             program.formulas.delete(address);

@@ -41,6 +41,45 @@ describe('FRM-01 advanced formula foundation', () => {
     ]);
   });
 
+  it('shadows workbook names with sheet-local names and rejects only same-scope duplicates', () => {
+    const names = createFormulaNameRegistry();
+    names.register({
+      id: 'workbook-rate',
+      name: 'Rate',
+      scope: 'workbook',
+      refersTo: {
+        sheetId,
+        start: { row: 0, column: 0 },
+        end: { row: 0, column: 0 },
+      },
+    });
+    names.register({
+      id: 'local-rate',
+      name: 'RATE',
+      scope: { sheetId },
+      refersTo: {
+        sheetId,
+        start: { row: 1, column: 0 },
+        end: { row: 1, column: 0 },
+      },
+    });
+
+    expect(names.resolve('rate', sheetId)?.id).toBe('local-rate');
+    expect(names.resolve('rate', 'sheet-2')?.id).toBe('workbook-rate');
+    expect(() =>
+      names.register({
+        id: 'duplicate-local-rate',
+        name: 'Rate',
+        scope: { sheetId },
+        refersTo: {
+          sheetId,
+          start: { row: 2, column: 0 },
+          end: { row: 2, column: 0 },
+        },
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'FORMULA_NAME_CONFLICT' }));
+  });
+
   it('plans dynamic spill atomically and reports blockers', () => {
     expect(
       planFormulaSpill({
@@ -150,5 +189,87 @@ describe('FRM-01 advanced formula foundation', () => {
     );
     expect(unblocked.values.get('sheet-1!D1')).toEqual({ type: 'number', value: 5 });
     expect(unblocked.values.get('sheet-1!D2')).toEqual({ type: 'number', value: 7 });
+  });
+
+  it('preserves name scope in dependency cycles and evaluates injected structured references', () => {
+    const parsed = parseSpreadsheetDocument({
+      schemaVersion: 2,
+      id: 'formula-document',
+      workbook: {
+        sheets: [
+          {
+            id: 'sheet-1',
+            name: 'Sheet 1',
+            cells: [
+              { row: 0, column: 0, cell: { input: { type: 'formula', source: '=Loop' } } },
+              { row: 0, column: 1, cell: { input: { type: 'number', value: 4 } } },
+              { row: 1, column: 1, cell: { input: { type: 'number', value: 6 } } },
+              {
+                row: 0,
+                column: 2,
+                cell: { input: { type: 'formula', source: '=SUM(Sales[Amount])' } },
+              },
+            ],
+            merges: [],
+          },
+        ],
+        styles: [],
+        validations: [],
+        settings: { dateSystem: 'excel-1900' },
+      },
+      templates: [],
+      resources: { items: [] },
+      extensions: {},
+    });
+    if (!parsed.ok) throw new Error('formula fixture must parse');
+    const names = createFormulaNameRegistry();
+    names.register({
+      id: 'loop',
+      name: 'Loop',
+      scope: { sheetId },
+      refersTo: {
+        sheetId,
+        start: { row: 0, column: 0 },
+        end: { row: 0, column: 0 },
+      },
+    });
+    const engine = createFormulaEngine({
+      names,
+      tables: {
+        resolve({ tableName, columnName, currentSheetId }) {
+          expect({ tableName, columnName, currentSheetId }).toEqual({
+            tableName: 'Sales',
+            columnName: 'Amount',
+            currentSheetId: 'sheet-1',
+          });
+          return {
+            status: 'resolved',
+            tableId: 'table-sales',
+            columnId: 'column-amount',
+            range: {
+              sheetId,
+              start: { row: 0, column: 1 },
+              end: { row: 1, column: 1 },
+            },
+          };
+        },
+      },
+    });
+    const program = engine.compile(parsed.document);
+    const result = engine.recalculate(program, [], {
+      locale: 'en-US',
+      timeZone: 'UTC',
+      dateSystem: 'excel-1900',
+      clock: { now: () => 0 },
+      tick: 0,
+      functionRegistryVersion: 'builtin-1',
+    });
+
+    expect(result.cycles).toEqual([['sheet-1!A1']]);
+    expect(result.values.get('sheet-1!A1')).toEqual({ type: 'error', value: '#REF!' });
+    expect(result.values.get('sheet-1!C1')).toEqual({ type: 'number', value: 10 });
+    expect(program.graph.dependencies.get('sheet-1!C1')).toEqual(
+      new Set(['sheet-1!B1', 'sheet-1!B2']),
+    );
   });
 });
