@@ -3,6 +3,7 @@ import { DataTransformError } from './errors';
 export interface SafeRegexLimits {
   readonly maximumPatternLength: number;
   readonly maximumInputLength: number;
+  readonly maximumOutputLength: number;
   readonly maximumSteps: number;
   readonly maximumMilliseconds: number;
 }
@@ -119,6 +120,7 @@ export function createSafeRegexBudget(source: string, limits: SafeRegexLimits): 
   }
   let steps = 0;
   let elapsed = 0;
+  let outputCodeUnits = 0;
   return {
     pattern,
     replace(value, replacement) {
@@ -141,7 +143,11 @@ export function createSafeRegexBudget(source: string, limits: SafeRegexLimits): 
       let match: RegExpExecArray | null;
       while ((match = pattern.exec(value)) !== null) {
         outputLength += replacement.length - match[0].length;
-        if (!Number.isSafeInteger(outputLength) || outputLength > limits.maximumInputLength) {
+        if (
+          !Number.isSafeInteger(outputLength) ||
+          outputLength > limits.maximumInputLength ||
+          outputCodeUnits > limits.maximumOutputLength - outputLength
+        ) {
           throw new DataTransformError(
             'REPLACE_BUDGET_EXCEEDED',
             'Replacement output exceeds the configured length budget',
@@ -151,6 +157,7 @@ export function createSafeRegexBudget(source: string, limits: SafeRegexLimits): 
           pattern.lastIndex = advanceUnicodeIndex(value, pattern.lastIndex);
         }
       }
+      outputCodeUnits += outputLength;
       pattern.lastIndex = 0;
       const result = value.replace(pattern, () => replacement);
       elapsed += performance.now() - started;

@@ -265,6 +265,7 @@ function replacementPattern(
   limits: {
     readonly maximumPatternLength: number;
     readonly maximumInputLength: number;
+    readonly maximumOutputLength: number;
     readonly maximumSteps: number;
     readonly maximumMilliseconds: number;
   },
@@ -278,6 +279,7 @@ function replaceText(
   transform: FindReplaceTransform,
   pattern: SafeRegexBudget | undefined,
   maximumOutputLength: number,
+  outputBudget: { remaining: number },
 ): string {
   if (pattern !== undefined) return pattern.replace(value, transform.replacement);
   const matchCount =
@@ -294,12 +296,17 @@ function replaceText(
         })();
   const outputLength =
     value.length + matchCount * (transform.replacement.length - transform.find.length);
-  if (!Number.isSafeInteger(outputLength) || outputLength > maximumOutputLength) {
+  if (
+    !Number.isSafeInteger(outputLength) ||
+    outputLength > maximumOutputLength ||
+    outputLength > outputBudget.remaining
+  ) {
     throw new DataTransformError(
       'REPLACE_BUDGET_EXCEEDED',
       'Replacement output exceeds the configured length budget',
     );
   }
+  outputBudget.remaining -= outputLength;
   return value.replaceAll(transform.find, () => transform.replacement);
 }
 
@@ -442,6 +449,8 @@ export function createDataTransformPlanner(limits: {
   readonly maxRegexSteps?: number;
   /** Maximum cumulative synchronous regex execution time per preview. */
   readonly maxRegexMilliseconds?: number;
+  /** Maximum cumulative generated text code units per preview; defaults to 10,000,000. */
+  readonly maxGeneratedTextLength?: number;
 }): {
   /** Builds an immutable bounded preview against one document revision. */
   preview(
@@ -465,6 +474,7 @@ export function createDataTransformPlanner(limits: {
   const regexLimits = Object.freeze({
     maximumPatternLength: limits.maxRegexPatternLength ?? 1_000,
     maximumInputLength: limits.maxRegexInputLength ?? 100_000,
+    maximumOutputLength: limits.maxGeneratedTextLength ?? 10_000_000,
     maximumSteps: limits.maxRegexSteps ?? 10_000_000,
     maximumMilliseconds: limits.maxRegexMilliseconds ?? 50,
   });
@@ -473,6 +483,8 @@ export function createDataTransformPlanner(limits: {
     regexLimits.maximumPatternLength < 0 ||
     !Number.isSafeInteger(regexLimits.maximumInputLength) ||
     regexLimits.maximumInputLength < 0 ||
+    !Number.isSafeInteger(regexLimits.maximumOutputLength) ||
+    regexLimits.maximumOutputLength < 0 ||
     !Number.isSafeInteger(regexLimits.maximumSteps) ||
     regexLimits.maximumSteps < 1 ||
     !Number.isFinite(regexLimits.maximumMilliseconds) ||
@@ -522,6 +534,16 @@ export function createDataTransformPlanner(limits: {
       const changes: { row: number; column: number; before: string; after: string }[] = [];
       const warnings: Diagnostic[] = [];
       const commands: DocumentCommandEnvelope[] = [];
+      const outputBudget = { remaining: regexLimits.maximumOutputLength };
+      const appendCommand = (command: DocumentCommandEnvelope): void => {
+        if (commands.length >= maxCommands) {
+          throw new DataTransformError(
+            'TRANSFORM_TOO_LARGE',
+            'Data transform exceeds the configured command limit',
+          );
+        }
+        commands.push(command);
+      };
 
       if (transform.type === 'find-replace') {
         const pattern = replacementPattern(transform, regexLimits);
@@ -532,7 +554,13 @@ export function createDataTransformPlanner(limits: {
           const before = inputText(entry.cell.input);
           if (entry.cell.input.type === 'formula') {
             if (
-              replaceText(before, transform, pattern, regexLimits.maximumInputLength) !== before
+              replaceText(
+                before,
+                transform,
+                pattern,
+                regexLimits.maximumInputLength,
+                outputBudget,
+              ) !== before
             ) {
               warnings.push(
                 diagnostic(
@@ -545,10 +573,16 @@ export function createDataTransformPlanner(limits: {
             continue;
           }
           if (entry.cell.input.type !== 'string') continue;
-          const after = replaceText(before, transform, pattern, regexLimits.maximumInputLength);
+          const after = replaceText(
+            before,
+            transform,
+            pattern,
+            regexLimits.maximumInputLength,
+            outputBudget,
+          );
           if (before === after) continue;
           changes.push({ row: entry.row, column: entry.column, before, after });
-          commands.push(setCellCommand(sheetId, entry.row, entry.column, after, commands.length));
+          appendCommand(setCellCommand(sheetId, entry.row, entry.column, after, commands.length));
           if (/^[=+@]/u.test(after)) {
             warnings.push(
               diagnostic('FORMULA_INJECTION_RISK', 'Replacement creates formula-like cell text', {
@@ -597,7 +631,7 @@ export function createDataTransformPlanner(limits: {
               );
             }
             changes.push({ row: entry.row, column, before, after });
-            commands.push(setCellCommand(sheetId, entry.row, column, after, commands.length));
+            appendCommand(setCellCommand(sheetId, entry.row, column, after, commands.length));
           }
         }
       } else if (transform.type === 'remove-duplicates') {
@@ -638,7 +672,7 @@ export function createDataTransformPlanner(limits: {
             before: 'duplicate row',
             after: '',
           });
-          commands.push(
+          appendCommand(
             Object.freeze({
               schemaVersion: 1,
               id: `transform-row-${commands.length + 1}`,
@@ -676,7 +710,7 @@ export function createDataTransformPlanner(limits: {
               );
             }
             changes.push({ row, column, before, after });
-            commands.push(setCellInputCommand(sheetId, row, column, value.input, commands.length));
+            appendCommand(setCellInputCommand(sheetId, row, column, value.input, commands.length));
             if (/^[=+\-@]/u.test(after)) {
               warnings.push(
                 diagnostic('FORMULA_INJECTION_RISK', 'Fill creates formula-like cell text', {

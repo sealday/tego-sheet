@@ -199,6 +199,31 @@ describe('DATA-01 advanced cleanup safety', () => {
     ).rejects.toMatchObject({ code: 'REPLACE_BUDGET_EXCEEDED' });
   });
 
+  it('enforces one cumulative generated-text budget across the complete preview', async () => {
+    const controller = seededController([
+      { row: 0, column: 0, input: { type: 'string', value: 'a' } },
+      { row: 1, column: 0, input: { type: 'string', value: 'a' } },
+    ]);
+    const planner = createDataTransformPlanner({
+      maxCells: 10,
+      maxSamples: 10,
+      maxGeneratedTextLength: 3,
+    });
+    await expect(
+      planner.preview(controller.getSnapshot(), {
+        type: 'find-replace',
+        range: {
+          sheetId: documentSheetId,
+          start: { row: 0, column: 0 },
+          end: { row: 1, column: 0 },
+        },
+        find: 'a',
+        replacement: 'xx',
+        match: 'literal',
+      }),
+    ).rejects.toMatchObject({ code: 'REPLACE_BUDGET_EXCEEDED' });
+  });
+
   it('rejects an oversized exact bounded quantifier before evaluation', async () => {
     const controller = seededController([
       { row: 0, column: 0, input: { type: 'string', value: 'a' } },
