@@ -857,7 +857,9 @@ export class SpreadsheetDocumentController {
         command.type === 'insert-row' ||
         command.type === 'delete-row' ||
         command.type === 'insert-column' ||
-        command.type === 'delete-column'
+        command.type === 'delete-column' ||
+        command.type === 'set-row-hidden' ||
+        command.type === 'set-column-hidden'
       ) {
         candidate = plan.document;
         this.documentHistory.record(
@@ -917,7 +919,9 @@ export class SpreadsheetDocumentController {
           command.type !== 'set-cell-input' &&
           command.type !== 'group' &&
           command.type !== 'ungroup' &&
-          command.type !== 'toggle-group'
+          command.type !== 'toggle-group' &&
+          command.type !== 'set-row-hidden' &&
+          command.type !== 'set-column-hidden'
         ) {
           throw new Error(`Schema-only commit is not supported for ${command.type}`);
         }

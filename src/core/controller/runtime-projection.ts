@@ -279,10 +279,46 @@ function rowShape(row: Record<string, unknown> | undefined): Record<string, unkn
   return shape;
 }
 
-function groupDerivedHidden(sheet: Sheet, axis: 'row' | 'column', index: number): boolean {
-  return sheet.groups.some(
-    (group) => group.collapsed && group.axis === axis && index >= group.start && index <= group.end,
-  );
+interface IndexInterval {
+  readonly start: number;
+  readonly end: number;
+}
+
+function collapsedGroupIntervals(
+  sheet: Sheet,
+): Readonly<Record<'row' | 'column', readonly IndexInterval[]>> {
+  const intervals: Record<'row' | 'column', IndexInterval[]> = { row: [], column: [] };
+  for (const axis of ['row', 'column'] as const) {
+    const sorted = sheet.groups
+      .filter((group) => group.collapsed && group.axis === axis)
+      .map(({ start, end }) => ({ start, end }))
+      .sort((left, right) => left.start - right.start || left.end - right.end);
+    for (const interval of sorted) {
+      const previous = intervals[axis].at(-1);
+      if (previous === undefined || interval.start > previous.end + 1) {
+        intervals[axis].push(interval);
+      } else if (interval.end > previous.end) {
+        intervals[axis][intervals[axis].length - 1] = {
+          start: previous.start,
+          end: interval.end,
+        };
+      }
+    }
+  }
+  return intervals;
+}
+
+function intervalContains(intervals: readonly IndexInterval[], index: number): boolean {
+  let lower = 0;
+  let upper = intervals.length - 1;
+  while (lower <= upper) {
+    const middle = lower + Math.floor((upper - lower) / 2);
+    const interval = intervals[middle]!;
+    if (index < interval.start) upper = middle - 1;
+    else if (index > interval.end) lower = middle + 1;
+    else return true;
+  }
+  return false;
 }
 
 function stripGroupDerivedHidden<T extends { readonly index: number; readonly hidden?: boolean }>(
@@ -310,6 +346,7 @@ function mergeSheet(
   legacyValidationIds: ReadonlySet<string>,
 ): SpreadsheetDocumentInput['workbook']['sheets'][number] {
   if (previous === undefined) return operational;
+  const collapsedIntervals = collapsedGroupIntervals(previous);
   const previousCells = new Map(
     previous.cells.map((item) => [`${item.row}:${item.column}`, item] as const),
   );
@@ -411,7 +448,7 @@ function mergeSheet(
       return stripGroupDerivedHidden(
         selected,
         previousRows.get(index),
-        groupDerivedHidden(previous, 'row', index),
+        intervalContains(collapsedIntervals.row, index),
         beforeRow?.hide === afterRow?.hide,
       );
     })
@@ -432,7 +469,7 @@ function mergeSheet(
       return stripGroupDerivedHidden(
         selected,
         previousColumns.get(index),
-        groupDerivedHidden(previous, 'column', index),
+        intervalContains(collapsedIntervals.column, index),
         beforeColumn?.hide === afterColumn?.hide,
       );
     })

@@ -1,14 +1,25 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SheetId } from '../../../src/core';
-import { projectDocumentToLegacy } from '../../../src/core/controller/runtime-projection';
+import {
+  projectDocumentToLegacy,
+  projectLegacyToDocument,
+} from '../../../src/core/controller/runtime-projection';
 import {
   parseSpreadsheetDocument,
   type GroupId,
+  type SpreadsheetDocument,
   type SpreadsheetDocumentInput,
 } from '../../../src/document';
 import { createDocumentController } from '../../../src/document-controller';
 
 const sheet = 'sheet-1' as SheetId;
+
+function legacyHidden(
+  layouts: Record<string, unknown> | undefined,
+  index: number,
+): boolean | undefined {
+  return (layouts?.[String(index)] as { readonly hide?: boolean } | undefined)?.hide;
+}
 
 function controllerFixture() {
   const parsed = parseSpreadsheetDocument({
@@ -228,4 +239,181 @@ describe('versioned outline group commands', () => {
     expect((runtime.rows?.['2'] as { readonly hide?: boolean } | undefined)?.hide).not.toBe(true);
     expect((runtime.cols?.['2'] as { readonly hide?: boolean } | undefined)?.hide).not.toBe(true);
   });
+
+  it('persists explicit row and column visibility inside collapsed groups across history', () => {
+    const controller = controllerFixture();
+    expect(controller.execute(groupCommand('rows', 1, 3))).toMatchObject({ status: 'committed' });
+    expect(controller.execute(groupCommand('columns', 1, 3, 'column'))).toMatchObject({
+      status: 'committed',
+    });
+    for (const id of ['rows', 'columns']) {
+      expect(
+        controller.execute({
+          schemaVersion: 1,
+          id: `collapse-${id}`,
+          command: { type: 'toggle-group', sheet, id: id as GroupId },
+        }),
+      ).toMatchObject({ status: 'committed' });
+    }
+
+    expect(
+      controller.execute({
+        schemaVersion: 1,
+        id: 'explicit-hide-row',
+        command: { type: 'set-row-hidden', sheet, row: 2, hidden: true },
+      }),
+    ).toMatchObject({ status: 'committed' });
+    expect(
+      controller.execute({
+        schemaVersion: 1,
+        id: 'explicit-hide-column',
+        command: { type: 'set-column-hidden', sheet, column: 2, hidden: true },
+      }),
+    ).toMatchObject({ status: 'committed' });
+    expect(controller.getSnapshot().document.workbook.sheets[0]?.rows).toContainEqual({
+      index: 2,
+      hidden: true,
+    });
+    expect(controller.getSnapshot().document.workbook.sheets[0]?.columns).toContainEqual({
+      index: 2,
+      hidden: true,
+    });
+
+    expect(controller.undo()).toMatchObject({ status: 'committed' });
+    expect(controller.getSnapshot().document.workbook.sheets[0]?.columns).not.toContainEqual({
+      index: 2,
+      hidden: true,
+    });
+    expect(controller.redo()).toMatchObject({ status: 'committed' });
+    expect(controller.getSnapshot().document.workbook.sheets[0]?.columns).toContainEqual({
+      index: 2,
+      hidden: true,
+    });
+
+    for (const id of ['rows', 'columns']) {
+      expect(
+        controller.execute({
+          schemaVersion: 1,
+          id: `expand-explicit-${id}`,
+          command: { type: 'toggle-group', sheet, id: id as GroupId },
+        }),
+      ).toMatchObject({ status: 'committed' });
+    }
+    const explicitlyHiddenRuntime = projectDocumentToLegacy(controller.getSnapshot().document)[0]!;
+    expect(legacyHidden(explicitlyHiddenRuntime.rows, 2)).toBe(true);
+    expect(legacyHidden(explicitlyHiddenRuntime.cols, 2)).toBe(true);
+    for (const id of ['rows', 'columns']) {
+      expect(
+        controller.execute({
+          schemaVersion: 1,
+          id: `recollapse-${id}`,
+          command: { type: 'toggle-group', sheet, id: id as GroupId },
+        }),
+      ).toMatchObject({ status: 'committed' });
+    }
+
+    expect(
+      controller.execute({
+        schemaVersion: 1,
+        id: 'explicit-show-row',
+        command: { type: 'set-row-hidden', sheet, row: 2, hidden: false },
+      }),
+    ).toMatchObject({ status: 'committed' });
+    expect(
+      controller.execute({
+        schemaVersion: 1,
+        id: 'explicit-show-column',
+        command: { type: 'set-column-hidden', sheet, column: 2, hidden: false },
+      }),
+    ).toMatchObject({ status: 'committed' });
+    expect(controller.getSnapshot().document.workbook.sheets[0]?.rows).toContainEqual({
+      index: 2,
+      hidden: false,
+    });
+    expect(controller.getSnapshot().document.workbook.sheets[0]?.columns).toContainEqual({
+      index: 2,
+      hidden: false,
+    });
+    const collapsedRuntime = projectDocumentToLegacy(controller.getSnapshot().document)[0]!;
+    expect(legacyHidden(collapsedRuntime.rows, 2)).toBe(true);
+    expect(legacyHidden(collapsedRuntime.cols, 2)).toBe(true);
+
+    expect(controller.undo()).toMatchObject({ status: 'committed' });
+    expect(controller.getSnapshot().document.workbook.sheets[0]?.columns).toContainEqual({
+      index: 2,
+      hidden: true,
+    });
+    expect(controller.redo()).toMatchObject({ status: 'committed' });
+    expect(controller.getSnapshot().document.workbook.sheets[0]?.columns).toContainEqual({
+      index: 2,
+      hidden: false,
+    });
+
+    for (const id of ['rows', 'columns']) {
+      expect(
+        controller.execute({
+          schemaVersion: 1,
+          id: `expand-${id}`,
+          command: { type: 'toggle-group', sheet, id: id as GroupId },
+        }),
+      ).toMatchObject({ status: 'committed' });
+    }
+    const expandedRuntime = projectDocumentToLegacy(controller.getSnapshot().document)[0]!;
+    expect(legacyHidden(expandedRuntime.rows, 2)).toBe(false);
+    expect(legacyHidden(expandedRuntime.cols, 2)).toBe(false);
+  });
+
+  it('merges 10k collapsed groups with 100k layouts without per-layout group scans', () => {
+    const groups = Array.from({ length: 10_000 }, (_, index) => ({
+      id: `group-${index}` as GroupId,
+      axis: 'row' as const,
+      start: index * 10,
+      end: index * 10,
+      level: 1,
+      collapsed: true,
+    }));
+    Object.defineProperty(groups, 'some', {
+      value: () => {
+        throw new Error('collapsed groups must be indexed before layout merge');
+      },
+    });
+    const largeDocument = {
+      schemaVersion: 2,
+      id: 'large-outline-projection',
+      workbook: {
+        sheets: [
+          {
+            id: sheet,
+            name: 'Sheet 1',
+            visibility: 'visible',
+            cells: [],
+            merges: [],
+            rowCount: 100_000,
+            columnCount: 1,
+            rows: Array.from({ length: 100_000 }, (_, index) => ({
+              index,
+              height: 20 + (index % 3),
+            })),
+            columns: [],
+            groups,
+            conditionalFormatting: [],
+            filterViews: [],
+            objects: [],
+          },
+        ],
+        styles: [],
+        validations: [],
+        settings: { dateSystem: 'excel-1900' as const },
+      },
+      templates: [],
+      resources: { items: [] },
+      extensions: {},
+    } as unknown as SpreadsheetDocument;
+    const legacy = projectDocumentToLegacy(largeDocument);
+    const started = performance.now();
+    const projected = projectLegacyToDocument(legacy, legacy, largeDocument, [sheet]);
+
+    expect(projected.workbook.sheets[0]?.rows).toHaveLength(100_000);
+    expect(performance.now() - started).toBeLessThan(10_000);
+  }, 30_000);
 });

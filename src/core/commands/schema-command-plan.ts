@@ -38,7 +38,7 @@ export interface SchemaProjectionCommit {
   readonly result: unknown;
   readonly kind: Extract<
     WorkbookChangeKind,
-    'cell' | 'clipboard' | 'autofill' | 'view' | 'object' | 'style' | 'outline'
+    'cell' | 'clipboard' | 'autofill' | 'view' | 'object' | 'style' | 'outline' | 'structure'
   >;
   readonly sheet: SheetId;
   readonly range?: CellRange;
@@ -532,6 +532,31 @@ function mutateOutlineGroups(
   sheet.groups = normalizeOutlineGroups(groups);
 }
 
+function mutateExplicitHidden(
+  input: SpreadsheetDocumentInput,
+  command: Extract<WorkbookCommand, { readonly type: 'set-row-hidden' | 'set-column-hidden' }>,
+  sheetIds: readonly SheetId[],
+): void {
+  const sheet = input.workbook.sheets[sheetIndex(sheetIds, command.sheet)];
+  if (sheet === undefined) return;
+  const count = command.count ?? 1;
+  if (command.type === 'set-row-hidden') {
+    const rows = new Map((sheet.rows ?? []).map((row) => [row.index, row]));
+    for (let offset = 0; offset < count; offset += 1) {
+      const index = command.row + offset;
+      rows.set(index, { ...rows.get(index), index, hidden: command.hidden });
+    }
+    sheet.rows = [...rows.values()].sort((left, right) => left.index - right.index);
+    return;
+  }
+  const columns = new Map((sheet.columns ?? []).map((column) => [column.index, column]));
+  for (let offset = 0; offset < count; offset += 1) {
+    const index = command.column + offset;
+    columns.set(index, { ...columns.get(index), index, hidden: command.hidden });
+  }
+  sheet.columns = [...columns.values()].sort((left, right) => left.index - right.index);
+}
+
 export function prepareSchemaProjectionCommit(
   command: Extract<
     WorkbookCommand,
@@ -548,7 +573,9 @@ export function prepareSchemaProjectionCommit(
         | 'set-cell-input'
         | 'group'
         | 'ungroup'
-        | 'toggle-group';
+        | 'toggle-group'
+        | 'set-row-hidden'
+        | 'set-column-hidden';
     }
   >,
   projection: WorkbookData,
@@ -566,6 +593,9 @@ export function prepareSchemaProjectionCommit(
   }
   if (command.type === 'group' || command.type === 'ungroup' || command.type === 'toggle-group') {
     return { result: undefined, kind: 'outline', sheet: command.sheet };
+  }
+  if (command.type === 'set-row-hidden' || command.type === 'set-column-hidden') {
+    return { result: undefined, kind: 'structure', sheet: command.sheet };
   }
   if (command.type === 'set-filter-view' || command.type === 'remove-filter-view') {
     return { result: undefined, kind: 'view', sheet: command.sheet };
@@ -619,6 +649,10 @@ export function prepareSchemaCommand(
     case 'ungroup':
     case 'toggle-group':
       mutateOutlineGroups(input, command, sheetIds);
+      break;
+    case 'set-row-hidden':
+    case 'set-column-hidden':
+      mutateExplicitHidden(input, command, sheetIds);
       break;
     case 'set-cell-input':
       setTypedCellInput(input, command, sheetIds, authoritativeInputs);
