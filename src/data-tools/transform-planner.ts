@@ -13,6 +13,10 @@ import type {
   SparseCell,
 } from '../document';
 import type { SheetId } from '../core';
+import { DataTransformError } from './errors';
+import { createSafeRegexBudget, type SafeRegexBudget } from './safe-regex';
+
+export { DataTransformError } from './errors';
 
 /** Find-and-replace request over scalar text cells in one document range. */
 export interface FindReplaceTransform {
@@ -52,25 +56,24 @@ export interface RemoveDuplicatesTransform {
   readonly keep: 'first' | 'last';
 }
 
-/** Supported deterministic data-cleanup requests. */
-export type DataTransform = FindReplaceTransform | SplitTextTransform | RemoveDuplicatesTransform;
-
-/** Stable planning failure. */
-export class DataTransformError extends Error {
-  /** Creates a machine-readable planning failure. */
-  constructor(
-    /** Stable transform-planning failure category. */
-    readonly code:
-      | 'TRANSFORM_ABORTED'
-      | 'TRANSFORM_TOO_LARGE'
-      | 'REPLACE_PATTERN_INVALID'
-      | 'TEXT_SPLIT_OVERFLOW',
-    message: string,
-  ) {
-    super(message);
-    this.name = 'DataTransformError';
-  }
+/** Generates a row-major numeric, ISO-date, or numeric-suffix text sequence. */
+export interface FillSeriesTransform {
+  /** Transform discriminator. */
+  readonly type: 'fill-series';
+  /** Inclusive row-major target range. */
+  readonly range: DocumentCellRange;
+  /** Explicit deterministic sequence category. */
+  readonly series: 'number' | 'date' | 'text-suffix';
+  /** One starting value or two values used to infer the step. */
+  readonly seed: readonly string[];
 }
+
+/** Supported deterministic data-cleanup requests. */
+export type DataTransform =
+  | FindReplaceTransform
+  | SplitTextTransform
+  | RemoveDuplicatesTransform
+  | FillSeriesTransform;
 
 /** Immutable dry-run result bound to one document revision. */
 export interface DataTransformPreview {
@@ -116,6 +119,16 @@ interface PendingPlan {
 export interface DataTransformPreviewOptions {
   /** Cancels planning before a command plan is published. */
   readonly signal?: AbortSignal;
+  /** Optional read-only template and calculated-value projections. */
+  readonly context?: DataToolPreviewContext;
+}
+
+/** Optional host projections used only to add conservative preview/anomaly warnings. */
+export interface DataToolPreviewContext {
+  /** Template-owned regions that should warn when a transform intersects them. */
+  readonly templateRegions?: readonly DocumentCellRange[];
+  /** Cells whose calculated values are errors, when the host exposes that projection. */
+  readonly errorCells?: readonly DocumentCellAddress[];
 }
 
 function inputText(input: CellInput): string {
@@ -164,6 +177,14 @@ function snapshotTransform(transform: DataTransform): DataTransform {
       maximumColumns: transform.maximumColumns,
     });
   }
+  if (transform.type === 'fill-series') {
+    return Object.freeze({
+      type: transform.type,
+      range,
+      series: transform.series,
+      seed: Object.freeze(transform.seed.map(String)),
+    });
+  }
   return Object.freeze({
     type: transform.type,
     range,
@@ -182,6 +203,17 @@ function diagnostic(code: string, message: string, cell?: DocumentCellAddress): 
     ...(cell === undefined
       ? {}
       : { location: Object.freeze({ cell: Object.freeze({ ...cell }) }) }),
+  });
+}
+
+function rangeDiagnostic(code: string, message: string, range: DocumentCellRange): Diagnostic {
+  return Object.freeze({
+    code,
+    severity: 'warning',
+    domain: 'data',
+    stage: 'plan',
+    message,
+    location: Object.freeze({ range: snapshotRange(range) }),
   });
 }
 
@@ -209,29 +241,27 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
   }
 }
 
-function replacementPattern(transform: FindReplaceTransform): RegExp | undefined {
+function replacementPattern(
+  transform: FindReplaceTransform,
+  limits: {
+    readonly maximumPatternLength: number;
+    readonly maximumInputLength: number;
+    readonly maximumSteps: number;
+    readonly maximumMilliseconds: number;
+  },
+): SafeRegexBudget | undefined {
   if (transform.match === 'literal') return undefined;
-  if (transform.find.length > 1_000) {
-    throw new DataTransformError('REPLACE_PATTERN_INVALID', 'Replacement pattern is too long');
-  }
-  try {
-    return new RegExp(transform.find, 'gu');
-  } catch (cause) {
-    throw new DataTransformError(
-      'REPLACE_PATTERN_INVALID',
-      cause instanceof Error ? cause.message : 'Replacement pattern is invalid',
-    );
-  }
+  return createSafeRegexBudget(transform.find, limits);
 }
 
 function replaceText(
   value: string,
   transform: FindReplaceTransform,
-  pattern: RegExp | undefined,
+  pattern: SafeRegexBudget | undefined,
 ): string {
   return pattern === undefined
     ? value.replaceAll(transform.find, transform.replacement)
-    : value.replace(pattern, transform.replacement);
+    : pattern.replace(value, transform.replacement);
 }
 
 function duplicateKey(
@@ -244,11 +274,115 @@ function duplicateKey(
   );
 }
 
+function parseIsoDate(value: string): number | undefined {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
+  if (match === null) return undefined;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const timestamp = Date.UTC(year, month - 1, day);
+  const date = new Date(timestamp);
+  return date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+    ? timestamp
+    : undefined;
+}
+
+function isoDate(timestamp: number): string {
+  return new Date(timestamp).toISOString().slice(0, 10);
+}
+
+function fillSeriesValues(transform: FillSeriesTransform, count: number): readonly string[] {
+  if (transform.seed.length < 1 || transform.seed.length > 2) {
+    throw new DataTransformError(
+      'FILL_SERIES_INVALID',
+      'Fill series requires one or two seed values',
+    );
+  }
+  const [first, second] = transform.seed;
+  if (first === undefined) {
+    throw new DataTransformError('FILL_SERIES_INVALID', 'Fill series seed is missing');
+  }
+  if (transform.series === 'number') {
+    const start = Number(first);
+    const next = second === undefined ? start + 1 : Number(second);
+    if (!Number.isFinite(start) || !Number.isFinite(next)) {
+      throw new DataTransformError('FILL_SERIES_INVALID', 'Numeric fill seeds must be finite');
+    }
+    const step = next - start;
+    return Object.freeze(Array.from({ length: count }, (_, index) => String(start + step * index)));
+  }
+  if (transform.series === 'date') {
+    const start = parseIsoDate(first);
+    const next =
+      second === undefined
+        ? start === undefined
+          ? undefined
+          : start + 86_400_000
+        : parseIsoDate(second);
+    if (start === undefined || next === undefined) {
+      throw new DataTransformError(
+        'FILL_SERIES_INVALID',
+        'Date fill seeds must use valid YYYY-MM-DD values',
+      );
+    }
+    const step = next - start;
+    return Object.freeze(
+      Array.from({ length: count }, (_, index) => isoDate(start + step * index)),
+    );
+  }
+  const firstMatch = /^(.*?)(-?\d+)$/u.exec(first);
+  const secondMatch = second === undefined ? undefined : /^(.*?)(-?\d+)$/u.exec(second);
+  if (
+    firstMatch === null ||
+    (second !== undefined && (secondMatch === null || secondMatch?.[1] !== firstMatch[1]))
+  ) {
+    throw new DataTransformError(
+      'FILL_SERIES_INVALID',
+      'Text-suffix seeds must share a prefix and end in an integer',
+    );
+  }
+  const prefix = firstMatch[1] as string;
+  const start = Number(firstMatch[2]);
+  const next = secondMatch == null ? start + 1 : Number(secondMatch[2]);
+  const width = Math.max(
+    (firstMatch[2] as string).replace(/^-/, '').length,
+    secondMatch?.[2]?.replace(/^-/, '').length ?? 0,
+  );
+  const step = next - start;
+  return Object.freeze(
+    Array.from({ length: count }, (_, index) => {
+      const value = start + step * index;
+      const digits = String(Math.abs(value)).padStart(width, '0');
+      return `${prefix}${value < 0 ? '-' : ''}${digits}`;
+    }),
+  );
+}
+
+function rangesIntersect(left: DocumentCellRange, right: DocumentCellRange): boolean {
+  return (
+    left.sheetId === right.sheetId &&
+    left.start.row <= right.end.row &&
+    left.end.row >= right.start.row &&
+    left.start.column <= right.end.column &&
+    left.end.column >= right.start.column
+  );
+}
+
 /** Creates an isolated revision-bound preview and commit planner. */
 export function createDataTransformPlanner(limits: {
   readonly maxCells: number;
   readonly maxCommands?: number;
   readonly maxSamples: number;
+  /** Maximum regex source length; defaults to 1,000 UTF-16 code units. */
+  readonly maxRegexPatternLength?: number;
+  /** Maximum text length accepted by one regex match; defaults to 100,000. */
+  readonly maxRegexInputLength?: number;
+  /** Maximum conservative pattern-length × input-length budget per preview. */
+  readonly maxRegexSteps?: number;
+  /** Maximum cumulative synchronous regex execution time per preview. */
+  readonly maxRegexMilliseconds?: number;
 }): {
   /** Builds an immutable bounded preview against one document revision. */
   preview(
@@ -268,6 +402,24 @@ export function createDataTransformPlanner(limits: {
   }
   if (!Number.isSafeInteger(limits.maxSamples) || limits.maxSamples < 0) {
     throw new TypeError('maxSamples must be a non-negative safe integer');
+  }
+  const regexLimits = Object.freeze({
+    maximumPatternLength: limits.maxRegexPatternLength ?? 1_000,
+    maximumInputLength: limits.maxRegexInputLength ?? 100_000,
+    maximumSteps: limits.maxRegexSteps ?? 10_000_000,
+    maximumMilliseconds: limits.maxRegexMilliseconds ?? 50,
+  });
+  if (
+    !Number.isSafeInteger(regexLimits.maximumPatternLength) ||
+    regexLimits.maximumPatternLength < 0 ||
+    !Number.isSafeInteger(regexLimits.maximumInputLength) ||
+    regexLimits.maximumInputLength < 0 ||
+    !Number.isSafeInteger(regexLimits.maximumSteps) ||
+    regexLimits.maximumSteps < 1 ||
+    !Number.isFinite(regexLimits.maximumMilliseconds) ||
+    regexLimits.maximumMilliseconds <= 0
+  ) {
+    throw new TypeError('Regex budgets must be finite non-negative limits');
   }
   const plans = new Map<string, PendingPlan>();
   let sequence = 0;
@@ -296,7 +448,7 @@ export function createDataTransformPlanner(limits: {
       const commands: DocumentCommandEnvelope[] = [];
 
       if (transform.type === 'find-replace') {
-        const pattern = replacementPattern(transform);
+        const pattern = replacementPattern(transform, regexLimits);
         for (const entry of sheet.cells) {
           throwIfAborted(options.signal);
           if (!inRange(entry, transform.range)) continue;
@@ -367,7 +519,7 @@ export function createDataTransformPlanner(limits: {
             commands.push(setCellCommand(sheetId, entry.row, column, after, commands.length));
           }
         }
-      } else {
+      } else if (transform.type === 'remove-duplicates') {
         if (
           transform.keyColumns.length === 0 ||
           transform.keyColumns.some(
@@ -411,12 +563,63 @@ export function createDataTransformPlanner(limits: {
             }),
           );
         }
+      } else {
+        const values = fillSeriesValues(transform, rowCount * columnCount);
+        let index = 0;
+        for (let row = transform.range.start.row; row <= transform.range.end.row; row += 1) {
+          for (
+            let column = transform.range.start.column;
+            column <= transform.range.end.column;
+            column += 1
+          ) {
+            throwIfAborted(options.signal);
+            const after = values[index] as string;
+            index += 1;
+            const existing = cells.get(cellKey(row, column));
+            const before = existing === undefined ? '' : inputText(existing.cell.input);
+            if (before === after) continue;
+            if (
+              existing !== undefined &&
+              existing.cell.input.type !== 'blank' &&
+              existing.cell.input.type !== (transform.series === 'number' ? 'number' : 'string')
+            ) {
+              warnings.push(
+                diagnostic(
+                  'FILL_SERIES_TYPE_OVERWRITE',
+                  'Fill series overwrites a cell with a different input type',
+                  { sheetId: transform.range.sheetId, row, column },
+                ),
+              );
+            }
+            changes.push({ row, column, before, after });
+            commands.push(setCellCommand(sheetId, row, column, after, commands.length));
+            if (/^[=+\-@]/u.test(after)) {
+              warnings.push(
+                diagnostic('FORMULA_INJECTION_RISK', 'Fill creates formula-like cell text', {
+                  sheetId: transform.range.sheetId,
+                  row,
+                  column,
+                }),
+              );
+            }
+          }
+        }
       }
 
       if (commands.length > maxCommands) {
         throw new DataTransformError(
           'TRANSFORM_TOO_LARGE',
           'Data transform exceeds the configured command limit',
+        );
+      }
+      for (const region of options.context?.templateRegions ?? []) {
+        if (!rangesIntersect(transform.range, region) || changes.length === 0) continue;
+        warnings.push(
+          rangeDiagnostic(
+            'TEMPLATE_REGION_CONFLICT',
+            'Data transform intersects a template-owned region',
+            region,
+          ),
         );
       }
       throwIfAborted(options.signal);
