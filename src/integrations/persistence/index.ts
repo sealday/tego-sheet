@@ -82,6 +82,7 @@ export interface PersistenceController {
   save(reason?: SaveReason): Promise<SaveResult>;
   retry(): Promise<SaveResult>;
   resolveConflict(revision: string): void;
+  discardConflict(revision: string): void;
   hasPendingChanges(): boolean;
   dispose(): void;
 }
@@ -100,7 +101,7 @@ export interface PersistenceSession {
   save(reason?: SaveReason): Promise<SaveResult | { readonly status: 'offline' }>;
   retry(): Promise<SaveResult | { readonly status: 'offline' }>;
   setOnline(online: boolean): void;
-  resolveConflict(revision: string): void;
+  resolveConflict(resolution: PersistenceConflictResolution): void;
   bindBeforeUnload(target: {
     addEventListener(type: 'beforeunload', listener: (event: BeforeUnloadEvent) => void): void;
     removeEventListener(type: 'beforeunload', listener: (event: BeforeUnloadEvent) => void): void;
@@ -108,6 +109,23 @@ export interface PersistenceSession {
   subscribe(listener: () => void): () => void;
   dispose(): void;
 }
+
+export type PersistenceConflictResolution =
+  | {
+      readonly strategy: 'keep-local';
+      readonly expectedRemoteRevision: string;
+    }
+  | {
+      readonly strategy: 'load-remote';
+      readonly expectedRemoteRevision: string;
+      readonly document: SpreadsheetDocument;
+    }
+  | {
+      readonly strategy: 'merge';
+      readonly expectedRemoteRevision: string;
+      readonly document: SpreadsheetDocument;
+      readonly rebasedTransactions: readonly SerializableTransactionEnvelope[];
+    };
 
 export interface CreatePersistenceSessionOptions extends CreatePersistenceControllerOptions {
   readonly autosaveDelayMs?: number;
@@ -129,6 +147,14 @@ function deepFreeze<Value>(value: Value): Value {
   Object.freeze(value);
   for (const child of Object.values(value)) deepFreeze(child);
   return value;
+}
+
+function snapshotJsonDocument(value: SpreadsheetDocument): unknown {
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    throw new TypeError('Persistence conflict document must be JSON serializable');
+  }
 }
 
 function snapshotTransaction(
@@ -422,6 +448,23 @@ export function createPersistenceController(
         pending: frozenIds(pending.values()),
       });
     },
+    discardConflict(nextRevision: string): void {
+      if (disposed) throw new TypeError('Persistence controller is disposed');
+      if (activePromise !== undefined) {
+        throw new TypeError('Cannot resolve a persistence conflict during an active save');
+      }
+      if (state.status !== 'conflict') {
+        throw new TypeError('No persistence conflict is available to resolve');
+      }
+      revision = identifier(nextRevision, 'Persistence resolved revision');
+      pending.clear();
+      retryRequest = undefined;
+      state = Object.freeze({
+        status: 'clean',
+        revision,
+        savedAt: options.now?.() ?? Date.now(),
+      });
+    },
     hasPendingChanges(): boolean {
       return pending.size > 0;
     },
@@ -459,6 +502,7 @@ export function createPersistenceSession(
   let timer: unknown;
   let firstPendingAt: number | undefined;
   let detachController: (() => void) | undefined;
+  let attachedController: SpreadsheetDocumentController | undefined;
   const listeners = new Set<() => void>();
   const beforeUnloadBindings = new Set<() => void>();
   const now = options.now ?? Date.now;
@@ -526,6 +570,7 @@ export function createPersistenceSession(
     attachController(controller): () => void {
       if (disposed) throw new TypeError('Persistence session is disposed');
       detachController?.();
+      attachedController = controller;
       const unsubscribe = controller.subscribe(({ snapshot, commit }) => {
         const transaction =
           commit.transaction ??
@@ -550,7 +595,10 @@ export function createPersistenceSession(
         if (!active) return;
         active = false;
         unsubscribe();
-        if (detachController === detach) detachController = undefined;
+        if (detachController === detach) {
+          detachController = undefined;
+          attachedController = undefined;
+        }
       };
       detachController = detach;
       return detach;
@@ -589,8 +637,42 @@ export function createPersistenceSession(
       else clearAutosave();
       publish();
     },
-    resolveConflict(revision): void {
-      persistence.resolveConflict(revision);
+    resolveConflict(resolution): void {
+      if (disposed) throw new TypeError('Persistence session is disposed');
+      const conflict = persistence.state;
+      if (conflict.status !== 'conflict') {
+        throw new TypeError('No persistence conflict is available to resolve');
+      }
+      const expectedRemoteRevision = identifier(
+        resolution.expectedRemoteRevision,
+        'Persistence expected remote revision',
+      );
+      if (conflict.currentRevision !== expectedRemoteRevision) {
+        throw new TypeError('Persistence conflict resolution is stale');
+      }
+      if (resolution.strategy === 'keep-local') {
+        persistence.resolveConflict(expectedRemoteRevision);
+        firstPendingAt = now();
+        scheduleAutosave();
+        publish();
+        return;
+      }
+      const parsed = parseSpreadsheetDocument(snapshotJsonDocument(resolution.document));
+      if (!parsed.ok || parsed.document.id !== options.documentId) {
+        throw new TypeError('Persistence conflict document is invalid');
+      }
+      const rebased =
+        resolution.strategy === 'merge'
+          ? resolution.rebasedTransactions.map(snapshotTransaction)
+          : [];
+      const controller = attachedController;
+      if (controller === undefined) {
+        throw new TypeError('Persistence conflict resolution requires an attached controller');
+      }
+      controller.replace(parsed.document);
+      persistence.discardConflict(expectedRemoteRevision);
+      for (const transaction of rebased) persistence.enqueue(transaction);
+      firstPendingAt = rebased.length === 0 ? undefined : now();
       scheduleAutosave();
       publish();
     },

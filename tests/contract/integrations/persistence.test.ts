@@ -439,4 +439,109 @@ describe('persistence integration contract', () => {
       controller.dispose();
     },
   );
+
+  it('resolves keep-local conflicts only against the expected remote revision and uses a new request', async () => {
+    const requests: SaveRequest[] = [];
+    let requestNumber = 0;
+    const document = testDocument([{ name: 'A' }]);
+    const session = createPersistenceSession({
+      documentId: document.id,
+      initialRevision: 'revision-1',
+      adapter: {
+        save: async (request) => {
+          requests.push(request);
+          if (requests.length === 1) {
+            return { status: 'conflict', currentRevision: 'revision-remote' };
+          }
+          return {
+            status: 'saved',
+            revision: 'revision-final',
+            persistedTransactionIds: request.transactions.map(({ id }) => id),
+          };
+        },
+      },
+      requestId: () => `request-${++requestNumber}`,
+      autosaveDelayMs: 60_000,
+    });
+    const controller = new SpreadsheetDocumentController(document);
+    session.attachController(controller);
+    const sheet = controller.getSheetIds()[0]!;
+    controller.dispatch(
+      { type: 'set-cell-text', address: { sheet, row: 0, column: 0 }, text: 'local' },
+      'ref',
+    );
+    await session.save();
+    expect(() =>
+      session.resolveConflict({
+        strategy: 'keep-local',
+        expectedRemoteRevision: 'revision-stale',
+      }),
+    ).toThrow(/stale/u);
+    expect(session.state.status).toBe('conflict');
+
+    session.resolveConflict({
+      strategy: 'keep-local',
+      expectedRemoteRevision: 'revision-remote',
+    });
+    await session.save();
+    expect(requests.map(({ requestId, baseRevision }) => ({ requestId, baseRevision }))).toEqual([
+      { requestId: 'request-1', baseRevision: 'revision-1' },
+      { requestId: 'request-2', baseRevision: 'revision-remote' },
+    ]);
+    session.dispose();
+    controller.dispose();
+  });
+
+  it('validates load/merge conflict inputs before atomic controller replacement', async () => {
+    const document = testDocument([{ name: 'A' }]);
+    const session = createPersistenceSession({
+      documentId: document.id,
+      initialRevision: 'revision-1',
+      adapter: {
+        save: async () => ({ status: 'conflict', currentRevision: 'revision-remote' }),
+      },
+      requestId: () => 'request-1',
+      autosaveDelayMs: 60_000,
+    });
+    const controller = new SpreadsheetDocumentController(document);
+    session.attachController(controller);
+    const sheet = controller.getSheetIds()[0]!;
+    controller.dispatch(
+      { type: 'set-cell-text', address: { sheet, row: 0, column: 0 }, text: 'local' },
+      'ref',
+    );
+    await session.save();
+    const before = controller.getDocument();
+
+    expect(() =>
+      session.resolveConflict({
+        strategy: 'load-remote',
+        expectedRemoteRevision: 'revision-remote',
+        document: { ...document, schemaVersion: 999 } as never,
+      }),
+    ).toThrow(/document is invalid/u);
+    expect(controller.getDocument()).toEqual(before);
+    expect(session.state.status).toBe('conflict');
+    expect(() =>
+      session.resolveConflict({
+        strategy: 'merge',
+        expectedRemoteRevision: 'revision-remote',
+        document,
+        rebasedTransactions: [{ ...transaction('rebased'), schemaVersion: 2 } as never],
+      }),
+    ).toThrow(/transaction is invalid/u);
+    expect(controller.getDocument()).toEqual(before);
+    expect(session.state.status).toBe('conflict');
+
+    const remote = testDocument([{ name: 'Remote' }]);
+    session.resolveConflict({
+      strategy: 'load-remote',
+      expectedRemoteRevision: 'revision-remote',
+      document: remote,
+    });
+    expect(session.state.status).toBe('clean');
+    expect(controller.getDocument().workbook.sheets[0]?.name).toBe('Remote');
+    session.dispose();
+    controller.dispose();
+  });
 });
