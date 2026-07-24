@@ -91,6 +91,59 @@ function inputAt(
 }
 
 describe('DATA-01 enhanced autofill planner', () => {
+  it('uses the command canonical expanded target for preview, budgets, samples, and commit', async () => {
+    const controller = controllerFixture();
+    const compact: AutofillTransform = {
+      ...request(),
+      target: {
+        sheetId: documentSheet,
+        start: { row: 2, column: 0 },
+        end: { row: 2, column: 0 },
+      },
+    };
+    const planner = createDataTransformPlanner({
+      maxCells: 20,
+      maxCommands: 1,
+      maxSamples: 10,
+    });
+    const preview = await planner.preview(controller.getSnapshot(), compact);
+
+    expect(preview).toMatchObject({
+      affectedRange: {
+        sheetId: documentSheet,
+        start: { row: 2, column: 0 },
+        end: { row: 3, column: 4 },
+      },
+      estimatedCellCount: 10,
+    });
+    expect(preview.sampleChanges).toHaveLength(10);
+    expect(preview.sampleChanges.at(-1)).toEqual({
+      row: 3,
+      column: 4,
+      before: '',
+      after: 'true',
+    });
+    expect(planner.commit(controller, preview.planId)).toMatchObject({ status: 'committed' });
+    expect(inputAt(controller, 3, 0)).toEqual({ type: 'number', value: 7 });
+    expect(inputAt(controller, 3, 3)).toEqual({
+      type: 'formula',
+      source: '=$A4+B$1',
+    });
+
+    await expect(
+      createDataTransformPlanner({ maxCells: 19, maxCommands: 1, maxSamples: 10 }).preview(
+        controller.getSnapshot(),
+        compact,
+      ),
+    ).rejects.toMatchObject({ code: 'TRANSFORM_TOO_LARGE' });
+    await expect(
+      createDataTransformPlanner({ maxCells: 20, maxCommands: 0, maxSamples: 10 }).preview(
+        controller.getSnapshot(),
+        compact,
+      ),
+    ).rejects.toMatchObject({ code: 'TRANSFORM_TOO_LARGE' });
+  });
+
   it('previews and atomically commits typed patterns and AST-translated formulas', async () => {
     const controller = controllerFixture();
     const planner = createDataTransformPlanner({

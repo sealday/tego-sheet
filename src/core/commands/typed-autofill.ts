@@ -1,5 +1,11 @@
 import type { Cell, CellInput, SheetRange } from '../../document';
 import { parseFormula, renderFormula, translateFormula } from '../../formula';
+import { internalPasteRange } from '../operations/clipboard';
+
+/** Canonical target expansion shared by autofill command validation, planning, and commit. */
+export function canonicalAutofillTargetRange(source: SheetRange, target: SheetRange): SheetRange {
+  return internalPasteRange(source, target);
+}
 
 function positiveModulo(value: number, divisor: number): number {
   return ((value % divisor) + divisor) % divisor;

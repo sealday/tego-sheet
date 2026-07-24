@@ -165,4 +165,67 @@ describe('versioned outline group commands', () => {
       }),
     ).toMatchObject({ status: 'rejected', code: 'GROUP_LIMIT_EXCEEDED' });
   });
+
+  it('strips derived hide when resizing or editing inside collapsed groups', () => {
+    const controller = controllerFixture();
+    expect(controller.execute(groupCommand('rows', 1, 3))).toMatchObject({ status: 'committed' });
+    expect(controller.execute(groupCommand('columns', 1, 3, 'column'))).toMatchObject({
+      status: 'committed',
+    });
+    for (const id of ['rows', 'columns']) {
+      expect(
+        controller.execute({
+          schemaVersion: 1,
+          id: `collapse-${id}`,
+          command: { type: 'toggle-group', sheet, id: id as GroupId },
+        }),
+      ).toMatchObject({ status: 'committed' });
+    }
+    expect(
+      controller.execute({
+        schemaVersion: 1,
+        id: 'resize-row',
+        command: { type: 'set-row-height', sheet, row: 2, height: 44 },
+      }),
+    ).toMatchObject({ status: 'committed' });
+    expect(
+      controller.execute({
+        schemaVersion: 1,
+        id: 'resize-column',
+        command: { type: 'set-column-width', sheet, column: 2, width: 88 },
+      }),
+    ).toMatchObject({ status: 'committed' });
+    expect(
+      controller.execute({
+        schemaVersion: 1,
+        id: 'edit-group-cell',
+        command: {
+          type: 'set-cell-input',
+          address: { sheet, row: 2, column: 2 },
+          input: { type: 'string', value: 'edited' },
+        },
+      }),
+    ).toMatchObject({ status: 'committed' });
+
+    expect(controller.getSnapshot().document.workbook.sheets[0]?.rows).toEqual([
+      { index: 2, height: 44 },
+      { index: 9, hidden: true },
+    ]);
+    expect(controller.getSnapshot().document.workbook.sheets[0]?.columns).toEqual([
+      { index: 2, width: 88 },
+    ]);
+
+    for (const id of ['rows', 'columns']) {
+      expect(
+        controller.execute({
+          schemaVersion: 1,
+          id: `expand-${id}`,
+          command: { type: 'toggle-group', sheet, id: id as GroupId },
+        }),
+      ).toMatchObject({ status: 'committed' });
+    }
+    const runtime = projectDocumentToLegacy(controller.getSnapshot().document)[0]!;
+    expect((runtime.rows?.['2'] as { readonly hide?: boolean } | undefined)?.hide).not.toBe(true);
+    expect((runtime.cols?.['2'] as { readonly hide?: boolean } | undefined)?.hide).not.toBe(true);
+  });
 });

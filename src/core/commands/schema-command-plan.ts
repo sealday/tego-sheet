@@ -19,7 +19,7 @@ import {
   transformDocumentCoordinates,
 } from '../coordinates/coordinate-transform';
 import { parseFormula, renameFormulaSheet, renderFormula } from '../../formula';
-import { createTypedAutofillResolver } from '../operations/typed-autofill';
+import { canonicalAutofillTargetRange, createTypedAutofillResolver } from './typed-autofill';
 
 type ValidationId = NonNullable<Cell['validationId']>;
 type MutableSheetGroup = NonNullable<SheetInput['groups']>[number];
@@ -56,11 +56,10 @@ function sheetIndex(sheetIds: readonly SheetId[], sheet: SheetId): number {
 export function plannedPasteTargetRange(
   command: Extract<WorkbookCommand, { readonly type: 'paste-internal' | 'autofill' }>,
 ): CellRange {
-  return internalPasteRange(
-    command.source.range,
-    command.target.range,
-    command.type === 'paste-internal' && command.cut,
-  );
+  if (command.type === 'autofill') {
+    return canonicalAutofillTargetRange(command.source.range, command.target.range);
+  }
+  return internalPasteRange(command.source.range, command.target.range, command.cut);
 }
 
 function normalizeOutlineGroups(groups: readonly MutableSheetGroup[]): MutableSheetGroup[] {
@@ -72,13 +71,13 @@ function normalizeOutlineGroups(groups: readonly MutableSheetGroup[]): MutableSh
         (left, right) =>
           left.start - right.start || right.end - left.end || left.id.localeCompare(right.id),
       );
-    for (const [index, group] of axisGroups.entries()) {
-      let level = 1;
-      for (let candidateIndex = 0; candidateIndex < index; candidateIndex += 1) {
-        const candidate = axisGroups[candidateIndex]!;
-        if (candidate.start <= group.start && candidate.end >= group.end) level += 1;
-      }
-      output.push({ ...group, level });
+    const stack: MutableSheetGroup[] = [];
+    for (const group of axisGroups) {
+      while (stack.length > 0 && group.start > stack.at(-1)!.end) stack.pop();
+      while (stack.length > 0 && group.end > stack.at(-1)!.end) stack.pop();
+      const normalized = { ...group, level: stack.length + 1 };
+      output.push(normalized);
+      stack.push(normalized);
     }
   }
   return output;

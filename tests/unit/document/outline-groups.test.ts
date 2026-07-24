@@ -5,7 +5,11 @@ import {
   type SpreadsheetDocumentInput,
 } from '../../../src/document';
 
-function fixture(groups: readonly unknown[]): SpreadsheetDocumentInput {
+function fixture(
+  groups: readonly unknown[],
+  rowCount = 10,
+  columnCount = 6,
+): SpreadsheetDocumentInput {
   return {
     schemaVersion: 2,
     id: 'outline-document',
@@ -16,8 +20,8 @@ function fixture(groups: readonly unknown[]): SpreadsheetDocumentInput {
           name: 'Sheet 1',
           cells: [],
           merges: [],
-          rowCount: 10,
-          columnCount: 6,
+          rowCount,
+          columnCount,
           groups,
         },
       ],
@@ -126,5 +130,23 @@ describe('Workbook 2.0 outline groups', () => {
       ok: false,
       diagnostics: [expect.objectContaining({ code: 'GROUP_LIMIT_EXCEEDED' })],
     });
+  });
+
+  it('normalizes the full 10k group budget without quadratic containment scanning', () => {
+    const groups = Array.from({ length: 10_000 }, (_, index) => ({
+      id: `group-${index}`,
+      axis: 'row',
+      start: index * 2,
+      end: index * 2,
+      level: 8,
+      collapsed: false,
+    }));
+    const parsed = parseSpreadsheetDocument(fixture(groups, 20_000), {
+      limits: { maxGroups: 10_000 },
+    });
+    expect(parsed).toMatchObject({ ok: true });
+    if (!parsed.ok) throw new Error(JSON.stringify(parsed.diagnostics));
+    expect(parsed.document.workbook.sheets[0]?.groups).toHaveLength(10_000);
+    expect(parsed.document.workbook.sheets[0]?.groups.every(({ level }) => level === 1)).toBe(true);
   });
 });

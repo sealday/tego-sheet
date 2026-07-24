@@ -911,23 +911,24 @@ function groupsAt(
         (left, right) =>
           left.start - right.start || right.end - left.end || compareCodeUnits(left.id, right.id),
       );
-    for (const [index, group] of axisGroups.entries()) {
-      let level = 1;
-      for (let candidateIndex = 0; candidateIndex < index; candidateIndex += 1) {
-        const candidate = axisGroups[candidateIndex] as SheetGroup;
-        const overlaps = candidate.start <= group.end && group.start <= candidate.end;
-        const contains = candidate.start <= group.start && candidate.end >= group.end;
-        if (overlaps && !contains) {
-          addDiagnostic(
-            context,
-            'GROUP_LIMIT_EXCEEDED',
-            path,
-            'Outline groups on one axis must be disjoint or properly nested',
-            'data',
-          );
-        }
-        if (contains) level += 1;
+    const stack: SheetGroup[] = [];
+    for (const group of axisGroups) {
+      while (stack.length > 0 && group.start > stack.at(-1)!.end) stack.pop();
+      let crossing = false;
+      while (stack.length > 0 && group.end > stack.at(-1)!.end) {
+        crossing = true;
+        stack.pop();
       }
+      if (crossing) {
+        addDiagnostic(
+          context,
+          'GROUP_LIMIT_EXCEEDED',
+          path,
+          'Outline groups on one axis must be disjoint or properly nested',
+          'data',
+        );
+      }
+      const level = stack.length + 1;
       if (level > MAX_GROUP_LEVEL) {
         addDiagnostic(
           context,
@@ -937,7 +938,9 @@ function groupsAt(
           'data',
         );
       }
-      output.push({ ...group, level });
+      const normalized = { ...group, level };
+      output.push(normalized);
+      stack.push(normalized);
     }
   }
   return output;

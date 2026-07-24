@@ -13,7 +13,10 @@ import type {
   SparseCell,
 } from '../document';
 import type { SheetId } from '../core';
-import { createTypedAutofillResolver } from '../core/operations/typed-autofill';
+import {
+  canonicalAutofillTargetRange,
+  createTypedAutofillResolver,
+} from '../core/commands/typed-autofill';
 import { DataTransformError } from './errors';
 import { indexSparseRange, yieldForCancellation } from './range-index';
 import { createSafeRegexBudget, type SafeRegexBudget } from './safe-regex';
@@ -521,7 +524,21 @@ export function createDataTransformPlanner(limits: {
     async preview(snapshot, transformInput, options = {}) {
       throwIfAborted(options.signal);
       const transform = snapshotTransform(transformInput);
-      const affectedRange = transform.type === 'autofill' ? transform.target : transform.range;
+      let affectedRange: DocumentCellRange;
+      try {
+        affectedRange =
+          transform.type === 'autofill'
+            ? {
+                sheetId: transform.target.sheetId,
+                ...canonicalAutofillTargetRange(transform.source, transform.target),
+              }
+            : transform.range;
+      } catch (cause) {
+        throw new DataTransformError(
+          'TRANSFORM_TOO_LARGE',
+          cause instanceof Error ? cause.message : 'Autofill target expansion failed',
+        );
+      }
       const rowCount = affectedRange.end.row - affectedRange.start.row + 1;
       const columnCount = affectedRange.end.column - affectedRange.start.column + 1;
       const affectedCellCount = rowCount * columnCount;
@@ -579,7 +596,7 @@ export function createDataTransformPlanner(limits: {
         transform.type === 'autofill'
           ? new Map([
               ...(await indexSparseRange(sheet.cells, transform.source, options.signal)),
-              ...(await indexSparseRange(sheet.cells, transform.target, options.signal)),
+              ...(await indexSparseRange(sheet.cells, affectedRange, options.signal)),
             ])
           : await indexSparseRange(sheet.cells, indexedRange, options.signal);
       const changes: { row: number; column: number; before: string; after: string }[] = [];
@@ -599,14 +616,14 @@ export function createDataTransformPlanner(limits: {
       if (transform.type === 'autofill') {
         const autofillInput = createTypedAutofillResolver(
           transform.source,
-          transform.target,
+          affectedRange,
           (row, column) => cells.get(cellKey(row, column))?.cell,
         );
         let inspected = 0;
-        for (let row = transform.target.start.row; row <= transform.target.end.row; row += 1) {
+        for (let row = affectedRange.start.row; row <= affectedRange.end.row; row += 1) {
           for (
-            let column = transform.target.start.column;
-            column <= transform.target.end.column;
+            let column = affectedRange.start.column;
+            column <= affectedRange.end.column;
             column += 1
           ) {
             inspected += 1;

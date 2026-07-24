@@ -279,6 +279,27 @@ function rowShape(row: Record<string, unknown> | undefined): Record<string, unkn
   return shape;
 }
 
+function groupDerivedHidden(sheet: Sheet, axis: 'row' | 'column', index: number): boolean {
+  return sheet.groups.some(
+    (group) => group.collapsed && group.axis === axis && index >= group.start && index <= group.end,
+  );
+}
+
+function stripGroupDerivedHidden<T extends { readonly index: number; readonly hidden?: boolean }>(
+  selected: T | undefined,
+  explicit: T | undefined,
+  derived: boolean,
+  hideUnchanged: boolean,
+): T | undefined {
+  if (selected === undefined || !derived || !hideUnchanged) return selected;
+  const { hidden: _derivedHidden, ...layout } = selected;
+  const normalized = {
+    ...layout,
+    ...(explicit?.hidden === undefined ? {} : { hidden: explicit.hidden }),
+  } as T;
+  return Object.keys(normalized).length === 1 ? undefined : normalized;
+}
+
 function mergeSheet(
   previous: Sheet | undefined,
   operational: SheetInput,
@@ -381,11 +402,19 @@ function mergeSheet(
   const operationalRows = new Map((operational.rows ?? []).map((row) => [row.index, row]));
   const rowIndexes = new Set([...previousRows.keys(), ...operationalRows.keys()]);
   const rows = [...rowIndexes]
-    .map((index) =>
-      sameJson(rowShape(legacyRow(beforeLegacy, index)), rowShape(legacyRow(afterLegacy, index)))
+    .map((index) => {
+      const beforeRow = legacyRow(beforeLegacy, index);
+      const afterRow = legacyRow(afterLegacy, index);
+      const selected = sameJson(rowShape(beforeRow), rowShape(afterRow))
         ? (previousRows.get(index) ?? operationalRows.get(index))
-        : operationalRows.get(index),
-    )
+        : operationalRows.get(index);
+      return stripGroupDerivedHidden(
+        selected,
+        previousRows.get(index),
+        groupDerivedHidden(previous, 'row', index),
+        beforeRow?.hide === afterRow?.hide,
+      );
+    })
     .filter((row): row is NonNullable<typeof row> => row !== undefined);
 
   const previousColumns = new Map(previous.columns.map((column) => [column.index, column]));
@@ -394,11 +423,19 @@ function mergeSheet(
   );
   const columnIndexes = new Set([...previousColumns.keys(), ...operationalColumns.keys()]);
   const columns = [...columnIndexes]
-    .map((index) =>
-      sameJson(legacyColumn(beforeLegacy, index), legacyColumn(afterLegacy, index))
+    .map((index) => {
+      const beforeColumn = legacyColumn(beforeLegacy, index);
+      const afterColumn = legacyColumn(afterLegacy, index);
+      const selected = sameJson(beforeColumn, afterColumn)
         ? (previousColumns.get(index) ?? operationalColumns.get(index))
-        : operationalColumns.get(index),
-    )
+        : operationalColumns.get(index);
+      return stripGroupDerivedHidden(
+        selected,
+        previousColumns.get(index),
+        groupDerivedHidden(previous, 'column', index),
+        beforeColumn?.hide === afterColumn?.hide,
+      );
+    })
     .filter((column): column is NonNullable<typeof column> => column !== undefined);
 
   const rowCount = sameJson(beforeLegacy?.rows?.len, afterLegacy?.rows?.len)
