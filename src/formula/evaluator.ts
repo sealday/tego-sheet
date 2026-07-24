@@ -47,6 +47,8 @@ export interface FormulaProgram {
   readonly formulas: ReadonlyMap<string, FormulaAst>;
   /** Compiled dependency edges. */
   readonly graph: FormulaDependencyGraph;
+  /** Projected spill children mapped to their formula anchor. */
+  readonly spillAnchors: ReadonlyMap<string, string>;
   /** Latest calculated values. */
   readonly values: ReadonlyMap<string, FormulaValue>;
   /** Latest compile and evaluation diagnostics. */
@@ -55,6 +57,7 @@ export interface FormulaProgram {
 
 interface FormulaProgramState {
   formulas: Map<string, FormulaAst>;
+  baseGraph: FormulaDependencyGraph;
   graph: FormulaDependencyGraph;
   inputs: Map<string, CellInput>;
   values: Map<string, FormulaValue>;
@@ -219,6 +222,40 @@ function snapshotGraph(graph: FormulaDependencyGraph): FormulaDependencyGraph {
       [...graph.dependents].map(([address, dependents]) => [address, new Set(dependents)]),
     ),
   };
+}
+
+function spillAnchorMap(
+  spills: ReadonlyMap<string, ReadonlySet<string>>,
+): ReadonlyMap<string, string> {
+  const anchors = new Map<string, string>();
+  for (const [anchor, projected] of spills) {
+    for (const address of projected) {
+      if (address !== anchor) anchors.set(address, anchor);
+    }
+  }
+  return anchors;
+}
+
+function remapSpillDependencies(
+  graph: FormulaDependencyGraph,
+  spills: ReadonlyMap<string, ReadonlySet<string>>,
+): FormulaDependencyGraph {
+  const anchors = spillAnchorMap(spills);
+  if (anchors.size === 0) return snapshotGraph(graph);
+  const dependencies = new Map<string, ReadonlySet<string>>();
+  const dependents = new Map<string, Set<string>>();
+  for (const [formula, references] of graph.dependencies) {
+    const remapped = new Set(
+      [...references].map((reference) => anchors.get(reference) ?? reference),
+    );
+    dependencies.set(formula, remapped);
+    for (const reference of remapped) {
+      const formulas = dependents.get(reference) ?? new Set<string>();
+      formulas.add(formula);
+      dependents.set(reference, formulas);
+    }
+  }
+  return { dependencies, dependents };
 }
 
 function snapshotDiagnostics(
@@ -403,6 +440,7 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
       }
       const state: FormulaProgramState = {
         formulas,
+        baseGraph: graph,
         graph,
         inputs: cellInputs(document),
         values,
@@ -418,6 +456,9 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
         },
         get graph() {
           return snapshotGraph(state.graph);
+        },
+        get spillAnchors() {
+          return new Map(spillAnchorMap(state.spills));
         },
         get values() {
           return new Map(state.values);
@@ -441,6 +482,7 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
       }
       const program: FormulaProgramState = {
         formulas: new Map(storedProgram.formulas),
+        baseGraph: storedProgram.baseGraph,
         graph: storedProgram.graph,
         inputs: new Map(storedProgram.inputs),
         values: new Map(storedProgram.values),
@@ -501,7 +543,10 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
           graphChanged = true;
         }
       }
-      if (graphChanged) program.graph = createDependencyGraph(program.formulas);
+      if (graphChanged) {
+        program.baseGraph = createDependencyGraph(program.formulas);
+        program.graph = program.baseGraph;
+      }
 
       let dirty: Set<string>;
       if (!program.initialized) dirty = new Set(program.formulas.keys());
@@ -804,10 +849,12 @@ export function createFormulaEngine(options: FormulaEngineOptions = {}): Formula
       };
 
       for (const address of [...dirty].sort()) resolveAddress(address);
+      program.graph = remapSpillDependencies(program.baseGraph, program.spills);
       program.initialized = true;
       program.lastTick = environment.tick;
       program.lastFunctionRegistryVersion = environment.functionRegistryVersion;
       storedProgram.formulas = program.formulas;
+      storedProgram.baseGraph = program.baseGraph;
       storedProgram.graph = program.graph;
       storedProgram.inputs = program.inputs;
       storedProgram.values = program.values;

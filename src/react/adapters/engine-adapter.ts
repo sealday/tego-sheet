@@ -144,6 +144,9 @@ export function createEngineAdapter(options: EngineAdapterOptions): EngineAdapte
       formulaValues: new Map(
         latestSnapshot.calculation.values.map(({ address, value }) => [address, value]),
       ),
+      formulaSpillAnchors: new Map(
+        latestSnapshot.calculation.spillAnchors.map(({ address, anchor }) => [address, anchor]),
+      ),
       cache: presentationCache,
       validation: createPresentationValidationResolver(latestSnapshot),
       revisions: {

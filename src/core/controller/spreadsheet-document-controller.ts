@@ -4,6 +4,7 @@ import type { CellInput, FilterView, SpreadsheetDocument } from '../../document/
 import {
   createFormulaEngine,
   createFormulaFunctionRegistry,
+  formulaAddressKey,
   type CalculationEnvironment,
   type FormulaEngine,
   type FormulaFunctionRegistry,
@@ -66,6 +67,11 @@ export interface SpreadsheetControllerSnapshot extends Omit<ControllerSnapshot, 
     readonly values: readonly {
       readonly address: string;
       readonly value: FormulaValue;
+    }[];
+    /** Spill children mapped to their current anchor. */
+    readonly spillAnchors: readonly {
+      readonly address: string;
+      readonly anchor: string;
     }[];
   };
 }
@@ -131,6 +137,7 @@ export type TransactionRejectionCode =
   | 'VALIDATION_REJECTED'
   | 'VALIDATION_RULE_INVALID'
   | 'VALIDATION_CAPABILITY_INVALID'
+  | 'SPILL_CELL_READ_ONLY'
   | 'REVISION_CONFLICT'
   | 'TRANSACTION_INVARIANT_FAILED'
   | 'TRANSACTION_LIMIT_EXCEEDED';
@@ -202,6 +209,7 @@ class ValidationBoundaryError extends Error {
       | 'VALIDATION_REJECTED'
       | 'VALIDATION_RULE_INVALID'
       | 'VALIDATION_CAPABILITY_INVALID'
+      | 'SPILL_CELL_READ_ONLY'
       | 'TRANSACTION_LIMIT_EXCEEDED'
     >,
     message: string,
@@ -580,6 +588,9 @@ export class SpreadsheetDocumentController {
         values: [...this.formulaValues]
           .sort(([left], [right]) => left.localeCompare(right))
           .map(([address, value]) => ({ address, value })),
+        spillAnchors: [...this.formulaProgram.spillAnchors]
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([address, anchor]) => ({ address, anchor })),
       },
       projection,
     });
@@ -805,6 +816,7 @@ export class SpreadsheetDocumentController {
         recoverable: true,
       });
     }
+    this.assertNoSpillChildEdits(command);
     this.legacy.assertCommand(command);
     const rollbackCheckpoint = this.checkpoint();
     const plan = prepareSchemaCommand(this.currentDocument, command, this.legacy.getSheetIds());
@@ -1324,6 +1336,60 @@ export class SpreadsheetDocumentController {
         );
       }
       throw new ValidationBoundaryError('VALIDATION_REJECTED', 'Cell value failed validation');
+    }
+  }
+
+  private assertNoSpillChildEdits(command: WorkbookCommand): void {
+    if (this.formulaProgram.spillAnchors.size === 0) return;
+    const ranges: Array<{
+      readonly sheet: SheetId;
+      readonly start: { readonly row: number; readonly column: number };
+      readonly end: { readonly row: number; readonly column: number };
+    }> = [];
+    if (command.type === 'set-cell-text') {
+      ranges.push({
+        sheet: command.address.sheet,
+        start: command.address,
+        end: command.address,
+      });
+    } else if (command.type === 'clear-contents') {
+      ranges.push({ sheet: command.selection.sheet, ...command.selection.range });
+    } else if (command.type === 'paste-external') {
+      const height = command.values.length;
+      const width = command.values.reduce((maximum, row) => Math.max(maximum, row.length), 0);
+      if (height > 0 && width > 0) {
+        ranges.push({
+          sheet: command.target.sheet,
+          start: command.target.range.start,
+          end: {
+            row: command.target.range.start.row + height - 1,
+            column: command.target.range.start.column + width - 1,
+          },
+        });
+      }
+    } else if (
+      (command.type === 'paste-internal' || command.type === 'autofill') &&
+      command.mode !== 'format'
+    ) {
+      ranges.push({ sheet: command.target.sheet, ...plannedPasteTargetRange(command) });
+      if (command.type === 'paste-internal' && command.cut) {
+        ranges.push({ sheet: command.source.sheet, ...command.source.range });
+      }
+    } else {
+      return;
+    }
+    for (const range of ranges) {
+      for (let row = range.start.row; row <= range.end.row; row += 1) {
+        for (let column = range.start.column; column <= range.end.column; column += 1) {
+          const address = formulaAddressKey({ sheetId: range.sheet as string, row, column });
+          const anchor = this.formulaProgram.spillAnchors.get(address);
+          if (anchor === undefined) continue;
+          throw new ValidationBoundaryError(
+            'SPILL_CELL_READ_ONLY',
+            `Spill child ${address} is read-only; edit anchor ${anchor}`,
+          );
+        }
+      }
     }
   }
 

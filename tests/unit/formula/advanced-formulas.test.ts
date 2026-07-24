@@ -272,4 +272,66 @@ describe('FRM-01 advanced formula foundation', () => {
       new Set(['sheet-1!B1', 'sheet-1!B2']),
     );
   });
+
+  it('maps spill-child dependencies to their anchor and cleans projections after anchor edits', () => {
+    const parsed = parseSpreadsheetDocument({
+      schemaVersion: 2,
+      id: 'formula-document',
+      workbook: {
+        sheets: [
+          {
+            id: 'sheet-1',
+            name: 'Sheet 1',
+            cells: [
+              { row: 0, column: 0, cell: { input: { type: 'number', value: 2 } } },
+              { row: 1, column: 0, cell: { input: { type: 'number', value: 3 } } },
+              { row: 0, column: 2, cell: { input: { type: 'formula', source: '=A1:A2' } } },
+              { row: 0, column: 3, cell: { input: { type: 'formula', source: '=C2*2' } } },
+            ],
+            merges: [],
+          },
+        ],
+        styles: [],
+        validations: [],
+        settings: { dateSystem: 'excel-1900' },
+      },
+      templates: [],
+      resources: { items: [] },
+      extensions: {},
+    });
+    if (!parsed.ok) throw new Error('formula fixture must parse');
+    const engine = createFormulaEngine();
+    const program = engine.compile(parsed.document);
+    const environment = {
+      locale: 'en-US',
+      timeZone: 'UTC',
+      dateSystem: 'excel-1900' as const,
+      clock: { now: () => 0 },
+      tick: 0,
+      functionRegistryVersion: 'builtin-1',
+    };
+
+    const initial = engine.recalculate(program, [], environment);
+    expect(initial.values.get('sheet-1!D1')).toEqual({ type: 'number', value: 6 });
+    expect(program.spillAnchors).toEqual(new Map([['sheet-1!C2', 'sheet-1!C1']]));
+    expect(program.graph.dependencies.get('sheet-1!D1')).toEqual(new Set(['sheet-1!C1']));
+
+    const updated = engine.recalculate(
+      program,
+      [{ sheetId: 'sheet-1', row: 1, column: 0, input: { type: 'number', value: 5 } }],
+      { ...environment, tick: 1 },
+    );
+    expect(updated.evaluatedAddresses).toEqual(['sheet-1!C1', 'sheet-1!D1']);
+    expect(updated.values.get('sheet-1!C2')).toEqual({ type: 'number', value: 5 });
+    expect(updated.values.get('sheet-1!D1')).toEqual({ type: 'number', value: 10 });
+
+    const removed = engine.recalculate(
+      program,
+      [{ sheetId: 'sheet-1', row: 0, column: 2, input: { type: 'blank' } }],
+      { ...environment, tick: 2 },
+    );
+    expect(removed.values.has('sheet-1!C2')).toBe(false);
+    expect(program.spillAnchors).toEqual(new Map());
+    expect(removed.values.get('sheet-1!D1')).toEqual({ type: 'number', value: 0 });
+  });
 });

@@ -74,6 +74,8 @@ export interface PresentationResolverOptions {
   readonly formulaProgram?: FormulaProgram;
   /** Typed F3 values supplied by a read-only controller snapshot adapter. */
   readonly formulaValues?: ReadonlyMap<string, FormulaValue>;
+  /** Spill children mapped to anchors when only controller calculation values are supplied. */
+  readonly formulaSpillAnchors?: ReadonlyMap<string, string>;
   /** Explicit deterministic presentation environment. */
   readonly environment: PresentationEnvironment;
   /** Revisions included in every cache key. */
@@ -443,10 +445,11 @@ export function createPresentationResolver(
       const formulaKey = formulaAddressKey(address);
       const formulaValue =
         options.formulaValues?.get(formulaKey) ?? options.formulaProgram?.values.get(formulaKey);
+      const spillAnchor =
+        options.formulaSpillAnchors?.get(formulaKey) ??
+        options.formulaProgram?.spillAnchors.get(formulaKey);
       const custom = customPresentation(cell, options.environment);
-      const value =
-        custom?.value ??
-        (cell?.input.type === 'formula' ? (formulaValue ?? inputValue(cell)) : inputValue(cell));
+      const value = custom?.value ?? formulaValue ?? inputValue(cell);
       let formattedText = custom?.formattedText ?? plain(value);
       const diagnostics: Diagnostic[] = [];
       if (custom === undefined && baseStyle.numberFormat !== undefined) {
@@ -511,7 +514,7 @@ export function createPresentationResolver(
               ? (custom?.label ?? formattedText)
               : `${custom?.label ?? formattedText}, ${description}`,
           ...(description === undefined ? {} : { description }),
-          readOnly: cell?.editable === false,
+          readOnly: cell?.editable === false || spillAnchor !== undefined,
           invalid: validation.status === 'error' || value.type === 'error',
           ...(custom === undefined ? {} : { role: custom.role }),
           ...(custom?.checked === undefined ? {} : { checked: custom.checked }),

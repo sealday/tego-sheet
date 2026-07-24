@@ -1022,6 +1022,12 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
             formulaValues: new Map(
               props.epoch.snapshot.calculation.values.map(({ address, value }) => [address, value]),
             ),
+            formulaSpillAnchors: new Map(
+              props.epoch.snapshot.calculation.spillAnchors.map(({ address, anchor }) => [
+                address,
+                anchor,
+              ]),
+            ),
             cache: accessibilityCache,
             validation: createPresentationValidationResolver(props.epoch.snapshot),
             revisions: {
