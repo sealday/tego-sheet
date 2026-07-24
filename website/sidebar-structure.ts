@@ -281,7 +281,13 @@ export function createDocumentationSidebars(typedocSidebar: SidebarItemConfig[])
         type: 'category',
         label: 'API Reference',
         link: { type: 'doc', id: 'api/index' },
-        items: typedocSidebar,
+        items: [
+          'api/templates',
+          'api/output',
+          'api/extensions',
+          'api/integrations',
+          ...typedocSidebar,
+        ],
       },
     ],
   };

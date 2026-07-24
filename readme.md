@@ -122,6 +122,16 @@ Existing sparse workbook JSON must enter explicitly through `migrateLegacyWorkbo
 
 See [Migration from x-data-spreadsheet](docs/migration-from-x-data-spreadsheet.md) for option mappings, the five intentional correctness fixes, and removal of the old imperative API.
 
+Existing tego-sheet applications moving from mutable workbook JSON should use
+[Migration to Workbook 2.0](docs/migration-to-workbook-2.md).
+
+## Optional public entry points
+
+- `tego-sheet/interchange`: bounded CSV, TSV, XLSX, and ODS readers and writers.
+- `tego-sheet/output/pdf`, `/xlsx`, and `/image`: isolated generated-document adapters.
+- `tego-sheet/sdk`: custom cells, template modules, adapter lifecycle, trust, and capabilities.
+- `tego-sheet/integrations`: host-owned persistence, history, collaboration, permission, comments, and AI proposal protocols.
+
 ## Documentation
 
 - [Documentation](https://sealday.github.io/tego-sheet/docs/getting-started/installation)

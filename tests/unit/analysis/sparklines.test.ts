@@ -63,6 +63,24 @@ describe('sparklines', () => {
     expect(result.diagnostics.map(({ code }) => code)).toEqual(['SPARKLINE_POINT_LIMIT_EXCEEDED']);
   });
 
+  it('diagnoses empty and truncated source reads without inventing points', () => {
+    const empty = resolveSparkline(definition, {
+      revision: 'empty',
+      read: () => [],
+    });
+    expect(empty.model.values).toEqual([]);
+    expect(empty.diagnostics.map(({ code }) => code)).toEqual(['SPARKLINE_EMPTY_SOURCE']);
+
+    const truncated = resolveSparkline(definition, {
+      revision: 'truncated',
+      read: () => [1, 2],
+    });
+    expect(truncated.model.values).toEqual([1, 2]);
+    expect(truncated.diagnostics.map(({ code }) => code)).toEqual([
+      'SPARKLINE_SOURCE_LENGTH_MISMATCH',
+    ]);
+  });
+
   it.each(['line', 'column', 'win-loss'] as const)(
     'lays out %s sparklines inside the supplied cell rectangle',
     (type) => {

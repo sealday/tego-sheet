@@ -1,4 +1,4 @@
-import { rm } from 'node:fs/promises';
+import { readdir, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +11,12 @@ export const publicApiProjectionPluginPath = fileURLToPath(
 );
 
 const requiredPlugins = ['typedoc-plugin-markdown', 'typedoc-docusaurus-theme'];
+const handWrittenApiGuides = new Set([
+  'extensions.md',
+  'integrations.md',
+  'output.md',
+  'templates.md',
+]);
 const require = createRequire(import.meta.url);
 
 interface TypeDocGenerationContext {
@@ -56,7 +62,22 @@ const defaultDependencies: StrictTypeDocDependencies = {
     return app as unknown as StrictTypeDocApplication;
   },
   async clearOutput(out) {
-    await rm(out, { force: true, recursive: true });
+    const entries = await readdir(out, { withFileTypes: true }).catch((error: unknown) => {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return [];
+      throw error;
+    });
+    await Promise.all(
+      entries
+        .filter((entry) => !entry.isFile() || !handWrittenApiGuides.has(entry.name))
+        .map((entry) => rm(join(out, entry.name), { force: true, recursive: true })),
+    );
+    const remaining = await readdir(out).catch((error: unknown) => {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return [];
+      throw error;
+    });
+    if (remaining.length === 0) {
+      await rm(out, { force: true, recursive: true });
+    }
   },
   projectRoot: process.cwd(),
 };

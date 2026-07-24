@@ -103,6 +103,21 @@ export function resolveSparkline(
   } else {
     const input = source.read(dependency);
     if (!Array.isArray(input)) throw new TypeError('Sparkline source must return an array');
+    if (input.length === 0) {
+      diagnostics.push(
+        diagnostic('SPARKLINE_EMPTY_SOURCE', `Sparkline ${id} source contains no values`, {
+          sparklineId: id,
+        }),
+      );
+    } else if (input.length < count) {
+      diagnostics.push(
+        diagnostic(
+          'SPARKLINE_SOURCE_LENGTH_MISMATCH',
+          `Sparkline ${id} source returned ${input.length} of ${count} expected points`,
+          { sparklineId: id, actual: input.length, expected: count },
+        ),
+      );
+    }
     values = Object.freeze(
       input.slice(0, count).map((value, pointIndex) => {
         if (typeof value === 'number' && Number.isFinite(value)) return value;

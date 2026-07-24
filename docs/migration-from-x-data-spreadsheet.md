@@ -2,7 +2,7 @@
 
 `tego-sheet` preserves supported workbook JSON and spreadsheet behavior, but intentionally provides a new React-only integration surface. Migrate application integration; do not rewrite stored workbook data.
 
-## Replace construction and events
+## Removed legacy APIs
 
 The old `new Spreadsheet(element, options)` constructor and `x_spreadsheet(...)` global do not exist. Render `<TegoSheet>` in React and import `tego-sheet/styles.css`. The old `.on(...)` emitter and string event names do not exist either; use typed props such as `onDocumentChange`, `onCellEdit`, `onPaste`, `onSelectionChange`, `onActiveSheetChange`, and `onError`.
 
@@ -22,7 +22,9 @@ export function Editor({ legacyJson, saveDocument }: EditorProps) {
 }
 ```
 
-There is no public controller, renderer, `DataProxy`, mutable sheet object, global locale mutation, or internal emitter.
+There is no public controller, renderer, `DataProxy`, mutable sheet object, global locale mutation,
+internal emitter, string event API, or manual `destroy()` lifecycle. Imports from `src`, `core`,
+`engine`, `controller`, or React internals are blocked by the package export map.
 
 ## Choose one ownership mode
 
@@ -102,5 +104,24 @@ Schema 2 persists stable sheet identity in `workbook.sheets[].id`. Callback and 
 values identify those sheets at runtime; serialize the document field rather than maintaining a
 second identity store. External replacements retain the IDs they supply, while edits, renames,
 history, and controlled acknowledgements preserve existing document IDs.
+
+Each `MigrationDiagnostic` has a stable code, severity, message, and source location. Treat error
+diagnostics as a failed import, persist warnings with the migration audit, and show informational
+diagnostics only when requested. Migration is atomic: a failure never returns a partially
+converted document.
+
+## Compatibility boundary
+
+| Input or behavior                                              | Migration result                                              |
+| -------------------------------------------------------------- | ------------------------------------------------------------- |
+| Ordered sheet arrays and single-sheet objects                  | Converted to schema 2 with stable sheet IDs                   |
+| Sparse cells, formulas, styles, merges, filters and validation | Preserved in normalized fields                                |
+| Cached formula values                                          | Dropped; the formula engine recalculates them                 |
+| Unknown JSON-compatible extension keys                         | Preserved when valid schema extensions                        |
+| Unsupported legacy fields                                      | Reported as `LEGACY_FIELD_DEGRADED` or `LEGACY_FIELD_DROPPED` |
+| Functions, cyclic objects and unsafe prototype keys            | Rejected                                                      |
+
+Enforce an application-level upload limit before parsing large imports. The library validates the
+complete result before publication and never exposes partial streaming documents.
 
 The package exposes only `tego-sheet`, `tego-sheet/styles.css`, the four locale subpaths, and `tego-sheet/package.json`. Imports from controller, engine, React internals, source, or legacy paths are unsupported and blocked by the export map.

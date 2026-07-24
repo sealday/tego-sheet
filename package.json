@@ -19,7 +19,8 @@
   },
   "files": [
     "dist",
-    "docs/migration-from-x-data-spreadsheet.md"
+    "docs/migration-from-x-data-spreadsheet.md",
+    "docs/migration-to-workbook-2.md"
   ],
   "type": "module",
   "sideEffects": [

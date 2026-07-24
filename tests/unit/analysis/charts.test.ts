@@ -105,6 +105,36 @@ describe('normalized charts', () => {
     ]);
   });
 
+  it('rejects duplicate series IDs before reading data', () => {
+    let reads = 0;
+    expect(() =>
+      resolveChart(
+        {
+          ...definition,
+          series: [
+            definition.series[0]!,
+            {
+              ...definition.series[0]!,
+              values: {
+                sheetId,
+                start: { row: 1, column: 2 },
+                end: { row: 3, column: 2 },
+              },
+            },
+          ],
+        },
+        {
+          revision: 'duplicate-series',
+          read: () => {
+            reads += 1;
+            return [1, 2, 3];
+          },
+        },
+      ),
+    ).toThrowError(/duplicate chart series ID actual/iu);
+    expect(reads).toBe(0);
+  });
+
   it('treats maximumPoints as a chart-wide budget and skips reads that cannot fit', () => {
     let forecastReads = 0;
     const result = resolveChart(
@@ -156,7 +186,7 @@ describe('normalized charts', () => {
     ).toBe(false);
   });
 
-  it.each(['column', 'bar', 'line', 'pie'] as const)(
+  it.each(['column', 'bar', 'line', 'area', 'pie', 'scatter', 'combo'] as const)(
     'lays out %s charts as renderer-neutral vector commands with an accessible summary',
     (type) => {
       const result = resolveChart(

@@ -623,6 +623,7 @@ describe('documentation site contract', () => {
 
   it('defines the complete sidebar structure from explicit document IDs', async () => {
     const typedocSidebar = [{ type: 'doc', id: 'api/generated-entry' }];
+    const apiGuides = ['api/templates', 'api/output', 'api/extensions', 'api/integrations'];
     const sidebars = loadRealSidebarsInIsolatedProcess();
 
     const { createDocumentationSidebars } = (await import(sidebarStructureUrl)) as {
@@ -684,17 +685,18 @@ describe('documentation site contract', () => {
           type: 'category',
           label: 'API Reference',
           link: { type: 'doc', id: 'api/index' },
-          items: typedocSidebar,
+          items: [...apiGuides, ...typedocSidebar],
         },
       ],
     });
     const builderSidebars = createDocumentationSidebars(typedocSidebar) as {
       docsSidebar: { items: unknown }[];
     };
-    expect(builderSidebars.docsSidebar.at(-1)?.items).toBe(typedocSidebar);
-    expect((sidebars as { docsSidebar: { items: unknown }[] }).docsSidebar.at(-1)?.items).toEqual(
-      typedocSidebar,
-    );
+    expect(builderSidebars.docsSidebar.at(-1)?.items).toEqual([...apiGuides, ...typedocSidebar]);
+    expect((sidebars as { docsSidebar: { items: unknown }[] }).docsSidebar.at(-1)?.items).toEqual([
+      ...apiGuides,
+      ...typedocSidebar,
+    ]);
   });
 
   it.each([

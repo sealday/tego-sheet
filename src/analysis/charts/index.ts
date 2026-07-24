@@ -10,7 +10,7 @@ import {
 } from '../references';
 
 /** Chart families implemented by the renderer-neutral first-party layout. */
-export type ChartType = 'column' | 'bar' | 'line' | 'pie';
+export type ChartType = 'column' | 'bar' | 'line' | 'area' | 'pie' | 'scatter' | 'combo';
 
 /** One persistent chart series backed by a stable worksheet range. */
 export interface ChartSeriesDefinition {
@@ -88,7 +88,7 @@ function diagnostic(code: string, message: string, details?: Diagnostic['details
 }
 
 function chartType(value: ChartType): ChartType {
-  if (!['column', 'bar', 'line', 'pie'].includes(value)) {
+  if (!['column', 'bar', 'line', 'area', 'pie', 'scatter', 'combo'].includes(value)) {
     throw new TypeError('Chart type is unsupported');
   }
   return value;
@@ -139,8 +139,13 @@ export function resolveChart(
       ),
     );
   }
+  const seriesIds = new Set<string>();
   const seriesReferences = accepted.map((series, index) => {
-    checkedIdentifier(series.id, `Chart series ${index} ID`);
+    const seriesId = checkedIdentifier(series.id, `Chart series ${index} ID`);
+    if (seriesIds.has(seriesId)) {
+      throw new TypeError(`Duplicate chart series ID ${seriesId}`);
+    }
+    seriesIds.add(seriesId);
     const reference = snapshotRange(series.values, `Chart series ${series.id} range`);
     dependencies.push(reference);
     return reference;
@@ -333,9 +338,10 @@ function cartesianCommands(
   const mapY = (value: number): number =>
     plot.y + plot.height - ((value - minimum) / span) * plot.height;
   const mapX = (value: number): number => plot.x + ((value - minimum) / span) * plot.width;
-  if (model.type === 'line') {
+  if (model.type === 'line' || model.type === 'area' || model.type === 'scatter') {
     model.series.forEach((series, seriesIndex) => {
       const points: string[] = [];
+      const areaPoints: { x: number; y: number }[] = [];
       let startsSegment = true;
       series.values.forEach((value, pointIndex) => {
         if (value === null) {
@@ -344,6 +350,7 @@ function cartesianCommands(
         }
         const x = plot.x + ((pointIndex + 0.5) / pointCount) * plot.width;
         const y = mapY(value);
+        areaPoints.push({ x, y });
         points.push(`${startsSegment ? 'M' : 'L'} ${x} ${y}`);
         startsSegment = false;
         commands.push({
@@ -352,7 +359,17 @@ function cartesianCommands(
           color: palette[seriesIndex % palette.length]!,
         });
       });
-      if (points.length > 0) {
+      if (model.type === 'area' && areaPoints.length > 0) {
+        const first = areaPoints[0]!;
+        const last = areaPoints[areaPoints.length - 1]!;
+        commands.push({
+          kind: 'path',
+          data: `M ${first.x} ${mapY(0)} ${areaPoints
+            .map(({ x, y }) => `L ${x} ${y}`)
+            .join(' ')} L ${last.x} ${mapY(0)} Z`,
+          fill: palette[seriesIndex % palette.length],
+        });
+      } else if (model.type !== 'scatter' && points.length > 0) {
         commands.push({
           kind: 'path',
           data: points.join(' '),
@@ -367,6 +384,30 @@ function cartesianCommands(
   model.series.forEach((series, seriesIndex) => {
     series.values.forEach((value, pointIndex) => {
       if (value === null) return;
+      if (model.type === 'combo' && seriesIndex % 2 === 1) {
+        const x = plot.x + ((pointIndex + 0.5) / pointCount) * plot.width;
+        const y = mapY(value);
+        commands.push({
+          kind: 'fill-rect',
+          rect: { x: x - 1.5, y: y - 1.5, width: 3, height: 3 },
+          color: palette[seriesIndex % palette.length]!,
+        });
+        if (pointIndex > 0) {
+          const previous = series.values[pointIndex - 1];
+          if (previous !== null && previous !== undefined) {
+            commands.push({
+              kind: 'line',
+              x1: plot.x + ((pointIndex - 0.5) / pointCount) * plot.width,
+              y1: mapY(previous),
+              x2: x,
+              y2: y,
+              color: palette[seriesIndex % palette.length]!,
+              width: 2,
+            });
+          }
+        }
+        return;
+      }
       if (model.type === 'bar') {
         const band = plot.height / pointCount;
         const thickness = (band * 0.72) / seriesCount;
