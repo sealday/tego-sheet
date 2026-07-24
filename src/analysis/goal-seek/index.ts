@@ -320,7 +320,7 @@ export function solveFormulaGoalSeek(options: FormulaGoalSeekOptions): FormulaGo
   const program = engine.compile(isolateAffectedDocument(options.document, affected));
   const evaluated = new Set<string>();
   let iterations = 0;
-  const evaluate = (candidate: number): { x: number; y: number; residual: number } => {
+  const evaluate = (candidate: number): { x: number; y: number; residual: number } | undefined => {
     const x = bounded(candidate, minimum, maximum);
     const calculation = engine.recalculate(
       program,
@@ -329,6 +329,13 @@ export function solveFormulaGoalSeek(options: FormulaGoalSeekOptions): FormulaGo
     );
     iterations += 1;
     for (const address of calculation.evaluatedAddresses) evaluated.add(address);
+    if (
+      [...calculation.diagnostics.values()].some((diagnostics) =>
+        diagnostics.some(({ code }) => code === 'FORMULA_EVALUATION_LIMIT_EXCEEDED'),
+      )
+    ) {
+      return undefined;
+    }
     const result = calculation.values.get(targetKey);
     if (result?.type !== 'number' || !Number.isFinite(result.value)) {
       throw new TypeError('Goal seek target formula must produce a finite numeric result');
@@ -358,9 +365,10 @@ export function solveFormulaGoalSeek(options: FormulaGoalSeekOptions): FormulaGo
 
   if (durationExceeded()) return limited();
   let previous = evaluate(initialGuess);
+  if (previous === undefined || durationExceeded()) return limited();
   let best = previous;
   if (Math.abs(previous.residual) <= tolerance) return finish('converged', best);
-  if (iterations >= maximumIterations || durationExceeded()) return limited(best);
+  if (iterations >= maximumIterations) return limited(best);
 
   const initialStep = finite(
     options.initialStep ?? Math.max(1, Math.abs(initialGuess) * 0.1),
@@ -368,6 +376,7 @@ export function solveFormulaGoalSeek(options: FormulaGoalSeekOptions): FormulaGo
   );
   if (initialStep === 0) throw new RangeError('Goal seek initialStep must not be zero');
   let current = evaluate(bounded(initialGuess + initialStep, minimum, maximum));
+  if (current === undefined || durationExceeded()) return limited(best);
   if (Math.abs(current.residual) < Math.abs(best.residual)) best = current;
   if (Math.abs(current.residual) <= tolerance) return finish('converged', best);
 
@@ -390,7 +399,9 @@ export function solveFormulaGoalSeek(options: FormulaGoalSeekOptions): FormulaGo
     }
     if (candidate === current.x) break;
     previous = current;
-    current = evaluate(candidate);
+    const evaluatedCandidate = evaluate(candidate);
+    if (evaluatedCandidate === undefined || durationExceeded()) return limited(best);
+    current = evaluatedCandidate;
     if (Math.abs(current.residual) < Math.abs(best.residual)) best = current;
     if (Math.abs(current.residual) <= tolerance) return finish('converged', best);
   }

@@ -215,7 +215,7 @@ describe('formula goal seek', () => {
     expect(result.status).toBe('not-converged');
     expect(result.diagnostic).toBe('GOAL_LIMIT_EXCEEDED');
 
-    expect(() =>
+    expect(
       solveFormulaGoalSeek({
         document,
         sourceRevision: 9,
@@ -225,7 +225,10 @@ describe('formula goal seek', () => {
         environment,
         maximumCalculationSteps: 1,
       }),
-    ).toThrow(/finite numeric result/u);
+    ).toMatchObject({
+      status: 'not-converged',
+      diagnostic: 'GOAL_LIMIT_EXCEEDED',
+    });
   });
 
   it('creates only a revision-consistent atomic apply proposal', () => {
