@@ -465,6 +465,58 @@ function removeStructuredTable(
   sheet.tables = (sheet.tables ?? []).filter((table) => table.id !== command.tableId);
 }
 
+function setChart(
+  input: SpreadsheetDocumentInput,
+  sheetIds: readonly SheetId[],
+  command: Extract<WorkbookCommand, { readonly type: 'set-chart' }>,
+): void {
+  const sheet = input.workbook.sheets[sheetIndex(sheetIds, command.sheet)];
+  if (sheet === undefined) return;
+  const charts = [...(sheet.charts ?? [])];
+  const index = charts.findIndex(({ id }) => id === command.chart.id);
+  const snapshot = structuredClone(command.chart);
+  if (index < 0) charts.push(snapshot);
+  else charts[index] = snapshot;
+  sheet.charts = charts;
+}
+
+function removeChart(
+  input: SpreadsheetDocumentInput,
+  sheetIds: readonly SheetId[],
+  command: Extract<WorkbookCommand, { readonly type: 'remove-chart' }>,
+): void {
+  const sheet = input.workbook.sheets[sheetIndex(sheetIds, command.sheet)];
+  if (sheet !== undefined) {
+    sheet.charts = (sheet.charts ?? []).filter(({ id }) => id !== command.chartId);
+  }
+}
+
+function setSparkline(
+  input: SpreadsheetDocumentInput,
+  sheetIds: readonly SheetId[],
+  command: Extract<WorkbookCommand, { readonly type: 'set-sparkline' }>,
+): void {
+  const sheet = input.workbook.sheets[sheetIndex(sheetIds, command.sheet)];
+  if (sheet === undefined) return;
+  const sparklines = [...(sheet.sparklines ?? [])];
+  const index = sparklines.findIndex(({ id }) => id === command.sparkline.id);
+  const snapshot = structuredClone(command.sparkline);
+  if (index < 0) sparklines.push(snapshot);
+  else sparklines[index] = snapshot;
+  sheet.sparklines = sparklines;
+}
+
+function removeSparkline(
+  input: SpreadsheetDocumentInput,
+  sheetIds: readonly SheetId[],
+  command: Extract<WorkbookCommand, { readonly type: 'remove-sparkline' }>,
+): void {
+  const sheet = input.workbook.sheets[sheetIndex(sheetIds, command.sheet)];
+  if (sheet !== undefined) {
+    sheet.sparklines = (sheet.sparklines ?? []).filter(({ id }) => id !== command.sparklineId);
+  }
+}
+
 function mapPasteCell(
   target: Cell | undefined,
   source: Cell | undefined,
@@ -652,6 +704,10 @@ export function prepareSchemaProjectionCommit(
         | 'remove-sheet-object'
         | 'set-table'
         | 'remove-table'
+        | 'set-chart'
+        | 'remove-chart'
+        | 'set-sparkline'
+        | 'remove-sparkline'
         | 'set-cell-input'
         | 'group'
         | 'ungroup'
@@ -697,6 +753,14 @@ export function prepareSchemaProjectionCommit(
         ? {}
         : { range: { start: command.table.range.start, end: command.table.range.end } }),
     };
+  }
+  if (
+    command.type === 'set-chart' ||
+    command.type === 'remove-chart' ||
+    command.type === 'set-sparkline' ||
+    command.type === 'remove-sparkline'
+  ) {
+    return { result: undefined, kind: 'object', sheet: command.sheet };
   }
   const range = plannedPasteTargetRange(command);
   if (command.type === 'autofill') {
@@ -791,6 +855,18 @@ export function prepareSchemaCommand(
       break;
     case 'remove-table':
       removeStructuredTable(input, sheetIds, command);
+      break;
+    case 'set-chart':
+      setChart(input, sheetIds, command);
+      break;
+    case 'remove-chart':
+      removeChart(input, sheetIds, command);
+      break;
+    case 'set-sparkline':
+      setSparkline(input, sheetIds, command);
+      break;
+    case 'remove-sparkline':
+      removeSparkline(input, sheetIds, command);
       break;
   }
   const parsed = parseSpreadsheetDocument(input);

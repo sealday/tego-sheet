@@ -378,6 +378,10 @@ export function applyCommand(
       case 'remove-sheet-object':
       case 'set-table':
       case 'remove-table':
+      case 'set-chart':
+      case 'remove-chart':
+      case 'set-sparkline':
+      case 'remove-sparkline':
         return null;
       default:
         return assertNeverCommand(command);

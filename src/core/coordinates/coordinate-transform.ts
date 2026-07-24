@@ -444,6 +444,37 @@ export function transformSheetCoordinates(
     }
     return { ...table, range: { ...table.range, ...range } };
   });
+  const transformAnalysisRange = <
+    T extends { readonly sheetId: string; readonly start: CellPoint; readonly end: CellPoint },
+  >(
+    range: T,
+  ): T => {
+    if (range.sheetId !== sheet.id) return range;
+    const next = transform.range(range);
+    if (next === null) throw new RangeError('Structural edit would remove an analysis source');
+    return { ...range, ...next };
+  };
+  const charts = (sheet.charts ?? []).map((chart) => ({
+    ...chart,
+    ...(chart.categories === undefined
+      ? {}
+      : { categories: transformAnalysisRange(chart.categories) }),
+    series: chart.series.map((series) => ({
+      ...series,
+      values: transformAnalysisRange(series.values),
+    })),
+    ...(chart.anchor === undefined
+      ? {}
+      : { anchor: transformObjectAnchor(chart.anchor, transform) }),
+  }));
+  const sparklines = (sheet.sparklines ?? []).flatMap((sparkline) => {
+    const source = transformAnalysisRange(sparkline.source);
+    if (sparkline.target.sheetId !== sheet.id) return [{ ...sparkline, source }];
+    const target = transform.point(sparkline.target);
+    return target === null
+      ? []
+      : [{ ...sparkline, source, target: { ...sparkline.target, ...target } }];
+  });
   return {
     ...sheet,
     ...(transform.axis === 'row' && sheet.rowCount !== undefined
@@ -483,6 +514,8 @@ export function transformSheetCoordinates(
     filterViews,
     objects,
     tables,
+    charts,
+    sparklines,
   };
 }
 
@@ -490,7 +523,18 @@ function transformFormulaCells(
   sheet: SheetInput,
   transform: CoordinateTransform,
   context: FormulaTransformContext,
+  targetSheetId: string,
 ): SheetInput {
+  const transformAnalysisRange = <
+    T extends { readonly sheetId: string; readonly start: CellPoint; readonly end: CellPoint },
+  >(
+    range: T,
+  ): T => {
+    if (range.sheetId !== targetSheetId) return range;
+    const next = transform.range(range);
+    if (next === null) throw new RangeError('Structural edit would remove an analysis source');
+    return { ...range, ...next };
+  };
   return {
     ...sheet,
     cells: sheet.cells.map((item) => ({
@@ -508,6 +552,20 @@ function transformFormulaCells(
               : { formula2: transform.formula(`=${format.formula2}`, context).slice(1) }),
           },
     ),
+    charts: (sheet.charts ?? []).map((chart) => ({
+      ...chart,
+      ...(chart.categories === undefined
+        ? {}
+        : { categories: transformAnalysisRange(chart.categories) }),
+      series: chart.series.map((series) => ({
+        ...series,
+        values: transformAnalysisRange(series.values),
+      })),
+    })),
+    sparklines: (sheet.sparklines ?? []).map((sparkline) => ({
+      ...sparkline,
+      source: transformAnalysisRange(sparkline.source),
+    })),
   };
 }
 
@@ -529,10 +587,15 @@ export function transformDocumentCoordinates(
           targetSheetName: target.name,
           transformUnqualified: true,
         })
-      : transformFormulaCells(sheet, transform, {
-          targetSheetName: target.name,
-          transformUnqualified: false,
-        }),
+      : transformFormulaCells(
+          sheet,
+          transform,
+          {
+            targetSheetName: target.name,
+            transformUnqualified: false,
+          },
+          targetSheetId,
+        ),
   );
   output.templates = output.templates.map((template) => {
     const transformDocumentRange = <

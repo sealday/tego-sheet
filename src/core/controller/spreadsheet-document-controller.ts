@@ -921,6 +921,10 @@ export class SpreadsheetDocumentController {
           command.type !== 'remove-sheet-object' &&
           command.type !== 'set-table' &&
           command.type !== 'remove-table' &&
+          command.type !== 'set-chart' &&
+          command.type !== 'remove-chart' &&
+          command.type !== 'set-sparkline' &&
+          command.type !== 'remove-sparkline' &&
           command.type !== 'set-cell-input' &&
           command.type !== 'group' &&
           command.type !== 'ungroup' &&

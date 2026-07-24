@@ -515,6 +515,8 @@ function mergeSheet(
     filterViews: previous.filterViews.map((view) => structuredClone(view)),
     objects: previous.objects.map((object) => structuredClone(object)),
     tables: previous.tables.map((table) => structuredClone(table)),
+    charts: previous.charts.map((chart) => structuredClone(chart)),
+    sparklines: previous.sparklines.map((sparkline) => structuredClone(sparkline)),
     groups: previous.groups.map((group) => ({ ...group })),
     cells,
     merges: sameJson(beforeLegacy?.merges, afterLegacy?.merges)

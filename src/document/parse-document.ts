@@ -30,6 +30,8 @@ import type {
   StoredSpreadsheetTemplate,
 } from './model/document';
 import type { TemplateBinding, TemplatePrintProfile } from '../template/model';
+import type { ChartDefinition, ChartSeriesDefinition, ChartType } from '../analysis/charts';
+import type { SparklineDefinition, SparklineType } from '../analysis/sparklines';
 import { BUILTIN_FORMULA_COMPATIBILITY, parseFormula, type FormulaAst } from '../formula';
 import type {
   DocumentId,
@@ -1702,6 +1704,131 @@ function structuredTablesAt(
   return tables;
 }
 
+function analysisRangeAt(value: unknown, path: string, context: ParseContext) {
+  const source = recordAt(value, path, context);
+  const range = rangeAt(value, path, context);
+  const sheetId = stringAt(source?.sheetId, `${path}.sheetId`, context) as DocumentSheetId;
+  if (!isNormalized(range)) {
+    addDiagnostic(context, 'INVALID_RANGE', path, 'Analysis range must be normalized');
+  }
+  return { sheetId, ...range };
+}
+
+function chartsAt(value: unknown, path: string, context: ParseContext): ChartDefinition[] {
+  if (value === undefined) return [];
+  const supported = new Set<ChartType>([
+    'column',
+    'bar',
+    'line',
+    'area',
+    'pie',
+    'scatter',
+    'combo',
+  ]);
+  const charts = arrayAt(value, path, context).map((entry, index): ChartDefinition => {
+    const entryPath = `${path}[${index}]`;
+    const source = recordAt(entry, entryPath, context);
+    const type = source?.type as ChartType;
+    if (!supported.has(type)) {
+      addDiagnostic(
+        context,
+        'DOCUMENT_SCHEMA_INVALID',
+        `${entryPath}.type`,
+        'Chart type is unsupported',
+      );
+    }
+    const series = arrayAt(source?.series, `${entryPath}.series`, context).map(
+      (item, seriesIndex): ChartSeriesDefinition => {
+        const seriesPath = `${entryPath}.series[${seriesIndex}]`;
+        const record = recordAt(item, seriesPath, context);
+        return {
+          id: stringAt(record?.id, `${seriesPath}.id`, context),
+          ...(record?.name === undefined
+            ? {}
+            : { name: displayStringAt(record.name, `${seriesPath}.name`, context) }),
+          values: analysisRangeAt(record?.values, `${seriesPath}.values`, context),
+        };
+      },
+    );
+    duplicateDiagnostics(context, series, `${entryPath}.series`);
+    const repeat =
+      source?.templateRepeat === 'shared' ||
+      source?.templateRepeat === 'per-item' ||
+      source?.templateRepeat === 'forbidden'
+        ? source.templateRepeat
+        : undefined;
+    if (source?.templateRepeat !== undefined && repeat === undefined) {
+      addDiagnostic(
+        context,
+        'DOCUMENT_SCHEMA_INVALID',
+        `${entryPath}.templateRepeat`,
+        'Chart templateRepeat is unsupported',
+      );
+    }
+    return {
+      id: stringAt(source?.id, `${entryPath}.id`, context),
+      type: supported.has(type) ? type : 'column',
+      ...(source?.title === undefined
+        ? {}
+        : { title: displayStringAt(source.title, `${entryPath}.title`, context) }),
+      ...(source?.categories === undefined
+        ? {}
+        : {
+            categories: analysisRangeAt(source.categories, `${entryPath}.categories`, context),
+          }),
+      series,
+      ...(source?.anchor === undefined
+        ? {}
+        : { anchor: objectAnchorAt(source.anchor, `${entryPath}.anchor`, context) }),
+      ...(repeat === undefined ? {} : { templateRepeat: repeat }),
+    };
+  });
+  duplicateDiagnostics(context, charts, path);
+  return charts;
+}
+
+function sparklinesAt(value: unknown, path: string, context: ParseContext): SparklineDefinition[] {
+  if (value === undefined) return [];
+  const supported = new Set<SparklineType>(['line', 'column', 'win-loss']);
+  const sparklines = arrayAt(value, path, context).map((entry, index): SparklineDefinition => {
+    const entryPath = `${path}[${index}]`;
+    const source = recordAt(entry, entryPath, context);
+    const type = source?.type as SparklineType;
+    if (!supported.has(type)) {
+      addDiagnostic(
+        context,
+        'DOCUMENT_SCHEMA_INVALID',
+        `${entryPath}.type`,
+        'Sparkline type is unsupported',
+      );
+    }
+    const target = recordAt(source?.target, `${entryPath}.target`, context);
+    return {
+      id: stringAt(source?.id, `${entryPath}.id`, context),
+      type: supported.has(type) ? type : 'line',
+      source: analysisRangeAt(source?.source, `${entryPath}.source`, context),
+      target: {
+        sheetId: stringAt(
+          target?.sheetId,
+          `${entryPath}.target.sheetId`,
+          context,
+        ) as DocumentSheetId,
+        ...pointAt(source?.target, `${entryPath}.target`, context),
+      },
+      ...(source?.color === undefined
+        ? {}
+        : { color: stringAt(source.color, `${entryPath}.color`, context) }),
+      ...(source?.negativeColor === undefined
+        ? {}
+        : {
+            negativeColor: stringAt(source.negativeColor, `${entryPath}.negativeColor`, context),
+          }),
+    };
+  });
+  duplicateDiagnostics(context, sparklines, path);
+  return sparklines;
+}
+
 function sheetAt(value: unknown, path: string, context: ParseContext): Sheet {
   const record = recordAt(value, path, context);
   const merges = arrayAt(record?.merges, `${path}.merges`, context).map((merge, index) =>
@@ -1761,6 +1888,8 @@ function sheetAt(value: unknown, path: string, context: ParseContext): Sheet {
     rowCount,
     columnCount,
   );
+  const charts = chartsAt(record?.charts, `${path}.charts`, context);
+  const sparklines = sparklinesAt(record?.sparklines, `${path}.sparklines`, context);
 
   for (const [index, merge] of merges.entries()) {
     if (!isNormalized(merge)) {
@@ -1803,6 +1932,8 @@ function sheetAt(value: unknown, path: string, context: ParseContext): Sheet {
     filterViews,
     objects,
     tables,
+    charts,
+    sparklines,
   };
 }
 
@@ -2297,6 +2428,10 @@ function canonicalizeDocument(document: SpreadsheetDocument): SpreadsheetDocumen
           (left, right) => left.zIndex - right.zIndex || compareCodeUnits(left.id, right.id),
         ),
         tables: [...sheet.tables].sort((left, right) => compareCodeUnits(left.id, right.id)),
+        charts: [...sheet.charts].sort((left, right) => compareCodeUnits(left.id, right.id)),
+        sparklines: [...sheet.sparklines].sort((left, right) =>
+          compareCodeUnits(left.id, right.id),
+        ),
       })),
       styles: [...document.workbook.styles].sort((left, right) =>
         compareCodeUnits(left.id, right.id),

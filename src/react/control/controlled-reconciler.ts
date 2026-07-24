@@ -169,6 +169,8 @@ export function remapWorkbookCommand(
     case 'ungroup':
     case 'toggle-group':
     case 'remove-table':
+    case 'remove-chart':
+    case 'remove-sparkline':
       return { ...command, sheet: remapSheet(command.sheet, mapping) };
     case 'set-table':
       return {
@@ -179,6 +181,45 @@ export function remapWorkbookCommand(
           range: {
             ...command.table.range,
             sheetId: remapDocumentSheet(command.table.range.sheetId, mapping),
+          },
+        },
+      };
+    case 'set-chart':
+      return {
+        ...command,
+        sheet: remapSheet(command.sheet, mapping),
+        chart: {
+          ...command.chart,
+          ...(command.chart.categories === undefined
+            ? {}
+            : {
+                categories: {
+                  ...command.chart.categories,
+                  sheetId: remapDocumentSheet(command.chart.categories.sheetId, mapping),
+                },
+              }),
+          series: command.chart.series.map((series) => ({
+            ...series,
+            values: {
+              ...series.values,
+              sheetId: remapDocumentSheet(series.values.sheetId, mapping),
+            },
+          })),
+        },
+      };
+    case 'set-sparkline':
+      return {
+        ...command,
+        sheet: remapSheet(command.sheet, mapping),
+        sparkline: {
+          ...command.sparkline,
+          source: {
+            ...command.sparkline.source,
+            sheetId: remapDocumentSheet(command.sparkline.source.sheetId, mapping),
+          },
+          target: {
+            ...command.sparkline.target,
+            sheetId: remapDocumentSheet(command.sparkline.target.sheetId, mapping),
           },
         },
       };

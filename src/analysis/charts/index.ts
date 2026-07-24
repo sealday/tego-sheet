@@ -1,4 +1,4 @@
-import type { Diagnostic } from '../../document';
+import type { Diagnostic, ObjectAnchor } from '../../document';
 import type { DisplayRect, PrintDisplayCommand } from '../../print';
 import {
   checkedIdentifier,
@@ -26,6 +26,10 @@ export interface ChartDefinition {
   readonly title?: string;
   readonly categories?: AnalysisRangeReference;
   readonly series: readonly ChartSeriesDefinition[];
+  /** Optional persistent worksheet-object anchor used by screen and output projections. */
+  readonly anchor?: ObjectAnchor;
+  /** Explicit behavior when the chart intersects a repeated template region. */
+  readonly templateRepeat?: 'shared' | 'per-item' | 'forbidden';
 }
 
 /** Bounded scalar range reader evaluated against one immutable revision. */

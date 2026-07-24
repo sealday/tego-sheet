@@ -481,6 +481,10 @@ export interface Sheet {
   readonly objects: readonly SheetObject[];
   /** Canonically ordered persistent structured tables. */
   readonly tables: readonly StructuredTable[];
+  /** Canonically ordered persistent renderer-neutral chart definitions. */
+  readonly charts: readonly import('../../analysis/charts').ChartDefinition[];
+  /** Canonically ordered persistent in-cell sparkline definitions. */
+  readonly sparklines: readonly import('../../analysis/sparklines').SparklineDefinition[];
 }
 
 /** One stable-ID entry in a JSON-valued registry. */
@@ -649,6 +653,8 @@ export interface SheetInput {
       sort?: { column: number; direction: 'asc' | 'desc' } | null;
     };
   }[];
+  charts?: import('../../analysis/charts').ChartDefinition[];
+  sparklines?: import('../../analysis/sparklines').SparklineDefinition[];
 }
 
 export interface SpreadsheetDocumentInput {

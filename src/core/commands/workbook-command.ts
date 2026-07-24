@@ -12,6 +12,8 @@ import type {
   StructuredTable,
 } from '../../document/model/document';
 import type { GroupId } from '../../document/model/ids';
+import type { ChartDefinition } from '../../analysis/charts';
+import type { SparklineDefinition } from '../../analysis/sparklines';
 
 /** Sets the user-facing text of one cell. */
 export interface SetCellTextCommand {
@@ -409,6 +411,34 @@ export interface RemoveTableCommand {
   readonly tableId: string;
 }
 
+/** Creates or replaces one persistent renderer-neutral chart. */
+export interface SetChartCommand {
+  readonly type: 'set-chart';
+  readonly sheet: SheetId;
+  readonly chart: ChartDefinition;
+}
+
+/** Removes one persistent chart by stable ID. */
+export interface RemoveChartCommand {
+  readonly type: 'remove-chart';
+  readonly sheet: SheetId;
+  readonly chartId: string;
+}
+
+/** Creates or replaces one persistent in-cell sparkline. */
+export interface SetSparklineCommand {
+  readonly type: 'set-sparkline';
+  readonly sheet: SheetId;
+  readonly sparkline: SparklineDefinition;
+}
+
+/** Removes one persistent sparkline by stable ID. */
+export interface RemoveSparklineCommand {
+  readonly type: 'remove-sparkline';
+  readonly sheet: SheetId;
+  readonly sparklineId: string;
+}
+
 /** Traverses one step backward through controller history. */
 export interface UndoCommand {
   /** Command discriminator. */
@@ -467,6 +497,10 @@ export type WorkbookCommand =
   | RemoveSheetObjectCommand
   | SetTableCommand
   | RemoveTableCommand
+  | SetChartCommand
+  | RemoveChartCommand
+  | SetSparklineCommand
+  | RemoveSparklineCommand
   | UndoCommand
   | RedoCommand;
 

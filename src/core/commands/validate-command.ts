@@ -684,6 +684,40 @@ export function validateCommand(state: WorkbookState, command: WorkbookCommand):
         throw invalidCommand('structured table ID must be a non-empty string');
       }
       return;
+    case 'set-chart':
+      validateSheet(state, command.sheet);
+      if (
+        command.chart === null ||
+        typeof command.chart !== 'object' ||
+        typeof command.chart.id !== 'string' ||
+        command.chart.id.trim().length === 0
+      ) {
+        throw invalidCommand('chart must have a non-empty ID');
+      }
+      return;
+    case 'remove-chart':
+      validateSheet(state, command.sheet);
+      if (typeof command.chartId !== 'string' || command.chartId.trim().length === 0) {
+        throw invalidCommand('chart ID must be a non-empty string');
+      }
+      return;
+    case 'set-sparkline':
+      validateSheet(state, command.sheet);
+      if (
+        command.sparkline === null ||
+        typeof command.sparkline !== 'object' ||
+        typeof command.sparkline.id !== 'string' ||
+        command.sparkline.id.trim().length === 0
+      ) {
+        throw invalidCommand('sparkline must have a non-empty ID');
+      }
+      return;
+    case 'remove-sparkline':
+      validateSheet(state, command.sheet);
+      if (typeof command.sparklineId !== 'string' || command.sparklineId.trim().length === 0) {
+        throw invalidCommand('sparkline ID must be a non-empty string');
+      }
+      return;
     case 'undo':
     case 'redo':
       return;
