@@ -1,4 +1,4 @@
-import type { DocumentCellRange } from '../document';
+import type { DocumentCellRange, DocumentSheetId } from '../document';
 
 const maximumRow = 1_048_575;
 const maximumColumn = 16_383;
@@ -9,7 +9,7 @@ export type AnalysisRangeReference = DocumentCellRange;
 
 /** Immutable, stable worksheet address consumed by analysis objects. */
 export interface AnalysisCellReference {
-  readonly sheetId: string;
+  readonly sheetId: DocumentSheetId;
   readonly row: number;
   readonly column: number;
 }

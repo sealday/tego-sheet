@@ -902,6 +902,7 @@ function worksheetXml(
   worksheet: GeneratedWorksheet,
   dxfIndices: ReadonlyMap<GeneratedConditionalCellRule, number>,
   hasDrawing: boolean,
+  tableRelationshipStart: number,
 ): string {
   const rows = new Map<
     number,
@@ -962,7 +963,40 @@ function worksheetXml(
     `<dimension ref="${absoluteRange(sheetRange(sheet)).replaceAll('$', '')}"/>` +
     `<sheetViews><sheetView workbookViewId="0"${profile?.showGridlines === false ? ' showGridLines="0"' : ''}${profile?.showHeadings === false ? ' showRowColHeaders="0"' : ''}/></sheetViews>` +
     `<sheetFormatPr defaultRowHeight="15"/>${columns}<sheetData>${rowXml}</sheetData>${merges}` +
-    `${autoFilterXml(sheet)}${validationXml(sheet, workbook)}${conditionalFormattingXml(sheet, workbook, worksheet, dxfIndices)}${pageXml(profile, sheet)}${hasDrawing ? '<drawing r:id="rId1"/>' : ''}</worksheet>`
+    `${autoFilterXml(sheet)}${validationXml(sheet, workbook)}${conditionalFormattingXml(sheet, workbook, worksheet, dxfIndices)}${pageXml(profile, sheet)}${hasDrawing ? '<drawing r:id="rId1"/>' : ''}${(sheet.tables ?? []).length === 0 ? '' : `<tableParts count="${sheet.tables.length}">${sheet.tables.map((_, index) => `<tablePart r:id="rId${tableRelationshipStart + index}"/>`).join('')}</tableParts>`}</worksheet>`
+  );
+}
+
+function nativeTableXml(
+  table: Workbook['sheets'][number]['tables'][number],
+  tableNumber: number,
+): string {
+  const reference = `${cellReference(table.range.start.row, table.range.start.column)}:${cellReference(table.range.end.row, table.range.end.column)}`;
+  const filterEnd = table.range.end.row - (table.totalsRow === true ? 1 : 0);
+  const filterReference = `${cellReference(table.range.start.row, table.range.start.column)}:${cellReference(filterEnd, table.range.end.column)}`;
+  const style =
+    table.style !== undefined && /^TableStyle[A-Za-z0-9_]+$/u.test(table.style)
+      ? table.style
+      : 'TableStyleMedium2';
+  const filterColumns = (table.filter?.filters ?? [])
+    .filter(({ column }) => column >= table.range.start.column && column <= table.range.end.column)
+    .map((filter) =>
+      filter.operator === 'all'
+        ? ''
+        : `<filterColumn colId="${filter.column - table.range.start.column}"><filters>${filter.values.map((value) => `<filter val="${xml(value)}"/>`).join('')}</filters></filterColumn>`,
+    )
+    .join('');
+  const sort =
+    table.filter?.sort === undefined || table.filter.sort === null
+      ? ''
+      : `<sortState ref="${filterReference}"><sortCondition ref="${cellReference(table.range.start.row + 1, table.filter.sort.column)}:${cellReference(filterEnd, table.filter.sort.column)}"${table.filter.sort.direction === 'desc' ? ' descending="1"' : ''}/></sortState>`;
+  return (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    `<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="${tableNumber}" name="${xml(table.name)}" displayName="${xml(table.name)}" ref="${reference}" headerRowCount="${table.headerRows ?? 1}" totalsRowShown="${table.totalsRow === true ? 1 : 0}">` +
+    `<autoFilter ref="${filterReference}">${filterColumns}${sort}</autoFilter>` +
+    `<tableColumns count="${table.columns.length}">${table.columns.map((column, index) => `<tableColumn id="${index + 1}" name="${xml(column.name)}"/>`).join('')}</tableColumns>` +
+    `<tableStyleInfo name="${style}" showFirstColumn="0" showLastColumn="0" showRowStripes="1" showColumnStripes="0"/>` +
+    '</table>'
   );
 }
 
@@ -1010,7 +1044,7 @@ function workbookDefinedNames(
   return names.length === 0 ? '' : `<definedNames>${names.join('')}</definedNames>`;
 }
 
-function contentTypes(drawings: readonly (DrawingPart | undefined)[]): string {
+function contentTypes(drawings: readonly (DrawingPart | undefined)[], workbook: Workbook): string {
   const mediaTypes = new Set(
     drawings.flatMap((drawing) => drawing?.media.map(({ mimeType }) => mimeType) ?? []),
   );
@@ -1025,6 +1059,20 @@ function contentTypes(drawings: readonly (DrawingPart | undefined)[]): string {
     '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
     `${drawings.map((_, index) => `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}` +
     `${drawings.flatMap((drawing) => (drawing === undefined ? [] : [`<Override PartName="/${drawing.drawingPath}" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`])).join('')}` +
+    `${workbook.sheets
+      .flatMap((sheet, sheetIndex) =>
+        (sheet.tables ?? []).map(
+          (_, tableIndex) =>
+            `<Override PartName="/xl/tables/table${
+              workbook.sheets
+                .slice(0, sheetIndex)
+                .reduce((count, item) => count + (item.tables ?? []).length, 0) +
+              tableIndex +
+              1
+            }.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/>`,
+        ),
+      )
+      .join('')}` +
     '</Types>'
   );
 }
@@ -1062,7 +1110,7 @@ function packageParts(
   const add = (path: string, value: string | Uint8Array): void => {
     parts.set(path, typeof value === 'string' ? strToU8(value) : value);
   };
-  add('[Content_Types].xml', contentTypes(drawings));
+  add('[Content_Types].xml', contentTypes(drawings, workbook));
   add(
     '_rels/.rels',
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
@@ -1093,6 +1141,7 @@ function packageParts(
   for (const [index, sheet] of workbook.sheets.entries()) {
     throwIfAborted(options.signal);
     const drawing = drawings[index];
+    const tableRelationshipStart = drawing === undefined ? 1 : 2;
     add(
       `xl/worksheets/sheet${index + 1}.xml`,
       worksheetXml(
@@ -1105,17 +1154,37 @@ function packageParts(
         worksheetById.get(sheet.id)!,
         differential.indices,
         drawing !== undefined,
+        tableRelationshipStart,
       ),
     );
     if (drawing !== undefined) {
       add(drawing.drawingPath, drawing.drawingXml);
       add(drawing.relationshipsPath, drawing.relationshipsXml);
+      for (const media of drawing.media) add(media.path, media.bytes);
+    }
+    const tablesBefore = workbook.sheets
+      .slice(0, index)
+      .reduce((count, item) => count + (item.tables ?? []).length, 0);
+    (sheet.tables ?? []).forEach((table, tableIndex) => {
+      const tableNumber = tablesBefore + tableIndex + 1;
+      add(`xl/tables/table${tableNumber}.xml`, nativeTableXml(table, tableNumber));
+    });
+    if (drawing !== undefined || (sheet.tables ?? []).length > 0) {
+      const relationships = [
+        ...(drawing === undefined
+          ? []
+          : [
+              `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing${index + 1}.xml"/>`,
+            ]),
+        ...(sheet.tables ?? []).map((_, tableIndex) => {
+          const tableNumber = tablesBefore + tableIndex + 1;
+          return `<Relationship Id="rId${tableRelationshipStart + tableIndex}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table${tableNumber}.xml"/>`;
+        }),
+      ];
       add(
         `xl/worksheets/_rels/sheet${index + 1}.xml.rels`,
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/' +
-          `drawing${index + 1}.xml"/></Relationships>`,
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${relationships.join('')}</Relationships>`,
       );
-      for (const media of drawing.media) add(media.path, media.bytes);
     }
   }
   return parts;

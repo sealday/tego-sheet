@@ -37,8 +37,17 @@ export type {
   SolverVariable,
 } from './solver';
 export { compileSolverModel, runSolver } from './solver';
-export { createStructuredTableResolver, planStructuredTableAutoExpand } from './tables';
-export type { StructuredTableAutoExpandResult, StructuredTableDocumentProvider } from './tables';
+export {
+  createStructuredTableResolver,
+  executeStructuredTableView,
+  planStructuredTableAutoExpand,
+} from './tables';
+export type {
+  StructuredTableAutoExpandResult,
+  StructuredTableDocumentProvider,
+  StructuredTableValueSource,
+  StructuredTableViewResult,
+} from './tables';
 export { chartAffectedByChanges, chartToDisplayCommands, resolveChart } from './charts';
 export type {
   ChartDefinition,

@@ -39,6 +39,7 @@ test('the analysis subpath exposes Worker-safe analysis protocols', () => {
         'compileSolverModel',
         'createFormulaGoalSeekApplyProposal',
         'createStructuredTableResolver',
+        'executeStructuredTableView',
         'planStructuredTableAutoExpand',
         'refreshPivot',
         'resolveChart',

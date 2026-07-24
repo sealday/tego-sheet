@@ -3,6 +3,7 @@ import {
   parseSpreadsheetDocument,
   serializeSpreadsheetDocument,
   type DocumentSheetId,
+  type SpreadsheetDocumentInput,
 } from '../../../src/document';
 import { createSpreadsheetDocument } from '../../../src/document/create-document';
 import { SpreadsheetDocumentController } from '../../../src/core/controller/spreadsheet-document-controller';
@@ -68,6 +69,25 @@ describe('persistent analysis visualizations', () => {
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) throw new Error('legacy document must parse');
     expect(parsed.document.workbook.sheets[0]).toMatchObject({ charts: [], sparklines: [] });
+  });
+
+  it('rejects dangling analysis sheet references atomically', () => {
+    const input = structuredClone(
+      createSpreadsheetDocument({ id: 'dangling-analysis', sheetId: 'sheet-1' }),
+    ) as unknown as SpreadsheetDocumentInput;
+    input.workbook.sheets[0]!.sparklines = [
+      {
+        ...sparkline,
+        source: { ...sparkline.source, sheetId: 'missing-sheet' as DocumentSheetId },
+      },
+    ];
+
+    const parsed = parseSpreadsheetDocument(input);
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) throw new Error('dangling analysis reference must fail');
+    expect(parsed.diagnostics).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'DANGLING_REFERENCE' })]),
+    );
   });
 
   it('persists, commands, undoes, and structurally transforms chart and sparkline references', () => {

@@ -154,6 +154,12 @@ export function createXlsxWriter(configuredLimits: InterchangeLimits = {}): Work
   ): Promise<WorkbookExportResult> => {
     throwIfAborted(options.signal);
     const unsupported: string[] = [];
+    if (document.workbook.sheets.some((sheet) => sheet.charts.length > 0)) {
+      unsupported.push('xlsx:charts');
+    }
+    if (document.workbook.sheets.some((sheet) => sheet.sparklines.length > 0)) {
+      unsupported.push('xlsx:sparklines');
+    }
     const blob = await adapter.render(generatedDocument(document), {
       formulaMode: 'formula-and-cached-value',
       compatibility: 'excel',

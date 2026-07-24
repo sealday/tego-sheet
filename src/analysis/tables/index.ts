@@ -115,3 +115,65 @@ export function planStructuredTableAutoExpand(
   }
   return { status: 'expanded', table: Object.freeze({ ...table, range: Object.freeze(range) }) };
 }
+
+/** Immutable row-order projection produced by table-local filters and sorting. */
+export interface StructuredTableViewResult {
+  readonly sourceRevision: string;
+  readonly rowIndices: readonly number[];
+}
+
+/** Bounded scalar reader used to execute a table view against one immutable revision. */
+export interface StructuredTableValueSource {
+  readonly revision: string;
+  readonly read: (row: number, column: number) => unknown;
+}
+
+function compareTableValues(left: unknown, right: unknown): number {
+  if (typeof left === 'number' && Number.isFinite(left)) {
+    return typeof right === 'number' && Number.isFinite(right) ? left - right : -1;
+  }
+  if (typeof right === 'number' && Number.isFinite(right)) return 1;
+  return String(left ?? '').localeCompare(String(right ?? ''), 'en-US');
+}
+
+/** Executes persistent table filter/sort metadata without mutating worksheet rows. */
+export function executeStructuredTableView(
+  table: StructuredTable,
+  source: StructuredTableValueSource,
+  options: { readonly maximumRows?: number; readonly signal?: AbortSignal } = {},
+): StructuredTableViewResult {
+  const maximumRows = options.maximumRows ?? 100_000;
+  if (!Number.isSafeInteger(maximumRows) || maximumRows <= 0) {
+    throw new RangeError('Structured table row limit must be a positive safe integer');
+  }
+  const start = table.range.start.row + (table.headerRows ?? 1);
+  const end = table.range.end.row - (table.totalsRow === true ? 1 : 0);
+  const count = Math.max(0, end - start + 1);
+  if (count > maximumRows) throw new RangeError('Structured table row limit exceeded');
+  const filters = table.filter?.filters ?? [];
+  const rows: { row: number; ordinal: number }[] = [];
+  for (let row = start; row <= end; row += 1) {
+    if (options.signal?.aborted === true)
+      throw new DOMException('Table view aborted', 'AbortError');
+    const visible = filters.every((filter) => {
+      if (filter.operator === 'all') return true;
+      const value = String(source.read(row, filter.column) ?? '');
+      return filter.values.includes(value);
+    });
+    if (visible) rows.push({ row, ordinal: rows.length });
+  }
+  const sort = table.filter?.sort;
+  if (sort !== undefined && sort !== null) {
+    rows.sort((left, right) => {
+      const order = compareTableValues(
+        source.read(left.row, sort.column),
+        source.read(right.row, sort.column),
+      );
+      return (sort.direction === 'asc' ? order : -order) || left.ordinal - right.ordinal;
+    });
+  }
+  return Object.freeze({
+    sourceRevision: source.revision,
+    rowIndices: Object.freeze(rows.map(({ row }) => row)),
+  });
+}

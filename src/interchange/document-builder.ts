@@ -4,6 +4,7 @@ import {
   type ConditionalFormat,
   type JsonValue,
   type ResourceMetadata,
+  type SheetInput,
   type SheetObject,
   type SheetFilter,
   type SheetRange,
@@ -29,6 +30,7 @@ export interface ImportedSheet {
   readonly conditionalFormatting?: readonly ConditionalFormat[];
   readonly visibility?: WorksheetVisibility;
   readonly objects?: readonly SheetObject[];
+  readonly tables?: readonly NonNullable<SheetInput['tables']>[number][];
 }
 
 export interface ImportedWorkbookMetadata {
@@ -95,6 +97,29 @@ export function buildDocument(
             ? {}
             : { conditionalFormatting: [...sheet.conditionalFormatting] }),
           ...(sheet.objects === undefined ? {} : { objects: [...sheet.objects] }),
+          ...(sheet.tables === undefined
+            ? {}
+            : {
+                tables: sheet.tables.map((table) => ({
+                  ...table,
+                  columns: table.columns.map((column) => ({ ...column })),
+                  ...(table.filter === undefined
+                    ? {}
+                    : {
+                        filter: {
+                          filters: table.filter.filters.map((filter) => ({
+                            ...filter,
+                            values: [...filter.values],
+                          })),
+                          ...(table.filter.sort === undefined
+                            ? {}
+                            : {
+                                sort: table.filter.sort === null ? null : { ...table.filter.sort },
+                              }),
+                        },
+                      }),
+                })),
+              }),
         }),
       ),
       styles: metadata.styles?.map((entry) => ({ id: entry.id, value: entry.value })) ?? [],

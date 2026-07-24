@@ -4,6 +4,7 @@ import type {
   DocumentSheetId,
   JsonValue,
   ResourceMetadata,
+  SheetInput,
   SpreadsheetDocumentInput,
 } from '../document';
 import { archiveXml, readArchive } from './archive';
@@ -92,6 +93,113 @@ function normalizedWorksheetTarget(target: string): string {
     throw new InterchangeError('MALFORMED_WORKBOOK', 'Worksheet target is outside worksheet parts');
   }
   return result;
+}
+
+function normalizedTableTarget(worksheetName: string, target: string): string {
+  const segments = `${worksheetName.slice(0, worksheetName.lastIndexOf('/'))}/${target}`.split('/');
+  const normalized: string[] = [];
+  for (const segment of segments) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..') normalized.pop();
+    else normalized.push(segment);
+  }
+  const result = normalized.join('/');
+  if (!result.startsWith('xl/tables/')) {
+    throw new InterchangeError('MALFORMED_WORKBOOK', 'Table target is outside table parts');
+  }
+  return result;
+}
+
+function worksheetTables(
+  entries: Readonly<Record<string, Uint8Array>>,
+  worksheetName: string,
+  worksheetXml: string,
+  sheetId: DocumentSheetId,
+  limits: ReturnType<typeof resolveLimits>,
+): readonly NonNullable<SheetInput['tables']>[number][] {
+  const references = [
+    ...worksheetXml.matchAll(/<tablePart\b([^>]*?)(?:\/>|>[\s\S]*?<\/tablePart>)/gi),
+  ].flatMap((match) => {
+    const id = attributes(match[1]!)['r:id'];
+    return id === undefined ? [] : [id];
+  });
+  if (references.length === 0) return [];
+  const relationshipPath = `${worksheetName.slice(0, worksheetName.lastIndexOf('/'))}/_rels/${worksheetName.slice(worksheetName.lastIndexOf('/') + 1)}.rels`;
+  if (entries[relationshipPath] === undefined) return [];
+  const relationships = relationshipTargets(archiveXml(entries, relationshipPath, limits));
+  return references.map((relationshipId, tableIndex): NonNullable<SheetInput['tables']>[number] => {
+    const target = relationships.get(relationshipId);
+    if (target === undefined) {
+      throw new InterchangeError('MALFORMED_WORKBOOK', 'Table relationship is missing');
+    }
+    const tableXml = archiveXml(entries, normalizedTableTarget(worksheetName, target), limits);
+    const root = attributes(/<table\b([^>]*)>/i.exec(tableXml)?.[1] ?? '');
+    if (root.ref === undefined || (root.displayName ?? root.name) === undefined) {
+      throw new InterchangeError('MALFORMED_WORKBOOK', 'Table definition is incomplete');
+    }
+    const range = sheetRange(root.ref);
+    const columns = [
+      ...tableXml.matchAll(/<tableColumn\b([^>]*?)(?:\/>|>[\s\S]*?<\/tableColumn>)/gi),
+    ].map((match, columnIndex) => {
+      const name = attributes(match[1]!).name;
+      if (name === undefined) {
+        throw new InterchangeError('MALFORMED_WORKBOOK', 'Table column name is missing');
+      }
+      return {
+        id: `${sheetId}-table-${tableIndex + 1}-column-${columnIndex + 1}`,
+        name,
+      };
+    });
+    const style = attributes(/<tableStyleInfo\b([^>]*?)(?:\/>|>)/i.exec(tableXml)?.[1] ?? '').name;
+    const autoFilter = /<autoFilter\b([^>]*?)(?:\/>|>([\s\S]*?)<\/autoFilter>)/i.exec(tableXml);
+    const filterBody = autoFilter?.[2] ?? '';
+    const filters = [
+      ...filterBody.matchAll(/<filterColumn\b([^>]*?)>([\s\S]*?)<\/filterColumn>/gi),
+    ].map((match) => {
+      const relativeColumn = Number(attributes(match[1]!).colId);
+      if (!Number.isSafeInteger(relativeColumn) || relativeColumn < 0) {
+        throw new InterchangeError('MALFORMED_WORKBOOK', 'Table filter column is invalid');
+      }
+      return {
+        column: range.start.column + relativeColumn,
+        operator: 'in' as const,
+        values: [...match[2]!.matchAll(/<filter\b([^>]*?)(?:\/>|>[\s\S]*?<\/filter>)/gi)].map(
+          (value) => attributes(value[1]!).val ?? '',
+        ),
+      };
+    });
+    const sortMatch = /<sortCondition\b([^>]*?)(?:\/>|>[\s\S]*?<\/sortCondition>)/i.exec(
+      filterBody,
+    );
+    const sortAttributes = sortMatch === null ? undefined : attributes(sortMatch[1]!);
+    const sortReference = sortAttributes?.ref;
+    return {
+      id: `${sheetId}-table-${tableIndex + 1}`,
+      name: root.displayName ?? root.name!,
+      range: { sheetId, ...range },
+      columns,
+      headerRows: 1,
+      totalsRow: root.totalsRowShown === '1',
+      ...(style === undefined ? {} : { style }),
+      autoExpand: true,
+      ...(filters.length === 0 && sortReference === undefined
+        ? {}
+        : {
+            filter: {
+              filters,
+              ...(sortReference === undefined
+                ? {}
+                : {
+                    sort: {
+                      column: sheetRange(sortReference).start.column,
+                      direction:
+                        sortAttributes?.descending === '1' ? ('desc' as const) : ('asc' as const),
+                    },
+                  }),
+            },
+          }),
+    };
+  });
 }
 
 function sharedStrings(xml: string | undefined): readonly string[] {
@@ -658,6 +766,17 @@ export function createXlsxReader(configuredLimits: InterchangeLimits = {}): Work
           limits,
           drawingResourcePool,
         );
+        const tables = worksheetTables(
+          entries,
+          worksheetName,
+          worksheetXml,
+          id as DocumentSheetId,
+          limits,
+        );
+        if (tables.length > 0) {
+          const genericTables = unsupported.lastIndexOf('xlsx:tables');
+          if (genericTables >= 0) unsupported.splice(genericTables, 1);
+        }
         if (!drawing.unsupported.includes('xlsx:drawing-objects')) {
           const genericDrawing = unsupported.lastIndexOf('xlsx:drawing-objects');
           if (genericDrawing >= 0) unsupported.splice(genericDrawing, 1);
@@ -667,6 +786,7 @@ export function createXlsxReader(configuredLimits: InterchangeLimits = {}): Work
         const sheet: ImportedSheet = {
           ...parsedSheet,
           ...(drawing.objects.length === 0 ? {} : { objects: drawing.objects }),
+          ...(tables.length === 0 ? {} : { tables }),
         };
         const profile = printProfile(id, worksheetXml);
         if (profile !== undefined) printProfiles.push(profile);

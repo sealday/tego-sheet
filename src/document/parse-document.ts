@@ -2188,6 +2188,33 @@ function validateReferences(document: SpreadsheetDocument, context: ParseContext
         }
       }
     });
+    const analysisReferences = [
+      ...sheet.charts.flatMap((chart) => [
+        ...(chart.categories === undefined ? [] : [chart.categories]),
+        ...chart.series.map(({ values }) => values),
+      ]),
+      ...sheet.sparklines.flatMap((sparkline) => [sparkline.source, sparkline.target]),
+    ];
+    analysisReferences.forEach((reference, referenceIndex) => {
+      if (!sheetIds.has(reference.sheetId)) {
+        addDiagnostic(
+          context,
+          'DANGLING_REFERENCE',
+          `$.workbook.sheets[${sheetIndex}].analysis[${referenceIndex}].sheetId`,
+          'Analysis definition references a sheet which does not exist',
+        );
+      }
+    });
+    sheet.sparklines.forEach((sparkline, sparklineIndex) => {
+      if (sparkline.target.sheetId !== sheet.id) {
+        addDiagnostic(
+          context,
+          'DANGLING_REFERENCE',
+          `$.workbook.sheets[${sheetIndex}].sparklines[${sparklineIndex}].target.sheetId`,
+          'Sparkline target must belong to its owning worksheet',
+        );
+      }
+    });
     for (const [collectionName, collection] of [
       ['rows', sheet.rows],
       ['columns', sheet.columns],

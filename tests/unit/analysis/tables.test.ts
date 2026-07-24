@@ -10,6 +10,7 @@ import {
 import { createFormulaEngine } from '../../../src/formula';
 import {
   createStructuredTableResolver,
+  executeStructuredTableView,
   planStructuredTableAutoExpand,
 } from '../../../src/analysis/tables';
 import { SpreadsheetDocumentController } from '../../../src/core/controller/spreadsheet-document-controller';
@@ -311,6 +312,36 @@ describe('TBL-01 persistent structured tables', () => {
         currentSheetId: 'sheet-1',
       }),
     ).toMatchObject({ range: { start: { row: 1 }, end: { row: 1 } } });
+  });
+
+  it('executes stable table-local filtering and sorting against one immutable revision', () => {
+    const table = {
+      ...parseOk(fixture()).workbook.sheets[0]!.tables[0]!,
+      filter: {
+        filters: [{ column: 0, operator: 'in' as const, values: ['East', 'West'] }],
+        sort: { column: 1, direction: 'desc' as const },
+      },
+    };
+    const values = new Map<string, unknown>([
+      ['1:0', 'East'],
+      ['1:1', 4],
+      ['2:0', 'West'],
+      ['2:1', 6],
+    ]);
+
+    expect(
+      executeStructuredTableView(table, {
+        revision: 'table-r1',
+        read: (row, column) => values.get(`${row}:${column}`),
+      }),
+    ).toEqual({ sourceRevision: 'table-r1', rowIndices: [2, 1] });
+    expect(() =>
+      executeStructuredTableView(
+        table,
+        { revision: 'table-r1', read: () => undefined },
+        { maximumRows: 1 },
+      ),
+    ).toThrowError(/row limit exceeded/iu);
   });
 
   it('plans direct bounded auto expansion and rejects occupied rows atomically', () => {
