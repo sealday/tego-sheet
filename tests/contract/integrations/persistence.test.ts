@@ -136,6 +136,30 @@ describe('persistence integration contract', () => {
     });
   });
 
+  it('sanitizes explicit adapter rejections before publishing them', async () => {
+    const controller = createPersistenceController({
+      documentId: 'document-1',
+      initialRevision: 'revision-1',
+      adapter: {
+        save: async () => ({
+          status: 'rejected',
+          code: 'TOKEN_LEAK',
+          message: 'Bearer secret-value\n    at private/server.ts:1',
+        }),
+      },
+      requestId: () => 'request-1',
+    });
+    controller.enqueue(transaction('tx-1'));
+
+    await expect(controller.save()).resolves.toEqual({
+      status: 'rejected',
+      code: 'PERSISTENCE_SAVE_REJECTED',
+      message: 'Persistence adapter rejected the save',
+    });
+    expect(JSON.stringify(controller.state)).not.toContain('secret-value');
+    expect(JSON.stringify(controller.state)).not.toContain('private/server');
+  });
+
   it('cancels in-flight work on disposal and rejects future saves', async () => {
     const save = vi.fn(
       (_request: SaveRequest, signal: AbortSignal) =>

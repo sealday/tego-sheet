@@ -41,7 +41,7 @@ const permissions = createPermissionSnapshot({
       target: { type: 'document', documentId: 'document-1' },
     },
     {
-      action: 'ai:apply',
+      action: 'range:edit',
       target: { type: 'document', documentId: 'document-1' },
     },
     {
@@ -214,8 +214,75 @@ describe('AI command integration contract', () => {
           action: 'ai:apply',
           target: { type: 'document', documentId: 'document-1' },
         },
+        {
+          action: 'ai:apply',
+          target: {
+            type: 'range',
+            range: {
+              sheetId: 'sheet-1',
+              start: { row: 0, column: 0 },
+              end: { row: 0, column: 0 },
+            },
+          },
+        },
       ],
     });
+    expect(() => session.accept()).toThrow(/target permission/u);
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it('requires the native command permission in addition to the AI apply grant', async () => {
+    const apply = vi.fn();
+    const aiOnly = createPermissionSnapshot({
+      revision: 'permission-1',
+      actorId: 'actor-1',
+      grants: [
+        {
+          action: 'ai:propose',
+          target: { type: 'document', documentId: 'document-1' },
+        },
+        {
+          action: 'ai:apply',
+          target: { type: 'document', documentId: 'document-1' },
+        },
+      ],
+    });
+    const session = await createAiProposalSession({
+      documentId: 'document-1',
+      documentRevision: 'revision-1',
+      permissionSnapshot: aiOnly,
+      signal: new AbortController().signal,
+      request: {
+        instruction: 'set A1',
+        locale: 'en-US',
+        allowedCommandTypes: ['set-cell-input'],
+      },
+      context: projectAiContext(document(), {
+        documentRevision: 'revision-1',
+        ranges: [],
+        include: [],
+        redactions: [],
+      }),
+      adapter: {
+        propose: async () => ({
+          id: 'proposal-native-permission',
+          summary: 'Set A1',
+          assumptions: [],
+          commands: [
+            {
+              type: 'set-cell-input',
+              address: { sheet: 'sheet-1', row: 0, column: 0 },
+              input: { type: 'string', value: 'done' },
+            },
+          ],
+        }),
+      },
+      dryRun: () => ({ status: 'ready', diagnostics: [] }),
+      apply,
+      getCurrentRevision: () => 'revision-1',
+      getPermissionSnapshot: () => aiOnly,
+    });
+
     expect(() => session.accept()).toThrow(/target permission/u);
     expect(apply).not.toHaveBeenCalled();
   });

@@ -226,11 +226,11 @@ export function createPersistenceController(
           return Object.freeze({ status: 'conflict', currentRevision });
         }
         const diagnostic: Diagnostic = Object.freeze({
-          code: result.code || 'PERSISTENCE_SAVE_FAILED',
+          code: 'PERSISTENCE_SAVE_REJECTED',
           severity: 'error',
           domain: 'persistence',
           stage: 'save',
-          message: result.message || 'Persistence adapter rejected the save',
+          message: 'Persistence adapter rejected the save',
         });
         state = Object.freeze({
           status: 'error',

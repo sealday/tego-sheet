@@ -1,6 +1,6 @@
 import type { WorkbookCommand } from '../../core/commands/workbook-command';
 import type { SpreadsheetDocument } from '../../document';
-import type { PermissionSnapshot, PermissionTarget } from '../permission';
+import type { PermissionAction, PermissionSnapshot, PermissionTarget } from '../permission';
 
 export type AiContextInclude = 'values' | 'formulas' | 'formats' | 'headers' | 'template-bindings';
 
@@ -105,14 +105,21 @@ function rangeTarget(
   };
 }
 
-function commandPermissionTargets(
+interface CommandPermissionRequest {
+  readonly action: PermissionAction;
+  readonly target: PermissionTarget;
+}
+
+function commandPermissionRequests(
   command: WorkbookCommand,
   documentId: string,
-): readonly PermissionTarget[] {
+): readonly CommandPermissionRequest[] {
   switch (command.type) {
     case 'set-cell-text':
     case 'set-cell-input':
-      return [rangeTarget(command.address.sheet, command.address)];
+      return [
+        { action: 'range:edit', target: rangeTarget(command.address.sheet, command.address) },
+      ];
     case 'clear-contents':
     case 'set-cell-metadata':
     case 'set-style':
@@ -124,40 +131,72 @@ function commandPermissionTargets(
     case 'remove-validation':
     case 'set-filter':
       return [
-        rangeTarget(
-          command.selection.sheet,
-          command.selection.range.start,
-          command.selection.range.end,
-        ),
+        {
+          action: 'range:edit',
+          target: rangeTarget(
+            command.selection.sheet,
+            command.selection.range.start,
+            command.selection.range.end,
+          ),
+        },
       ];
     case 'paint-format':
       return [
-        rangeTarget(command.target.sheet, command.target.range.start, command.target.range.end),
+        {
+          action: 'range:edit',
+          target: rangeTarget(
+            command.target.sheet,
+            command.target.range.start,
+            command.target.range.end,
+          ),
+        },
       ];
     case 'paste-internal':
     case 'paste-external':
       return [
-        rangeTarget(command.target.sheet, command.target.range.start, command.target.range.end),
+        {
+          action: 'range:edit',
+          target: rangeTarget(
+            command.target.sheet,
+            command.target.range.start,
+            command.target.range.end,
+          ),
+        },
       ];
     case 'autofill':
       return [
-        rangeTarget(command.target.sheet, command.target.range.start, command.target.range.end),
+        {
+          action: 'range:edit',
+          target: rangeTarget(
+            command.target.sheet,
+            command.target.range.start,
+            command.target.range.end,
+          ),
+        },
       ];
     case 'set-sheet-object':
       return [
         {
-          type: 'object',
-          sheetId: command.sheet,
-          objectId: command.object.id,
+          action: 'object:edit',
+          target: {
+            type: 'object',
+            sheetId: command.sheet,
+            objectId: command.object.id,
+          },
         },
       ];
     case 'remove-sheet-object':
-      return [{ type: 'object', sheetId: command.sheet, objectId: command.objectId }];
+      return [
+        {
+          action: 'object:edit',
+          target: { type: 'object', sheetId: command.sheet, objectId: command.objectId },
+        },
+      ];
     case 'add-sheet':
-      return [{ type: 'document', documentId }];
+      return [{ action: 'document:edit', target: { type: 'document', documentId } }];
     case 'undo':
     case 'redo':
-      return [{ type: 'document', documentId }];
+      return [{ action: 'document:edit', target: { type: 'document', documentId } }];
     case 'insert-row':
     case 'delete-row':
     case 'insert-column':
@@ -180,7 +219,7 @@ function commandPermissionTargets(
     case 'remove-filter-view':
     case 'set-table':
     case 'remove-table':
-      return [{ type: 'sheet', sheetId: command.sheet }];
+      return [{ action: 'sheet:edit', target: { type: 'sheet', sheetId: command.sheet } }];
   }
 }
 
@@ -355,10 +394,10 @@ export async function createAiProposalSession<ApplyResult>(
       ) {
         throw new TypeError('AI proposal permission is stale or denied');
       }
-      const deniedTarget = proposal.commands
-        .flatMap((command) => commandPermissionTargets(command, options.documentId))
-        .find((target) => !permissions.can('ai:apply', target));
-      if (deniedTarget !== undefined) {
+      const deniedRequest = proposal.commands
+        .flatMap((command) => commandPermissionRequests(command, options.documentId))
+        .find(({ action, target }) => !permissions.can(action, target));
+      if (deniedRequest !== undefined) {
         throw new TypeError('AI proposal target permission is denied');
       }
       settled = true;

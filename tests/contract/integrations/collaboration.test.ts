@@ -113,6 +113,13 @@ describe('collaboration integration contract', () => {
         transactionBoundary: { prepare: vi.fn() },
       }),
     ).toThrow(/1 MiB/u);
+    expect(() =>
+      createRemoteOperationProcessor({
+        initialRevision: 'revision-1',
+        maximumRememberedOperations: 9_999,
+        transactionBoundary: { prepare: vi.fn() },
+      }),
+    ).toThrow(/10000/u);
 
     const deniedPrepare = vi.fn();
     const denied = createRemoteOperationProcessor({
@@ -269,6 +276,119 @@ describe('collaboration integration contract', () => {
     );
     expect(submit).toHaveBeenCalledTimes(1);
     expect(stored.size).toBe(0);
+  });
+
+  it('serializes new local operations behind reconnect replay', async () => {
+    const stored = new Map<string, CollaborationOutboundOperation>();
+    let releaseReplay!: () => void;
+    const replayBarrier = new Promise<void>((resolve) => {
+      releaseReplay = resolve;
+    });
+    const outbox = {
+      put: vi.fn(async (operation: CollaborationOutboundOperation) => {
+        stored.set(operation.operationId, operation);
+      }),
+      remove: vi.fn(async (operationId: string) => {
+        stored.delete(operationId);
+      }),
+      list: vi.fn(async () => [...stored.values()]),
+    };
+    stored.set('operation-old', {
+      protocolVersion: 1,
+      documentId: 'document-1',
+      operationId: 'operation-old',
+      baseRevision: 'revision-1',
+      revision: 'revision-2',
+      transaction,
+    });
+    const submit = vi.fn(async (operation: CollaborationOutboundOperation) => {
+      if (operation.operationId === 'operation-old') await replayBarrier;
+      return { operationId: operation.operationId };
+    });
+    const coordinator = createCollaborationOutboxCoordinator({
+      documentId: 'document-1',
+      outbox,
+      adapter: { submit },
+    });
+    const reconnect = coordinator.reconnect(
+      { protocolVersions: [1], collaborativeUndo: true },
+      new AbortController().signal,
+    );
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+    const queued = coordinator.queue(
+      {
+        protocolVersion: 1,
+        documentId: 'document-1',
+        operationId: 'operation-new',
+        baseRevision: 'revision-2',
+        revision: 'revision-3',
+        transaction: { ...transaction, id: 'transaction-new' },
+      },
+      new AbortController().signal,
+    );
+    await Promise.resolve();
+    expect(submit).toHaveBeenCalledTimes(1);
+
+    releaseReplay();
+    await expect(reconnect).resolves.toEqual(['operation-old']);
+    await expect(queued).resolves.toEqual({
+      status: 'submitted',
+      operationId: 'operation-new',
+    });
+    expect(submit.mock.calls.map(([operation]) => operation.operationId)).toEqual([
+      'operation-old',
+      'operation-new',
+    ]);
+  });
+
+  it('stays offline after replay failure so new work cannot overtake the outbox', async () => {
+    const stored = new Map<string, CollaborationOutboundOperation>();
+    stored.set('operation-old', {
+      protocolVersion: 1,
+      documentId: 'document-1',
+      operationId: 'operation-old',
+      baseRevision: 'revision-1',
+      revision: 'revision-2',
+      transaction,
+    });
+    const outbox = {
+      put: vi.fn(async (operation: CollaborationOutboundOperation) => {
+        stored.set(operation.operationId, operation);
+      }),
+      remove: vi.fn(async (operationId: string) => {
+        stored.delete(operationId);
+      }),
+      list: vi.fn(async () => [...stored.values()]),
+    };
+    const submit = vi.fn(async () => {
+      throw new Error('offline');
+    });
+    const coordinator = createCollaborationOutboxCoordinator({
+      documentId: 'document-1',
+      outbox,
+      adapter: { submit },
+    });
+
+    await expect(
+      coordinator.reconnect(
+        { protocolVersions: [1], collaborativeUndo: true },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow(/offline/u);
+    await expect(
+      coordinator.queue(
+        {
+          protocolVersion: 1,
+          documentId: 'document-1',
+          operationId: 'operation-new',
+          baseRevision: 'revision-2',
+          revision: 'revision-3',
+          transaction: { ...transaction, id: 'transaction-new' },
+        },
+        new AbortController().signal,
+      ),
+    ).resolves.toEqual({ status: 'queued', operationId: 'operation-new' });
+    expect(submit).toHaveBeenCalledTimes(1);
   });
 
   it('keeps expiring presence in session state only and releases it on close', () => {

@@ -166,10 +166,12 @@ export function createRemoteOperationProcessor(
   }
   if (
     !Number.isSafeInteger(maximumRememberedOperations) ||
-    maximumRememberedOperations < 1 ||
-    maximumRememberedOperations > 10_000
+    maximumRememberedOperations < 10_000 ||
+    maximumRememberedOperations > 100_000
   ) {
-    throw new RangeError('Collaboration maximumRememberedOperations must be from 1 through 10000');
+    throw new RangeError(
+      'Collaboration maximumRememberedOperations must be from 10000 through 100000',
+    );
   }
   const remembered = new Set<string>();
   const order: string[] = [];
@@ -294,6 +296,17 @@ export function createCollaborationOutboxCoordinator(options: {
     collaborativeUndo: true,
   };
   const activeSubmissions = new Set<AbortController>();
+  let operationTail: Promise<void> = Promise.resolve();
+  let connectionGeneration = 0;
+
+  const serialize = <Result>(operation: () => Promise<Result>): Promise<Result> => {
+    const result = operationTail.then(operation);
+    operationTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  };
 
   const assertCapabilities = (
     operation: CollaborationOutboundOperation,
@@ -343,15 +356,24 @@ export function createCollaborationOutboxCoordinator(options: {
       if (snapshot.documentId !== documentId) {
         throw new TypeError('Collaboration outbound documentId does not match coordinator');
       }
-      if (signal.aborted) throw new TypeError('Collaboration operation was cancelled');
-      await options.outbox.put(snapshot);
-      if (!connected || capabilities === undefined) {
-        return Object.freeze({ status: 'queued', operationId: snapshot.operationId });
-      }
-      await submitStored(snapshot, signal, capabilities);
-      return Object.freeze({ status: 'submitted', operationId: snapshot.operationId });
+      return serialize(async () => {
+        if (signal.aborted) throw new TypeError('Collaboration operation was cancelled');
+        await options.outbox.put(snapshot);
+        if (!connected || capabilities === undefined) {
+          return Object.freeze({
+            status: 'queued' as const,
+            operationId: snapshot.operationId,
+          });
+        }
+        await submitStored(snapshot, signal, capabilities);
+        return Object.freeze({
+          status: 'submitted' as const,
+          operationId: snapshot.operationId,
+        });
+      });
     },
     disconnect(): void {
+      connectionGeneration += 1;
       connected = false;
       capabilities = undefined;
       for (const controller of activeSubmissions) controller.abort();
@@ -373,26 +395,34 @@ export function createCollaborationOutboxCoordinator(options: {
       ) {
         throw new TypeError('Collaboration replay protocol capabilities are invalid');
       }
-      const stored = (await options.outbox.list(documentId)).map(snapshotOutboundOperation);
-      const seen = new Set<string>();
-      for (const [index, operation] of stored.entries()) {
-        if (operation.documentId !== documentId || seen.has(operation.operationId)) {
-          throw new TypeError('Collaboration replay identity is invalid');
+      return serialize(async () => {
+        const reconnectGeneration = connectionGeneration;
+        connected = false;
+        capabilities = undefined;
+        const stored = (await options.outbox.list(documentId)).map(snapshotOutboundOperation);
+        const seen = new Set<string>();
+        for (const [index, operation] of stored.entries()) {
+          if (operation.documentId !== documentId || seen.has(operation.operationId)) {
+            throw new TypeError('Collaboration replay identity is invalid');
+          }
+          const previous = stored[index - 1];
+          if (previous !== undefined && previous.revision !== operation.baseRevision) {
+            throw new TypeError('Collaboration replay revision chain is not contiguous');
+          }
+          assertCapabilities(operation, normalizedCapabilities);
+          seen.add(operation.operationId);
         }
-        const previous = stored[index - 1];
-        if (previous !== undefined && previous.revision !== operation.baseRevision) {
-          throw new TypeError('Collaboration replay revision chain is not contiguous');
+        const acknowledged: string[] = [];
+        for (const operation of stored) {
+          acknowledged.push(await submitStored(operation, signal, normalizedCapabilities));
         }
-        assertCapabilities(operation, normalizedCapabilities);
-        seen.add(operation.operationId);
-      }
-      capabilities = normalizedCapabilities;
-      connected = true;
-      const acknowledged: string[] = [];
-      for (const operation of stored) {
-        acknowledged.push(await submitStored(operation, signal, normalizedCapabilities));
-      }
-      return Object.freeze(acknowledged);
+        if (signal.aborted || reconnectGeneration !== connectionGeneration) {
+          throw new TypeError('Collaboration reconnect was cancelled');
+        }
+        capabilities = normalizedCapabilities;
+        connected = true;
+        return Object.freeze(acknowledged);
+      });
     },
   });
 }
