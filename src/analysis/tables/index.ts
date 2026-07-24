@@ -220,26 +220,54 @@ export function projectStructuredTableRows(
   source: StructuredTableValueSource,
   options: { readonly maximumRows?: number; readonly signal?: AbortSignal } = {},
 ): readonly StructuredTableRowProjection[] {
-  return Object.freeze(
-    tables.flatMap((table) => {
-      if (table.filter === undefined) return [];
-      const startRow = table.range.start.row + (table.headerRows ?? 1);
-      const endRow = table.range.end.row - (table.totalsRow === true ? 1 : 0);
-      if (startRow > endRow) return [];
-      const visible = executeStructuredTableView(table, source, options).rowIndices;
-      const included = new Set(visible);
-      const hiddenRows = Array.from(
-        { length: endRow - startRow + 1 },
-        (_, index) => startRow + index,
-      ).filter((row) => !included.has(row));
-      return [
+  const active = tables
+    .filter((table) => table.filter !== undefined)
+    .sort(
+      (left, right) =>
+        left.range.start.column - right.range.start.column ||
+        left.range.end.column - right.range.end.column ||
+        left.id.localeCompare(right.id),
+    );
+  const claimedRows = new Set<number>();
+  const projections: StructuredTableRowProjection[] = [];
+  for (const table of active) {
+    const startRow = table.range.start.row + (table.headerRows ?? 1);
+    const endRow = table.range.end.row - (table.totalsRow === true ? 1 : 0);
+    if (startRow > endRow) continue;
+    const runs: { startRow: number; endRow: number }[] = [];
+    let runStart: number | undefined;
+    for (let row = startRow; row <= endRow; row += 1) {
+      if (!claimedRows.has(row)) {
+        runStart ??= row;
+      } else if (runStart !== undefined) {
+        runs.push({ startRow: runStart, endRow: row - 1 });
+        runStart = undefined;
+      }
+    }
+    if (runStart !== undefined) runs.push({ startRow: runStart, endRow });
+    if (runs.length === 0) continue;
+
+    const visible = executeStructuredTableView(table, source, options).rowIndices;
+    const included = new Set(visible);
+    const hiddenRows = Array.from(
+      { length: endRow - startRow + 1 },
+      (_, index) => startRow + index,
+    ).filter((row) => !included.has(row));
+    for (const run of runs) {
+      const runHidden = hiddenRows.filter((row) => row >= run.startRow && row <= run.endRow);
+      projections.push(
         Object.freeze({
-          startRow,
-          endRow,
-          rowOrder: Object.freeze([...visible, ...hiddenRows]),
-          hiddenRows: Object.freeze(hiddenRows),
+          ...run,
+          rowOrder: Object.freeze(
+            [...visible, ...hiddenRows].filter((row) => row >= run.startRow && row <= run.endRow),
+          ),
+          hiddenRows: Object.freeze(runHidden),
         }),
-      ];
-    }),
+      );
+      for (let row = run.startRow; row <= run.endRow; row += 1) claimedRows.add(row);
+    }
+  }
+  return Object.freeze(
+    projections.sort((left, right) => left.startRow - right.startRow || left.endRow - right.endRow),
   );
 }
