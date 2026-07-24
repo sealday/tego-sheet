@@ -121,33 +121,109 @@ function objectAnchorRange(
       };
 }
 
-function detectRepeatedRowObjects(
+type ObjectRepeatBinding = Extract<
+  TemplateBinding,
+  { readonly type: 'repeat-rows' | 'repeat-range' | 'repeat-page' | 'repeat-sheet' }
+>;
+
+function isObjectRepeatBinding(binding: TemplateBinding): binding is ObjectRepeatBinding {
+  return (
+    binding.type === 'repeat-rows' ||
+    binding.type === 'repeat-range' ||
+    binding.type === 'repeat-page' ||
+    binding.type === 'repeat-sheet'
+  );
+}
+
+function detectRepeatedObjects(
   document: SpreadsheetDocument,
   template: SpreadsheetTemplate,
+  diagnostics: Diagnostic[],
 ): SpreadsheetTemplate {
+  const repeats = template.bindings.filter(isObjectRepeatBinding);
+  const persistent = document.workbook.sheets.flatMap((sheet) =>
+    (sheet.objects ?? []).flatMap((object) => {
+      const anchor = objectAnchorRange(object);
+      if (anchor === undefined) return [];
+      return [
+        {
+          key: `${String(sheet.id)}:${String(object.id)}`,
+          reference: {
+            id: String(object.id),
+            anchor,
+            anchorMode:
+              object.templateRepeat === 'shared' ? ('absolute' as const) : ('range' as const),
+            ...(object.kind === 'image' ? { resourceId: String(object.resourceId) } : {}),
+          },
+        },
+      ];
+    }),
+  );
+  const anchorByKey = new Map(persistent.map(({ key, reference }) => [key, reference.anchor]));
+  for (const binding of repeats) {
+    for (const reference of binding.objects ?? []) {
+      const key = `${String(binding.range.sheetId)}:${reference.id}`;
+      if (!anchorByKey.has(key)) anchorByKey.set(key, reference.anchor);
+    }
+  }
+  const ownerByKey = new Map<string, string>();
+  for (const [key, anchor] of anchorByKey) {
+    const candidates = repeats
+      .filter(
+        (binding) => binding.range.sheetId === anchor.sheetId && intersects(binding.range, anchor),
+      )
+      .sort((left, right) => {
+        const leftArea =
+          (left.range.end.row - left.range.start.row + 1) *
+          (left.range.end.column - left.range.start.column + 1);
+        const rightArea =
+          (right.range.end.row - right.range.start.row + 1) *
+          (right.range.end.column - right.range.start.column + 1);
+        return leftArea - rightArea || String(left.id).localeCompare(String(right.id));
+      });
+    const owner = candidates[0];
+    if (owner === undefined) continue;
+    const ambiguous = candidates
+      .slice(1)
+      .find((candidate) => !containsRange(candidate.range, owner.range));
+    if (
+      ambiguous !== undefined ||
+      candidates.some(
+        (candidate) => sameRange(candidate.range, owner.range) && candidate.id !== owner.id,
+      )
+    ) {
+      diagnostics.push(
+        diagnostic(
+          'INVALID_OBJECT_ANCHOR',
+          `Object ${key.slice(key.indexOf(':') + 1)} intersects repeats without a unique deepest owner`,
+          owner,
+        ),
+      );
+    }
+    ownerByKey.set(key, String(owner.id));
+  }
+  const persistentByOwner = new Map<string, (typeof persistent)[number]['reference'][]>();
+  for (const { key, reference } of persistent) {
+    const owner = ownerByKey.get(key);
+    if (owner === undefined) continue;
+    const values = persistentByOwner.get(owner) ?? [];
+    values.push(reference);
+    persistentByOwner.set(owner, values);
+  }
   return {
     ...template,
     bindings: template.bindings.map((binding) => {
-      if (binding.type !== 'repeat-rows') return binding;
-      const sheet = document.workbook.sheets.find(({ id }) => id === binding.range.sheetId);
-      const detected = (sheet?.objects ?? []).flatMap((object) => {
-        const anchor = objectAnchorRange(object);
-        if (anchor === undefined || !intersects(binding.range, anchor)) return [];
-        return [
-          {
-            id: String(object.id),
-            anchor,
-            anchorMode: 'range' as const,
-            ...(object.kind === 'image' ? { resourceId: String(object.resourceId) } : {}),
-          },
-        ];
-      });
-      if (detected.length === 0) return binding;
-      const declared = new Set((binding.objects ?? []).map(({ id }) => id));
-      return {
-        ...binding,
-        objects: [...(binding.objects ?? []), ...detected.filter(({ id }) => !declared.has(id))],
-      };
+      if (!isObjectRepeatBinding(binding)) return binding;
+      const ownedDeclared = (binding.objects ?? []).filter(
+        ({ id }) => ownerByKey.get(`${String(binding.range.sheetId)}:${id}`) === String(binding.id),
+      );
+      const declared = new Set(ownedDeclared.map(({ id }) => id));
+      const owned = [
+        ...ownedDeclared,
+        ...(persistentByOwner.get(String(binding.id)) ?? []).filter(({ id }) => !declared.has(id)),
+      ];
+      const { objects: _objects, ...withoutObjects } = binding;
+      return owned.length === 0 ? withoutObjects : { ...withoutObjects, objects: owned };
     }),
   };
 }
@@ -884,7 +960,7 @@ export function compileSpreadsheetTemplate(
     ]);
     return immutableClone({ diagnostics: frozenDiagnostics, hasErrors: true });
   }
-  const template = detectRepeatedRowObjects(resolved.document, unresolvedTemplate);
+  const template = detectRepeatedObjects(resolved.document, unresolvedTemplate, diagnostics);
   if (exceedsCompilationBudget(resolved.document, template)) {
     const frozenDiagnostics = immutableClone([
       ...diagnostics,

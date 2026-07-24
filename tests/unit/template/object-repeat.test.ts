@@ -235,6 +235,134 @@ describe('repeat-row floating object materialization', () => {
     ]);
   });
 
+  it('detects intersecting objects for every structural repeat kind', () => {
+    for (const binding of [
+      {
+        id: 'range',
+        type: 'repeat-range',
+        range: objectRange,
+        source: 'items',
+        empty: 'remove',
+        axis: 'vertical',
+      },
+      {
+        id: 'page',
+        type: 'repeat-page',
+        range: objectRange,
+        source: 'items',
+        empty: 'remove',
+      },
+      {
+        id: 'sheet',
+        type: 'repeat-sheet',
+        range: objectRange,
+        source: 'items',
+        empty: 'remove',
+        name: 'item.name',
+      },
+    ] as const) {
+      const seeded = fixture('per-item');
+      const template = {
+        ...seeded.template,
+        bindings: [binding],
+      } as unknown as SpreadsheetTemplate;
+      const document = { ...seeded.document, templates: [template] };
+
+      expect(compile(document, template).diagnostics).toContainEqual(
+        expect.objectContaining({
+          code: 'OBJECT_REPEAT_POLICY_REQUIRED',
+          location: { bindingId: binding.id },
+        }),
+      );
+    }
+  });
+
+  it('assigns nested objects to the deepest repeat and encodes the complete stable item path', () => {
+    const seeded = fixture('per-item');
+    const object = seeded.document.workbook.sheets[0]!.objects[0]!;
+    const template = {
+      ...seeded.template,
+      bindings: [
+        {
+          id: 'outer',
+          type: 'repeat-rows',
+          range: { ...objectRange, end: { row: 1, column: 0 } },
+          source: 'groups',
+          empty: 'remove',
+          pageBreak: 'auto',
+          objectPolicy: 'per-item',
+        },
+        {
+          id: 'inner',
+          type: 'repeat-rows',
+          range: { ...objectRange, start: { row: 1, column: 0 }, end: { row: 1, column: 0 } },
+          source: 'item.children',
+          empty: 'remove',
+          pageBreak: 'auto',
+          objectPolicy: 'per-item',
+        },
+      ],
+    } as unknown as SpreadsheetTemplate;
+    const document = {
+      ...seeded.document,
+      workbook: {
+        ...seeded.document.workbook,
+        sheets: [
+          {
+            ...seeded.document.workbook.sheets[0]!,
+            cells: [
+              { row: 0, column: 0, cell: { input: { type: 'string' as const, value: 'group' } } },
+              { row: 1, column: 0, cell: { input: { type: 'string' as const, value: 'child' } } },
+            ],
+            objects: [
+              {
+                ...object,
+                anchor: {
+                  type: 'one-cell' as const,
+                  cell: { sheetId: 'sheet-1' as never, row: 1, column: 0 },
+                  offset: { x: 2, y: 3 },
+                  size: { width: 12, height: 8 },
+                },
+              },
+            ],
+          },
+        ],
+      },
+      templates: [template],
+    };
+    const compiled = compile(document, template);
+    const first = expandAdvancedTemplate(
+      compiled.template!,
+      { groups: [{ children: [{}, {}] }, { children: [{}] }] },
+      limits,
+    );
+    const changedSibling = expandAdvancedTemplate(
+      compiled.template!,
+      { groups: [{ children: [{}, {}] }, { children: [{}, {}, {}] }] },
+      limits,
+    );
+
+    expect(compiled.hasErrors).toBe(false);
+    expect(
+      compiled.template?.ir.bindings.map((binding) => [
+        binding.id,
+        'objects' in binding ? binding.objects?.map(({ id }) => id) : undefined,
+      ]),
+    ).toEqual([
+      ['outer', undefined],
+      ['inner', ['badge']],
+    ]);
+    expect(first.objectMappings.map(({ objectId }) => objectId)).toEqual([
+      'badge~outer~1~inner~1',
+      'badge~outer~1~inner~2',
+      'badge~outer~2~inner~1',
+    ]);
+    expect(changedSibling.objectMappings.slice(0, 2).map(({ objectId }) => objectId)).toEqual([
+      'badge~outer~1~inner~1',
+      'badge~outer~1~inner~2',
+    ]);
+  });
+
   it('preserves mapping-only references alongside persistent repeated objects', () => {
     const seeded = fixture('per-item');
     const binding = seeded.template.bindings[0] as Extract<
@@ -266,10 +394,13 @@ describe('repeat-row floating object materialization', () => {
 
     expect(result.objectMappings.map(({ objectId }) => objectId)).toEqual([
       'badge~rows~1',
-      'legacy-overlay',
+      'legacy-overlay~rows~1',
       'badge~rows~2',
-      'legacy-overlay',
+      'legacy-overlay~rows~2',
     ]);
+    expect(new Set(result.objectMappings.map(({ objectId }) => objectId)).size).toBe(
+      result.objectMappings.length,
+    );
   });
 
   it('keeps shared objects once and removes per-item objects with an empty repeated collection', () => {
@@ -370,6 +501,28 @@ describe('repeat-row floating object materialization', () => {
       expect.objectContaining({ code: 'EXPANSION_LIMIT_EXCEEDED' }),
     );
     expect(document.workbook.sheets[0]?.objects).toHaveLength(1);
+  });
+
+  it('counts mapping-only repeated objects against the pre-materialization object budget', () => {
+    const seeded = fixture('per-item');
+    const document = {
+      ...seeded.document,
+      workbook: {
+        ...seeded.document.workbook,
+        sheets: [{ ...seeded.document.workbook.sheets[0]!, objects: [] }],
+      },
+    };
+    const result = expandAdvancedTemplate(
+      compile(document, seeded.template).template!,
+      { items: [{}, {}] },
+      { ...limits, maxExpandedObjects: 1 },
+    );
+
+    expect(result.document).toBeUndefined();
+    expect(result.objectMappings).toEqual([]);
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'EXPANSION_LIMIT_EXCEEDED' }),
+    );
   });
 
   it('keeps object anchors aligned when a nested conditional removes repeated rows', () => {

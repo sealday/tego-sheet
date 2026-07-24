@@ -1137,7 +1137,7 @@ describe('TP2 advanced template structures', () => {
     );
     expect(objectExpansion.objectMappings).toEqual([
       {
-        objectId: 'logo',
+        objectId: 'logo~objects~1',
         resourceId: 'logo-resource',
         policy: 'per-item',
         itemIndex: 0,
@@ -1145,7 +1145,7 @@ describe('TP2 advanced template structures', () => {
         generated: range(0, 0, 0, 0),
       },
       {
-        objectId: 'logo',
+        objectId: 'logo~objects~2',
         resourceId: 'logo-resource',
         policy: 'per-item',
         itemIndex: 1,

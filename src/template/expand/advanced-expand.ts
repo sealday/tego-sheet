@@ -102,16 +102,150 @@ function translatedObjectAnchor(
       };
 }
 
+function rangeArea(range: DocumentCellRange): number {
+  return (range.end.row - range.start.row + 1) * (range.end.column - range.start.column + 1);
+}
+
+function containsRange(outer: DocumentCellRange, inner: DocumentCellRange): boolean {
+  return (
+    outer.sheetId === inner.sheetId &&
+    outer.start.row <= inner.start.row &&
+    outer.start.column <= inner.start.column &&
+    outer.end.row >= inner.end.row &&
+    outer.end.column >= inner.end.column
+  );
+}
+
+function repeatedObjectId(
+  sourceId: string,
+  binding: Extract<TemplateIRBinding, { readonly objects?: unknown }>,
+  mapping: StructuralMapping,
+  mappings: readonly StructuralMapping[],
+  compiled: CompiledTemplate,
+): string {
+  const ancestors = compiled.ir.bindings
+    .filter(
+      (candidate): candidate is Extract<TemplateIRBinding, { readonly range: DocumentCellRange }> =>
+        'range' in candidate &&
+        candidate.id !== binding.id &&
+        containsRange(candidate.range, binding.range),
+    )
+    .sort((left, right) => rangeArea(right.range) - rangeArea(left.range));
+  const path = ancestors.flatMap((ancestor) => {
+    const match = mappings
+      .filter(
+        (candidate) =>
+          candidate.bindingId === ancestor.id &&
+          containsRange(candidate.generated, mapping.generated),
+      )
+      .sort((left, right) => rangeArea(left.generated) - rangeArea(right.generated))[0];
+    return match === undefined ? [] : [String(ancestor.id), String(match.itemIndex + 1)];
+  });
+  return [sourceId, ...path, String(binding.id), String(mapping.itemIndex + 1)].join('~');
+}
+
+function projectedRepeatedObjectCount(
+  compiled: CompiledTemplate,
+  data: unknown,
+  formatters: TemplateFormatterRegistry,
+): number {
+  const byId = new Map(compiled.ir.bindings.map((binding) => [binding.id, binding]));
+  const copiesByBinding = new Map<string, number>();
+  const visit = (node: TemplateRegionNode, scope: Scope): void => {
+    const binding = byId.get(node.bindingId);
+    if (binding === undefined) return;
+    if (binding.type === 'conditional-range') {
+      if (evaluateTemplateExpression(binding.when, scope, formatters)) {
+        node.children.forEach((child) => visit(child, scope));
+      }
+      return;
+    }
+    if (!('source' in binding) || binding.type === 'subtemplate') {
+      node.children.forEach((child) => visit(child, scope));
+      return;
+    }
+    const resolved = evaluateTemplateExpression(binding.source, scope, formatters);
+    const items = Array.isArray(resolved) ? resolved : [];
+    const copies =
+      items.length === 0 && 'empty' in binding && binding.empty === 'keep-template-row'
+        ? [undefined]
+        : items;
+    const mappingCopies =
+      binding.type === 'repeat-range' && binding.axis === 'both'
+        ? copies.length *
+          Math.max(0, ...copies.map((item) => (Array.isArray(item) ? item.length : 1)))
+        : copies.length;
+    copiesByBinding.set(
+      String(binding.id),
+      (copiesByBinding.get(String(binding.id)) ?? 0) + mappingCopies,
+    );
+    for (const [index, item] of copies.entries()) {
+      const childScope = {
+        root: data,
+        item,
+        parent: scope.item,
+        index,
+        first: index === 0,
+        last: index === copies.length - 1,
+      };
+      node.children.forEach((child) => visit(child, childScope));
+    }
+  };
+  const roots =
+    compiled.ir.regionTree ??
+    compiled.ir.bindings
+      .filter((binding) => 'range' in binding)
+      .map((binding) => ({
+        bindingId: binding.id,
+        range: binding.range,
+        depth: 1,
+        children: [],
+      }));
+  roots.forEach((root) => visit(root, { root: data }));
+
+  let count = compiled.sourceDocument.workbook.sheets.reduce(
+    (total, sheet) => total + sheet.objects.length,
+    0,
+  );
+  for (const binding of compiled.ir.bindings) {
+    if (
+      !('objects' in binding) ||
+      binding.objects === undefined ||
+      binding.objects.length === 0 ||
+      binding.objectPolicy === undefined ||
+      binding.objectPolicy === 'forbidden'
+    ) {
+      continue;
+    }
+    const sourceSheet = compiled.sourceDocument.workbook.sheets.find(
+      ({ id }) => id === binding.range.sheetId,
+    );
+    const copies = copiesByBinding.get(String(binding.id)) ?? 0;
+    for (const reference of binding.objects) {
+      const persistent = sourceSheet?.objects.some(({ id }) => id === reference.id) === true;
+      if (binding.objectPolicy === 'per-item') count += copies - (persistent ? 1 : 0);
+      else if (!persistent) count += 1;
+    }
+  }
+  return count;
+}
+
 function materializeRepeatedObjects(
   document: SpreadsheetDocument,
   compiled: CompiledTemplate,
   mappings: readonly StructuralMapping[],
+  maxExpandedObjects: number,
 ): {
-  readonly document: SpreadsheetDocument;
+  readonly document?: SpreadsheetDocument;
   readonly mappings: readonly StructuralObjectMapping[];
 } {
   let nextDocument = document;
   const objectMappings: StructuralObjectMapping[] = [];
+  const appendMapping = (mapping: StructuralObjectMapping): boolean => {
+    if (objectMappings.length >= maxExpandedObjects) return false;
+    objectMappings.push(mapping);
+    return true;
+  };
   for (const binding of compiled.ir.bindings) {
     if (
       !('objects' in binding) ||
@@ -127,14 +261,18 @@ function materializeRepeatedObjects(
     );
     if (binding.objectPolicy === 'shared') {
       for (const reference of binding.objects) {
-        objectMappings.push({
-          objectId: reference.id,
-          ...(reference.resourceId === undefined ? {} : { resourceId: reference.resourceId }),
-          policy: 'shared',
-          itemIndex: 0,
-          source: reference.anchor,
-          generated: reference.anchor,
-        });
+        if (
+          !appendMapping({
+            objectId: reference.id,
+            ...(reference.resourceId === undefined ? {} : { resourceId: reference.resourceId }),
+            policy: 'shared',
+            itemIndex: 0,
+            source: reference.anchor,
+            generated: reference.anchor,
+          })
+        ) {
+          return { mappings: [] };
+        }
       }
       continue;
     }
@@ -163,30 +301,34 @@ function materializeRepeatedObjects(
       const rowDelta = mapping.generated.start.row - mapping.source.start.row;
       const columnDelta = mapping.generated.start.column - mapping.source.start.column;
       for (const { reference, object } of repeatedSources) {
-        if (object === undefined) {
-          objectMappings.push({
-            objectId: reference.id,
-            ...(reference.resourceId === undefined ? {} : { resourceId: reference.resourceId }),
-            policy: 'per-item',
-            itemIndex: mapping.itemIndex,
-            source: reference.anchor,
-            generated: {
-              sheetId: mapping.generated.sheetId,
-              start: {
-                row: reference.anchor.start.row + rowDelta,
-                column: reference.anchor.start.column + columnDelta,
-              },
-              end: {
-                row: reference.anchor.end.row + rowDelta,
-                column: reference.anchor.end.column + columnDelta,
-              },
-            },
-          });
-          continue;
-        }
-        let id = `${String(object.id)}~${String(binding.id)}~${mapping.itemIndex + 1}`;
+        let id = repeatedObjectId(reference.id, binding, mapping, mappings, compiled);
         while (existingIds.has(id)) id += '_';
         existingIds.add(id);
+        if (object === undefined) {
+          if (
+            !appendMapping({
+              objectId: id,
+              ...(reference.resourceId === undefined ? {} : { resourceId: reference.resourceId }),
+              policy: 'per-item',
+              itemIndex: mapping.itemIndex,
+              source: reference.anchor,
+              generated: {
+                sheetId: mapping.generated.sheetId,
+                start: {
+                  row: reference.anchor.start.row + rowDelta,
+                  column: reference.anchor.start.column + columnDelta,
+                },
+                end: {
+                  row: reference.anchor.end.row + rowDelta,
+                  column: reference.anchor.end.column + columnDelta,
+                },
+              },
+            })
+          ) {
+            return { mappings: [] };
+          }
+          continue;
+        }
         const generatedObject = {
           ...object,
           id: id as SheetObject['id'],
@@ -195,32 +337,38 @@ function materializeRepeatedObjects(
         const target = generatedBySheet.get(String(mapping.generated.sheetId)) ?? [];
         target.push(generatedObject);
         generatedBySheet.set(String(mapping.generated.sheetId), target);
-        objectMappings.push({
-          objectId: id,
-          ...(reference.resourceId === undefined ? {} : { resourceId: reference.resourceId }),
-          policy: 'per-item',
-          itemIndex: mapping.itemIndex,
-          source: reference.anchor,
-          generated: {
-            sheetId: mapping.generated.sheetId,
-            start: {
-              row:
-                reference.anchor.start.row + mapping.generated.start.row - mapping.source.start.row,
-              column:
-                reference.anchor.start.column +
-                mapping.generated.start.column -
-                mapping.source.start.column,
+        if (
+          !appendMapping({
+            objectId: id,
+            ...(reference.resourceId === undefined ? {} : { resourceId: reference.resourceId }),
+            policy: 'per-item',
+            itemIndex: mapping.itemIndex,
+            source: reference.anchor,
+            generated: {
+              sheetId: mapping.generated.sheetId,
+              start: {
+                row:
+                  reference.anchor.start.row +
+                  mapping.generated.start.row -
+                  mapping.source.start.row,
+                column:
+                  reference.anchor.start.column +
+                  mapping.generated.start.column -
+                  mapping.source.start.column,
+              },
+              end: {
+                row:
+                  reference.anchor.end.row + mapping.generated.start.row - mapping.source.start.row,
+                column:
+                  reference.anchor.end.column +
+                  mapping.generated.start.column -
+                  mapping.source.start.column,
+              },
             },
-            end: {
-              row:
-                reference.anchor.end.row + mapping.generated.start.row - mapping.source.start.row,
-              column:
-                reference.anchor.end.column +
-                mapping.generated.start.column -
-                mapping.source.start.column,
-            },
-          },
-        });
+          })
+        ) {
+          return { mappings: [] };
+        }
       }
     }
     if (sourceObjects.length > 0) {
@@ -1472,6 +1620,15 @@ export function expandAdvancedTemplate(
       forcedPageBreaks: new Map(),
     });
   }
+  const maxExpandedObjects = limits.maxExpandedObjects ?? 10_000;
+  if (projectedRepeatedObjectCount(compiled, data, formatters) > maxExpandedObjects) {
+    return freeze({
+      diagnostics: [error('EXPANSION_LIMIT_EXCEEDED', 'Advanced expansion exceeds object limits')],
+      structuralMappings: [],
+      objectMappings: [],
+      forcedPageBreaks: new Map(),
+    });
+  }
   const plan = createExpansionPlan(compiled);
   const base = expandTemplate(
     compiled.sourceDocument,
@@ -1818,14 +1975,27 @@ export function expandAdvancedTemplate(
       forcedPageBreaks: new Map(),
     });
   }
-  const repeatedObjects = materializeRepeatedObjects(document, compiled, mappings);
+  const repeatedObjects = materializeRepeatedObjects(
+    document,
+    compiled,
+    mappings,
+    maxExpandedObjects,
+  );
+  if (repeatedObjects.document === undefined) {
+    return freeze({
+      diagnostics: [error('EXPANSION_LIMIT_EXCEEDED', 'Advanced expansion exceeds object limits')],
+      structuralMappings: [],
+      objectMappings: [],
+      forcedPageBreaks: new Map(),
+    });
+  }
   document = repeatedObjects.document;
   const objectMappings = repeatedObjects.mappings;
   const objectCount = document.workbook.sheets.reduce(
     (count, sheet) => count + sheet.objects.length,
     0,
   );
-  if (objectCount > (limits.maxExpandedObjects ?? 10_000)) {
+  if (objectCount > maxExpandedObjects) {
     return freeze({
       diagnostics: [error('EXPANSION_LIMIT_EXCEEDED', 'Advanced expansion exceeds object limits')],
       structuralMappings: [],
