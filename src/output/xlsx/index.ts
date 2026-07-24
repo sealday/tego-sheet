@@ -849,7 +849,15 @@ function autoFilterXml(sheet: Sheet): string {
   const sort =
     filter.sort === undefined || filter.sort === null
       ? ''
-      : `<sortState ref="${reference}"><sortCondition ref="${cellReference(range.start.row, filter.sort.column)}:${cellReference(range.end.row, filter.sort.column)}"${filter.sort.direction === 'desc' ? ' descending="1"' : ''}/></sortState>`;
+      : (() => {
+          if (filter.sort.column < range.start.column || filter.sort.column > range.end.column) {
+            throw outputError('XLSX_UNSUPPORTED_FEATURE', 'Sort column is outside its range', {
+              location: { sheetId: sheet.id },
+              details: { column: filter.sort.column },
+            });
+          }
+          return `<sortState ref="${reference}"><sortCondition ref="${cellReference(range.start.row, filter.sort.column)}:${cellReference(range.end.row, filter.sort.column)}"${filter.sort.direction === 'desc' ? ' descending="1"' : ''}/></sortState>`;
+        })();
   return `<autoFilter ref="${reference}">${columns}${sort}</autoFilter>`;
 }
 
@@ -974,12 +982,26 @@ function nativeTableXml(
   const reference = `${cellReference(table.range.start.row, table.range.start.column)}:${cellReference(table.range.end.row, table.range.end.column)}`;
   const filterEnd = table.range.end.row - (table.totalsRow === true ? 1 : 0);
   const filterReference = `${cellReference(table.range.start.row, table.range.start.column)}:${cellReference(filterEnd, table.range.end.column)}`;
-  const style =
-    table.style !== undefined && /^TableStyle[A-Za-z0-9_]+$/u.test(table.style)
-      ? table.style
-      : 'TableStyleMedium2';
+  const tableRange = table.range;
+  const requireTableColumn = (column: number, feature: string): void => {
+    if (column < tableRange.start.column || column > tableRange.end.column) {
+      throw outputError(
+        'XLSX_UNSUPPORTED_FEATURE',
+        `${feature} column is outside its table range`,
+        {
+          location: { sheetId: tableRange.sheetId },
+          details: { column, tableId: table.id },
+        },
+      );
+    }
+  };
+  for (const filter of table.filter?.filters ?? []) {
+    requireTableColumn(filter.column, 'Filter');
+  }
+  if (table.filter?.sort !== undefined && table.filter.sort !== null) {
+    requireTableColumn(table.filter.sort.column, 'Sort');
+  }
   const filterColumns = (table.filter?.filters ?? [])
-    .filter(({ column }) => column >= table.range.start.column && column <= table.range.end.column)
     .map((filter) =>
       filter.operator === 'all'
         ? ''
@@ -995,7 +1017,9 @@ function nativeTableXml(
     `<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="${tableNumber}" name="${xml(table.name)}" displayName="${xml(table.name)}" ref="${reference}" headerRowCount="${table.headerRows ?? 1}" totalsRowShown="${table.totalsRow === true ? 1 : 0}">` +
     `<autoFilter ref="${filterReference}">${filterColumns}${sort}</autoFilter>` +
     `<tableColumns count="${table.columns.length}">${table.columns.map((column, index) => `<tableColumn id="${index + 1}" name="${xml(column.name)}"/>`).join('')}</tableColumns>` +
-    `<tableStyleInfo name="${style}" showFirstColumn="0" showLastColumn="0" showRowStripes="1" showColumnStripes="0"/>` +
+    (table.style === undefined
+      ? ''
+      : `<tableStyleInfo name="${xml(table.style)}" showFirstColumn="0" showLastColumn="0" showRowStripes="1" showColumnStripes="0"/>`) +
     '</table>'
   );
 }

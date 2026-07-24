@@ -157,7 +157,11 @@ function worksheetTables(
       ...filterBody.matchAll(/<filterColumn\b([^>]*?)>([\s\S]*?)<\/filterColumn>/gi),
     ].map((match) => {
       const relativeColumn = Number(attributes(match[1]!).colId);
-      if (!Number.isSafeInteger(relativeColumn) || relativeColumn < 0) {
+      if (
+        !Number.isSafeInteger(relativeColumn) ||
+        relativeColumn < 0 ||
+        relativeColumn > range.end.column - range.start.column
+      ) {
         throw new InterchangeError('MALFORMED_WORKBOOK', 'Table filter column is invalid');
       }
       return {
@@ -173,6 +177,17 @@ function worksheetTables(
     );
     const sortAttributes = sortMatch === null ? undefined : attributes(sortMatch[1]!);
     const sortReference = sortAttributes?.ref;
+    const sortRange = sortReference === undefined ? undefined : sheetRange(sortReference);
+    if (
+      sortRange !== undefined &&
+      (sortRange.start.column !== sortRange.end.column ||
+        sortRange.start.column < range.start.column ||
+        sortRange.end.column > range.end.column ||
+        sortRange.start.row < range.start.row ||
+        sortRange.end.row > range.end.row)
+    ) {
+      throw new InterchangeError('MALFORMED_WORKBOOK', 'Table sort range is outside the table');
+    }
     return {
       id: `${sheetId}-table-${tableIndex + 1}`,
       name: root.displayName ?? root.name!,
@@ -181,7 +196,6 @@ function worksheetTables(
       headerRows: 1,
       totalsRow: root.totalsRowShown === '1',
       ...(style === undefined ? {} : { style }),
-      autoExpand: true,
       ...(filters.length === 0 && sortReference === undefined
         ? {}
         : {
@@ -191,7 +205,7 @@ function worksheetTables(
                 ? {}
                 : {
                     sort: {
-                      column: sheetRange(sortReference).start.column,
+                      column: sortRange!.start.column,
                       direction:
                         sortAttributes?.descending === '1' ? ('desc' as const) : ('asc' as const),
                     },
@@ -602,7 +616,11 @@ function parseWorksheet(
     const filters = [...body.matchAll(/<filterColumn\b([^>]*?)>([\s\S]*?)<\/filterColumn>/gi)].map(
       (match) => {
         const relativeColumn = Number(attributes(match[1]!).colId);
-        if (!Number.isSafeInteger(relativeColumn) || relativeColumn < 0) {
+        if (
+          !Number.isSafeInteger(relativeColumn) ||
+          relativeColumn < 0 ||
+          relativeColumn > range.end.column - range.start.column
+        ) {
           throw new InterchangeError('MALFORMED_WORKBOOK', 'Auto-filter column is invalid');
         }
         return {
@@ -617,6 +635,20 @@ function parseWorksheet(
     const sortMatch = /<sortCondition\b([^>]*?)(?:\/>|>[\s\S]*?<\/sortCondition>)/i.exec(body);
     const sortAttributes = sortMatch === null ? undefined : attributes(sortMatch[1]!);
     const sortReference = sortAttributes?.ref;
+    const sortRange = sortReference === undefined ? undefined : sheetRange(sortReference);
+    if (
+      sortRange !== undefined &&
+      (sortRange.start.column !== sortRange.end.column ||
+        sortRange.start.column < range.start.column ||
+        sortRange.end.column > range.end.column ||
+        sortRange.start.row < range.start.row ||
+        sortRange.end.row > range.end.row)
+    ) {
+      throw new InterchangeError(
+        'MALFORMED_WORKBOOK',
+        'Auto-filter sort range is outside the filter range',
+      );
+    }
     filter = {
       range,
       filters,
@@ -624,7 +656,7 @@ function parseWorksheet(
         ? {}
         : {
             sort: {
-              column: sheetRange(sortReference).start.column,
+              column: sortRange!.start.column,
               direction: sortAttributes?.descending === '1' ? ('desc' as const) : ('asc' as const),
             },
           }),
@@ -634,6 +666,7 @@ function parseWorksheet(
   if (/<sheetProtection\b/i.test(xml)) unsupported.push('xlsx:sheet-protection');
   if (/<drawing\b/i.test(xml)) unsupported.push('xlsx:drawing-objects');
   if (/<tableParts\b/i.test(xml)) unsupported.push('xlsx:tables');
+  if (/<(?:\w+:)?sparklineGroups?\b/i.test(xml)) unsupported.push('xlsx:sparklines');
   if (/<pivotTableDefinition\b/i.test(xml)) unsupported.push('xlsx:pivot-tables');
   if (/<(?:legacyDrawing|oleObjects|controls)\b/i.test(xml)) {
     unsupported.push('xlsx:embedded-objects');

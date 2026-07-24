@@ -198,6 +198,49 @@ describe('IO-01 bounded atomic workbook readers and writers', () => {
     );
   });
 
+  it('reports native XLSX sparkline extensions as unsupported', async () => {
+    const imported = await createXlsxReader().read(
+      xlsxFixture(`<?xml version="1.0"?>
+        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">
+          <sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData>
+          <extLst><ext uri="{05C60535-1F16-4fd2-B633-F4F36F0B64E0}">
+            <x14:sparklineGroups><x14:sparklineGroup>
+              <x14:sparklines><x14:sparkline><xm:f>A1:A1</xm:f><xm:sqref>B1</xm:sqref></x14:sparkline></x14:sparklines>
+            </x14:sparklineGroup></x14:sparklineGroups>
+          </ext></extLst>
+        </worksheet>`),
+    );
+
+    expect(imported.security.unsupportedFeatures).toContain('xlsx:sparklines');
+    expect(imported.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: 'UNSUPPORTED_INTERCHANGE_FEATURE',
+        details: { feature: 'xlsx:sparklines' },
+      }),
+    );
+  });
+
+  it('rejects worksheet filters whose filter or sort column is outside the filter range', async () => {
+    const fixture = (body: string) =>
+      xlsxFixture(`<?xml version="1.0"?>
+        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+          <sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData>
+          <autoFilter ref="A1:B2">${body}</autoFilter>
+        </worksheet>`);
+
+    await expect(
+      createXlsxReader().read(
+        fixture('<filterColumn colId="2"><filters><filter val="x"/></filters></filterColumn>'),
+      ),
+    ).rejects.toMatchObject({ code: 'MALFORMED_WORKBOOK' });
+    await expect(
+      createXlsxReader().read(
+        fixture('<sortState ref="A1:B2"><sortCondition ref="C1:C2"/></sortState>'),
+      ),
+    ).rejects.toMatchObject({ code: 'MALFORMED_WORKBOOK' });
+  });
+
   it('reports every recognized ODS degradation as a structured diagnostic', async () => {
     const imported = await createOdsReader().read(
       odsFixture(`<?xml version="1.0"?>

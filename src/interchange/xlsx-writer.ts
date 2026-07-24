@@ -160,6 +160,20 @@ export function createXlsxWriter(configuredLimits: InterchangeLimits = {}): Work
     if (document.workbook.sheets.some((sheet) => sheet.sparklines.length > 0)) {
       unsupported.push('xlsx:sparklines');
     }
+    if (
+      document.workbook.sheets.some((sheet) =>
+        sheet.tables.some((table) => table.columns.some((column) => column.dataType !== undefined)),
+      )
+    ) {
+      unsupported.push('xlsx:table-column-data-type');
+    }
+    if (
+      document.workbook.sheets.some((sheet) =>
+        sheet.tables.some((table) => table.autoExpand !== undefined),
+      )
+    ) {
+      unsupported.push('xlsx:table-auto-expand');
+    }
     const blob = await adapter.render(generatedDocument(document), {
       formulaMode: 'formula-and-cached-value',
       compatibility: 'excel',
@@ -178,7 +192,23 @@ export function createXlsxWriter(configuredLimits: InterchangeLimits = {}): Work
   return Object.freeze({
     format: 'xlsx',
     async write(document: SpreadsheetDocument, options = {}) {
-      return (await writeResult(document, options as InterchangeWriteOptions)).blob;
+      const result = await writeResult(document, options as InterchangeWriteOptions);
+      if (result.diagnostics.length > 0) {
+        const features = result.diagnostics.flatMap(({ details }) =>
+          details !== undefined &&
+          details !== null &&
+          typeof details === 'object' &&
+          'feature' in details &&
+          typeof details.feature === 'string'
+            ? [details.feature]
+            : [],
+        );
+        throw new InterchangeError(
+          'DOCUMENT_INVALID',
+          `XLSX Blob export would omit unsupported semantics: ${features.join(', ')}`,
+        );
+      }
+      return result.blob;
     },
     writeResult(document: SpreadsheetDocument, options = {}) {
       return writeResult(document, options as InterchangeWriteOptions);
