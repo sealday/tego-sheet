@@ -278,6 +278,11 @@ function disabledToolbarActions(runtime: SlotRuntime): Set<ToolbarAction['type']
     )
       disabled.add('delete-column');
   }
+  for (const type of MUTATING_ACTIONS) {
+    if (disabled.has(type)) continue;
+    const command = toolbarPermissionProbe(runtime, type);
+    if (command !== null && !runtime.dispatcher.canDispatch(command)) disabled.add(type);
+  }
   return disabled;
 }
 
@@ -396,6 +401,32 @@ function toolbarCommand(runtime: SlotRuntime, action: ToolbarAction): WorkbookCo
         column: active.column,
         order: action.order,
       };
+  }
+}
+
+function toolbarPermissionProbe(
+  runtime: SlotRuntime,
+  type: ToolbarAction['type'],
+): WorkbookCommand | null {
+  switch (type) {
+    case 'set-style':
+      return toolbarCommand(runtime, { type, patch: {} });
+    case 'set-border':
+      return toolbarCommand(runtime, { type, mode: 'all' });
+    case 'set-validation':
+      return toolbarCommand(runtime, {
+        type,
+        rule: { mode: 'cell', type: 'number', required: false },
+      });
+    case 'set-filter':
+      return toolbarCommand(runtime, {
+        type,
+        filter: { column: runtime.selection?.active.column ?? 0, operator: 'all', value: [] },
+      });
+    case 'sort':
+      return toolbarCommand(runtime, { type, order: 'asc' });
+    default:
+      return toolbarCommand(runtime, { type } as ToolbarAction);
   }
 }
 
@@ -1177,7 +1208,7 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
   const toolbarProps = Object.freeze<ToolbarRenderProps>({
     selection: selection === null ? null : clonePublic(selection),
     activeStyle: clonePublic(activeStyle),
-    readOnly: props.readOnly ?? false,
+    readOnly: renderRuntime.readOnly,
     canUndo: props.epoch.snapshot.canUndo,
     canRedo: props.epoch.snapshot.canRedo,
     merged: mergedSelection(renderRuntime),
@@ -1196,7 +1227,7 @@ function Runtime(props: RuntimeProps, forwardedRef: ForwardedRef<TegoSheetHandle
       ),
     ),
     activeSheet,
-    readOnly: props.readOnly ?? false,
+    readOnly: renderRuntime.readOnly,
     ...tabActions,
   });
   const filterSelection = filterAuthority?.selection ?? selection;

@@ -98,6 +98,7 @@ export interface PersistenceSession {
   readonly state: PersistenceSessionState;
   attachController(controller: SpreadsheetDocumentController): () => void;
   save(reason?: SaveReason): Promise<SaveResult | { readonly status: 'offline' }>;
+  retry(): Promise<SaveResult | { readonly status: 'offline' }>;
   setOnline(online: boolean): void;
   resolveConflict(revision: string): void;
   bindBeforeUnload(target: {
@@ -110,6 +111,7 @@ export interface PersistenceSession {
 
 export interface CreatePersistenceSessionOptions extends CreatePersistenceControllerOptions {
   readonly autosaveDelayMs?: number;
+  readonly autosaveMaxWaitMs?: number;
   readonly setTimer?: (callback: () => void, delay: number) => unknown;
   readonly clearTimer?: (handle: unknown) => void;
   readonly initiallyOnline?: boolean;
@@ -438,8 +440,16 @@ export function createPersistenceSession(
 ): PersistenceSession {
   const persistence = createPersistenceController(options);
   const autosaveDelayMs = options.autosaveDelayMs ?? 1_000;
-  if (!Number.isSafeInteger(autosaveDelayMs) || autosaveDelayMs < 0) {
-    throw new RangeError('Persistence autosaveDelayMs must be a non-negative safe integer');
+  const autosaveMaxWaitMs = options.autosaveMaxWaitMs ?? Math.max(10_000, autosaveDelayMs);
+  if (!Number.isSafeInteger(autosaveDelayMs) || autosaveDelayMs < 250 || autosaveDelayMs > 60_000) {
+    throw new RangeError('Persistence autosaveDelayMs must be from 250 through 60000');
+  }
+  if (
+    !Number.isSafeInteger(autosaveMaxWaitMs) ||
+    autosaveMaxWaitMs < autosaveDelayMs ||
+    autosaveMaxWaitMs > 60_000
+  ) {
+    throw new RangeError('Persistence autosaveMaxWaitMs must be from delay through 60000');
   }
   const setTimer = options.setTimer ?? ((callback, delay) => setTimeout(callback, delay));
   const clearTimer =
@@ -447,8 +457,11 @@ export function createPersistenceSession(
   let online = options.initiallyOnline ?? true;
   let disposed = false;
   let timer: unknown;
+  let firstPendingAt: number | undefined;
   let detachController: (() => void) | undefined;
   const listeners = new Set<() => void>();
+  const beforeUnloadBindings = new Set<() => void>();
+  const now = options.now ?? Date.now;
 
   const computeState = (): PersistenceSessionState => {
     if (online) return persistence.state;
@@ -475,13 +488,28 @@ export function createPersistenceSession(
   };
   const scheduleAutosave = (): void => {
     clearAutosave();
-    if (!online || !persistence.hasPendingChanges()) return;
+    if (!online || !persistence.hasPendingChanges()) {
+      if (!persistence.hasPendingChanges()) firstPendingAt = undefined;
+      return;
+    }
+    firstPendingAt ??= now();
+    const remaining = Math.max(0, autosaveMaxWaitMs - (now() - firstPendingAt));
+    const delay = Math.min(autosaveDelayMs, remaining);
     timer = setTimer(() => {
       timer = undefined;
       const saving = persistence.save('autosave');
       publish();
-      void saving.then(publish, publish);
-    }, autosaveDelayMs);
+      void saving.then(
+        () => {
+          publish();
+          scheduleAutosave();
+        },
+        () => {
+          publish();
+          scheduleAutosave();
+        },
+      );
+    }, delay);
   };
 
   const session: PersistenceSession = {
@@ -533,6 +561,19 @@ export function createPersistenceSession(
         scheduleAutosave();
       }
     },
+    async retry() {
+      if (disposed) throw new TypeError('Persistence session is disposed');
+      clearAutosave();
+      if (!online) return Object.freeze({ status: 'offline' as const });
+      const retrying = persistence.retry();
+      publish();
+      try {
+        return await retrying;
+      } finally {
+        publish();
+        scheduleAutosave();
+      }
+    },
     setOnline(nextOnline): void {
       if (disposed) throw new TypeError('Persistence session is disposed');
       if (online === nextOnline) return;
@@ -555,11 +596,14 @@ export function createPersistenceSession(
       };
       target.addEventListener('beforeunload', listener);
       let active = true;
-      return (): void => {
+      const unbind = (): void => {
         if (!active) return;
         active = false;
         target.removeEventListener('beforeunload', listener);
+        beforeUnloadBindings.delete(unbind);
       };
+      beforeUnloadBindings.add(unbind);
+      return unbind;
     },
     subscribe(listener): () => void {
       if (disposed) return () => undefined;
@@ -571,6 +615,7 @@ export function createPersistenceSession(
       disposed = true;
       clearAutosave();
       detachController?.();
+      for (const unbind of beforeUnloadBindings) unbind();
       listeners.clear();
       persistence.dispose();
     },

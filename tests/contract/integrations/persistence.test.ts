@@ -234,7 +234,7 @@ describe('persistence integration contract', () => {
         },
       },
       requestId: () => 'request-1',
-      autosaveDelayMs: 10,
+      autosaveDelayMs: 250,
     });
     const controller = new SpreadsheetDocumentController(document);
     session.attachController(controller);
@@ -269,6 +269,125 @@ describe('persistence integration contract', () => {
     expect(requests).toHaveLength(1);
     unbind();
     session.dispose();
+    controller.dispose();
+  });
+
+  it('reschedules autosave when edits arrive during an in-flight batch', async () => {
+    const pending = deferred<SaveResult>();
+    const timers: Array<() => void> = [];
+    const document = testDocument([{ name: 'A' }]);
+    const save = vi
+      .fn<(request: SaveRequest, signal: AbortSignal) => Promise<SaveResult>>()
+      .mockImplementationOnce(() => pending.promise)
+      .mockImplementationOnce(async (request) => ({
+        status: 'saved',
+        revision: 'revision-3',
+        persistedTransactionIds: request.transactions.map(({ id }) => id),
+      }));
+    const session = createPersistenceSession({
+      documentId: document.id,
+      initialRevision: 'revision-1',
+      adapter: { save },
+      requestId: () => `request-${save.mock.calls.length + 1}`,
+      autosaveDelayMs: 250,
+      setTimer: (callback) => {
+        timers.push(callback);
+        return callback;
+      },
+      clearTimer: (handle) => {
+        const index = timers.indexOf(handle as () => void);
+        if (index >= 0) timers.splice(index, 1);
+      },
+    });
+    const controller = new SpreadsheetDocumentController(document);
+    session.attachController(controller);
+    const sheet = controller.getSheetIds()[0]!;
+    controller.dispatch(
+      { type: 'set-cell-text', address: { sheet, row: 0, column: 0 }, text: 'first' },
+      'ref',
+    );
+    timers.shift()?.();
+    controller.dispatch(
+      { type: 'set-cell-text', address: { sheet, row: 0, column: 1 }, text: 'second' },
+      'ref',
+    );
+    timers.shift()?.();
+    pending.resolve({
+      status: 'saved',
+      revision: 'revision-2',
+      persistedTransactionIds: [save.mock.calls[0]![0].transactions[0]!.id],
+    });
+    await pending.promise;
+    await vi.waitFor(() => expect(timers).toHaveLength(1));
+    timers.shift()?.();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(session.state.status).toBe('clean'));
+    session.dispose();
+    controller.dispose();
+  });
+
+  it('bounds debounce, enforces max-wait, retries the same request, and cleans unload bindings', async () => {
+    expect(() =>
+      createPersistenceSession({
+        documentId: 'document-1',
+        initialRevision: 'revision-1',
+        adapter: { save: vi.fn() },
+        requestId: () => 'request-1',
+        autosaveDelayMs: 249,
+      }),
+    ).toThrow(/250/u);
+
+    let now = 0;
+    const delays: number[] = [];
+    const listeners = new Set<(event: BeforeUnloadEvent) => void>();
+    const save = vi
+      .fn<(request: SaveRequest, signal: AbortSignal) => Promise<SaveResult>>()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockImplementationOnce(async (request) => ({
+        status: 'saved',
+        revision: 'revision-2',
+        persistedTransactionIds: request.transactions.map(({ id }) => id),
+      }));
+    const session = createPersistenceSession({
+      documentId: 'document-1',
+      initialRevision: 'revision-1',
+      adapter: { save },
+      requestId: () => 'stable-request',
+      autosaveDelayMs: 1_000,
+      autosaveMaxWaitMs: 10_000,
+      now: () => now,
+      setTimer: (_callback, delay) => {
+        delays.push(delay);
+        return delay;
+      },
+      clearTimer: () => undefined,
+    });
+    const controller = new SpreadsheetDocumentController(testDocument([{ name: 'A' }]));
+    session.attachController(controller);
+    const sheet = controller.getSheetIds()[0]!;
+    controller.dispatch(
+      { type: 'set-cell-text', address: { sheet, row: 0, column: 0 }, text: 'first' },
+      'ref',
+    );
+    now = 9_750;
+    controller.dispatch(
+      { type: 'set-cell-text', address: { sheet, row: 0, column: 1 }, text: 'second' },
+      'ref',
+    );
+    expect(delays.at(-1)).toBe(250);
+    await expect(session.save()).rejects.toThrow(/failed/u);
+    await expect(session.retry()).resolves.toMatchObject({ status: 'saved' });
+    expect(save.mock.calls.map(([request]) => request.requestId)).toEqual([
+      'stable-request',
+      'stable-request',
+    ]);
+    session.bindBeforeUnload({
+      addEventListener: (_type, listener) => listeners.add(listener),
+      removeEventListener: (_type, listener) => listeners.delete(listener),
+    });
+    expect(listeners.size).toBe(1);
+    session.dispose();
+    expect(listeners.size).toBe(0);
     controller.dispose();
   });
 });

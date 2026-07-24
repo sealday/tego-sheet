@@ -229,4 +229,44 @@ describe('permission integration contract', () => {
     );
     expect(gate(context)).toBe(true);
   });
+
+  it('authorizes implicit source reads and cut-source mutation explicitly', () => {
+    const requests = deriveWorkbookCommandPermissionRequests(
+      {
+        type: 'paste-internal',
+        source: {
+          sheet: 'sheet-source' as never,
+          range: { start: { row: 0, column: 0 }, end: { row: 1, column: 1 } },
+          active: { row: 0, column: 0 },
+        },
+        target: {
+          sheet: 'sheet-target' as never,
+          range: { start: { row: 2, column: 2 }, end: { row: 3, column: 3 } },
+          active: { row: 2, column: 2 },
+        },
+        mode: 'all',
+        cut: true,
+      },
+      'document-1',
+    );
+    expect(requests).toEqual(
+      expect.arrayContaining([
+        {
+          action: 'sheet:view',
+          target: { type: 'sheet', sheetId: 'sheet-source' },
+        },
+        {
+          action: 'range:edit',
+          target: {
+            type: 'range',
+            range: {
+              sheetId: 'sheet-source',
+              start: { row: 0, column: 0 },
+              end: { row: 1, column: 1 },
+            },
+          },
+        },
+      ]),
+    );
+  });
 });

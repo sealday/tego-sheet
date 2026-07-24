@@ -209,6 +209,10 @@ function rangeRequest(
   };
 }
 
+function sheetViewRequest(sheetId: string): PermissionRequest {
+  return { action: 'sheet:view', target: { type: 'sheet', sheetId } };
+}
+
 /** Derives the document guard and precise mutation target for one workbook command. */
 export function deriveWorkbookCommandPermissionRequests(
   command: WorkbookCommand,
@@ -240,25 +244,32 @@ export function deriveWorkbookCommandPermissionRequests(
         command.selection.range.end,
       );
       break;
-    case 'paint-format':
     case 'paste-external':
-    case 'autofill':
       targetRequest = rangeRequest(
         command.target.sheet,
         command.target.range.start,
         command.target.range.end,
       );
       break;
+    case 'paint-format':
+    case 'autofill':
+      return Object.freeze([
+        documentRequest,
+        rangeRequest(command.target.sheet, command.target.range.start, command.target.range.end),
+        sheetViewRequest(command.source.sheet),
+      ]);
     case 'paste-internal': {
       const target = rangeRequest(
         command.target.sheet,
         command.target.range.start,
         command.target.range.end,
       );
-      if (!command.cut) return Object.freeze([documentRequest, target]);
+      const sourceView = sheetViewRequest(command.source.sheet);
+      if (!command.cut) return Object.freeze([documentRequest, target, sourceView]);
       return Object.freeze([
         documentRequest,
         target,
+        sourceView,
         rangeRequest(command.source.sheet, command.source.range.start, command.source.range.end),
       ]);
     }
@@ -275,11 +286,22 @@ export function deriveWorkbookCommandPermissionRequests(
       };
       break;
     case 'set-chart':
-      targetRequest = {
-        action: 'object:edit',
-        target: { type: 'object', sheetId: command.sheet, objectId: command.chart.id },
-      };
-      break;
+      return Object.freeze([
+        documentRequest,
+        {
+          action: 'object:edit',
+          target: { type: 'object', sheetId: command.sheet, objectId: command.chart.id },
+        },
+        ...Array.from(
+          new Set(
+            [
+              command.chart.categories?.sheetId,
+              ...command.chart.series.map(({ values }) => values.sheetId),
+            ].filter((sheetId): sheetId is string => sheetId !== undefined),
+          ),
+          sheetViewRequest,
+        ),
+      ]);
     case 'remove-chart':
       targetRequest = {
         action: 'object:edit',
@@ -287,8 +309,11 @@ export function deriveWorkbookCommandPermissionRequests(
       };
       break;
     case 'set-sparkline':
-      targetRequest = rangeRequest(command.sparkline.target.sheetId, command.sparkline.target);
-      break;
+      return Object.freeze([
+        documentRequest,
+        rangeRequest(command.sparkline.target.sheetId, command.sparkline.target),
+        sheetViewRequest(command.sparkline.source.sheetId),
+      ]);
     case 'remove-sparkline':
       targetRequest = {
         action: 'sheet:edit',

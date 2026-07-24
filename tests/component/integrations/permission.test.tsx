@@ -56,6 +56,23 @@ it('uses one permission store for ref and toolbar commands with live default-den
   act(() => {
     store.replace(
       createPermissionSnapshot({
+        revision: 'permission-document-only',
+        actorId: 'actor-1',
+        grants: [
+          {
+            action: 'document:edit',
+            target: { type: 'document', documentId: source.id },
+          },
+        ],
+      }),
+    );
+  });
+  await waitFor(() => expect(toolbar!.readOnly).toBe(false));
+  expect(toolbar!.disabledActions.has('set-style')).toBe(true);
+
+  act(() => {
+    store.replace(
+      createPermissionSnapshot({
         revision: 'permission-1',
         actorId: 'actor-1',
         grants: [
