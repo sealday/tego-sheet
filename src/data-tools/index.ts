@@ -3,6 +3,7 @@ export type {
   DataTransform,
   DataTransformCommitResult,
   DataTransformPreview,
+  DataTransformPreviewOptions,
   FindReplaceTransform,
   RemoveDuplicatesTransform,
   SplitTextTransform,

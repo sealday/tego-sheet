@@ -76,6 +76,7 @@ const expectedPublicExports = [
   'DataTransformCommitResult',
   'DataTransformError',
   'DataTransformPreview',
+  'DataTransformPreviewOptions',
   'DecodedResourceImage',
   'DeleteSheetCommand',
   'DelimitedWriteOptions',

@@ -59,6 +59,7 @@ export type DataTransform = FindReplaceTransform | SplitTextTransform | RemoveDu
 export class DataTransformError extends Error {
   /** Creates a machine-readable planning failure. */
   constructor(
+    /** Stable transform-planning failure category. */
     readonly code:
       | 'TRANSFORM_ABORTED'
       | 'TRANSFORM_TOO_LARGE'
@@ -111,7 +112,9 @@ interface PendingPlan {
   readonly commands: readonly DocumentCommandEnvelope[];
 }
 
-interface PreviewOptions {
+/** Cancellation options for an asynchronous transform preview. */
+export interface DataTransformPreviewOptions {
+  /** Cancels planning before a command plan is published. */
   readonly signal?: AbortSignal;
 }
 
@@ -251,7 +254,7 @@ export function createDataTransformPlanner(limits: {
   preview(
     snapshot: DocumentControllerSnapshot,
     transform: DataTransform,
-    options?: PreviewOptions,
+    options?: DataTransformPreviewOptions,
   ): Promise<DataTransformPreview>;
   /** Atomically commits a previously previewed plan when its revision is still current. */
   commit(controller: DocumentController, planId: string): DataTransformCommitResult;
