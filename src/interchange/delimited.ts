@@ -1,5 +1,6 @@
 import type { CellInput, SpreadsheetDocument } from '../document';
 import {
+  exportResult,
   importResult,
   inputBytes,
   InterchangeError,
@@ -186,55 +187,62 @@ function createDelimitedWriter(
   configuredLimits: InterchangeLimits = {},
 ): WorkbookWriter {
   const limits = resolveLimits(configuredLimits);
+  const write = async (
+    document: SpreadsheetDocument,
+    options: DelimitedWriteOptions = {},
+  ): Promise<Blob> => {
+    throwIfAborted(options.signal);
+    const delimiter = options.delimiter ?? defaultDelimiter;
+    if (delimiter !== ',' && delimiter !== '\t') {
+      throw new TypeError('delimiter must be a comma or tab');
+    }
+    const lineEnding = options.lineEnding ?? '\n';
+    const sheet = document.workbook.sheets[0];
+    const maxRow = sheet?.cells.reduce((maximum, cell) => Math.max(maximum, cell.row), -1) ?? -1;
+    const maxColumn =
+      sheet?.cells.reduce((maximum, cell) => Math.max(maximum, cell.column), -1) ?? -1;
+    if (maxRow + 1 > limits.maxRows) {
+      throw new InterchangeError('ROW_LIMIT_EXCEEDED', 'Delimited row limit exceeded');
+    }
+    if (maxColumn + 1 > limits.maxColumns) {
+      throw new InterchangeError('COLUMN_LIMIT_EXCEEDED', 'Delimited column limit exceeded');
+    }
+    const byCoordinate = new Map(
+      sheet?.cells.map((cell) => [`${cell.row}:${cell.column}`, cell.cell.input]) ?? [],
+    );
+    const rows: string[] = [];
+    for (let row = 0; row <= maxRow; row += 1) {
+      throwIfAborted(options.signal);
+      const fields: string[] = [];
+      for (let column = 0; column <= maxColumn; column += 1) {
+        const input = byCoordinate.get(`${row}:${column}`);
+        let value = input ? cellText(input) : '';
+        if (options.formulaInjectionProtection !== false && input?.type === 'string') {
+          value = protectFormula(value);
+        }
+        fields.push(quoted(value, delimiter));
+      }
+      rows.push(fields.join(delimiter));
+    }
+    const text = rows.length === 0 ? '' : `${rows.join(lineEnding)}${lineEnding}`;
+    const bytes = utf8Bytes(text);
+    const maxOutputBytes = options.maxOutputBytes ?? limits.maxOutputBytes;
+    if (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 0) {
+      throw new TypeError('maxOutputBytes must be a non-negative safe integer');
+    }
+    if (bytes > maxOutputBytes) {
+      throw new InterchangeError('OUTPUT_LIMIT_EXCEEDED', 'Delimited output byte limit exceeded');
+    }
+    throwIfAborted(options.signal);
+    return new Blob([text], {
+      type: delimiter === ',' ? 'text/csv' : 'text/tab-separated-values',
+    });
+  };
   return Object.freeze({
     format,
-    async write(document: SpreadsheetDocument, options: DelimitedWriteOptions = {}): Promise<Blob> {
-      throwIfAborted(options.signal);
-      const delimiter = options.delimiter ?? defaultDelimiter;
-      if (delimiter !== ',' && delimiter !== '\t') {
-        throw new TypeError('delimiter must be a comma or tab');
-      }
-      const lineEnding = options.lineEnding ?? '\n';
-      const sheet = document.workbook.sheets[0];
-      const maxRow = sheet?.cells.reduce((maximum, cell) => Math.max(maximum, cell.row), -1) ?? -1;
-      const maxColumn =
-        sheet?.cells.reduce((maximum, cell) => Math.max(maximum, cell.column), -1) ?? -1;
-      if (maxRow + 1 > limits.maxRows) {
-        throw new InterchangeError('ROW_LIMIT_EXCEEDED', 'Delimited row limit exceeded');
-      }
-      if (maxColumn + 1 > limits.maxColumns) {
-        throw new InterchangeError('COLUMN_LIMIT_EXCEEDED', 'Delimited column limit exceeded');
-      }
-      const byCoordinate = new Map(
-        sheet?.cells.map((cell) => [`${cell.row}:${cell.column}`, cell.cell.input]) ?? [],
-      );
-      const rows: string[] = [];
-      for (let row = 0; row <= maxRow; row += 1) {
-        throwIfAborted(options.signal);
-        const fields: string[] = [];
-        for (let column = 0; column <= maxColumn; column += 1) {
-          const input = byCoordinate.get(`${row}:${column}`);
-          let value = input ? cellText(input) : '';
-          if (options.formulaInjectionProtection !== false && input?.type === 'string') {
-            value = protectFormula(value);
-          }
-          fields.push(quoted(value, delimiter));
-        }
-        rows.push(fields.join(delimiter));
-      }
-      const text = rows.length === 0 ? '' : `${rows.join(lineEnding)}${lineEnding}`;
-      const bytes = utf8Bytes(text);
-      const maxOutputBytes = options.maxOutputBytes ?? limits.maxOutputBytes;
-      if (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 0) {
-        throw new TypeError('maxOutputBytes must be a non-negative safe integer');
-      }
-      if (bytes > maxOutputBytes) {
-        throw new InterchangeError('OUTPUT_LIMIT_EXCEEDED', 'Delimited output byte limit exceeded');
-      }
-      throwIfAborted(options.signal);
-      return new Blob([text], {
-        type: delimiter === ',' ? 'text/csv' : 'text/tab-separated-values',
-      });
+    write,
+    async writeResult(document: SpreadsheetDocument, options = {}) {
+      return exportResult(format, await write(document, options as DelimitedWriteOptions));
     },
   });
 }

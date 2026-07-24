@@ -145,7 +145,7 @@ describe('IO-01 bounded atomic workbook readers and writers', () => {
     });
   });
 
-  it('imports a restricted ODS core and reports unsupported constructs', async () => {
+  it('imports a restricted ODS core including merged ranges', async () => {
     const imported = await createOdsReader().read(
       odsFixture(
         odsFixtureContent(
@@ -156,7 +156,10 @@ describe('IO-01 bounded atomic workbook readers and writers', () => {
     expect(imported.document.workbook.sheets[0]?.cells.map(({ cell }) => cell.input)).toEqual([
       { type: 'string', value: 'Merged' },
     ]);
-    expect(imported.security.unsupportedFeatures).toContain('ods:merged-cells');
+    expect(imported.document.workbook.sheets[0]?.merges).toEqual([
+      { start: { row: 0, column: 0 }, end: { row: 0, column: 1 } },
+    ]);
+    expect(imported.security.unsupportedFeatures).not.toContain('ods:merged-cells');
   });
 
   it('reports every recognized XLSX degradation as a structured diagnostic', async () => {
@@ -173,12 +176,15 @@ describe('IO-01 bounded atomic workbook readers and writers', () => {
     );
 
     expect(imported.security.unsupportedFeatures).toEqual([
-      'xlsx:auto-filter',
       'xlsx:hyperlinks',
       'xlsx:sheet-protection',
       'xlsx:drawing-objects',
       'xlsx:tables',
     ]);
+    expect(imported.document.workbook.sheets[0]?.filter).toEqual({
+      range: { start: { row: 0, column: 0 }, end: { row: 1, column: 0 } },
+      filters: [],
+    });
     expect(imported.diagnostics).toEqual(
       imported.security.unsupportedFeatures.map((feature) =>
         expect.objectContaining({
@@ -220,7 +226,6 @@ describe('IO-01 bounded atomic workbook readers and writers', () => {
       'ods:drawing-objects',
       'ods:database-ranges',
       'ods:named-expressions',
-      'ods:data-validation',
       'ods:pivot-tables',
     ]);
     expect(imported.diagnostics).toHaveLength(imported.security.unsupportedFeatures.length);

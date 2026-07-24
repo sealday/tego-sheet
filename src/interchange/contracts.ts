@@ -48,6 +48,14 @@ export interface DelimitedWriteOptions {
   readonly maxOutputBytes?: number;
 }
 
+/** Per-write cancellation and output quota options shared by package writers. */
+export interface InterchangeWriteOptions {
+  /** Cancels serialization before an atomic result is returned. */
+  readonly signal?: AbortSignal;
+  /** Per-write finalized output byte limit. */
+  readonly maxOutputBytes?: number;
+}
+
 /** Evidence that parsing performed no active or external execution. */
 export interface InterchangeSecurityReport {
   /** Always false because readers never execute active content. */
@@ -72,6 +80,16 @@ export interface WorkbookImportResult {
   readonly security: InterchangeSecurityReport;
 }
 
+/** Immutable structured result returned by semantic workbook writers. */
+export interface WorkbookExportResult {
+  /** Emitted workbook format. */
+  readonly format: InterchangeFormat;
+  /** Complete finalized output; never a partial package. */
+  readonly blob: Blob;
+  /** Structured semantic-degradation diagnostics. */
+  readonly diagnostics: readonly Diagnostic[];
+}
+
 /** Byte, blob, or text input accepted by workbook readers. */
 export type InterchangeInput = Uint8Array | ArrayBuffer | Blob | string;
 
@@ -83,12 +101,20 @@ export interface WorkbookReader {
   read(input: InterchangeInput, options?: InterchangeReadOptions): Promise<WorkbookImportResult>;
 }
 
-/** Bounded delimited-text workbook writer. */
+/** Atomic bounded workbook writer with a backward-compatible blob convenience method. */
 export interface WorkbookWriter {
   /** Format emitted by this writer. */
-  readonly format: 'csv' | 'tsv';
+  readonly format: InterchangeFormat;
   /** Serializes a document to a blob. */
-  write(document: SpreadsheetDocument, options?: DelimitedWriteOptions): Promise<Blob>;
+  write(
+    document: SpreadsheetDocument,
+    options?: DelimitedWriteOptions | InterchangeWriteOptions,
+  ): Promise<Blob>;
+  /** Serializes a document and reports any intentional semantic degradation. */
+  writeResult(
+    document: SpreadsheetDocument,
+    options?: DelimitedWriteOptions | InterchangeWriteOptions,
+  ): Promise<WorkbookExportResult>;
 }
 
 /** Stable workbook interchange failure categories. */
@@ -217,5 +243,28 @@ export function importResult(
       ),
     ),
     security,
+  });
+}
+
+export function exportResult(
+  format: InterchangeFormat,
+  blob: Blob,
+  unsupportedFeatures: readonly string[] = [],
+): WorkbookExportResult {
+  return Object.freeze({
+    format,
+    blob,
+    diagnostics: Object.freeze(
+      [...new Set(unsupportedFeatures)].map((feature) =>
+        Object.freeze({
+          code: 'UNSUPPORTED_INTERCHANGE_FEATURE',
+          severity: 'warning' as const,
+          domain: 'interchange' as const,
+          stage: 'serialize' as const,
+          message: `The exported workbook omits an unsupported feature: ${feature}`,
+          details: Object.freeze({ feature }),
+        }),
+      ),
+    ),
   });
 }

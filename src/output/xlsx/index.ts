@@ -815,6 +815,32 @@ function validationXml(sheet: Sheet, workbook: Workbook): string {
     : `<dataValidations count="${validations.length}">${validations.join('')}</dataValidations>`;
 }
 
+function autoFilterXml(sheet: Sheet): string {
+  const filter = sheet.filter;
+  if (filter === undefined) return '';
+  const range = filter.range ?? sheetRange(sheet);
+  const reference = absoluteRange(range).replaceAll('$', '');
+  const columns = filter.filters
+    .filter(({ operator }) => operator !== 'all')
+    .map(({ column, values }) => {
+      if (column < range.start.column || column > range.end.column) {
+        throw outputError('XLSX_UNSUPPORTED_FEATURE', 'Filter column is outside its range', {
+          location: { sheetId: sheet.id },
+          details: { column },
+        });
+      }
+      return `<filterColumn colId="${column - range.start.column}"><filters>${values
+        .map((value) => `<filter val="${xml(value)}"/>`)
+        .join('')}</filters></filterColumn>`;
+    })
+    .join('');
+  const sort =
+    filter.sort === undefined || filter.sort === null
+      ? ''
+      : `<sortState ref="${reference}"><sortCondition ref="${cellReference(range.start.row, filter.sort.column)}:${cellReference(range.end.row, filter.sort.column)}"${filter.sort.direction === 'desc' ? ' descending="1"' : ''}/></sortState>`;
+  return `<autoFilter ref="${reference}">${columns}${sort}</autoFilter>`;
+}
+
 function pageXml(profile: TemplatePrintProfile | undefined, sheet: Sheet): string {
   if (profile === undefined) return '';
   const margins = profile.page.margins;
@@ -994,7 +1020,7 @@ function worksheetXml(
     `<dimension ref="${absoluteRange(sheetRange(sheet)).replaceAll('$', '')}"/>` +
     `<sheetViews><sheetView workbookViewId="0"${profile?.showGridlines === false ? ' showGridLines="0"' : ''}${profile?.showHeadings === false ? ' showRowColHeaders="0"' : ''}/></sheetViews>` +
     `<sheetFormatPr defaultRowHeight="15"/>${columns}<sheetData>${rowXml}</sheetData>${merges}` +
-    `${validationXml(sheet, workbook)}${conditionalFormattingXml(sheet, workbook, worksheet, dxfIndices)}${pageXml(profile, sheet)}${hasDrawing ? '<drawing r:id="rId1"/>' : ''}</worksheet>`
+    `${autoFilterXml(sheet)}${validationXml(sheet, workbook)}${conditionalFormattingXml(sheet, workbook, worksheet, dxfIndices)}${pageXml(profile, sheet)}${hasDrawing ? '<drawing r:id="rId1"/>' : ''}</worksheet>`
   );
 }
 

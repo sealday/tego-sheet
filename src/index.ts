@@ -297,9 +297,11 @@ export {
   createCsvReader,
   createCsvWriter,
   createOdsReader,
+  createOdsWriter,
   createTsvReader,
   createTsvWriter,
   createXlsxReader,
+  createXlsxWriter,
   InterchangeError,
 } from './interchange';
 export type {
@@ -310,6 +312,8 @@ export type {
   InterchangeLimits,
   InterchangeReadOptions,
   InterchangeSecurityReport,
+  InterchangeWriteOptions,
+  WorkbookExportResult,
   WorkbookImportResult,
   WorkbookReader,
   WorkbookWriter,

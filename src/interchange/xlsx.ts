@@ -1,4 +1,10 @@
-import type { CellInput } from '../document';
+import type {
+  CellInput,
+  ConditionalStyle,
+  DocumentSheetId,
+  JsonValue,
+  SpreadsheetDocumentInput,
+} from '../document';
 import { archiveXml, readArchive } from './archive';
 import {
   importResult,
@@ -31,6 +37,20 @@ function rowIndex(reference: string): number {
     throw new InterchangeError('MALFORMED_WORKBOOK', `Invalid cell reference: ${reference}`);
   }
   return row;
+}
+
+function sheetRange(reference: string): {
+  readonly start: { readonly row: number; readonly column: number };
+  readonly end: { readonly row: number; readonly column: number };
+} {
+  const [startReference, endReference = startReference] = reference.replaceAll('$', '').split(':');
+  if (startReference === undefined || endReference === undefined) {
+    throw new InterchangeError('MALFORMED_WORKBOOK', `Invalid range reference: ${reference}`);
+  }
+  return {
+    start: { row: rowIndex(startReference), column: columnIndex(startReference) },
+    end: { row: rowIndex(endReference), column: columnIndex(endReference) },
+  };
 }
 
 function relationshipTargets(xml: string): ReadonlyMap<string, string> {
@@ -81,6 +101,194 @@ function sharedStrings(xml: string | undefined): readonly string[] {
   );
 }
 
+interface ParsedXlsxStyles {
+  readonly registry: readonly { readonly id: string; readonly value: JsonValue }[];
+  readonly cellStyleIds: ReadonlyMap<number, string>;
+  readonly differentialStyles: readonly ConditionalStyle[];
+}
+
+function children(xml: string, element: string): readonly string[] {
+  const container = new RegExp(`<${element}s\\b[^>]*>([\\s\\S]*?)<\\/${element}s>`, 'i').exec(
+    xml,
+  )?.[1];
+  if (container === undefined) return [];
+  return [
+    ...container.matchAll(
+      new RegExp(`<${element}\\b[^>]*?(?:\\/>|>([\\s\\S]*?)<\\/${element}>)`, 'gi'),
+    ),
+  ].map((match) => match[0]);
+}
+
+function normalizedColor(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const normalized = value.startsWith('FF') && value.length === 8 ? value.slice(2) : value;
+  return /^[\dA-F]{6}$/i.test(normalized) ? `#${normalized.toLowerCase()}` : undefined;
+}
+
+function styleValue(
+  xfXml: string,
+  fonts: readonly string[],
+  fills: readonly string[],
+  borders: readonly string[],
+  numberFormats: ReadonlyMap<number, string>,
+): JsonValue {
+  const xf = attributes(/^<xf\b([^>]*)/i.exec(xfXml)?.[1] ?? '');
+  const font = fonts[Number(xf.fontId ?? 0)] ?? '';
+  const fill = fills[Number(xf.fillId ?? 0)] ?? '';
+  const border = borders[Number(xf.borderId ?? 0)] ?? '';
+  const alignmentXml = /<alignment\b([^>]*?)(?:\/>|>)/i.exec(xfXml)?.[1];
+  const alignment = alignmentXml === undefined ? {} : attributes(alignmentXml);
+  const result: Record<string, JsonValue> = {};
+  const fontColor = normalizedColor(
+    attributes(/<color\b([^>]*?)(?:\/>|>)/i.exec(font)?.[1] ?? '').rgb,
+  );
+  const fillColor = normalizedColor(
+    attributes(/<fgColor\b([^>]*?)(?:\/>|>)/i.exec(fill)?.[1] ?? '').rgb,
+  );
+  const name = attributes(/<name\b([^>]*?)(?:\/>|>)/i.exec(font)?.[1] ?? '').val;
+  const size = Number(attributes(/<sz\b([^>]*?)(?:\/>|>)/i.exec(font)?.[1] ?? '').val);
+  if (fontColor !== undefined) result.color = fontColor;
+  if (fillColor !== undefined) result.backgroundColor = fillColor;
+  if (name !== undefined) result.fontFamily = name;
+  if (Number.isFinite(size)) result.fontSize = size;
+  if (/<b(?:\s[^>]*)?\/?>/i.test(font)) result.bold = true;
+  if (/<i(?:\s[^>]*)?\/?>/i.test(font)) result.italic = true;
+  if (alignment.horizontal !== undefined) result.horizontalAlign = alignment.horizontal;
+  if (alignment.vertical !== undefined) {
+    result.verticalAlign = alignment.vertical === 'center' ? 'middle' : alignment.vertical;
+  }
+  if (alignment.wrapText === '1') result.wrap = true;
+  const numberFormat = numberFormats.get(Number(xf.numFmtId ?? 0));
+  if (numberFormat !== undefined) result.numberFormat = numberFormat;
+  for (const side of ['left', 'right', 'top', 'bottom'] as const) {
+    const match = new RegExp(`<${side}\\b([^>]*)>([\\s\\S]*?)<\\/${side}>`, 'i').exec(border);
+    if (match === null) continue;
+    const lineStyle = attributes(match[1]!).style;
+    const color = normalizedColor(
+      attributes(/<color\b([^>]*?)(?:\/>|>)/i.exec(match[2]!)?.[1] ?? '').rgb,
+    );
+    if (lineStyle !== undefined && color !== undefined)
+      result[`${side}Border`] = [lineStyle, color];
+  }
+  return result;
+}
+
+function parseStyles(xml: string | undefined): ParsedXlsxStyles {
+  if (xml === undefined) {
+    return { registry: [], cellStyleIds: new Map(), differentialStyles: [] };
+  }
+  const numberFormats = new Map(
+    [...xml.matchAll(/<numFmt\b([^>]*?)(?:\/>|>[\s\S]*?<\/numFmt>)/gi)].flatMap((match) => {
+      const entry = attributes(match[1]!);
+      const id = Number(entry.numFmtId);
+      return Number.isSafeInteger(id) && entry.formatCode !== undefined
+        ? ([[id, entry.formatCode]] as const)
+        : [];
+    }),
+  );
+  const fonts = children(xml, 'font');
+  const fills = children(xml, 'fill');
+  const borders = children(xml, 'border');
+  const cellXfsBody = /<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/i.exec(xml)?.[1] ?? '';
+  const xfs = [...cellXfsBody.matchAll(/<xf\b[^>]*?(?:\/>|>([\s\S]*?)<\/xf>)/gi)].map(
+    (match) => match[0],
+  );
+  const registry = xfs.slice(1).map((xf, index) => ({
+    id: `xlsx-style-${index + 1}`,
+    value: styleValue(xf, fonts, fills, borders, numberFormats),
+  }));
+  const cellStyleIds = new Map(registry.map((entry, index) => [index + 1, entry.id]));
+  const differentialStyles = children(xml, 'dxf').map((dxf) => {
+    const font = /<font\b[^>]*>([\s\S]*?)<\/font>/i.exec(dxf)?.[1] ?? '';
+    const fill = /<fill\b[^>]*>([\s\S]*?)<\/fill>/i.exec(dxf)?.[1] ?? '';
+    const color = normalizedColor(
+      attributes(/<color\b([^>]*?)(?:\/>|>)/i.exec(font)?.[1] ?? '').rgb,
+    );
+    const backgroundColor = normalizedColor(
+      attributes(/<fgColor\b([^>]*?)(?:\/>|>)/i.exec(fill)?.[1] ?? '').rgb,
+    );
+    return {
+      ...(color === undefined ? {} : { color }),
+      ...(backgroundColor === undefined ? {} : { backgroundColor }),
+      ...(/<b(?:\s[^>]*)?\/?>/i.test(font) ? { bold: true } : {}),
+    };
+  });
+  return { registry, cellStyleIds, differentialStyles };
+}
+
+function pageBand(value: string): { left?: string; center?: string; right?: string } | undefined {
+  if (value === '') return undefined;
+  const result: { left?: string; center?: string; right?: string } = {};
+  const matches = [...value.matchAll(/&([LCR])/g)];
+  for (const [index, match] of matches.entries()) {
+    const content = value.slice(match.index + 2, matches[index + 1]?.index ?? value.length);
+    if (match[1] === 'L') result.left = content;
+    if (match[1] === 'C') result.center = content;
+    if (match[1] === 'R') result.right = content;
+  }
+  return Object.keys(result).length === 0 ? { center: value } : result;
+}
+
+function printProfile(
+  sheetId: string,
+  xml: string,
+): SpreadsheetDocumentInput['templates'][number]['printProfiles'][number] | undefined {
+  if (!/<(?:pageMargins|pageSetup|headerFooter|printOptions)\b/i.test(xml)) return undefined;
+  const marginAttributes = attributes(/<pageMargins\b([^>]*?)(?:\/>|>)/i.exec(xml)?.[1] ?? '');
+  const setup = attributes(/<pageSetup\b([^>]*?)(?:\/>|>)/i.exec(xml)?.[1] ?? '');
+  const view = attributes(/<sheetView\b([^>]*?)(?:\/>|>)/i.exec(xml)?.[1] ?? '');
+  const paper =
+    setup.paperSize === '11'
+      ? ({ type: 'A5' } as const)
+      : setup.paperSize === '1'
+        ? ({ type: 'Letter' } as const)
+        : setup.paperWidth !== undefined && setup.paperHeight !== undefined
+          ? ({
+              type: 'custom',
+              width: Number.parseFloat(setup.paperWidth) * 96,
+              height: Number.parseFloat(setup.paperHeight) * 96,
+            } as const)
+          : ({ type: 'A4' } as const);
+  const scale =
+    setup.scale !== undefined
+      ? ({ type: 'fixed', value: Number(setup.scale) / 100 } as const)
+      : setup.fitToHeight === '1'
+        ? ({ type: 'fit-page' } as const)
+        : ({ type: 'fit-width', pages: Number(setup.fitToWidth ?? 1) } as const);
+  const headerFooter = /<headerFooter\b[^>]*>([\s\S]*?)<\/headerFooter>/i.exec(xml)?.[1] ?? '';
+  const header = pageBand(
+    textContent(/<oddHeader\b[^>]*>([\s\S]*?)<\/oddHeader>/i.exec(headerFooter)?.[1] ?? ''),
+  );
+  const footer = pageBand(
+    textContent(/<oddFooter\b[^>]*>([\s\S]*?)<\/oddFooter>/i.exec(headerFooter)?.[1] ?? ''),
+  );
+  const documentSheetId = sheetId as DocumentSheetId;
+  return {
+    id: `xlsx-print-${sheetId}`,
+    name: 'Imported print',
+    targets: [{ type: 'sheet', sheetId: documentSheetId }],
+    page: {
+      paper,
+      orientation: setup.orientation === 'landscape' ? 'landscape' : 'portrait',
+      margins: {
+        top: Number(marginAttributes.top ?? 0) * 96,
+        right: Number(marginAttributes.right ?? 0) * 96,
+        bottom: Number(marginAttributes.bottom ?? 0) * 96,
+        left: Number(marginAttributes.left ?? 0) * 96,
+      },
+      scale,
+    },
+    manualBreaks: [...xml.matchAll(/<brk\b([^>]*?)(?:\/>|>)/gi)].flatMap((match) => {
+      const beforeRow = Number(attributes(match[1]!).id);
+      return Number.isSafeInteger(beforeRow) ? [{ sheetId: documentSheetId, beforeRow }] : [];
+    }),
+    ...(header === undefined ? {} : { header }),
+    ...(footer === undefined ? {} : { footer }),
+    showGridlines: view.showGridLines !== '0',
+    showHeadings: view.showRowColHeaders !== '0',
+  };
+}
+
 function parseCell(
   cellAttributes: Readonly<Record<string, string>>,
   body: string,
@@ -127,11 +335,15 @@ function parseCell(
 }
 
 function parseWorksheet(
+  id: string,
   name: string,
   xml: string,
   strings: readonly string[],
+  styles: ParsedXlsxStyles,
+  validationRegistry: { id: string; value: JsonValue }[],
   limits: ReturnType<typeof resolveLimits>,
   unsupported: string[],
+  visibility: ImportedSheet['visibility'],
   signal?: AbortSignal,
 ): ImportedSheet {
   const cells: ImportedSheet['cells'][number][] = [];
@@ -151,16 +363,163 @@ function parseWorksheet(
     }
     const input = parseCell(cellAttributes, match[2] ?? '', strings, unsupported);
     if (input) {
-      cells.push({ row, column, input });
+      const styleId =
+        cellAttributes.s === undefined
+          ? undefined
+          : styles.cellStyleIds.get(Number(cellAttributes.s));
+      cells.push({ row, column, input, ...(styleId === undefined ? {} : { styleId }) });
       if (cells.length > limits.maxCells) {
         throw new InterchangeError('CELL_LIMIT_EXCEEDED', 'XLSX cell limit exceeded');
       }
     }
   }
-  if (/<mergeCells\b/i.test(xml)) unsupported.push('xlsx:merged-cells');
-  if (/<conditionalFormatting\b/i.test(xml)) unsupported.push('xlsx:conditional-formatting');
-  if (/<dataValidations\b/i.test(xml)) unsupported.push('xlsx:data-validation');
-  if (/<autoFilter\b/i.test(xml)) unsupported.push('xlsx:auto-filter');
+  const merges = [...xml.matchAll(/<mergeCell\b([^>]*?)(?:\/>|>[\s\S]*?<\/mergeCell>)/gi)].map(
+    (match) => {
+      const reference = attributes(match[1]!).ref;
+      if (reference === undefined) {
+        throw new InterchangeError('MALFORMED_WORKBOOK', 'Merged range reference is missing');
+      }
+      return sheetRange(reference);
+    },
+  );
+  const byCoordinate = new Map(cells.map((cell) => [`${cell.row}:${cell.column}`, cell]));
+  const setValidation = (reference: string, validationId: string): void => {
+    const range = sheetRange(reference);
+    for (let row = range.start.row; row <= range.end.row; row += 1) {
+      for (let column = range.start.column; column <= range.end.column; column += 1) {
+        const key = `${row}:${column}`;
+        const current = byCoordinate.get(key);
+        const next = {
+          row,
+          column,
+          input: current?.input ?? ({ type: 'blank' } as const),
+          ...(current?.styleId === undefined ? {} : { styleId: current.styleId }),
+          validationId,
+        };
+        if (current === undefined) cells.push(next);
+        else cells[cells.indexOf(current)] = next;
+        byCoordinate.set(key, next);
+      }
+    }
+  };
+  for (const match of xml.matchAll(
+    /<dataValidation\b([^>]*?)(?:\/>|>([\s\S]*?)<\/dataValidation>)/gi,
+  )) {
+    const ruleAttributes = attributes(match[1]!);
+    if (ruleAttributes.sqref === undefined || ruleAttributes.type === undefined) {
+      throw new InterchangeError('MALFORMED_WORKBOOK', 'Data validation is incomplete');
+    }
+    const body = match[2] ?? '';
+    const scalar = (tag: 'formula1' | 'formula2'): JsonValue | undefined => {
+      const value = new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i').exec(body)?.[1];
+      if (value === undefined) return undefined;
+      const decoded = textContent(value);
+      const number = Number(decoded);
+      return Number.isFinite(number) && decoded.trim() !== '' ? number : decoded;
+    };
+    const formula1 = scalar('formula1');
+    const formula2 = scalar('formula2');
+    const id = `xlsx-validation-${validationRegistry.length + 1}`;
+    validationRegistry.push({
+      id,
+      value: {
+        type: ruleAttributes.type,
+        ...(ruleAttributes.operator === undefined ? {} : { operator: ruleAttributes.operator }),
+        ...(formula1 === undefined ? {} : { formula1 }),
+        ...(formula2 === undefined ? {} : { formula2 }),
+        allowBlank: ruleAttributes.allowBlank === '1',
+      },
+    });
+    for (const reference of ruleAttributes.sqref.split(/\s+/).filter(Boolean)) {
+      setValidation(reference, id);
+    }
+  }
+  const conditionalFormatting: NonNullable<ImportedSheet['conditionalFormatting']>[number][] = [];
+  for (const match of xml.matchAll(
+    /<conditionalFormatting\b([^>]*?)>([\s\S]*?)<\/conditionalFormatting>/gi,
+  )) {
+    const reference = attributes(match[1]!).sqref;
+    if (reference === undefined || /\s/.test(reference.trim())) {
+      unsupported.push('xlsx:conditional-formatting-multi-range');
+      continue;
+    }
+    const range = { sheetId: id as DocumentSheetId, ...sheetRange(reference) };
+    const rule = /<cfRule\b([^>]*?)>([\s\S]*?)<\/cfRule>/i.exec(match[2]!);
+    if (rule === null) continue;
+    const ruleAttributes = attributes(rule[1]!);
+    if (ruleAttributes.type === 'colorScale') {
+      const colors = [...rule[2]!.matchAll(/<color\b([^>]*?)(?:\/>|>)/gi)]
+        .map((color) => normalizedColor(attributes(color[1]!).rgb))
+        .filter((color): color is string => color !== undefined);
+      if (colors.length === 2 || colors.length === 3) {
+        conditionalFormatting.push({
+          type: 'color-scale',
+          range,
+          minimumColor: colors[0]!,
+          ...(colors.length === 3 ? { midpointColor: colors[1]! } : {}),
+          maximumColor: colors.at(-1)!,
+        });
+      } else unsupported.push('xlsx:conditional-formatting-color');
+    } else if (ruleAttributes.type === 'cellIs' && ruleAttributes.operator !== undefined) {
+      const formulas = [...rule[2]!.matchAll(/<formula\b[^>]*>([\s\S]*?)<\/formula>/gi)].map(
+        (formula) => textContent(formula[1]!),
+      );
+      const differential =
+        ruleAttributes.dxfId === undefined
+          ? {}
+          : (styles.differentialStyles[Number(ruleAttributes.dxfId)] ?? {});
+      conditionalFormatting.push({
+        type: 'cell-is',
+        range,
+        operator: ruleAttributes.operator as never,
+        formula: formulas[0] ?? '',
+        ...(formulas[1] === undefined ? {} : { formula2: formulas[1] }),
+        style: differential,
+      });
+    } else {
+      unsupported.push(`xlsx:conditional-formatting-${ruleAttributes.type ?? 'unknown'}`);
+    }
+  }
+  const autoFilter = /<autoFilter\b([^>]*?)(?:\/>|>([\s\S]*?)<\/autoFilter>)/i.exec(xml);
+  let filter: ImportedSheet['filter'];
+  if (autoFilter !== null) {
+    const reference = attributes(autoFilter[1]!).ref;
+    if (reference === undefined) {
+      throw new InterchangeError('MALFORMED_WORKBOOK', 'Auto-filter range is missing');
+    }
+    const range = sheetRange(reference);
+    const body = autoFilter[2] ?? '';
+    const filters = [...body.matchAll(/<filterColumn\b([^>]*?)>([\s\S]*?)<\/filterColumn>/gi)].map(
+      (match) => {
+        const relativeColumn = Number(attributes(match[1]!).colId);
+        if (!Number.isSafeInteger(relativeColumn) || relativeColumn < 0) {
+          throw new InterchangeError('MALFORMED_WORKBOOK', 'Auto-filter column is invalid');
+        }
+        return {
+          column: range.start.column + relativeColumn,
+          operator: 'in' as const,
+          values: [...match[2]!.matchAll(/<filter\b([^>]*?)(?:\/>|>[\s\S]*?<\/filter>)/gi)].map(
+            (value) => attributes(value[1]!).val ?? '',
+          ),
+        };
+      },
+    );
+    const sortMatch = /<sortCondition\b([^>]*?)(?:\/>|>[\s\S]*?<\/sortCondition>)/i.exec(body);
+    const sortAttributes = sortMatch === null ? undefined : attributes(sortMatch[1]!);
+    const sortReference = sortAttributes?.ref;
+    filter = {
+      range,
+      filters,
+      ...(sortReference === undefined
+        ? {}
+        : {
+            sort: {
+              column: sheetRange(sortReference).start.column,
+              direction: sortAttributes?.descending === '1' ? ('desc' as const) : ('asc' as const),
+            },
+          }),
+    };
+  }
   if (/<hyperlinks\b/i.test(xml)) unsupported.push('xlsx:hyperlinks');
   if (/<sheetProtection\b/i.test(xml)) unsupported.push('xlsx:sheet-protection');
   if (/<drawing\b/i.test(xml)) unsupported.push('xlsx:drawing-objects');
@@ -169,10 +528,16 @@ function parseWorksheet(
   if (/<(?:legacyDrawing|oleObjects|controls)\b/i.test(xml)) {
     unsupported.push('xlsx:embedded-objects');
   }
-  if (/<(?:pageMargins|pageSetup|headerFooter|printOptions)\b/i.test(xml)) {
-    unsupported.push('xlsx:print-settings');
-  }
-  return { name, cells };
+  cells.sort((left, right) => left.row - right.row || left.column - right.column);
+  return {
+    name,
+    id,
+    cells,
+    merges,
+    ...(filter === undefined ? {} : { filter }),
+    ...(conditionalFormatting.length === 0 ? {} : { conditionalFormatting }),
+    ...(visibility === undefined ? {} : { visibility }),
+  };
 }
 
 /** Creates an atomic XLSX reader with ZIP and XML resource limits. */
@@ -213,15 +578,34 @@ export function createXlsxReader(configuredLimits: InterchangeLimits = {}): Work
           : archiveXml(entries, 'xl/sharedStrings.xml', limits);
       const strings = sharedStrings(shared);
       const unsupported: string[] = [];
-      if (/<definedNames\b/i.test(workbook)) unsupported.push('xlsx:defined-names');
+      const definedNames =
+        /<definedNames\b[^>]*>([\s\S]*?)<\/definedNames>/i.exec(workbook)?.[1] ?? '';
+      if (
+        [...definedNames.matchAll(/<definedName\b([^>]*?)(?:\/>|>[\s\S]*?<\/definedName>)/gi)].some(
+          (match) =>
+            !new Set(['_xlnm.Print_Area', '_xlnm.Print_Titles']).has(
+              attributes(match[1]!).name ?? '',
+            ),
+        )
+      ) {
+        unsupported.push('xlsx:defined-names');
+      }
       if (/<workbookProtection\b/i.test(workbook)) unsupported.push('xlsx:workbook-protection');
-      if (entries['xl/styles.xml'] !== undefined) unsupported.push('xlsx:styles');
+      const styles = parseStyles(
+        entries['xl/styles.xml'] === undefined
+          ? undefined
+          : archiveXml(entries, 'xl/styles.xml', limits),
+      );
       if (entries['xl/calcChain.xml'] !== undefined) unsupported.push('xlsx:calculation-chain');
       if (entryNames.some((name) => /^xl\/comments\d*\.xml$/i.test(name))) {
         unsupported.push('xlsx:comments');
       }
       const sheets: ImportedSheet[] = [];
+      const validations: { id: string; value: JsonValue }[] = [];
+      const printProfiles: SpreadsheetDocumentInput['templates'][number]['printProfiles'][number][] =
+        [];
       let totalCells = 0;
+      let sheetIndex = 0;
       for (const match of workbook.matchAll(/<sheet\b([^>]*?)(?:\/>|>[\s\S]*?<\/sheet>)/gi)) {
         throwIfAborted(options.signal);
         const sheetAttributes = attributes(match[1]!);
@@ -231,25 +615,60 @@ export function createXlsxReader(configuredLimits: InterchangeLimits = {}): Work
           throw new InterchangeError('MALFORMED_WORKBOOK', 'Worksheet relationship is missing');
         }
         const worksheetName = normalizedWorksheetTarget(target);
+        const id = `interchange-sheet-${sheetIndex + 1}`;
+        const state = sheetAttributes.state;
+        const visibility =
+          state === 'hidden'
+            ? ('hidden' as const)
+            : state === 'veryHidden'
+              ? ('very-hidden' as const)
+              : ('visible' as const);
+        const worksheetXml = archiveXml(entries, worksheetName, limits);
         const sheet = parseWorksheet(
+          id,
           sheetAttributes.name,
-          archiveXml(entries, worksheetName, limits),
+          worksheetXml,
           strings,
+          styles,
+          validations,
           limits,
           unsupported,
+          visibility,
           options.signal,
         );
+        const profile = printProfile(id, worksheetXml);
+        if (profile !== undefined) printProfiles.push(profile);
         totalCells += sheet.cells.length;
         if (totalCells > limits.maxCells) {
           throw new InterchangeError('CELL_LIMIT_EXCEEDED', 'XLSX cell limit exceeded');
         }
         sheets.push(sheet);
+        sheetIndex += 1;
       }
       if (sheets.length === 0) {
         throw new InterchangeError('MALFORMED_WORKBOOK', 'Workbook contains no worksheets');
       }
       throwIfAborted(options.signal);
-      return importResult('xlsx', buildDocument(sheets), [], unsupported);
+      return importResult(
+        'xlsx',
+        buildDocument(sheets, {
+          styles: styles.registry,
+          validations,
+          templates:
+            printProfiles.length === 0
+              ? []
+              : [
+                  {
+                    id: 'xlsx-imported-print',
+                    name: 'Imported print',
+                    bindings: [],
+                    printProfiles: [...printProfiles],
+                  },
+                ],
+        }),
+        [],
+        unsupported,
+      );
     },
   });
 }
