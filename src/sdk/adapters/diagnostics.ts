@@ -6,6 +6,7 @@ import type {
   AdapterDiagnosticDetails,
   AdapterManifest,
 } from './types';
+import { JsonSnapshotError, snapshotJsonValue } from './json-safe';
 
 /** Public adapter failure carrying one stable diagnostic. */
 export class AdapterSdkError extends Error {
@@ -34,6 +35,17 @@ export function adapterDiagnostic(
     readonly cause?: unknown;
   } = {},
 ): AdapterDiagnostic {
+  let details: AdapterDiagnosticDetails | undefined;
+  if (options.details !== undefined) {
+    try {
+      details = snapshotJsonValue(options.details, 'diagnostic.details');
+    } catch (cause) {
+      details = Object.freeze({
+        invalidDetails:
+          cause instanceof JsonSnapshotError ? cause.message : 'Diagnostic details are invalid',
+      });
+    }
+  }
   return Object.freeze({
     code,
     severity: 'error',
@@ -43,7 +55,7 @@ export function adapterDiagnostic(
     ...(options.manifest === undefined
       ? {}
       : { location: Object.freeze({ adapterId: options.manifest.id }) }),
-    ...(options.details === undefined ? {} : { details: options.details }),
+    ...(details === undefined ? {} : { details }),
     ...(options.cause === undefined ? {} : { cause: options.cause }),
   });
 }

@@ -160,6 +160,88 @@ describe('public AdapterRegistry facade', () => {
     });
   });
 
+  it('snapshots configured defaults once and deeply freezes diagnostic details', async () => {
+    let reads = 0;
+    const defaults = {
+      get solver() {
+        reads += 1;
+        return reads === 1 ? 'alpha' : 'zeta';
+      },
+    };
+    const registry = createAdapterRegistry({
+      apiVersion: '1.0',
+      environment: 'browser',
+      defaults,
+    });
+    await registry.register(solver('alpha'));
+    await registry.register(solver('zeta'));
+
+    expect(registry.resolve('solver')).toMatchObject({ manifest: { id: 'alpha' } });
+    expect(registry.resolve('solver')).toMatchObject({ manifest: { id: 'alpha' } });
+    expect(reads).toBe(1);
+
+    const ambiguous = createAdapterRegistry({
+      apiVersion: '1.0',
+      environment: 'browser',
+    });
+    await ambiguous.register(solver('alpha'));
+    await ambiguous.register(solver('zeta'));
+    let error: AdapterSdkError | undefined;
+    try {
+      ambiguous.resolve('solver');
+    } catch (cause) {
+      error = cause as AdapterSdkError;
+    }
+    expect(error).toBeDefined();
+    expect(Object.isFrozen(error!.diagnostic.details)).toBe(true);
+    expect(
+      Object.isFrozen((error!.diagnostic.details as { candidates: readonly string[] }).candidates),
+    ).toBe(true);
+  });
+
+  it('reads manifest fields once and rejects accessor-backed manifest arrays without invoking them', async () => {
+    const reads = { id: 0, apiVersion: 0, kind: 0 };
+    const capabilityGetter = vi.fn(() => 'solve');
+    const capabilities: string[] = [];
+    Object.defineProperty(capabilities, '0', {
+      enumerable: true,
+      configurable: true,
+      get: capabilityGetter,
+    });
+    capabilities.length = 1;
+    const manifest = {
+      get id() {
+        reads.id += 1;
+        return 'hostile';
+      },
+      get apiVersion() {
+        reads.apiVersion += 1;
+        return '1.0' as const;
+      },
+      get kind() {
+        reads.kind += 1;
+        return 'solver' as const;
+      },
+      environments: ['browser'] as const,
+      execution: 'trusted-main' as const,
+      priority: 0,
+      capabilities,
+    };
+    const registry = createAdapterRegistry({
+      apiVersion: '1.0',
+      environment: 'browser',
+    });
+
+    await expect(
+      registry.register({
+        manifest,
+        implementation: { invoke: async () => null },
+      }),
+    ).rejects.toMatchObject({ code: 'ADAPTER_MANIFEST_INVALID' });
+    expect(reads).toEqual({ id: 1, apiVersion: 1, kind: 1 });
+    expect(capabilityGetter).not.toHaveBeenCalled();
+  });
+
   it('releases registrations in reverse order and makes unregister/dispose idempotent', async () => {
     const released: string[] = [];
     const registry = createAdapterRegistry({

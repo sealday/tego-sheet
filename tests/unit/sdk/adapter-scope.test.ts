@@ -79,6 +79,122 @@ describe('AdapterScope invocation boundary', () => {
     expect(Object.isFrozen(grant.capabilities)).toBe(true);
   });
 
+  it('rejects an already-aborted scope before scheduling adapter work', async () => {
+    const direct = vi.fn(async () => null);
+    const registry = createAdapterRegistry({
+      apiVersion: '1.0',
+      environment: 'browser',
+    });
+    await registry.register(trustedSolver(direct));
+    const parent = new AbortController();
+    parent.abort(new Error('cancelled before scope creation'));
+    const scope = registry.createScope({
+      signal: parent.signal,
+      grant: createCapabilityGrant(['solve']),
+    });
+
+    const rejected = scope.invoke(registry.resolve('solver'), {
+      capability: 'solve',
+      input: null,
+      validateResult: () => true,
+    });
+    await expect(rejected).rejects.toMatchObject({ code: 'ADAPTER_INVOCATION_ABORTED' });
+    expect(direct).not.toHaveBeenCalled();
+  });
+
+  it('snapshots grants instead of trusting a caller-supplied allows method', async () => {
+    const direct = vi.fn(async () => null);
+    const registry = createAdapterRegistry({
+      apiVersion: '1.0',
+      environment: 'browser',
+    });
+    await registry.register(trustedSolver(direct, ['solve', 'inspect']));
+    const scope = registry.createScope({
+      signal: new AbortController().signal,
+      grant: {
+        capabilities: ['inspect'],
+        allows: () => true,
+      },
+    });
+
+    await expect(
+      scope.invoke(registry.resolve('solver'), {
+        capability: 'solve',
+        input: null,
+        validateResult: () => true,
+      }),
+    ).rejects.toMatchObject({ code: 'CAPABILITY_DENIED' });
+    expect(direct).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    new Map([['value', 1]]),
+    new Set([1]),
+    () => undefined,
+    { toJSON: () => ({ safe: true }) },
+    Object.defineProperty({}, 'value', { enumerable: true, get: () => 1 }),
+  ])('rejects non-plain or executable invocation input %#', async (input) => {
+    const direct = vi.fn(async () => null);
+    const registry = createAdapterRegistry({
+      apiVersion: '1.0',
+      environment: 'browser',
+    });
+    await registry.register(trustedSolver(direct));
+    const scope = registry.createScope({
+      signal: new AbortController().signal,
+      grant: createCapabilityGrant(['solve']),
+    });
+
+    await expect(
+      scope.invoke(registry.resolve('solver'), {
+        capability: 'solve',
+        input,
+        validateResult: () => true,
+      }),
+    ).rejects.toMatchObject({ code: 'ADAPTER_INPUT_INVALID' });
+    expect(direct).not.toHaveBeenCalled();
+  });
+
+  it('rejects cycles and unsafe results while passing a frozen detached input snapshot', async () => {
+    const cycle: { self?: unknown } = {};
+    cycle.self = cycle;
+    const seen: unknown[] = [];
+    const registry = createAdapterRegistry({
+      apiVersion: '1.0',
+      environment: 'browser',
+    });
+    await registry.register(
+      trustedSolver(async ({ input }) => {
+        seen.push(input);
+        return new Map([['unsafe', true]]);
+      }),
+    );
+    const scope = registry.createScope({
+      signal: new AbortController().signal,
+      grant: createCapabilityGrant(['solve']),
+    });
+
+    await expect(
+      scope.invoke(registry.resolve('solver'), {
+        capability: 'solve',
+        input: cycle,
+        validateResult: () => true,
+      }),
+    ).rejects.toMatchObject({ code: 'ADAPTER_INPUT_INVALID' });
+
+    const original = { nested: { value: 1 } };
+    await expect(
+      scope.invoke(registry.resolve('solver'), {
+        capability: 'solve',
+        input: original,
+        validateResult: () => true,
+      }),
+    ).rejects.toMatchObject({ code: 'ADAPTER_RESULT_INVALID' });
+    expect(seen[0]).not.toBe(original);
+    expect(Object.isFrozen(seen[0])).toBe(true);
+    expect(Object.isFrozen((seen[0] as { nested: object }).nested)).toBe(true);
+  });
+
   it('normalizes adapter exceptions and invalid results to invocation diagnostics', async () => {
     const registry = createAdapterRegistry({
       apiVersion: '1.0',

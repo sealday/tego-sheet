@@ -235,6 +235,7 @@ export type AdapterDiagnosticCode =
   | 'ADAPTER_AMBIGUOUS'
   | 'ADAPTER_INITIALIZATION_FAILED'
   | 'ADAPTER_INVOCATION_FAILED'
+  | 'ADAPTER_INPUT_INVALID'
   | 'ADAPTER_RESULT_INVALID'
   | 'ADAPTER_DISPOSE_FAILED'
   | 'ADAPTER_LIMIT_EXCEEDED'
@@ -242,6 +243,7 @@ export type AdapterDiagnosticCode =
   | 'ADAPTER_INVOCATION_ABORTED'
   | 'ADAPTER_SCOPE_DISPOSED'
   | 'ADAPTER_REGISTRY_DISPOSED'
+  | 'ADAPTER_OPTIONS_INVALID'
   | 'CAPABILITY_DENIED';
 
 /** Diagnostic emitted by the public adapter SDK. */
@@ -270,4 +272,4 @@ export interface AdapterRegistry {
 }
 
 /** JSON-safe diagnostic details helper type. */
-export type AdapterDiagnosticDetails = Readonly<Record<string, JsonValue>>;
+export type AdapterDiagnosticDetails = JsonValue;

@@ -1,6 +1,12 @@
 import type { JsonValue } from '../../core/types/json';
-import { DEFAULT_ADAPTER_SCOPE_LIMITS, type AdapterScopeLimits } from '../trust';
+import {
+  createCapabilityGrant,
+  DEFAULT_ADAPTER_SCOPE_LIMITS,
+  type AdapterScopeLimits,
+  type CapabilityGrant,
+} from '../trust';
 import { adapterDiagnostic, AdapterSdkError } from './diagnostics';
+import { jsonSnapshotBytes, snapshotJsonValue } from './json-safe';
 import type {
   AdapterDiagnostic,
   AdapterKind,
@@ -12,7 +18,6 @@ import type {
   ScopedAdapterInvocation,
 } from './types';
 
-const encoder = new TextEncoder();
 const timeoutMarker = Object.freeze({ type: 'adapter-timeout' });
 const disposedMarker = Object.freeze({ type: 'adapter-scope-disposed' });
 
@@ -24,7 +29,23 @@ interface AdapterScopeRuntimeOptions {
 }
 
 function limitsSnapshot(overrides: Partial<AdapterScopeLimits> | undefined): AdapterScopeLimits {
-  const limits = Object.freeze({ ...DEFAULT_ADAPTER_SCOPE_LIMITS, ...overrides });
+  let limits: AdapterScopeLimits;
+  try {
+    limits = Object.freeze({
+      maxConcurrentInvocations:
+        overrides?.maxConcurrentInvocations ??
+        DEFAULT_ADAPTER_SCOPE_LIMITS.maxConcurrentInvocations,
+      maxDurationMs: overrides?.maxDurationMs ?? DEFAULT_ADAPTER_SCOPE_LIMITS.maxDurationMs,
+      maxInputBytes: overrides?.maxInputBytes ?? DEFAULT_ADAPTER_SCOPE_LIMITS.maxInputBytes,
+      maxOutputBytes: overrides?.maxOutputBytes ?? DEFAULT_ADAPTER_SCOPE_LIMITS.maxOutputBytes,
+    });
+  } catch (cause) {
+    throw new AdapterSdkError([
+      adapterDiagnostic('ADAPTER_OPTIONS_INVALID', 'validate', 'Scope limits could not be read', {
+        cause,
+      }),
+    ]);
+  }
   if (
     !Number.isSafeInteger(limits.maxConcurrentInvocations) ||
     limits.maxConcurrentInvocations <= 0 ||
@@ -35,14 +56,27 @@ function limitsSnapshot(overrides: Partial<AdapterScopeLimits> | undefined): Ada
     !Number.isSafeInteger(limits.maxOutputBytes) ||
     limits.maxOutputBytes <= 0
   ) {
-    throw new TypeError('Adapter scope limits must be positive finite integers');
+    throw new AdapterSdkError([
+      adapterDiagnostic(
+        'ADAPTER_OPTIONS_INVALID',
+        'validate',
+        'Adapter scope limits must be positive finite integers',
+      ),
+    ]);
   }
   return limits;
 }
 
-function encodedSize(value: unknown): number {
-  const serialized = JSON.stringify(value);
-  return serialized === undefined ? 0 : encoder.encode(serialized).byteLength;
+function grantSnapshot(grant: CapabilityGrant): CapabilityGrant {
+  try {
+    return createCapabilityGrant(grant.capabilities);
+  } catch (cause) {
+    throw new AdapterSdkError([
+      adapterDiagnostic('ADAPTER_OPTIONS_INVALID', 'validate', 'Capability grant is invalid', {
+        cause,
+      }),
+    ]);
+  }
 }
 
 function callable(value: unknown): value is CallableAdapter {
@@ -55,6 +89,7 @@ function callable(value: unknown): value is CallableAdapter {
 
 export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): AdapterScope {
   const limits = limitsSnapshot(runtime.options.limits);
+  const grant = grantSnapshot(runtime.options.grant);
   const controller = new AbortController();
   const active = new Set<Promise<void>>();
   let disposed = false;
@@ -92,8 +127,14 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
       if (disposed) {
         fail('ADAPTER_SCOPE_DISPOSED', 'Adapter scope has been disposed', { resolution });
       }
+      if (controller.signal.aborted) {
+        fail('ADAPTER_INVOCATION_ABORTED', 'Adapter invocation was aborted', {
+          resolution,
+          cause: controller.signal.reason,
+        });
+      }
       if (
-        !runtime.options.grant.allows(invocation.capability) ||
+        !grant.allows(invocation.capability) ||
         !resolution.manifest.capabilities.includes(invocation.capability)
       ) {
         fail('CAPABILITY_DENIED', `Capability ${invocation.capability} was not granted`, {
@@ -101,15 +142,16 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
           details: { capability: invocation.capability },
         });
       }
-      let inputBytes = 0;
+      let inputSnapshot: JsonValue;
       try {
-        inputBytes = encodedSize(invocation.input);
+        inputSnapshot = snapshotJsonValue(invocation.input, 'adapter.input');
       } catch (cause) {
-        return fail('ADAPTER_LIMIT_EXCEEDED', 'Adapter input is not JSON serializable', {
+        return fail('ADAPTER_INPUT_INVALID', 'Adapter input is not strict JSON data', {
           resolution,
           cause,
         });
       }
+      const inputBytes = jsonSnapshotBytes(inputSnapshot);
       if (inputBytes > limits.maxInputBytes) {
         fail('ADAPTER_LIMIT_EXCEEDED', 'Adapter input exceeds the scope byte limit', {
           resolution,
@@ -149,7 +191,7 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
               adapterId: resolution.manifest.id,
               kind: resolution.manifest.kind,
               capability: invocation.capability,
-              input: structuredClone(invocation.input),
+              input: inputSnapshot,
               ...(runtime.options.documentId === undefined
                 ? {}
                 : { documentId: runtime.options.documentId }),
@@ -161,7 +203,7 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
           throw new TypeError(`Adapter ${resolution.manifest.id} is not generically callable`);
         }
         return resolution.implementation.invoke(
-          Object.freeze({ capability: invocation.capability, input: invocation.input }),
+          Object.freeze({ capability: invocation.capability, input: inputSnapshot }),
           Object.freeze({
             ...(runtime.options.documentId === undefined
               ? {}
@@ -179,9 +221,18 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
 
       try {
         const result = await settled;
+        let resultSnapshot: JsonValue;
+        try {
+          resultSnapshot = snapshotJsonValue(result, 'adapter.result');
+        } catch (cause) {
+          return fail('ADAPTER_RESULT_INVALID', 'Adapter result is not strict JSON data', {
+            resolution,
+            cause,
+          });
+        }
         let valid = false;
         try {
-          valid = invocation.validateResult(result);
+          valid = invocation.validateResult(resultSnapshot);
         } catch {
           valid = false;
         }
@@ -191,22 +242,14 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
             details: { capability: invocation.capability },
           });
         }
-        let outputBytes = 0;
-        try {
-          outputBytes = encodedSize(result);
-        } catch (cause) {
-          return fail('ADAPTER_RESULT_INVALID', 'Adapter result is not JSON serializable', {
-            resolution,
-            cause,
-          });
-        }
+        const outputBytes = jsonSnapshotBytes(resultSnapshot);
         if (outputBytes > limits.maxOutputBytes) {
           fail('ADAPTER_LIMIT_EXCEEDED', 'Adapter result exceeds the scope byte limit', {
             resolution,
             details: { actual: outputBytes, limit: limits.maxOutputBytes },
           });
         }
-        return result as Result;
+        return resultSnapshot as Result;
       } catch (cause) {
         if (cause instanceof AdapterSdkError) throw cause;
         if (invocationController.signal.aborted) {

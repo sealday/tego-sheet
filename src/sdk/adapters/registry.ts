@@ -5,6 +5,7 @@ import { createAdapterRegistryKernel } from '../../extensions/kernel/registry';
 import './kernel-bridge';
 import { adapterDiagnostic, AdapterSdkError, mapKernelError } from './diagnostics';
 import { snapshotAdapterManifest } from './manifest';
+import { ADAPTER_KINDS } from './manifest';
 import { createAdapterScopeRuntime } from './scope';
 import type {
   AdapterDiagnostic,
@@ -43,9 +44,43 @@ function compareManifest(left: AdapterManifest, right: AdapterManifest): number 
 
 /** Creates a public registry facade backed by the existing F5 registry kernel. */
 export function createAdapterRegistry(options: AdapterRegistryOptions): AdapterRegistry {
+  let configuration: AdapterRegistryOptions;
+  try {
+    const defaultsSource = options.defaults;
+    const defaults: Partial<Record<AdapterKind, string>> = {};
+    if (defaultsSource !== undefined) {
+      for (const kind of ADAPTER_KINDS) {
+        const id = defaultsSource[kind];
+        if (id !== undefined) {
+          if (typeof id !== 'string' || id.length === 0) {
+            throw new TypeError(`Default adapter ${kind} must be a non-empty ID`);
+          }
+          defaults[kind] = id;
+        }
+      }
+    }
+    configuration = Object.freeze({
+      apiVersion: options.apiVersion,
+      environment: options.environment,
+      defaults: Object.freeze(defaults),
+      ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
+      ...(options.isolatedWorkerTransport === undefined
+        ? {}
+        : { isolatedWorkerTransport: options.isolatedWorkerTransport }),
+    });
+  } catch (cause) {
+    throw new AdapterSdkError([
+      adapterDiagnostic(
+        'ADAPTER_OPTIONS_INVALID',
+        'validate',
+        'Adapter registry options could not be snapshotted',
+        { cause },
+      ),
+    ]);
+  }
   const kernel = createAdapterRegistryKernel({
-    apiVersion: options.apiVersion,
-    environment: options.environment,
+    apiVersion: configuration.apiVersion,
+    environment: configuration.environment,
   });
   const records = new Map<string, PublicRecord>();
   const scopes = new Set<AdapterScope>();
@@ -54,7 +89,7 @@ export function createAdapterRegistry(options: AdapterRegistryOptions): AdapterR
 
   const publish = (diagnostic: AdapterDiagnostic): void => {
     try {
-      options.diagnostics?.(diagnostic);
+      configuration.diagnostics?.(diagnostic);
     } catch {
       // Diagnostic observers cannot own registry control flow.
     }
@@ -184,7 +219,7 @@ export function createAdapterRegistry(options: AdapterRegistryOptions): AdapterR
         selected = candidates.find(({ id }) => id === query.id);
         reason = 'explicit-id';
       } else {
-        const configured = options.defaults?.[kind];
+        const configured = configuration.defaults?.[kind];
         if (configured !== undefined) {
           selected = candidates.find(({ id }) => id === configured);
           reason = 'configured-default';
@@ -209,7 +244,7 @@ export function createAdapterRegistry(options: AdapterRegistryOptions): AdapterR
       try {
         const kernelImplementation = kernel.resolve(kind, {
           id: chosen.id,
-          environment: options.environment,
+          environment: configuration.environment,
         });
         const implementation =
           chosen.execution === 'isolated-worker'
@@ -235,9 +270,9 @@ export function createAdapterRegistry(options: AdapterRegistryOptions): AdapterR
       }
       const scope = createAdapterScopeRuntime({
         options: scopeOptions,
-        ...(options.isolatedWorkerTransport === undefined
+        ...(configuration.isolatedWorkerTransport === undefined
           ? {}
-          : { transport: options.isolatedWorkerTransport }),
+          : { transport: configuration.isolatedWorkerTransport }),
         publish,
         onDispose: () => scopes.delete(scope),
       });

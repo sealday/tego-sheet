@@ -13,15 +13,16 @@ const capabilityPattern = /^[a-z][a-z0-9]*(?:[.:-][a-z0-9]+)*$/;
 
 /** Creates a deduplicated immutable capability grant. */
 export function createCapabilityGrant(capabilities: readonly string[]): CapabilityGrant {
-  if (
-    !Array.isArray(capabilities) ||
-    capabilities.some(
-      (capability) => typeof capability !== 'string' || !capabilityPattern.test(capability),
-    )
-  ) {
-    throw new TypeError('Capabilities must be stable lowercase identifiers');
-  }
-  const snapshot = Object.freeze([...new Set(capabilities)].sort());
+  const snapshot = Object.freeze(
+    [
+      ...snapshotStringList(
+        capabilities,
+        'capabilities',
+        (entry) => capabilityPattern.test(entry),
+        true,
+      ),
+    ].sort(),
+  );
   const allowed = new Set(snapshot);
   return Object.freeze({
     capabilities: snapshot,
@@ -48,3 +49,4 @@ export const DEFAULT_ADAPTER_SCOPE_LIMITS: Readonly<AdapterScopeLimits> = Object
   maxInputBytes: 1024 * 1024,
   maxOutputBytes: 4 * 1024 * 1024,
 });
+import { snapshotStringList } from '../adapters/json-safe';

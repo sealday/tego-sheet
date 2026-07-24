@@ -1,5 +1,6 @@
 import type { AdapterKind, AdapterManifest } from './types';
 import { adapterDiagnostic, AdapterSdkError } from './diagnostics';
+import { JsonSnapshotError, snapshotStringList } from './json-safe';
 
 export const ADAPTER_KINDS = Object.freeze([
   'workbook-reader',
@@ -57,30 +58,45 @@ export function snapshotAdapterManifest<K extends AdapterKind>(
     ]);
   }
 
-  const validCapabilities =
-    Array.isArray(capabilities) &&
-    capabilities.length > 0 &&
-    capabilities.every(
-      (capability) => typeof capability === 'string' && capabilityPattern.test(capability),
-    ) &&
-    new Set(capabilities).size === capabilities.length;
-  const validFormats =
-    formats === undefined ||
-    (Array.isArray(formats) &&
-      formats.length > 0 &&
-      formats.every((format) => typeof format === 'string' && format.length > 0) &&
-      new Set(formats).size === formats.length);
+  let capabilitySnapshot: readonly string[] = [];
+  let formatSnapshot: readonly string[] | undefined;
+  let environmentSnapshot: readonly string[] = [];
+  try {
+    capabilitySnapshot = snapshotStringList(
+      capabilities,
+      'manifest.capabilities',
+      (entry) => capabilityPattern.test(entry),
+      false,
+    );
+    environmentSnapshot = snapshotStringList(
+      environments,
+      'manifest.environments',
+      (entry) => entry === 'browser' || entry === 'worker' || entry === 'node',
+      false,
+    );
+    formatSnapshot =
+      formats === undefined
+        ? undefined
+        : snapshotStringList(formats, 'manifest.formats', (entry) => entry.length > 0, false);
+  } catch (cause) {
+    if (!(cause instanceof JsonSnapshotError)) throw cause;
+    throw new AdapterSdkError([
+      adapterDiagnostic(
+        'ADAPTER_MANIFEST_INVALID',
+        'validate',
+        cause.message,
+        typeof id === 'string' ? { manifest: { id }, cause } : { cause },
+      ),
+    ]);
+  }
   if (
     typeof id !== 'string' ||
     typeof apiVersion !== 'string' ||
     typeof kind !== 'string' ||
     !kindSet.has(kind) ||
-    !Array.isArray(environments) ||
     (execution !== 'trusted-main' && execution !== 'isolated-worker') ||
     typeof priority !== 'number' ||
-    !Number.isSafeInteger(priority) ||
-    !validCapabilities ||
-    !validFormats
+    !Number.isSafeInteger(priority)
   ) {
     throw new AdapterSdkError([
       adapterDiagnostic(
@@ -92,17 +108,14 @@ export function snapshotAdapterManifest<K extends AdapterKind>(
     ]);
   }
 
-  const environmentSnapshot = environments as readonly AdapterManifest<K>['environments'][number][];
-  const capabilitySnapshot = capabilities as readonly string[];
-  const formatSnapshot = formats as readonly string[] | undefined;
   return Object.freeze({
     id,
     apiVersion: apiVersion as AdapterManifest<K>['apiVersion'],
     kind: kind as K,
-    environments: Object.freeze([...environmentSnapshot]),
+    environments: environmentSnapshot as AdapterManifest<K>['environments'],
     execution,
     priority,
-    capabilities: Object.freeze([...capabilitySnapshot]),
-    ...(formatSnapshot === undefined ? {} : { formats: Object.freeze([...formatSnapshot]) }),
+    capabilities: capabilitySnapshot,
+    ...(formatSnapshot === undefined ? {} : { formats: formatSnapshot }),
   });
 }
