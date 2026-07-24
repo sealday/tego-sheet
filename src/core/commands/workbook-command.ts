@@ -4,7 +4,12 @@ import type { BorderLine, CellStyle } from '../types/workbook';
 import type { FilterDefinition } from '../types/options';
 import type { ValidationRule } from '../types/validation';
 import type { PasteMode } from '../operations/clipboard';
-import type { ConditionalFormat, FilterView, SheetObject } from '../../document/model/document';
+import type {
+  CellInput,
+  ConditionalFormat,
+  FilterView,
+  SheetObject,
+} from '../../document/model/document';
 
 /** Sets the user-facing text of one cell. */
 export interface SetCellTextCommand {
@@ -14,6 +19,16 @@ export interface SetCellTextCommand {
   readonly address: CellAddress;
   /** Text to parse and store. */
   readonly text: string;
+}
+
+/** Sets one normalized typed cell input without parsing it through display text. */
+export interface SetCellInputCommand {
+  /** Command discriminator. */
+  readonly type: 'set-cell-input';
+  /** Cell receiving the typed input. */
+  readonly address: CellAddress;
+  /** Complete safe Workbook 2.0 input value. */
+  readonly input: CellInput;
 }
 
 /** Clears cell contents within a selection. */
@@ -358,6 +373,7 @@ export type HistoryCommand = UndoCommand | RedoCommand;
  */
 export type WorkbookCommand =
   | SetCellTextCommand
+  | SetCellInputCommand
   | ClearContentsCommand
   | SetCellMetadataCommand
   | SetStyleCommand

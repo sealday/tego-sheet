@@ -223,6 +223,7 @@ export type {
   ResizeColumnCommand,
   ResizeRowCommand,
   SetCellTextCommand,
+  SetCellInputCommand,
   SetCellMetadataCommand,
   SetConditionalFormatCommand,
   SetFilterCommand,

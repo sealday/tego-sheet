@@ -16,6 +16,7 @@ import { clearFilter, setFilter } from '../operations/filter';
 import { setSort } from '../operations/sort';
 import { removeValidation, setValidation } from '../operations/validation';
 import { parseA1Range } from '../coordinates/ranges';
+import { setCellText } from '../model/cells';
 
 export interface AppliedCommand {
   readonly state: WorkbookState;
@@ -66,6 +67,37 @@ export function applyCommand(
         );
         if (previousText === command.text) return null;
         const next = applyCellOperation(runtimeSheet.data, command);
+        if (next === runtimeSheet.data) return null;
+        const point = { row: command.address.row, column: command.address.column };
+        return {
+          state: state.update(command.address.sheet, () => next),
+          result: undefined,
+          kind: 'cell',
+          sheet: command.address.sheet,
+          range: { start: point, end: point },
+          undoable: true,
+        };
+      }
+      case 'set-cell-input': {
+        const runtimeSheet = state.get(command.address.sheet);
+        if (runtimeSheet === null)
+          throw new RangeError(`Unknown sheet ID: ${command.address.sheet}`);
+        const text =
+          command.input.type === 'blank' || command.input.type === 'custom'
+            ? ''
+            : command.input.type === 'formula'
+              ? command.input.source
+              : command.input.type === 'boolean'
+                ? command.input.value
+                  ? 'TRUE'
+                  : 'FALSE'
+                : String(command.input.value);
+        const next = setCellText(
+          runtimeSheet.data,
+          command.address.row,
+          command.address.column,
+          text,
+        );
         if (next === runtimeSheet.data) return null;
         const point = { row: command.address.row, column: command.address.column };
         return {

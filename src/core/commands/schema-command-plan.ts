@@ -32,7 +32,7 @@ export interface SchemaProjectionCommit {
   readonly result: unknown;
   readonly kind: Extract<
     WorkbookChangeKind,
-    'clipboard' | 'autofill' | 'view' | 'object' | 'style'
+    'cell' | 'clipboard' | 'autofill' | 'view' | 'object' | 'style'
   >;
   readonly sheet: SheetId;
   readonly range?: CellRange;
@@ -393,6 +393,24 @@ function transformInternalPaste(
   }
 }
 
+function setTypedCellInput(
+  input: SpreadsheetDocumentInput,
+  command: Extract<WorkbookCommand, { readonly type: 'set-cell-input' }>,
+  sheetIds: readonly SheetId[],
+  authoritativeInputs: Map<string, Set<string>>,
+): void {
+  const sheet = input.workbook.sheets[sheetIndex(sheetIds, command.address.sheet)];
+  if (sheet === undefined) return;
+  const current = getCell(sheet, command.address.row, command.address.column);
+  setCell(sheet, command.address.row, command.address.column, {
+    ...current,
+    input: structuredClone(command.input),
+  });
+  const keys = authoritativeInputs.get(sheet.id) ?? new Set<string>();
+  keys.add(cellKey(command.address.row, command.address.column));
+  authoritativeInputs.set(sheet.id, keys);
+}
+
 export function prepareSchemaProjectionCommit(
   command: Extract<
     WorkbookCommand,
@@ -405,13 +423,23 @@ export function prepareSchemaProjectionCommit(
         | 'set-conditional-format'
         | 'remove-conditional-format'
         | 'set-sheet-object'
-        | 'remove-sheet-object';
+        | 'remove-sheet-object'
+        | 'set-cell-input';
     }
   >,
   projection: WorkbookData,
   sheetIds: readonly SheetId[],
   capturePasteValues: boolean,
 ): SchemaProjectionCommit {
+  if (command.type === 'set-cell-input') {
+    const point = { row: command.address.row, column: command.address.column };
+    return {
+      result: undefined,
+      kind: 'cell',
+      sheet: command.address.sheet,
+      range: { start: point, end: point },
+    };
+  }
   if (command.type === 'set-filter-view' || command.type === 'remove-filter-view') {
     return { result: undefined, kind: 'view', sheet: command.sheet };
   }
@@ -460,6 +488,9 @@ export function prepareSchemaCommand(
   const authoritativeInputs = new Map<string, Set<string>>();
   const authoritativeValidations = new Map<string, Map<string, ValidationId | null>>();
   switch (command.type) {
+    case 'set-cell-input':
+      setTypedCellInput(input, command, sheetIds, authoritativeInputs);
+      break;
     case 'insert-row':
     case 'delete-row':
     case 'insert-column':

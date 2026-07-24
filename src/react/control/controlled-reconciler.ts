@@ -60,6 +60,7 @@ export function remapWorkbookCommand(
 ): WorkbookCommand {
   switch (command.type) {
     case 'set-cell-text':
+    case 'set-cell-input':
       return {
         ...command,
         address: {

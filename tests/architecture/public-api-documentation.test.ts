@@ -296,6 +296,7 @@ const expectedPublicExports = [
   'ScalarFormulaValue',
   'Selection',
   'SetBorderCommand',
+  'SetCellInputCommand',
   'SetCellMetadataCommand',
   'SetCellTextCommand',
   'SetConditionalFormatCommand',

@@ -898,7 +898,8 @@ export class SpreadsheetDocumentController {
           command.type !== 'set-conditional-format' &&
           command.type !== 'remove-conditional-format' &&
           command.type !== 'set-sheet-object' &&
-          command.type !== 'remove-sheet-object'
+          command.type !== 'remove-sheet-object' &&
+          command.type !== 'set-cell-input'
         ) {
           throw new Error(`Schema-only commit is not supported for ${command.type}`);
         }
@@ -1247,6 +1248,14 @@ export class SpreadsheetDocumentController {
     }[] = [];
     if (command.type === 'set-cell-text') {
       candidates.push({ ...command.address, text: command.text });
+    } else if (command.type === 'set-cell-input') {
+      const text =
+        command.input.type === 'blank' || command.input.type === 'custom'
+          ? ''
+          : command.input.type === 'formula'
+            ? command.input.source
+            : String(command.input.value);
+      candidates.push({ ...command.address, text });
     } else if (command.type === 'clear-contents') {
       const { start, end } = command.selection.range;
       const count = (end.row - start.row + 1) * (end.column - start.column + 1);
@@ -1359,7 +1368,7 @@ export class SpreadsheetDocumentController {
       readonly start: { readonly row: number; readonly column: number };
       readonly end: { readonly row: number; readonly column: number };
     }> = [];
-    if (command.type === 'set-cell-text') {
+    if (command.type === 'set-cell-text' || command.type === 'set-cell-input') {
       ranges.push({
         sheet: command.address.sheet,
         start: command.address,

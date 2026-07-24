@@ -29,6 +29,85 @@ import { assertSetFilterResourceLimit } from '../operations/filter';
 import { assertSortResourceLimit } from '../operations/sort';
 import type { WorkbookCommand } from './workbook-command';
 
+function assertJsonValue(value: unknown, depth = 0): void {
+  if (depth > 64) throw invalidCommand('Custom cell input exceeds the JSON nesting limit');
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'boolean' ||
+    (typeof value === 'number' && Number.isFinite(value))
+  ) {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) assertJsonValue(item, depth + 1);
+    return;
+  }
+  if (typeof value !== 'object' || Object.getPrototypeOf(value) !== Object.prototype) {
+    throw invalidCommand('Custom cell input must contain only plain JSON values');
+  }
+  for (const [key, item] of Object.entries(value)) {
+    if (key.length === 0) throw invalidCommand('Custom cell input keys cannot be empty');
+    assertJsonValue(item, depth + 1);
+  }
+}
+
+function hasExactKeys(candidate: Record<string, unknown>, keys: readonly string[]): boolean {
+  const actual = Object.keys(candidate).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function assertTypedCellInput(input: unknown): void {
+  if (typeof input !== 'object' || input === null || Array.isArray(input) || !('type' in input)) {
+    throw invalidCommand('Cell input must be a typed object');
+  }
+  const candidate = input as Record<string, unknown>;
+  if (candidate.type === 'blank' && hasExactKeys(candidate, ['type'])) return;
+  if (
+    candidate.type === 'string' &&
+    typeof candidate.value === 'string' &&
+    hasExactKeys(candidate, ['type', 'value'])
+  ) {
+    return;
+  }
+  if (
+    candidate.type === 'number' &&
+    typeof candidate.value === 'number' &&
+    Number.isFinite(candidate.value) &&
+    hasExactKeys(candidate, ['type', 'value'])
+  ) {
+    return;
+  }
+  if (
+    candidate.type === 'boolean' &&
+    typeof candidate.value === 'boolean' &&
+    hasExactKeys(candidate, ['type', 'value'])
+  ) {
+    return;
+  }
+  if (
+    candidate.type === 'formula' &&
+    typeof candidate.source === 'string' &&
+    candidate.source.startsWith('=') &&
+    hasExactKeys(candidate, ['type', 'source'])
+  ) {
+    return;
+  }
+  if (
+    candidate.type === 'custom' &&
+    typeof candidate.cellType === 'string' &&
+    candidate.cellType.length > 0 &&
+    Number.isSafeInteger(candidate.schemaVersion) &&
+    (candidate.schemaVersion as number) >= 0 &&
+    hasExactKeys(candidate, ['type', 'cellType', 'schemaVersion', 'value'])
+  ) {
+    assertJsonValue(candidate.value);
+    return;
+  }
+  throw invalidCommand('Cell input is invalid');
+}
+
 export function invalidCommand(message: string, cause?: unknown): TegoSheetException {
   return new TegoSheetException({
     code: 'INVALID_COMMAND',
@@ -166,6 +245,24 @@ export function validateCommand(state: WorkbookState, command: WorkbookCommand):
       }
       validateSheet(state, command.address.sheet);
       if (typeof command.text !== 'string') throw invalidCommand('Cell text must be a string');
+      try {
+        assertCellEditable(
+          state.get(command.address.sheet)!.data,
+          command.address.row,
+          command.address.column,
+        );
+      } catch (cause) {
+        throw invalidCommand('Cell is not editable', cause);
+      }
+      return;
+    case 'set-cell-input':
+      try {
+        assertCellAddress(command.address);
+      } catch (cause) {
+        throw invalidCommand('set-cell-input requires a valid cell address', cause);
+      }
+      validateSheet(state, command.address.sheet);
+      assertTypedCellInput(command.input);
       try {
         assertCellEditable(
           state.get(command.address.sheet)!.data,

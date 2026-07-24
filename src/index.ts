@@ -58,6 +58,7 @@ export type {
   Selection,
   SetBorderCommand,
   SetCellMetadataCommand,
+  SetCellInputCommand,
   SetCellTextCommand,
   SetConditionalFormatCommand,
   SetFilterCommand,

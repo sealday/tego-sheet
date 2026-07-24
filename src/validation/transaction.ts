@@ -109,14 +109,22 @@ function candidates(
     Number.isSafeInteger(count) && count >= 0 && output.length + count <= MAX_VALIDATION_CANDIDATES;
   for (const envelope of transaction.commands) {
     const command = envelope.command;
-    if (command.type === 'set-cell-text') {
+    if (command.type === 'set-cell-text' || command.type === 'set-cell-input') {
       if (!reserve(1)) {
         return {
           ok: false,
           result: rejected('TRANSACTION_LIMIT_EXCEEDED', 'Validation candidate limit exceeded'),
         };
       }
-      output.push({ ...command.address, text: command.text });
+      const text =
+        command.type === 'set-cell-text'
+          ? command.text
+          : command.input.type === 'blank' || command.input.type === 'custom'
+            ? ''
+            : command.input.type === 'formula'
+              ? command.input.source
+              : String(command.input.value);
+      output.push({ ...command.address, text });
       continue;
     }
     if (command.type === 'clear-contents') {
