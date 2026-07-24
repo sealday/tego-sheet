@@ -3,14 +3,27 @@ import {
   ADAPTER_KINDS,
   AdapterSdkError,
   createAdapterRegistry,
+  type AdapterManifest,
   type AdapterRegistration,
   type SolverAdapter,
+  type TrustedMainAdapterRegistration,
 } from '../../../src/sdk/adapters';
 
-function solver(
-  id: string,
-  options: Partial<AdapterRegistration<'solver'>> = {},
-): AdapterRegistration<'solver'> {
+interface SolverOptions extends Partial<
+  Omit<TrustedMainAdapterRegistration<'solver'>, 'manifest' | 'implementation'>
+> {
+  readonly manifest?: Partial<AdapterManifest<'solver'>>;
+  readonly implementation?: SolverAdapter;
+}
+
+function solver(id: string, options: SolverOptions = {}): AdapterRegistration<'solver'> {
+  const {
+    manifest: manifestOptions,
+    implementation = {
+      invoke: async ({ input }) => input,
+    } satisfies SolverAdapter,
+    ...lifecycle
+  } = options;
   return {
     manifest: {
       id,
@@ -20,11 +33,10 @@ function solver(
       execution: 'trusted-main',
       priority: 0,
       capabilities: ['solve'],
-    },
-    implementation: {
-      invoke: async ({ input }) => input,
-    } satisfies SolverAdapter,
-    ...options,
+      ...manifestOptions,
+    } as TrustedMainAdapterRegistration<'solver'>['manifest'],
+    implementation,
+    ...lifecycle,
   };
 }
 
@@ -71,9 +83,9 @@ describe('public AdapterRegistry facade', () => {
     expect(Object.isFrozen(listed[0]!.formats)).toBe(true);
     expect(registry.resolve('solver', { id: 'linear' })).toMatchObject({
       manifest: registration.manifest,
-      implementation: registration.implementation,
       reason: 'explicit-id',
     });
+    expect(registry.resolve('solver', { id: 'linear' })).not.toHaveProperty('implementation');
   });
 
   it('maps kernel duplicate, version, and environment failures to stable public diagnostics', async () => {
@@ -292,4 +304,38 @@ describe('public AdapterRegistry facade', () => {
     expect(cleanup).toHaveBeenCalledTimes(1);
     expect(registry.list()).toEqual([]);
   });
+
+  it.each(['implementation', 'initialize', 'dispose'] as const)(
+    'rejects isolated-worker registration with a main-thread %s hook',
+    async (field) => {
+      const mainHook = vi.fn();
+      const registry = createAdapterRegistry({
+        apiVersion: '1.0',
+        environment: 'browser',
+        isolatedWorkerTransport: {
+          invoke: async () => null,
+          terminate: async () => undefined,
+        },
+      });
+      const registration = {
+        manifest: {
+          id: 'isolated',
+          apiVersion: '1.0',
+          kind: 'solver',
+          environments: ['browser'],
+          execution: 'isolated-worker',
+          priority: 0,
+          capabilities: ['solve'],
+        },
+        descriptor: { workerId: 'solver-worker' },
+        [field]: field === 'implementation' ? { invoke: mainHook } : mainHook,
+      };
+
+      await expect(registry.register(registration as never)).rejects.toMatchObject({
+        code: 'ADAPTER_MANIFEST_INVALID',
+      });
+      expect(mainHook).not.toHaveBeenCalled();
+      expect(registry.list()).toEqual([]);
+    },
+  );
 });

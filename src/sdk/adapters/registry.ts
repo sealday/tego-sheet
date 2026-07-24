@@ -1,4 +1,5 @@
 import type { Diagnostic } from '../../document/diagnostics';
+import type { JsonValue } from '../../core/types/json';
 import { ExtensionKernelError, type ExtensionManifest } from '../../extensions/kernel/manifest';
 import type { KernelContext, KernelRegistration } from '../../extensions/kernel/capabilities';
 import { createAdapterRegistryKernel } from '../../extensions/kernel/registry';
@@ -7,7 +8,10 @@ import { adapterDiagnostic, AdapterSdkError, mapKernelError } from './diagnostic
 import { snapshotAdapterManifest } from './manifest';
 import { ADAPTER_KINDS } from './manifest';
 import { createAdapterScopeRuntime } from './scope';
+import type { AdapterScopeResolution } from './scope';
+import { snapshotJsonValue } from './json-safe';
 import type {
+  AdapterByKind,
   AdapterDiagnostic,
   AdapterKind,
   AdapterManifest,
@@ -19,10 +23,14 @@ import type {
   AdapterResolutionQuery,
   AdapterScope,
   AdapterScopeOptions,
+  IsolatedWorkerAdapterDescriptor,
+  TrustedMainAdapterRegistration,
 } from './types';
 
 interface PublicRecord<K extends AdapterKind = AdapterKind> {
   readonly manifest: AdapterManifest<K>;
+  readonly implementation?: AdapterByKind[K];
+  readonly descriptor?: IsolatedWorkerAdapterDescriptor;
   readonly unregister: () => Promise<readonly AdapterDiagnostic[]>;
 }
 
@@ -83,6 +91,7 @@ export function createAdapterRegistry(options: AdapterRegistryOptions): AdapterR
     environment: configuration.environment,
   });
   const records = new Map<string, PublicRecord>();
+  const resolutionRecords = new WeakMap<object, PublicRecord>();
   const scopes = new Set<AdapterScope>();
   let disposed = false;
   let disposePromise: Promise<readonly AdapterDiagnostic[]> | undefined;
@@ -118,14 +127,90 @@ export function createAdapterRegistry(options: AdapterRegistryOptions): AdapterR
         fail('ADAPTER_REGISTRY_DISPOSED', 'Cannot register an adapter after disposal');
       }
       let manifest: AdapterManifest<K>;
+      let implementation: AdapterByKind[K] | undefined;
+      let descriptor: IsolatedWorkerAdapterDescriptor | undefined;
+      let initialize: TrustedMainAdapterRegistration<K>['initialize'];
+      let dispose: TrustedMainAdapterRegistration<K>['dispose'];
       try {
-        manifest = snapshotAdapterManifest(registration.manifest);
+        if (registration === null || typeof registration !== 'object') {
+          throw new TypeError('Adapter registration must be an object');
+        }
+        const manifestProperty = Object.getOwnPropertyDescriptor(registration, 'manifest');
+        if (manifestProperty === undefined || !('value' in manifestProperty)) {
+          throw new TypeError('Adapter manifest must be a plain data property');
+        }
+        manifest = snapshotAdapterManifest(manifestProperty.value as AdapterManifest<K>);
+        if (manifest.execution === 'isolated-worker') {
+          if (
+            Object.hasOwn(registration, 'implementation') ||
+            Object.hasOwn(registration, 'initialize') ||
+            Object.hasOwn(registration, 'dispose')
+          ) {
+            throw new TypeError('Isolated adapters cannot register main-thread code');
+          }
+          const descriptorProperty = Object.getOwnPropertyDescriptor(registration, 'descriptor');
+          if (descriptorProperty === undefined || !('value' in descriptorProperty)) {
+            throw new TypeError('Isolated adapters require a transport-owned descriptor');
+          }
+          const descriptorSnapshot = snapshotJsonValue(
+            descriptorProperty.value,
+            'adapter.descriptor',
+          );
+          if (
+            descriptorSnapshot === null ||
+            Array.isArray(descriptorSnapshot) ||
+            typeof descriptorSnapshot !== 'object'
+          ) {
+            throw new TypeError('Isolated adapter descriptor must contain one workerId');
+          }
+          const descriptorObject = descriptorSnapshot as Readonly<Record<string, JsonValue>>;
+          const workerId = descriptorObject.workerId;
+          if (
+            typeof workerId !== 'string' ||
+            workerId.length === 0 ||
+            Object.keys(descriptorObject).length !== 1
+          ) {
+            throw new TypeError('Isolated adapter descriptor must contain one workerId');
+          }
+          descriptor = descriptorObject as unknown as IsolatedWorkerAdapterDescriptor;
+        } else {
+          if (Object.hasOwn(registration, 'descriptor')) {
+            throw new TypeError('Trusted adapters cannot register a worker descriptor');
+          }
+          const implementationProperty = Object.getOwnPropertyDescriptor(
+            registration,
+            'implementation',
+          );
+          if (implementationProperty === undefined || !('value' in implementationProperty)) {
+            throw new TypeError('Trusted adapters require a plain implementation property');
+          }
+          implementation = implementationProperty.value as AdapterByKind[K];
+          const initializeProperty = Object.getOwnPropertyDescriptor(registration, 'initialize');
+          const disposeProperty = Object.getOwnPropertyDescriptor(registration, 'dispose');
+          if (initializeProperty !== undefined && !('value' in initializeProperty)) {
+            throw new TypeError('Adapter initialize must be a plain data property');
+          }
+          if (disposeProperty !== undefined && !('value' in disposeProperty)) {
+            throw new TypeError('Adapter dispose must be a plain data property');
+          }
+          initialize = initializeProperty?.value as typeof initialize;
+          dispose = disposeProperty?.value as typeof dispose;
+        }
       } catch (error) {
         if (error instanceof AdapterSdkError) {
           error.diagnostics.forEach(publish);
           throw error;
         }
-        throw error;
+        const normalized = new AdapterSdkError([
+          adapterDiagnostic(
+            'ADAPTER_MANIFEST_INVALID',
+            'validate',
+            'Adapter registration is invalid',
+            { cause: error },
+          ),
+        ]);
+        normalized.diagnostics.forEach(publish);
+        throw normalized;
       }
 
       let kernelUnregister: () => Promise<readonly Diagnostic[]>;
@@ -137,12 +222,18 @@ export function createAdapterRegistry(options: AdapterRegistryOptions): AdapterR
             kind: manifest.kind,
             environments: manifest.environments,
           } as ExtensionManifest & { readonly kind: K },
-          implementation: registration.implementation,
-          ...(registration.initialize === undefined
+          implementation:
+            manifest.execution === 'isolated-worker'
+              ? Object.freeze({
+                  adapterId: manifest.id,
+                  workerId: descriptor!.workerId,
+                })
+              : implementation,
+          ...(initialize === undefined
             ? {}
             : {
                 initialize: ({ environment, signal }: KernelContext) =>
-                  registration.initialize?.({
+                  initialize?.({
                     environment,
                     signal,
                     diagnostics: (diagnostic) => {
@@ -155,7 +246,7 @@ export function createAdapterRegistry(options: AdapterRegistryOptions): AdapterR
                     },
                   }),
               }),
-          ...(registration.dispose === undefined ? {} : { dispose: registration.dispose }),
+          ...(dispose === undefined ? {} : { dispose }),
         } as unknown as KernelRegistration<K>;
         kernelUnregister = await kernel.register(kernelRegistration);
       } catch (error) {
@@ -184,7 +275,12 @@ export function createAdapterRegistry(options: AdapterRegistryOptions): AdapterR
         });
         return releasePromise;
       };
-      records.set(key, { manifest, unregister } as PublicRecord);
+      records.set(key, {
+        manifest,
+        ...(implementation === undefined ? {} : { implementation }),
+        ...(descriptor === undefined ? {} : { descriptor }),
+        unregister,
+      } as PublicRecord);
       return unregister;
     },
 
@@ -242,18 +338,16 @@ export function createAdapterRegistry(options: AdapterRegistryOptions): AdapterR
           ...(query.id === undefined ? {} : { id: query.id }),
         });
       try {
-        const kernelImplementation = kernel.resolve(kind, {
+        kernel.resolve(kind, {
           id: chosen.id,
           environment: configuration.environment,
         });
-        const implementation =
-          chosen.execution === 'isolated-worker'
-            ? Object.freeze({
-                execution: 'isolated-worker' as const,
-                adapterId: chosen.id,
-              })
-            : kernelImplementation;
-        return Object.freeze({ manifest: chosen, implementation, reason });
+        const record =
+          records.get(keyOf(chosen.kind, chosen.id)) ??
+          fail('ADAPTER_NOT_FOUND', `Adapter ${chosen.id} is no longer registered`);
+        const resolution = Object.freeze({ manifest: chosen, reason });
+        resolutionRecords.set(resolution, record);
+        return resolution;
       } catch (error) {
         if (error instanceof ExtensionKernelError) {
           const mapped = mapKernelError(error);
@@ -275,6 +369,16 @@ export function createAdapterRegistry(options: AdapterRegistryOptions): AdapterR
           : { transport: configuration.isolatedWorkerTransport }),
         publish,
         onDispose: () => scopes.delete(scope),
+        lookupResolution: (resolution): AdapterScopeResolution | undefined => {
+          const record = resolutionRecords.get(resolution);
+          if (
+            record === undefined ||
+            records.get(keyOf(record.manifest.kind, record.manifest.id)) !== record
+          ) {
+            return undefined;
+          }
+          return record;
+        },
       });
       scopes.add(scope);
       return scope;

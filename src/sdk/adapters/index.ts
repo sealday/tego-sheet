@@ -28,7 +28,8 @@ export type {
   CollaborationAdapter,
   CommentsAdapter,
   FormulaFunctionProviderAdapter,
-  IsolatedWorkerAdapterReference,
+  IsolatedWorkerAdapterDescriptor,
+  IsolatedWorkerAdapterRegistration,
   IsolatedWorkerInvocation,
   IsolatedWorkerTransport,
   OutputAdapter,
@@ -36,5 +37,6 @@ export type {
   PersistenceAdapter,
   ScopedAdapterInvocation,
   SolverAdapter,
+  TrustedMainAdapterRegistration,
   VersionHistoryAdapter,
 } from './types';

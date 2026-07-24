@@ -9,12 +9,15 @@ import { adapterDiagnostic, AdapterSdkError } from './diagnostics';
 import { jsonSnapshotBytes, snapshotJsonValue } from './json-safe';
 import type {
   AdapterDiagnostic,
+  AdapterByKind,
   AdapterKind,
+  AdapterManifest,
   AdapterResolution,
   AdapterScope,
   AdapterScopeOptions,
   CallableAdapter,
   IsolatedWorkerTransport,
+  IsolatedWorkerAdapterDescriptor,
   ScopedAdapterInvocation,
 } from './types';
 
@@ -26,6 +29,14 @@ interface AdapterScopeRuntimeOptions {
   readonly transport?: IsolatedWorkerTransport;
   readonly publish: (diagnostic: AdapterDiagnostic) => void;
   readonly onDispose: () => void;
+  readonly lookupResolution: (resolution: AdapterResolution) => AdapterScopeResolution | undefined;
+}
+
+/** Registry-private live binding resolved from one opaque public handle. */
+export interface AdapterScopeResolution {
+  readonly manifest: AdapterManifest;
+  readonly implementation?: AdapterByKind[AdapterKind];
+  readonly descriptor?: IsolatedWorkerAdapterDescriptor;
 }
 
 function limitsSnapshot(overrides: Partial<AdapterScopeLimits> | undefined): AdapterScopeLimits {
@@ -133,9 +144,15 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
           cause: controller.signal.reason,
         });
       }
+      const binding =
+        runtime.lookupResolution(resolution) ??
+        fail(
+          'ADAPTER_RESOLUTION_INVALID',
+          'Adapter resolution is forged, foreign, or no longer registered',
+        );
       if (
         !grant.allows(invocation.capability) ||
-        !resolution.manifest.capabilities.includes(invocation.capability)
+        !binding.manifest.capabilities.includes(invocation.capability)
       ) {
         fail('CAPABILITY_DENIED', `Capability ${invocation.capability} was not granted`, {
           resolution,
@@ -182,14 +199,15 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
       });
 
       const execution = Promise.resolve().then(async () => {
-        if (resolution.manifest.execution === 'isolated-worker') {
-          if (runtime.transport === undefined) {
+        if (binding.manifest.execution === 'isolated-worker') {
+          if (runtime.transport === undefined || binding.descriptor === undefined) {
             throw new Error('No isolated-worker transport is configured');
           }
           return runtime.transport.invoke(
             Object.freeze({
-              adapterId: resolution.manifest.id,
-              kind: resolution.manifest.kind,
+              adapterId: binding.manifest.id,
+              workerId: binding.descriptor.workerId,
+              kind: binding.manifest.kind,
               capability: invocation.capability,
               input: inputSnapshot,
               ...(runtime.options.documentId === undefined
@@ -199,10 +217,10 @@ export function createAdapterScopeRuntime(runtime: AdapterScopeRuntimeOptions): 
             invocationController.signal,
           );
         }
-        if (!callable(resolution.implementation)) {
-          throw new TypeError(`Adapter ${resolution.manifest.id} is not generically callable`);
+        if (!callable(binding.implementation)) {
+          throw new TypeError(`Adapter ${binding.manifest.id} is not generically callable`);
         }
-        return resolution.implementation.invoke(
+        return binding.implementation.invoke(
           Object.freeze({ capability: invocation.capability, input: inputSnapshot }),
           Object.freeze({
             ...(runtime.options.documentId === undefined

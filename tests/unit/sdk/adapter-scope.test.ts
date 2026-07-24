@@ -337,6 +337,7 @@ describe('AdapterScope invocation boundary', () => {
     const direct = vi.fn();
     const transport: IsolatedWorkerTransport = {
       invoke: vi.fn(async (request) => ({ adapterId: request.adapterId })),
+      terminate: vi.fn(async () => undefined),
     };
     const registry = createAdapterRegistry({
       apiVersion: '1.0',
@@ -353,7 +354,7 @@ describe('AdapterScope invocation boundary', () => {
         priority: 0,
         capabilities: ['solve'],
       },
-      implementation: { invoke: direct },
+      descriptor: { workerId: 'solver-worker' },
     });
     const scope = registry.createScope({
       signal: new AbortController().signal,
@@ -372,19 +373,59 @@ describe('AdapterScope invocation boundary', () => {
       }),
     ).resolves.toEqual({ adapterId: 'isolated' });
     expect(direct).not.toHaveBeenCalled();
-    expect(registry.resolve('solver').implementation).toEqual({
-      execution: 'isolated-worker',
-      adapterId: 'isolated',
-    });
+    expect(registry.resolve('solver')).not.toHaveProperty('implementation');
     expect(transport.invoke).toHaveBeenCalledWith(
       expect.objectContaining({
         adapterId: 'isolated',
+        workerId: 'solver-worker',
         kind: 'solver',
         capability: 'solve',
         input: { objective: 1 },
       }),
       expect.any(AbortSignal),
     );
+  });
+
+  it('rejects forged, foreign, and unregistered stale resolutions', async () => {
+    const first = createAdapterRegistry({
+      apiVersion: '1.0',
+      environment: 'browser',
+    });
+    const second = createAdapterRegistry({
+      apiVersion: '1.0',
+      environment: 'browser',
+    });
+    const unregister = await first.register(trustedSolver(async () => null));
+    await second.register(trustedSolver(async () => null));
+    const firstScope = first.createScope({
+      signal: new AbortController().signal,
+      grant: createCapabilityGrant(['solve']),
+    });
+    const firstResolution = first.resolve('solver');
+    const secondResolution = second.resolve('solver');
+    const invocation = {
+      capability: 'solve',
+      input: null,
+      validateResult: () => true,
+    };
+
+    await expect(
+      firstScope.invoke(
+        {
+          manifest: firstResolution.manifest,
+          reason: 'explicit-id',
+        } as never,
+        invocation,
+      ),
+    ).rejects.toMatchObject({ code: 'ADAPTER_RESOLUTION_INVALID' });
+    await expect(firstScope.invoke(secondResolution, invocation)).rejects.toMatchObject({
+      code: 'ADAPTER_RESOLUTION_INVALID',
+    });
+
+    await unregister();
+    await expect(firstScope.invoke(firstResolution, invocation)).rejects.toMatchObject({
+      code: 'ADAPTER_RESOLUTION_INVALID',
+    });
   });
 
   it('aborts active work and removes resources exactly once when disposed', async () => {

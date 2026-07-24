@@ -140,17 +140,42 @@ export interface AdapterInitializationContext {
   readonly diagnostics: (diagnostic: Diagnostic) => void;
 }
 
-/** One public adapter and its F5-backed lifecycle hooks. */
-export interface AdapterRegistration<K extends AdapterKind = AdapterKind> {
-  /** Immutable registration metadata. */
+interface AdapterRegistrationBase<K extends AdapterKind> {
   readonly manifest: AdapterManifest<K>;
-  /** Kind-specific implementation retained by the F5 kernel. */
+}
+
+/** Same-realm adapter registration backed by the F5 lifecycle kernel. */
+export interface TrustedMainAdapterRegistration<
+  K extends AdapterKind = AdapterKind,
+> extends AdapterRegistrationBase<K> {
+  readonly manifest: AdapterManifest<K> & { readonly execution: 'trusted-main' };
   readonly implementation: AdapterByKind[K];
   /** Optional initialization before publication. */
   readonly initialize?: (context: AdapterInitializationContext) => void | Promise<void>;
   /** Optional cleanup after the adapter is unpublished. */
   readonly dispose?: () => void | Promise<void>;
 }
+
+/** Transport-owned identity for an isolated worker implementation. */
+export interface IsolatedWorkerAdapterDescriptor {
+  readonly workerId: string;
+}
+
+/** Isolated adapters register only transport-owned data and no main-thread code. */
+export interface IsolatedWorkerAdapterRegistration<
+  K extends AdapterKind = AdapterKind,
+> extends AdapterRegistrationBase<K> {
+  readonly manifest: AdapterManifest<K> & { readonly execution: 'isolated-worker' };
+  readonly descriptor: IsolatedWorkerAdapterDescriptor;
+  readonly implementation?: never;
+  readonly initialize?: never;
+  readonly dispose?: never;
+}
+
+/** One public adapter registration accepted by the F5-backed registry. */
+export type AdapterRegistration<K extends AdapterKind = AdapterKind> =
+  | TrustedMainAdapterRegistration<K>
+  | IsolatedWorkerAdapterRegistration<K>;
 
 /** Public query used to list adapter manifests. */
 export interface AdapterQuery {
@@ -172,7 +197,6 @@ export type AdapterResolutionReason = 'explicit-id' | 'single-match' | 'configur
 /** Stable resolved adapter snapshot. */
 export interface AdapterResolution<K extends AdapterKind = AdapterKind> {
   readonly manifest: AdapterManifest<K>;
-  readonly implementation: AdapterByKind[K] | IsolatedWorkerAdapterReference;
   readonly reason: AdapterResolutionReason;
 }
 
@@ -199,6 +223,7 @@ export interface AdapterScopeOptions {
 /** Isolated-worker request containing only schema-cloneable public data. */
 export interface IsolatedWorkerInvocation {
   readonly adapterId: string;
+  readonly workerId: string;
   readonly kind: AdapterKind;
   readonly capability: string;
   readonly input: unknown;
@@ -208,12 +233,7 @@ export interface IsolatedWorkerInvocation {
 /** Host transport which owns the actual Worker and structured-clone protocol. */
 export interface IsolatedWorkerTransport {
   invoke(request: IsolatedWorkerInvocation, signal: AbortSignal): Promise<unknown>;
-}
-
-/** Opaque public reference returned instead of same-realm code for isolated adapters. */
-export interface IsolatedWorkerAdapterReference {
-  readonly execution: 'isolated-worker';
-  readonly adapterId: string;
+  terminate(workerId: string): Promise<void>;
 }
 
 /** Operation-scoped invocation and cleanup surface. */
@@ -237,6 +257,7 @@ export type AdapterDiagnosticCode =
   | 'ADAPTER_INVOCATION_FAILED'
   | 'ADAPTER_INPUT_INVALID'
   | 'ADAPTER_RESULT_INVALID'
+  | 'ADAPTER_RESOLUTION_INVALID'
   | 'ADAPTER_DISPOSE_FAILED'
   | 'ADAPTER_LIMIT_EXCEEDED'
   | 'ADAPTER_INVOCATION_TIMEOUT'
