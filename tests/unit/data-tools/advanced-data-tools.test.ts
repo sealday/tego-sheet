@@ -55,7 +55,7 @@ function seededController(
 }
 
 describe('DATA-01 advanced cleanup safety', () => {
-  it.each(['(a+)+$', '(?=a)a', String.raw`(a)\1`])(
+  it.each(['(a+)+$', '(?=a)a', String.raw`(a)\1`, 'a*a*', 'a+.*a+', '(a|aa)+', '.*.*', 'a{1,}b'])(
     'rejects unsafe regular expression %s before evaluation',
     async (find) => {
       const controller = seededController([
@@ -96,7 +96,7 @@ describe('DATA-01 advanced cleanup safety', () => {
       constrained.preview(controller.getSnapshot(), {
         type: 'find-replace',
         range,
-        find: 'a+b',
+        find: 'a{1,10}b',
         replacement: 'ok',
         match: 'regex',
       }),
@@ -114,7 +114,7 @@ describe('DATA-01 advanced cleanup safety', () => {
       stepBounded.preview(controller.getSnapshot(), {
         type: 'find-replace',
         range,
-        find: 'a+b',
+        find: 'a{1,10}b',
         replacement: 'ok',
         match: 'regex',
       }),
@@ -132,7 +132,7 @@ describe('DATA-01 advanced cleanup safety', () => {
       patternBounded.preview(controller.getSnapshot(), {
         type: 'find-replace',
         range,
-        find: 'a+b',
+        find: 'a{1,10}b',
         replacement: 'ok',
         match: 'regex',
       }),
@@ -149,7 +149,7 @@ describe('DATA-01 advanced cleanup safety', () => {
       safe.preview(controller.getSnapshot(), {
         type: 'find-replace',
         range,
-        find: 'a+b',
+        find: 'a{1,10}b',
         replacement: 'ok',
         match: 'regex',
       }),
@@ -176,7 +176,7 @@ describe('DATA-01 advanced cleanup safety', () => {
         planner.preview(controller.getSnapshot(), {
           type: 'find-replace',
           range,
-          find: 'a+b',
+          find: 'a{1,10}b',
           replacement: 'ok',
           match: 'regex',
         }),
@@ -213,10 +213,10 @@ describe('DATA-01 advanced cleanup safety', () => {
     expect(
       controller.getSnapshot().document.workbook.sheets[0]?.cells.map(({ cell }) => cell.input),
     ).toEqual([
-      { type: 'string', value: '1' },
-      { type: 'string', value: '3' },
-      { type: 'string', value: '5' },
-      { type: 'string', value: '7' },
+      { type: 'number', value: 1 },
+      { type: 'number', value: 3 },
+      { type: 'number', value: 5 },
+      { type: 'number', value: 7 },
     ]);
     expect(controller.undo()).toMatchObject({ status: 'committed' });
 
@@ -235,6 +235,19 @@ describe('DATA-01 advanced cleanup safety', () => {
       '2024-01-03',
       '2024-01-05',
     ]);
+    expect(planner.commit(controller, date.planId)).toMatchObject({ status: 'committed' });
+    expect(
+      controller
+        .getSnapshot()
+        .document.workbook.sheets[0]?.cells.filter(({ row }) => row === 0)
+        .map(({ cell }) => cell.input),
+    ).toEqual([
+      { type: 'string', value: 'wrong type' },
+      { type: 'string', value: '2024-01-01' },
+      { type: 'string', value: '2024-01-03' },
+      { type: 'string', value: '2024-01-05' },
+    ]);
+    expect(controller.undo()).toMatchObject({ status: 'committed' });
 
     const suffix = await planner.preview(controller.getSnapshot(), {
       type: 'fill-series',
@@ -255,6 +268,17 @@ describe('DATA-01 advanced cleanup safety', () => {
       expect.objectContaining({ code: 'FORMULA_INJECTION_RISK' }),
       expect.objectContaining({ code: 'FORMULA_INJECTION_RISK' }),
       expect.objectContaining({ code: 'FORMULA_INJECTION_RISK' }),
+    ]);
+    expect(planner.commit(controller, suffix.planId)).toMatchObject({ status: 'committed' });
+    expect(
+      controller
+        .getSnapshot()
+        .document.workbook.sheets[0]?.cells.filter(({ row }) => row === 1)
+        .map(({ cell }) => cell.input),
+    ).toEqual([
+      { type: 'string', value: '=ITEM01' },
+      { type: 'string', value: '=ITEM03' },
+      { type: 'string', value: '=ITEM05' },
     ]);
   });
 
@@ -331,6 +355,48 @@ describe('DATA-01 advanced cleanup safety', () => {
         { maxCells: 10, maxFindings: 10 },
       ),
     ).rejects.toMatchObject({ code: 'TRANSFORM_TOO_LARGE' });
+  });
+
+  it('yields anomaly and fill work so an AbortSignal raised after invocation cancels publication', async () => {
+    const controller = seededController([]);
+    const analysisAbort = new AbortController();
+    const analysis = analyzeDataAnomalies(
+      controller.getSnapshot(),
+      {
+        range: {
+          sheetId: documentSheetId,
+          start: { row: 0, column: 0 },
+          end: { row: 4_999, column: 0 },
+        },
+        checks: ['blank'],
+      },
+      { maxCells: 5_000, maxFindings: 10, signal: analysisAbort.signal },
+    );
+    queueMicrotask(() => analysisAbort.abort());
+    await expect(analysis).rejects.toMatchObject({ code: 'TRANSFORM_ABORTED' });
+
+    const planner = createDataTransformPlanner({
+      maxCells: 5_000,
+      maxCommands: 5_000,
+      maxSamples: 10,
+    });
+    const fillAbort = new AbortController();
+    const fill = planner.preview(
+      controller.getSnapshot(),
+      {
+        type: 'fill-series',
+        range: {
+          sheetId: documentSheetId,
+          start: { row: 0, column: 0 },
+          end: { row: 4_999, column: 0 },
+        },
+        series: 'number',
+        seed: ['1', '2'],
+      },
+      { signal: fillAbort.signal },
+    );
+    queueMicrotask(() => fillAbort.abort());
+    await expect(fill).rejects.toMatchObject({ code: 'TRANSFORM_ABORTED' });
   });
 
   it('warns through optional preview context when changes intersect template regions', async () => {

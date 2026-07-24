@@ -1,6 +1,7 @@
 import type { CellInput, Diagnostic, DocumentCellAddress, DocumentCellRange } from '../document';
 import type { DocumentControllerSnapshot } from '../document-controller';
 import { DataTransformError } from './errors';
+import { indexSparseRange, yieldForCancellation } from './range-index';
 import type { DataToolPreviewContext } from './transform-planner';
 
 /** Read-only anomaly categories supported by the bounded analyzer. */
@@ -96,20 +97,21 @@ export async function analyzeDataAnomalies(
   if (sheet === undefined) {
     throw new DataTransformError('TRANSFORM_TOO_LARGE', 'Data anomaly sheet does not exist');
   }
-  const cells = new Map(
-    sheet.cells.map((entry) => [key(entry.row, entry.column), entry.cell.input]),
-  );
+  const cells = await indexSparseRange(sheet.cells, request.range, options.signal);
   const errorCells = new Set((options.context?.errorCells ?? []).map(addressKey));
   let expectedType = request.expectedType;
   if (expectedType === undefined && request.checks.includes('type-outlier')) {
     const counts = new Map<Exclude<CellInput['type'], 'blank'>, number>();
+    let inspected = 0;
     for (let row = request.range.start.row; row <= request.range.end.row; row += 1) {
       for (
         let column = request.range.start.column;
         column <= request.range.end.column;
         column += 1
       ) {
-        const input = cells.get(key(row, column));
+        inspected += 1;
+        await yieldForCancellation(inspected, options.signal);
+        const input = cells.get(key(row, column))?.cell.input;
         if (input === undefined || input.type === 'blank') continue;
         const type = input.type;
         counts.set(type, (counts.get(type) ?? 0) + 1);
@@ -127,11 +129,13 @@ export async function analyzeDataAnomalies(
     if (findings.length < options.maxFindings) findings.push(value);
     else truncated = true;
   };
+  let inspected = 0;
   for (let row = request.range.start.row; row <= request.range.end.row; row += 1) {
     for (let column = request.range.start.column; column <= request.range.end.column; column += 1) {
-      throwIfAnalysisAborted(options.signal);
+      inspected += 1;
+      await yieldForCancellation(inspected, options.signal);
       const cell = { sheetId: request.range.sheetId, row, column };
-      const input = cells.get(key(row, column)) ?? ({ type: 'blank' } as const);
+      const input = cells.get(key(row, column))?.cell.input ?? ({ type: 'blank' } as const);
       const calculatedError = errorCells.has(addressKey(cell));
       if (request.checks.includes('error') && calculatedError) {
         add(finding('DATA_ERROR_ANOMALY', 'Calculated cell contains an error', cell));

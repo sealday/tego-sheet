@@ -7,20 +7,18 @@ export interface SafeRegexLimits {
   readonly maximumMilliseconds: number;
 }
 
-function quantifierEnd(source: string, index: number): number | undefined {
-  const token = source[index];
-  if (token === '*' || token === '+' || token === '?') return index + 1;
-  if (token !== '{') return undefined;
-  const match = /^\{\d+(?:,\d*)?\}/u.exec(source.slice(index));
-  return match === null ? undefined : index + match[0].length;
-}
-
-function hasUnsafeNestedQuantifier(source: string): boolean {
-  const groups: { quantified: boolean; alternation: boolean }[] = [];
+function assertLinearPattern(source: string): void {
   let inClass = false;
+  let quantifiers = 0;
   for (let index = 0; index < source.length; index += 1) {
     const token = source[index];
     if (token === '\\') {
+      if (source[index + 1] === 'p' || source[index + 1] === 'P') {
+        throw new DataTransformError(
+          'REPLACE_PATTERN_INVALID',
+          'Replacement patterns cannot contain Unicode property escapes',
+        );
+      }
       index += 1;
       continue;
     }
@@ -33,34 +31,51 @@ function hasUnsafeNestedQuantifier(source: string): boolean {
       continue;
     }
     if (inClass) continue;
-    if (token === '(') {
-      groups.push({ quantified: false, alternation: false });
-      continue;
-    }
     if (token === '|') {
-      const current = groups.at(-1);
-      if (current !== undefined) current.alternation = true;
-      continue;
+      throw new DataTransformError(
+        'REPLACE_PATTERN_INVALID',
+        'Replacement patterns cannot contain alternation',
+      );
     }
-    if (token === ')') {
-      const group = groups.pop();
-      if (group === undefined) continue;
-      const end = quantifierEnd(source, index + 1);
-      if (end === undefined) continue;
-      if (group.quantified || group.alternation) return true;
-      const parent = groups.at(-1);
-      if (parent !== undefined) parent.quantified = true;
-      continue;
+    if (token === '(' && source[index + 1] === '?') {
+      throw new DataTransformError(
+        'REPLACE_PATTERN_INVALID',
+        'Replacement patterns cannot contain special groups',
+      );
     }
-    const end = quantifierEnd(source, index);
-    if (end !== undefined) {
-      const current = groups.at(-1);
-      if (current !== undefined) current.quantified = true;
-      index = end - 1;
-      if (source[index + 1] === '?') index += 1;
+    if (token === '*' || token === '+') {
+      throw new DataTransformError(
+        'REPLACE_PATTERN_INVALID',
+        'Replacement patterns cannot contain unbounded quantifiers',
+      );
     }
+    if (token !== '?' && token !== '{') continue;
+    if (source[index - 1] === ')') {
+      throw new DataTransformError(
+        'REPLACE_PATTERN_INVALID',
+        'Replacement patterns cannot quantify groups',
+      );
+    }
+    let end = index + 1;
+    if (token === '{') {
+      const match = /^\{(\d+)(?:,(\d+))?\}/u.exec(source.slice(index));
+      if (match === null || (match[2] !== undefined && Number(match[2]) > 100)) {
+        throw new DataTransformError(
+          'REPLACE_PATTERN_INVALID',
+          'Replacement patterns require a finite bounded quantifier no greater than 100',
+        );
+      }
+      end = index + match[0].length;
+    }
+    quantifiers += 1;
+    if (quantifiers > 1 || source[end] === '?') {
+      throw new DataTransformError(
+        'REPLACE_PATTERN_INVALID',
+        'Replacement patterns can contain at most one non-lazy bounded quantifier',
+      );
+    }
+    index = end - 1;
   }
-  return false;
 }
 
 function assertSafePattern(source: string, limits: SafeRegexLimits): void {
@@ -73,18 +88,7 @@ function assertSafePattern(source: string, limits: SafeRegexLimits): void {
       'Replacement patterns cannot contain backreferences',
     );
   }
-  if (/\(\?(?:[=!]|<[=!])/u.test(source)) {
-    throw new DataTransformError(
-      'REPLACE_PATTERN_INVALID',
-      'Replacement patterns cannot contain lookaround assertions',
-    );
-  }
-  if (hasUnsafeNestedQuantifier(source)) {
-    throw new DataTransformError(
-      'REPLACE_PATTERN_INVALID',
-      'Replacement pattern contains an unsafe nested or ambiguous quantifier',
-    );
-  }
+  assertLinearPattern(source);
 }
 
 /** One bounded regex instance scoped to a single transform preview. */

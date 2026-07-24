@@ -14,6 +14,7 @@ import type {
 } from '../document';
 import type { SheetId } from '../core';
 import { DataTransformError } from './errors';
+import { indexSparseRange, yieldForCancellation } from './range-index';
 import { createSafeRegexBudget, type SafeRegexBudget } from './safe-regex';
 
 export { DataTransformError } from './errors';
@@ -235,6 +236,24 @@ function setCellCommand(
   });
 }
 
+function setCellInputCommand(
+  sheet: SheetId,
+  row: number,
+  column: number,
+  input: CellInput,
+  index: number,
+): DocumentCommandEnvelope {
+  return Object.freeze({
+    schemaVersion: 1,
+    id: `transform-cell-${index + 1}`,
+    command: Object.freeze({
+      type: 'set-cell-input',
+      address: Object.freeze({ sheet, row, column }),
+      input: Object.freeze({ ...input }),
+    }),
+  });
+}
+
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted === true) {
     throw new DataTransformError('TRANSFORM_ABORTED', 'Data transform preview was aborted');
@@ -293,7 +312,12 @@ function isoDate(timestamp: number): string {
   return new Date(timestamp).toISOString().slice(0, 10);
 }
 
-function fillSeriesValues(transform: FillSeriesTransform, count: number): readonly string[] {
+interface FillSeriesValue {
+  readonly text: string;
+  readonly input: CellInput;
+}
+
+function createFillSeries(transform: FillSeriesTransform): (index: number) => FillSeriesValue {
   if (transform.seed.length < 1 || transform.seed.length > 2) {
     throw new DataTransformError(
       'FILL_SERIES_INVALID',
@@ -311,7 +335,16 @@ function fillSeriesValues(transform: FillSeriesTransform, count: number): readon
       throw new DataTransformError('FILL_SERIES_INVALID', 'Numeric fill seeds must be finite');
     }
     const step = next - start;
-    return Object.freeze(Array.from({ length: count }, (_, index) => String(start + step * index)));
+    return (index) => {
+      const value = start + step * index;
+      if (!Number.isFinite(value)) {
+        throw new DataTransformError('FILL_SERIES_INVALID', 'Numeric fill result must be finite');
+      }
+      return Object.freeze({
+        text: String(value),
+        input: Object.freeze({ type: 'number', value }),
+      });
+    };
   }
   if (transform.series === 'date') {
     const start = parseIsoDate(first);
@@ -328,9 +361,13 @@ function fillSeriesValues(transform: FillSeriesTransform, count: number): readon
       );
     }
     const step = next - start;
-    return Object.freeze(
-      Array.from({ length: count }, (_, index) => isoDate(start + step * index)),
-    );
+    return (index) => {
+      const text = isoDate(start + step * index);
+      return Object.freeze({
+        text,
+        input: Object.freeze({ type: 'string', value: text }),
+      });
+    };
   }
   const firstMatch = /^(.*?)(-?\d+)$/u.exec(first);
   const secondMatch = second === undefined ? undefined : /^(.*?)(-?\d+)$/u.exec(second);
@@ -351,13 +388,15 @@ function fillSeriesValues(transform: FillSeriesTransform, count: number): readon
     secondMatch?.[2]?.replace(/^-/, '').length ?? 0,
   );
   const step = next - start;
-  return Object.freeze(
-    Array.from({ length: count }, (_, index) => {
-      const value = start + step * index;
-      const digits = String(Math.abs(value)).padStart(width, '0');
-      return `${prefix}${value < 0 ? '-' : ''}${digits}`;
-    }),
-  );
+  return (index) => {
+    const value = start + step * index;
+    const digits = String(Math.abs(value)).padStart(width, '0');
+    const text = `${prefix}${value < 0 ? '-' : ''}${digits}`;
+    return Object.freeze({
+      text,
+      input: Object.freeze({ type: 'string', value: text }),
+    });
+  };
 }
 
 function rangesIntersect(left: DocumentCellRange, right: DocumentCellRange): boolean {
@@ -442,16 +481,34 @@ export function createDataTransformPlanner(limits: {
         throw new DataTransformError('TRANSFORM_TOO_LARGE', 'Data transform sheet does not exist');
       }
       const sheetId = transform.range.sheetId as string as SheetId;
-      const cells = new Map(sheet.cells.map((entry) => [cellKey(entry.row, entry.column), entry]));
+      const indexedRange =
+        transform.type === 'split-text'
+          ? {
+              sheetId: transform.range.sheetId,
+              start: transform.range.start,
+              end: {
+                row: transform.range.end.row,
+                column: transform.range.end.column + transform.maximumColumns - 1,
+              },
+            }
+          : transform.range;
+      if (!Number.isSafeInteger(indexedRange.end.column)) {
+        throw new DataTransformError(
+          'TEXT_SPLIT_OVERFLOW',
+          'Text split output exceeds the supported column range',
+        );
+      }
+      const cells = await indexSparseRange(sheet.cells, indexedRange, options.signal);
       const changes: { row: number; column: number; before: string; after: string }[] = [];
       const warnings: Diagnostic[] = [];
       const commands: DocumentCommandEnvelope[] = [];
 
       if (transform.type === 'find-replace') {
         const pattern = replacementPattern(transform, regexLimits);
-        for (const entry of sheet.cells) {
-          throwIfAborted(options.signal);
-          if (!inRange(entry, transform.range)) continue;
+        let inspected = 0;
+        for (const entry of cells.values()) {
+          inspected += 1;
+          await yieldForCancellation(inspected, options.signal);
           const before = inputText(entry.cell.input);
           if (entry.cell.input.type === 'formula') {
             if (replaceText(before, transform, pattern) !== before) {
@@ -491,8 +548,10 @@ export function createDataTransformPlanner(limits: {
             'Text split requires a delimiter and a positive column limit',
           );
         }
-        for (const entry of sheet.cells) {
-          throwIfAborted(options.signal);
+        let inspected = 0;
+        for (const entry of cells.values()) {
+          inspected += 1;
+          await yieldForCancellation(inspected, options.signal);
           if (!inRange(entry, transform.range) || entry.cell.input.type !== 'string') continue;
           const parts = entry.cell.input.value.split(transform.delimiter);
           if (parts.length > transform.maximumColumns) {
@@ -541,8 +600,10 @@ export function createDataTransformPlanner(limits: {
         const scan = transform.keep === 'first' ? rows : [...rows].reverse();
         const retained = new Set<string>();
         const duplicates: number[] = [];
+        let inspected = 0;
         for (const row of scan) {
-          throwIfAborted(options.signal);
+          inspected += 1;
+          await yieldForCancellation(inspected, options.signal);
           const key = duplicateKey(row, transform.keyColumns, cells);
           if (retained.has(key)) duplicates.push(row);
           else retained.add(key);
@@ -564,7 +625,7 @@ export function createDataTransformPlanner(limits: {
           );
         }
       } else {
-        const values = fillSeriesValues(transform, rowCount * columnCount);
+        const valueAt = createFillSeries(transform);
         let index = 0;
         for (let row = transform.range.start.row; row <= transform.range.end.row; row += 1) {
           for (
@@ -572,8 +633,9 @@ export function createDataTransformPlanner(limits: {
             column <= transform.range.end.column;
             column += 1
           ) {
-            throwIfAborted(options.signal);
-            const after = values[index] as string;
+            await yieldForCancellation(index, options.signal);
+            const value = valueAt(index);
+            const after = value.text;
             index += 1;
             const existing = cells.get(cellKey(row, column));
             const before = existing === undefined ? '' : inputText(existing.cell.input);
@@ -592,7 +654,7 @@ export function createDataTransformPlanner(limits: {
               );
             }
             changes.push({ row, column, before, after });
-            commands.push(setCellCommand(sheetId, row, column, after, commands.length));
+            commands.push(setCellInputCommand(sheetId, row, column, value.input, commands.length));
             if (/^[=+\-@]/u.test(after)) {
               warnings.push(
                 diagnostic('FORMULA_INJECTION_RISK', 'Fill creates formula-like cell text', {
