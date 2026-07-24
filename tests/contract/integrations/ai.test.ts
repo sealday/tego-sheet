@@ -231,7 +231,7 @@ describe('AI command integration contract', () => {
     expect(apply).not.toHaveBeenCalled();
   });
 
-  it('requires the native command permission in addition to the AI apply grant', async () => {
+  it('requires native permissions for every target modified by an internal cut', async () => {
     const apply = vi.fn();
     const aiOnly = createPermissionSnapshot({
       revision: 'permission-1',
@@ -245,6 +245,28 @@ describe('AI command integration contract', () => {
           action: 'ai:apply',
           target: { type: 'document', documentId: 'document-1' },
         },
+        {
+          action: 'ai:apply',
+          target: {
+            type: 'range',
+            range: {
+              sheetId: 'sheet-1',
+              start: { row: 0, column: 1 },
+              end: { row: 0, column: 1 },
+            },
+          },
+        },
+        {
+          action: 'range:edit',
+          target: {
+            type: 'range',
+            range: {
+              sheetId: 'sheet-1',
+              start: { row: 0, column: 0 },
+              end: { row: 0, column: 0 },
+            },
+          },
+        },
       ],
     });
     const session = await createAiProposalSession({
@@ -253,9 +275,9 @@ describe('AI command integration contract', () => {
       permissionSnapshot: aiOnly,
       signal: new AbortController().signal,
       request: {
-        instruction: 'set A1',
+        instruction: 'move B1 to A1',
         locale: 'en-US',
-        allowedCommandTypes: ['set-cell-input'],
+        allowedCommandTypes: ['paste-internal'],
       },
       context: projectAiContext(document(), {
         documentRevision: 'revision-1',
@@ -266,13 +288,27 @@ describe('AI command integration contract', () => {
       adapter: {
         propose: async () => ({
           id: 'proposal-native-permission',
-          summary: 'Set A1',
+          summary: 'Move B1 to A1',
           assumptions: [],
           commands: [
             {
-              type: 'set-cell-input',
-              address: { sheet: 'sheet-1', row: 0, column: 0 },
-              input: { type: 'string', value: 'done' },
+              type: 'paste-internal',
+              source: {
+                sheet: 'sheet-1',
+                range: {
+                  start: { row: 0, column: 1 },
+                  end: { row: 0, column: 1 },
+                },
+              },
+              target: {
+                sheet: 'sheet-1',
+                range: {
+                  start: { row: 0, column: 0 },
+                  end: { row: 0, column: 0 },
+                },
+              },
+              mode: 'all',
+              cut: true,
             },
           ],
         }),

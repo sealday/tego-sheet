@@ -151,7 +151,29 @@ function commandPermissionRequests(
           ),
         },
       ];
-    case 'paste-internal':
+    case 'paste-internal': {
+      const requests: CommandPermissionRequest[] = [
+        {
+          action: 'range:edit',
+          target: rangeTarget(
+            command.target.sheet,
+            command.target.range.start,
+            command.target.range.end,
+          ),
+        },
+      ];
+      if (command.cut) {
+        requests.push({
+          action: 'range:edit',
+          target: rangeTarget(
+            command.source.sheet,
+            command.source.range.start,
+            command.source.range.end,
+          ),
+        });
+      }
+      return requests;
+    }
     case 'paste-external':
       return [
         {
