@@ -13,6 +13,40 @@ import {
   type RoadmapItemId,
 } from '../../../website/src/data/roadmap';
 
+const shippedRoadmapIds = [
+  'workbook-2',
+  'transactions',
+  'formula-format-core',
+  'render-semantics',
+  'extension-kernel',
+  'print-targets',
+  'template-bindings',
+  'pagination',
+  'print-preview',
+  'advanced-repeats',
+  'resource-pipeline',
+  'pdf-output',
+  'image-output',
+  'conditional-formatting',
+  'advanced-validation',
+  'formula-library',
+  'array-formulas',
+  'saved-views',
+  'data-cleanup',
+  'structured-tables',
+  'charts',
+  'objects',
+  'pivot-slicer',
+  'solver',
+  'cell-sdk',
+  'template-sdk',
+  'adapter-sdk',
+  'persistence-history',
+  'collaboration',
+  'permission-comments',
+  'ai-commands',
+] as const satisfies readonly RoadmapItemId[];
+
 it('maps every roadmap item to acceptance evidence without duplicate ids', () => {
   expect(new Set(roadmapAcceptance.map((entry) => entry.id)).size).toBe(allRoadmapItems.length);
   expect(roadmapAcceptance.map((entry) => entry.id).sort()).toEqual(
@@ -23,21 +57,7 @@ it('maps every roadmap item to acceptance evidence without duplicate ids', () =>
   );
   expect(
     roadmapAcceptance.filter((entry) => entry.state === 'shipped').map((entry) => entry.id),
-  ).toEqual([
-    'workbook-2',
-    'transactions',
-    'formula-format-core',
-    'render-semantics',
-    'extension-kernel',
-    'print-targets',
-    'template-bindings',
-    'pagination',
-    'print-preview',
-    'advanced-repeats',
-    'resource-pipeline',
-    'pdf-output',
-    'image-output',
-  ]);
+  ).toEqual(shippedRoadmapIds);
   expect(getRoadmapDeliveryState('workbook-2')).toBe('shipped');
   expect(getRoadmapDeliveryState('transactions')).toBe('shipped');
   expect(getRoadmapDeliveryState('formula-format-core')).toBe('shipped');
@@ -63,21 +83,9 @@ it('keeps canonical ids when an item moves out of the planned projection', () =>
   expect(
     selectRoadmapItemsByStatus(deliveryFixture, 'planned').map((item) => item.id),
   ).not.toContain('transactions');
-  expect(selectRoadmapItemsByStatus(deliveryFixture, 'shipped').map((item) => item.id)).toEqual([
-    'workbook-2',
-    'transactions',
-    'formula-format-core',
-    'render-semantics',
-    'extension-kernel',
-    'print-targets',
-    'template-bindings',
-    'pagination',
-    'print-preview',
-    'advanced-repeats',
-    'resource-pipeline',
-    'pdf-output',
-    'image-output',
-  ]);
+  expect(selectRoadmapItemsByStatus(deliveryFixture, 'shipped').map((item) => item.id)).toEqual(
+    shippedRoadmapIds,
+  );
 });
 
 it('keeps acceptance ids typed and derives phase from the canonical record', () => {
