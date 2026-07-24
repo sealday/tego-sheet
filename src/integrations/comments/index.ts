@@ -90,6 +90,8 @@ export interface CommentStore {
   list(): readonly CommentThread[];
   getSnapshot(): readonly CommentThread[];
   subscribe(listener: () => void): () => void;
+  /** Re-evaluates visibility against the latest permission snapshot. */
+  refresh(): void;
   create(input: {
     readonly anchor: CommentAnchor;
     readonly content: readonly CommentRichTextNode[];
@@ -232,6 +234,7 @@ export function createCommentStore(options: {
   readonly documentId: string;
   readonly actorId: string;
   readonly permissions: () => PermissionSnapshot | undefined;
+  readonly subscribePermissions?: (listener: () => void) => () => void;
   readonly nextId: () => string;
   readonly nextRevision: () => string;
 }): CommentStore {
@@ -298,6 +301,7 @@ export function createCommentStore(options: {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    refresh,
     create(input): CommentThread {
       if (input.expectedDocumentRevision !== input.currentDocumentRevision) {
         throw new TypeError('Comment document revision conflict');
@@ -355,6 +359,7 @@ export function createCommentStore(options: {
       return Object.freeze(updates);
     },
   };
+  options.subscribePermissions?.(refresh);
   return Object.freeze(store);
 }
 
@@ -419,6 +424,40 @@ export function createCommentAnchorOutboxCoordinator(options: {
   readonly outbox: CommentAnchorOutbox;
   readonly adapter: CommentAnchorUpdatePort;
 }): CommentAnchorOutboxCoordinator {
+  let operationTail: Promise<void> = Promise.resolve();
+  const serialize = <Result>(operation: () => Promise<Result>): Promise<Result> => {
+    const result = operationTail.then(operation);
+    operationTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  };
+  const validateStored = (
+    documentId: string,
+    stored: readonly CommentAnchorUpdateBatch[],
+  ): readonly CommentAnchorUpdateBatch[] => {
+    if (stored.length > 10_000) throw new RangeError('Comment outbox resume limit is 10000');
+    const snapshots = stored.map(snapshotBatch);
+    const operationIds = new Set<string>();
+    for (const [index, item] of snapshots.entries()) {
+      if (item.documentId !== documentId) {
+        throw new TypeError('Comment outbox batch documentId does not match resume document');
+      }
+      if (
+        item.fromDocumentRevision === item.toDocumentRevision ||
+        operationIds.has(item.operationId)
+      ) {
+        throw new TypeError('Comment outbox revision chain or operation order is invalid');
+      }
+      const previous = snapshots[index - 1];
+      if (previous !== undefined && previous.toDocumentRevision !== item.fromDocumentRevision) {
+        throw new TypeError('Comment outbox revision chain is not contiguous');
+      }
+      operationIds.add(item.operationId);
+    }
+    return snapshots;
+  };
   const submitStored = async (
     batch: CommentAnchorUpdateBatch,
     signal: AbortSignal,
@@ -437,40 +476,37 @@ export function createCommentAnchorOutboxCoordinator(options: {
       signal: AbortSignal,
     ): Promise<CommentAnchorUpdateAck> {
       const snapshot = snapshotBatch(batch);
-      if (signal.aborted) throw new TypeError('Comment anchor update was cancelled');
-      await options.outbox.put(snapshot);
-      return submitStored(snapshot, signal);
+      return serialize(async () => {
+        if (signal.aborted) throw new TypeError('Comment anchor update was cancelled');
+        const pending = validateStored(
+          snapshot.documentId,
+          await options.outbox.list(snapshot.documentId),
+        );
+        const previous = pending[pending.length - 1];
+        if (
+          pending.some((item) => item.operationId === snapshot.operationId) ||
+          (previous !== undefined && previous.toDocumentRevision !== snapshot.fromDocumentRevision)
+        ) {
+          throw new TypeError('Comment outbox pending revision chain conflict');
+        }
+        await options.outbox.put(snapshot);
+        return submitStored(snapshot, signal);
+      });
     },
     async resume(
       documentId: string,
       signal: AbortSignal,
     ): Promise<readonly CommentAnchorUpdateAck[]> {
       if (!identifierPattern.test(documentId)) throw new TypeError('Comment documentId is invalid');
-      const stored = await options.outbox.list(documentId);
-      if (stored.length > 10_000) throw new RangeError('Comment outbox resume limit is 10000');
-      const snapshots = stored.map(snapshotBatch);
-      const operationIds = new Set<string>();
-      for (const [index, batch] of snapshots.entries()) {
-        if (batch.documentId !== documentId) {
-          throw new TypeError('Comment outbox batch documentId does not match resume document');
+      return serialize(async () => {
+        if (signal.aborted) throw new TypeError('Comment anchor update was cancelled');
+        const snapshots = validateStored(documentId, await options.outbox.list(documentId));
+        const acknowledgements: CommentAnchorUpdateAck[] = [];
+        for (const batch of snapshots) {
+          acknowledgements.push(await submitStored(batch, signal));
         }
-        if (
-          batch.fromDocumentRevision === batch.toDocumentRevision ||
-          operationIds.has(batch.operationId)
-        ) {
-          throw new TypeError('Comment outbox revision chain or operation order is invalid');
-        }
-        const previous = snapshots[index - 1];
-        if (previous !== undefined && previous.toDocumentRevision !== batch.fromDocumentRevision) {
-          throw new TypeError('Comment outbox revision chain is not contiguous');
-        }
-        operationIds.add(batch.operationId);
-      }
-      const acknowledgements: CommentAnchorUpdateAck[] = [];
-      for (const batch of snapshots) {
-        acknowledgements.push(await submitStored(batch, signal));
-      }
-      return Object.freeze(acknowledgements);
+        return Object.freeze(acknowledgements);
+      });
     },
   });
 }

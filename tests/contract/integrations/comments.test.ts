@@ -149,6 +149,68 @@ describe('comments integration contract', () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
+  it('serializes queue and resume so an in-flight batch is submitted only once', async () => {
+    const stored = new Map<string, CommentAnchorUpdateBatch>();
+    let releaseSubmit!: () => void;
+    const submitBarrier = new Promise<void>((resolve) => {
+      releaseSubmit = resolve;
+    });
+    const submit = vi.fn(async (item: CommentAnchorUpdateBatch) => {
+      await submitBarrier;
+      return { operationId: item.operationId };
+    });
+    const coordinator = createCommentAnchorOutboxCoordinator({
+      outbox: {
+        put: async (item) => {
+          stored.set(item.operationId, item);
+        },
+        remove: async (operationId) => {
+          stored.delete(operationId);
+        },
+        list: async () => [...stored.values()],
+      },
+      adapter: { submit },
+    });
+
+    const queued = coordinator.queue(batch, new AbortController().signal);
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+    const resumed = coordinator.resume('document-1', new AbortController().signal);
+    await Promise.resolve();
+    expect(submit).toHaveBeenCalledTimes(1);
+
+    releaseSubmit();
+    await expect(queued).resolves.toEqual({ operationId: 'operation-1' });
+    await expect(resumed).resolves.toEqual([]);
+    expect(submit).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a queued batch that conflicts with the pending document revision chain', async () => {
+    const put = vi.fn();
+    const submit = vi.fn();
+    const coordinator = createCommentAnchorOutboxCoordinator({
+      outbox: {
+        put,
+        remove: vi.fn(),
+        list: async () => [batch],
+      },
+      adapter: { submit },
+    });
+
+    await expect(
+      coordinator.queue(
+        {
+          ...batch,
+          operationId: 'operation-2',
+          fromDocumentRevision: 'revision-stale',
+          toDocumentRevision: 'revision-3',
+        },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow(/revision chain conflict/u);
+    expect(put).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
   it('sanitizes bounded rich text and rejects revision or permission conflicts', () => {
     expect(
       sanitizeCommentRichText([
@@ -179,6 +241,39 @@ describe('comments integration contract', () => {
       /revision conflict/u,
     );
     expect(store.resolve(thread.id, thread.revision, true).resolved).toBe(true);
+  });
+
+  it('refreshes comment visibility after permissions change', () => {
+    let canView = true;
+    let revision = 0;
+    const listener = vi.fn();
+    const store = createCommentStore({
+      documentId: 'document-1',
+      actorId: 'actor-1',
+      permissions: () => ({
+        revision: `permission-${revision}`,
+        actorId: 'actor-1',
+        can: (action) => action !== 'comment:view' || canView,
+      }),
+      nextId: () => 'thread-1',
+      nextRevision: () => `thread-revision-${++revision}`,
+    });
+    store.create({
+      anchor: { type: 'cell', cell: { sheetId: 'sheet-1', row: 1, column: 2 } },
+      content: [{ text: 'hello' }],
+      expectedDocumentRevision: 'document-revision-1',
+      currentDocumentRevision: 'document-revision-1',
+    });
+    store.subscribe(listener);
+
+    canView = false;
+    store.refresh();
+    expect(store.getSnapshot()).toEqual([]);
+
+    canView = true;
+    store.refresh();
+    expect(store.getSnapshot()).toHaveLength(1);
+    expect(listener).toHaveBeenCalledTimes(2);
   });
 
   it('rebases anchors and projects explicit marker/full print policies', () => {

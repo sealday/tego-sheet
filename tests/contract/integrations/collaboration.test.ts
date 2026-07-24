@@ -167,6 +167,42 @@ describe('collaboration integration contract', () => {
     expect(processor.revision).toBe('revision-1');
   });
 
+  it('requires resync when both remote commit and rollback fail', () => {
+    const processor = createRemoteOperationProcessor({
+      initialRevision: 'revision-1',
+      permissionGate: () => true,
+      transactionBoundary: {
+        prepare: () => ({
+          commit: () => {
+            throw new Error('partial host failure');
+          },
+          rollback: () => {
+            throw new Error('rollback failure');
+          },
+        }),
+      },
+    });
+    const operation = {
+      operationId: 'operation-corrupt',
+      actorId: 'actor-2',
+      baseRevision: 'revision-1',
+      revision: 'revision-2',
+      transaction,
+    };
+
+    expect(processor.process(operation)).toEqual({
+      status: 'resync-required',
+      expectedRevision: 'revision-1',
+      receivedBaseRevision: 'revision-1',
+    });
+    expect(
+      processor.process({
+        ...operation,
+        operationId: 'operation-after-corrupt',
+      }),
+    ).toMatchObject({ status: 'resync-required' });
+  });
+
   it('rejects local-history commands in favor of inverse transactions', () => {
     const prepare = vi.fn();
     const processor = createRemoteOperationProcessor({
@@ -589,5 +625,71 @@ describe('collaboration integration contract', () => {
       status: 'resync-required',
       revision: 'revision-1',
     });
+  });
+
+  it('does not let an obsolete handshake failure disconnect a newer connection', async () => {
+    let rejectFirst!: (error: Error) => void;
+    const firstHandshake = new Promise<never>((_resolve, reject) => {
+      rejectFirst = reject;
+    });
+    let attempt = 0;
+    const session = createCollaborationSession({
+      processor: createRemoteOperationProcessor({
+        initialRevision: 'revision-0',
+        permissionGate: () => true,
+        transactionBoundary: {
+          prepare: () => ({ commit: vi.fn(), rollback: vi.fn() }),
+        },
+      }),
+      presence: createPresenceStore({ now: () => 0 }),
+      port: {
+        connect: async () => {
+          attempt += 1;
+          if (attempt === 1) return firstHandshake;
+          return {
+            revision: 'revision-2',
+            capabilities: { protocolVersions: [1], collaborativeUndo: true },
+          };
+        },
+        subscribe: () => () => undefined,
+      },
+    });
+
+    const obsolete = session.connect(new AbortController().signal);
+    await vi.waitFor(() => expect(session.state.status).toBe('connecting'));
+    await session.connect(new AbortController().signal);
+    expect(session.getSnapshot()).toEqual({ status: 'connected', revision: 'revision-2' });
+
+    rejectFirst(new Error('obsolete offline'));
+    await expect(obsolete).rejects.toThrow(/obsolete offline/u);
+    expect(session.getSnapshot()).toEqual({ status: 'connected', revision: 'revision-2' });
+  });
+
+  it('cancels an in-flight handshake and remains disconnected', async () => {
+    const controller = new AbortController();
+    const session = createCollaborationSession({
+      processor: createRemoteOperationProcessor({
+        initialRevision: 'revision-0',
+        permissionGate: () => true,
+        transactionBoundary: {
+          prepare: () => ({ commit: vi.fn(), rollback: vi.fn() }),
+        },
+      }),
+      presence: createPresenceStore({ now: () => 0 }),
+      port: {
+        connect: (signal) =>
+          new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () => reject(new TypeError('handshake aborted')), {
+              once: true,
+            });
+          }),
+        subscribe: vi.fn(),
+      },
+    });
+
+    const connecting = session.connect(controller.signal);
+    controller.abort();
+    await expect(connecting).rejects.toThrow(/aborted|cancelled/u);
+    expect(session.getSnapshot()).toEqual({ status: 'disconnected' });
   });
 });

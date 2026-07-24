@@ -251,7 +251,12 @@ export function createRemoteOperationProcessor(
         try {
           prepared.rollback();
         } catch {
-          // The host boundary owns rollback durability. Never advance protocol state on failure.
+          resyncRequired = true;
+          return Object.freeze({
+            status: 'resync-required',
+            expectedRevision: revision,
+            receivedBaseRevision: baseRevision,
+          });
         }
         return Object.freeze({ status: 'rejected', operationId });
       }
@@ -625,12 +630,14 @@ export function createCollaborationSession(options: {
   let unsubscribe: (() => void) | undefined;
   let connectionAbort: AbortController | undefined;
   let detachExternalAbort: (() => void) | undefined;
+  let connectionGeneration = 0;
   const listeners = new Set<() => void>();
   const publish = (next: CollaborationSession['state']): void => {
     state = Object.freeze(next);
     for (const listener of listeners) listener();
   };
   const disconnect = (): void => {
+    connectionGeneration += 1;
     detachExternalAbort?.();
     detachExternalAbort = undefined;
     connectionAbort?.abort();
@@ -647,10 +654,13 @@ export function createCollaborationSession(options: {
     },
     async connect(signal): Promise<void> {
       disconnect();
+      const generation = connectionGeneration;
       publish({ status: 'connecting' });
       const controller = new AbortController();
       connectionAbort = controller;
-      const abort = (): void => disconnect();
+      const abort = (): void => {
+        if (generation === connectionGeneration) disconnect();
+      };
       if (signal.aborted) {
         disconnect();
         throw new TypeError('Collaboration connect was cancelled');
@@ -659,12 +669,15 @@ export function createCollaborationSession(options: {
       detachExternalAbort = () => signal.removeEventListener('abort', abort);
       try {
         const handshake = await options.port.connect(controller.signal);
-        if (controller.signal.aborted) throw new TypeError('Collaboration connect was cancelled');
+        if (controller.signal.aborted || generation !== connectionGeneration) {
+          throw new TypeError('Collaboration connect was cancelled');
+        }
         if (!handshake.capabilities.protocolVersions.includes(1)) {
           throw new TypeError('Collaboration protocol capability is unavailable');
         }
         options.processor.resetAfterResync(handshake.revision);
-        unsubscribe = options.port.subscribe((event) => {
+        const nextUnsubscribe = options.port.subscribe((event) => {
+          if (generation !== connectionGeneration) return;
           try {
             if (event.type === 'presence') {
               options.presence.replace(event.presence);
@@ -686,9 +699,14 @@ export function createCollaborationSession(options: {
             publish({ status: 'resync-required', revision: options.processor.revision });
           }
         }, controller.signal);
+        if (generation !== connectionGeneration) {
+          nextUnsubscribe();
+          throw new TypeError('Collaboration connect was cancelled');
+        }
+        unsubscribe = nextUnsubscribe;
         publish({ status: 'connected', revision: options.processor.revision });
       } catch (error) {
-        disconnect();
+        if (generation === connectionGeneration) disconnect();
         throw error;
       }
     },
