@@ -616,7 +616,7 @@ function reportObjectDiagnostics(
       ]),
     ).values(),
   ];
-  const fingerprint = JSON.stringify(unique);
+  const fingerprint = JSON.stringify([sheetId, unique]);
   if (fingerprint === previousFingerprint) return;
   updateFingerprint(fingerprint);
   callback(

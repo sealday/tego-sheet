@@ -73,6 +73,18 @@ function documentFixture(collapsedOutline = false) {
               column: 0,
               cell: { input: { type: 'number', value: 12 } },
             },
+            {
+              row: 4,
+              column: 0,
+              cell: {
+                input: {
+                  type: 'custom',
+                  cellType: 'missing.person',
+                  schemaVersion: 1,
+                  value: { userId: 'u-1', name: '<Ada>' },
+                },
+              },
+            },
           ],
           merges: [],
           rows: [
@@ -178,6 +190,25 @@ function resolverFixture(maximumEntries = 100, collapsedOutline = false) {
 }
 
 describe('shared cell presentation', () => {
+  it('preserves unknown custom values through safe screen and print fallback text', () => {
+    const { resolver } = resolverFixture();
+    const presentation = resolver.resolve({
+      sheetId: 'sheet-1' as never,
+      row: 4,
+      column: 0,
+    });
+
+    expect(presentation.formattedText).toBe('{"name":"<Ada>","userId":"u-1"}');
+    expect(presentation.accessibility.label).toBe('{"name":"<Ada>","userId":"u-1"}');
+    expect(presentation.diagnostics).toEqual([
+      expect.objectContaining({
+        code: 'CELL_PLUGIN_UNAVAILABLE',
+        domain: 'extension',
+        stage: 'render',
+      }),
+    ]);
+  });
+
   it('derives collapsed outline visibility for screen and print without row truth mutation', () => {
     const { document, resolver } = resolverFixture(100, true);
     expect(resolver.resolve({ sheetId: 'sheet-1' as never, row: 2, column: 0 }).visibility).toEqual(

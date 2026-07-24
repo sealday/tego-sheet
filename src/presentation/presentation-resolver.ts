@@ -16,6 +16,12 @@ import {
 import { checkboxCellType } from '../extensions/cell-types/checkbox';
 import { dropdownCellType } from '../extensions/cell-types/dropdown';
 import type { BuiltInCellTypeDefinition, CellTypeScalar } from '../extensions/kernel/capabilities';
+import {
+  createCellTypeRegistry,
+  resolveCustomCell,
+  type CellExtensionDiagnostic,
+  type CellTypeRegistry,
+} from '../sdk/cells';
 import type {
   CellPresentation,
   PresentationAnnotation,
@@ -103,7 +109,14 @@ export interface PresentationResolverOptions {
   };
   /** Optional ordered annotation resolver. */
   readonly annotations?: (address: DocumentCellAddress) => readonly PresentationAnnotation[];
+  /** Optional public custom-cell registry; unknown types retain safe text fallback semantics. */
+  readonly cellTypes?: CellTypeRegistry;
 }
+
+const EMPTY_CELL_TYPE_REGISTRY = createCellTypeRegistry({
+  apiVersion: '1.0',
+  environment: 'browser',
+});
 
 function record(value: JsonValue | undefined): Readonly<Record<string, JsonValue>> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -214,6 +227,7 @@ interface CustomPresentation {
   readonly label: string;
   readonly role: 'text' | 'checkbox' | 'combobox';
   readonly checked?: boolean;
+  readonly diagnostics?: readonly CellExtensionDiagnostic[];
 }
 
 function scalarValue(value: CellTypeScalar): FormulaValue {
@@ -226,13 +240,21 @@ function scalarValue(value: CellTypeScalar): FormulaValue {
 function customPresentation(
   cell: Cell | undefined,
   environment: PresentationEnvironment,
+  registry: CellTypeRegistry,
 ): CustomPresentation | undefined {
   if (cell?.input.type !== 'custom') return undefined;
   if (cell.input.cellType === 'checkbox')
     return describeCustom(checkboxCellType, cell.input, environment);
   if (cell.input.cellType === 'dropdown')
     return describeCustom(dropdownCellType, cell.input, environment);
-  return undefined;
+  const resolved = resolveCustomCell(registry, cell.input, environment);
+  return {
+    value: { type: 'error', value: '#VALUE!' },
+    formattedText: environment.target === 'print' ? resolved.printText : resolved.formattedText,
+    label: resolved.accessibilityLabel,
+    role: 'text',
+    diagnostics: resolved.diagnostics,
+  };
 }
 
 function describeCustom<Value extends JsonValue>(
@@ -454,10 +476,24 @@ export function createPresentationResolver(
       const spillAnchor =
         options.formulaSpillAnchors?.get(formulaKey) ??
         options.formulaProgram?.spillAnchors.get(formulaKey);
-      const custom = customPresentation(cell, options.environment);
+      const custom = customPresentation(
+        cell,
+        options.environment,
+        options.cellTypes ?? EMPTY_CELL_TYPE_REGISTRY,
+      );
       const value = custom?.value ?? formulaValue ?? inputValue(cell);
       let formattedText = custom?.formattedText ?? plain(value);
-      const diagnostics: Diagnostic[] = [];
+      const diagnostics: Diagnostic[] =
+        custom?.diagnostics?.map(
+          (diagnostic): Diagnostic => ({
+            code: diagnostic.code,
+            severity: 'warning',
+            domain: 'extension',
+            stage: 'render',
+            message: diagnostic.message,
+            location: { cell: address },
+          }),
+        ) ?? [];
       if (custom === undefined && baseStyle.numberFormat !== undefined) {
         try {
           formattedText = formatter.format(value, baseStyle.numberFormat, options.environment);

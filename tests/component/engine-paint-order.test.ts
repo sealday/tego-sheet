@@ -308,3 +308,64 @@ it('resolves a data URL image through the resource pipeline and repaints with dr
   expect(onObjectDiagnostics).toHaveBeenLastCalledWith([]);
   engine.dispose();
 });
+
+it('reports identical object diagnostics again when the active sheet changes', () => {
+  const frames: FrameRequestCallback[] = [];
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    frames.push(callback);
+    return frames.length;
+  });
+  vi.stubGlobal('cancelAnimationFrame', vi.fn());
+  const root = document.createElement('div');
+  Object.defineProperties(root, {
+    clientWidth: { configurable: true, value: 500 },
+    clientHeight: { configurable: true, value: 300 },
+  });
+  const canvas = createCanvasHarness();
+  const base = testDocument({ rows: { len: 2 }, cols: { len: 3 } });
+  const object = {
+    id: 'shared-object-id',
+    kind: 'image',
+    anchor: { type: 'absolute', rect: { x: 10, y: 20, width: 40, height: 30 } },
+    zIndex: 1,
+    locked: false,
+    templateRepeat: 'shared',
+    resourceId: 'shared-resource-id',
+    fit: 'contain',
+    accessibility: { name: 'Unresolved' },
+  } as const;
+  const first = { ...base.workbook.sheets[0]!, objects: [object] };
+  const second = { ...first, id: 'second-sheet', name: 'Second' };
+  const controller = new SpreadsheetDocumentController({
+    ...base,
+    workbook: { ...base.workbook, sheets: [first, second] },
+    resources: {
+      items: [
+        {
+          id: 'shared-resource-id',
+          kind: 'image',
+          mimeType: 'image/png',
+          url: 'https://example.test/not-fetched.png',
+        },
+      ],
+    },
+  } as unknown as SpreadsheetDocument);
+  const [firstSheet, secondSheet] = controller.getSheetIds();
+  const onObjectDiagnostics = vi.fn();
+  const engine = createEngineAdapter({
+    root,
+    canvas: canvas.canvas as unknown as HTMLCanvasElement,
+    onObjectDiagnostics,
+  });
+
+  engine.render(controller.getSnapshot(), firstSheet!);
+  frames.shift()!(0);
+  engine.render(controller.getSnapshot(), secondSheet!);
+  frames.shift()!(1);
+
+  const reportedSheets = onObjectDiagnostics.mock.calls
+    .filter(([diagnostics]) => diagnostics.length > 0)
+    .map(([diagnostics]) => diagnostics[0].location.sheetId);
+  expect(reportedSheets).toEqual([firstSheet, secondSheet]);
+  engine.dispose();
+});
