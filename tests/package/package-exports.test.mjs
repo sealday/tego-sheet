@@ -38,9 +38,12 @@ test('the analysis subpath exposes Worker-safe analysis protocols', () => {
         'compileSlicerFilterContext',
         'compileSolverModel',
         'createFormulaGoalSeekApplyProposal',
+        'createPersistedVisualizationValueSource',
         'createStructuredTableResolver',
+        'createVisualizationPlacement',
         'executeStructuredTableView',
         'planStructuredTableAutoExpand',
+        'projectPersistedVisualizations',
         'refreshPivot',
         'resolveChart',
         'resolveSparkline',
@@ -325,6 +328,7 @@ test('the integrations subpath exposes only host-owned protocol runtimes', () =>
       `
       const integrations = await import('tego-sheet/integrations');
       const expected = [
+        'CommentAnchorOutboxConflictError',
         'checkpointDocumentVersion',
         'createAiProposalSession',
         'createCollaborationOutboxCoordinator',

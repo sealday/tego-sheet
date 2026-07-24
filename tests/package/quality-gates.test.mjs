@@ -22,6 +22,7 @@ test('demo TypeScript resolves every public locale from source without dist', ()
   const config = JSON.parse(readFileSync(new URL('demo/tsconfig.json', repositoryRoot), 'utf8'));
   assert.deepEqual(config.compilerOptions.paths, {
     'tego-sheet': ['../src/index.ts'],
+    'tego-sheet/integrations': ['../src/integrations/index.ts'],
     'tego-sheet/styles.css': ['../src/ui/styles/index.less'],
     'tego-sheet/locales/en': ['../src/locales/en.ts'],
     'tego-sheet/locales/de': ['../src/locales/de.ts'],
