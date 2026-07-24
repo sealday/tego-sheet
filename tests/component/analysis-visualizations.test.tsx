@@ -1,7 +1,11 @@
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseSpreadsheetDocument, TegoSheet } from '../../src';
-import type { SpreadsheetDocument, SpreadsheetDocumentInput } from '../../src/document';
+import type {
+  DocumentSheetId,
+  SpreadsheetDocument,
+  SpreadsheetDocumentInput,
+} from '../../src/document';
 import { createFontMetrics } from '../../src/presentation';
 import type { PrintDisplayCommand } from '../../src/print';
 import { compileSpreadsheetTemplate } from '../../src/template/compiler';
@@ -43,7 +47,7 @@ const sourceInput: SpreadsheetDocumentInput = {
               {
                 id: 'actual',
                 values: {
-                  sheetId: 'sheet-1',
+                  sheetId: 'sheet-1' as DocumentSheetId,
                   start: { row: 0, column: 0 },
                   end: { row: 0, column: 2 },
                 },
@@ -51,7 +55,7 @@ const sourceInput: SpreadsheetDocumentInput = {
             ],
             anchor: {
               type: 'one-cell',
-              cell: { sheetId: 'sheet-1', row: 2, column: 0 },
+              cell: { sheetId: 'sheet-1' as DocumentSheetId, row: 2, column: 0 },
               offset: { x: 4, y: 4 },
               size: { width: 220, height: 110 },
             },
@@ -62,11 +66,11 @@ const sourceInput: SpreadsheetDocumentInput = {
             id: 'revenue-trend',
             type: 'column',
             source: {
-              sheetId: 'sheet-1',
+              sheetId: 'sheet-1' as DocumentSheetId,
               start: { row: 0, column: 0 },
               end: { row: 0, column: 2 },
             },
-            target: { sheetId: 'sheet-1', row: 1, column: 3 },
+            target: { sheetId: 'sheet-1' as DocumentSheetId, row: 1, column: 3 },
           },
         ],
       },
