@@ -244,7 +244,7 @@ test('the interchange subpath exposes only Worker-safe reader and writer contrac
   );
 });
 
-test('the SDK subpath exposes only public adapter lifecycle and trust runtimes', () => {
+test('the SDK subpath exposes only approved public extension runtimes', () => {
   execFileSync(
     process.execPath,
     [
@@ -256,8 +256,14 @@ test('the SDK subpath exposes only public adapter lifecycle and trust runtimes',
         'ADAPTER_KINDS',
         'AdapterSdkError',
         'DEFAULT_ADAPTER_SCOPE_LIMITS',
+        'TemplateModuleSdkError',
         'createAdapterRegistry',
         'createCapabilityGrant',
+        'createCellEditorSession',
+        'createCellTypeRegistry',
+        'createTemplateModuleRegistry',
+        'executeTemplateModulePipeline',
+        'resolveCustomCell',
       ];
       if (JSON.stringify(Object.keys(sdk)) !== JSON.stringify(expected)) {
         throw new Error('Unexpected SDK exports: ' + Object.keys(sdk).join(','));
