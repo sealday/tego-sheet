@@ -569,6 +569,12 @@ describe('documentation site contract', () => {
     expect(playgroundStyles).toMatch(
       /@media \(max-width:\s*42rem\)[\s\S]*?\.outputStudioGrid\s*{[^}]*display:\s*flex;[^}]*flex-direction:\s*column/,
     );
+    expect(playgroundStyles).toMatch(
+      /@media \(max-width:\s*42rem\)[\s\S]*?\.outputStudioGrid\s*{[^}]*align-items:\s*stretch/,
+    );
+    expect(playgroundStyles).toMatch(
+      /@media \(max-width:\s*42rem\)[\s\S]*?\.exactPreview,[\s\S]*?\.pipelineOutputs\s*{[^}]*width:\s*100%/,
+    );
   });
 
   it('documents the exact React peer dependency range from package metadata', () => {

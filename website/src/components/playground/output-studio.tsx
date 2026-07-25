@@ -39,6 +39,7 @@ export interface OutputStudioAdapters {
 
 interface OutputStudioProps {
   readonly adapters?: OutputStudioAdapters;
+  readonly embedded?: boolean;
 }
 
 function createOutputStudioAdapters(): OutputStudioAdapters {
@@ -82,7 +83,10 @@ interface ActiveOutputRequest {
   readonly controller: AbortController;
 }
 
-export function OutputStudio({ adapters: injectedAdapters }: OutputStudioProps = {}): ReactElement {
+export function OutputStudio({
+  adapters: injectedAdapters,
+  embedded = false,
+}: OutputStudioProps = {}): ReactElement {
   const [fixture] = useState(createInvoiceOutputFixture);
   const [draftTemplate, setDraftTemplate] = useState(fixture.template);
   const [draftData, setDraftData] = useState(() => JSON.stringify(fixture.data, null, 2));
@@ -360,12 +364,15 @@ export function OutputStudio({ adapters: injectedAdapters }: OutputStudioProps =
           ? 'Generation is blocked. Review the diagnostics.'
           : 'Preview and outputs use the current generated document.';
 
+  const Root = embedded ? 'section' : 'main';
+  const Title = embedded ? 'h2' : 'h1';
+
   return (
-    <main className={styles.outputStudio}>
+    <Root className={styles.outputStudio}>
       <header className={styles.outputStudioHeader}>
         <div>
           <p className={styles.eyebrow}>Output playground</p>
-          <h1>Output Studio</h1>
+          <Title>Output Studio</Title>
           <p>One document · many outputs.</p>
           <p>Preview, print, PDF, and PNG share one exact display list.</p>
           <p>XLSX uses the semantic workbook in the same GeneratedDocument.</p>
@@ -533,6 +540,6 @@ export function OutputStudio({ adapters: injectedAdapters }: OutputStudioProps =
           </div>
         </section>
       </div>
-    </main>
+    </Root>
   );
 }

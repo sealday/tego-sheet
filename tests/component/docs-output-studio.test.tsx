@@ -794,6 +794,24 @@ it('defines the approved responsive areas and accessible nested designer control
   expect(playgroundStyles).toMatch(
     /@media \(max-width: 42rem\)[\s\S]*?\.exactPreview\s*{[^}]*order:\s*1[^}]*}[\s\S]*?\.outputInputs\s*{[^}]*order:\s*2[^}]*}[\s\S]*?\.pipelineOutputs\s*{[^}]*order:\s*3/,
   );
+  const mobileStyles = playgroundStyles
+    .slice(playgroundStyles.indexOf('@media (max-width: 42rem)'))
+    .split('@media (max-width: 36rem)')[0]
+    ?.replace(/^@media[^{]+{/, '')
+    .replace(/}\s*$/, '');
+  const style = document.createElement('style');
+  style.textContent = `${playgroundStyles.match(/\.outputStudioGrid\s*{[^}]*}/s)?.[0] ?? ''}${mobileStyles}`;
+  document.head.append(style);
+  const grid = document.createElement('div');
+  grid.className = 'outputStudioGrid';
+  const preview = document.createElement('section');
+  preview.className = 'exactPreview';
+  grid.append(preview);
+  document.body.append(grid);
+  expect(getComputedStyle(grid).alignItems).toBe('stretch');
+  expect(getComputedStyle(preview).width).toBe('100%');
+  grid.remove();
+  style.remove();
   expect(playgroundStyles).toMatch(
     /\.templateSheet input:not\(\[type=['"]checkbox['"]\]\):not\(\[type=['"]radio['"]\]\)\s*{[^}]*min-height:\s*2\.75rem/s,
   );

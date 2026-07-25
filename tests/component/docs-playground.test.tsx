@@ -221,7 +221,7 @@ it('keeps Spreadsheet as the default for legacy mode URLs', async () => {
 });
 
 it('canonicalizes an invalid mode while preserving the path and unrelated parameters', async () => {
-  window.history.replaceState({}, '', '/tego-sheet/playground?theme=dark&mode=nope');
+  window.history.replaceState({}, '', '/tego-sheet/playground?theme=dark&mode=nope#preview');
   const replaceState = vi.spyOn(window.history, 'replaceState');
 
   await renderPlayground();
@@ -232,7 +232,7 @@ it('canonicalizes an invalid mode while preserving the path and unrelated parame
   expect(replaceState).toHaveBeenCalledWith(
     window.history.state,
     '',
-    '/tego-sheet/playground?theme=dark&mode=uncontrolled&workspace=spreadsheet',
+    '/tego-sheet/playground?theme=dark&mode=uncontrolled&workspace=spreadsheet#preview',
   );
 });
 
@@ -250,17 +250,69 @@ it('canonicalizes a missing mode while preserving the path and unrelated paramet
 });
 
 it('opens Output Studio directly and restores the selected Spreadsheet mode', async () => {
-  window.history.replaceState({}, '', '/tego-sheet/playground?workspace=output&mode=locales');
+  window.history.replaceState(
+    {},
+    '',
+    '/tego-sheet/playground?workspace=output&mode=locales#invoice',
+  );
 
   await renderPlayground();
+  const pushState = vi.spyOn(window.history, 'pushState');
 
   expect(screen.getByRole('heading', { name: 'Output Studio' })).toBeTruthy();
   fireEvent.click(screen.getByRole('tab', { name: 'Spreadsheet' }));
 
+  expect(pushState).toHaveBeenCalledWith(
+    window.history.state,
+    '',
+    '/tego-sheet/playground?workspace=spreadsheet&mode=locales#invoice',
+  );
   expect((screen.getByRole('radio', { name: 'Locales' }) as HTMLInputElement).checked).toBe(true);
 });
 
+it('renders one main landmark and a complete workspace tab relationship', async () => {
+  window.history.replaceState({}, '', '/tego-sheet/playground?workspace=output&mode=uncontrolled');
+  const rendered = await renderPlayground();
+
+  const spreadsheetTab = screen.getByRole('tab', { name: 'Spreadsheet' });
+  const outputTab = screen.getByRole('tab', { name: 'Output Studio' });
+  const panel = screen.getByRole('tabpanel');
+
+  expect(rendered.container.querySelectorAll('main')).toHaveLength(1);
+  expect(screen.getByRole('heading', { name: 'Playground', level: 1 })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Output Studio', level: 2 })).toBeTruthy();
+  expect(outputTab.getAttribute('aria-controls')).toBe(panel.id);
+  expect(panel.getAttribute('aria-labelledby')).toBe(outputTab.id);
+  expect(spreadsheetTab.tabIndex).toBe(-1);
+  expect(outputTab.tabIndex).toBe(0);
+});
+
+it('moves focus and selection through workspace tabs with arrow, Home, and End keys', async () => {
+  await renderPlayground();
+  const spreadsheetTab = screen.getByRole('tab', { name: 'Spreadsheet' });
+  spreadsheetTab.focus();
+
+  fireEvent.keyDown(spreadsheetTab, { key: 'ArrowRight' });
+  const outputTab = screen.getByRole('tab', { name: 'Output Studio' });
+  expect(document.activeElement).toBe(outputTab);
+  expect(outputTab.getAttribute('aria-selected')).toBe('true');
+  expect(window.location.search).toContain('workspace=output');
+
+  fireEvent.keyDown(outputTab, { key: 'ArrowLeft' });
+  expect(document.activeElement).toBe(spreadsheetTab);
+  expect(spreadsheetTab.getAttribute('aria-selected')).toBe('true');
+
+  fireEvent.keyDown(spreadsheetTab, { key: 'End' });
+  expect(document.activeElement).toBe(outputTab);
+  expect(outputTab.getAttribute('aria-selected')).toBe('true');
+
+  fireEvent.keyDown(outputTab, { key: 'Home' });
+  expect(document.activeElement).toBe(spreadsheetTab);
+  expect(spreadsheetTab.getAttribute('aria-selected')).toBe('true');
+});
+
 it('pushes a selected mode, changes the keyed preset boundary, and clears old events', async () => {
+  window.history.replaceState({}, '', '/tego-sheet/playground#sheet');
   await renderPlayground();
   fireEvent.click(screen.getByRole('button', { name: 'Commit mock change' }));
   expect(screen.getAllByRole('listitem', { name: /event/i })).toHaveLength(1);
@@ -273,7 +325,7 @@ it('pushes a selected mode, changes the keyed preset boundary, and clears old ev
   expect(pushState).toHaveBeenCalledWith(
     window.history.state,
     '',
-    '/tego-sheet/playground?workspace=spreadsheet&mode=controlled',
+    '/tego-sheet/playground?workspace=spreadsheet&mode=controlled#sheet',
   );
   expect(screen.getByTestId('preset-boundary').getAttribute('data-preset-key')).not.toBe(oldKey);
   expect(screen.getByTestId('tego-sheet-double').getAttribute('data-mount-id')).not.toBe(oldMount);
@@ -412,7 +464,9 @@ it('records structured onError payloads as public events', async () => {
 
 it('offers Reset and Reload after an unexpected render failure without exposing a stack', async () => {
   const onReload = vi.fn();
+  window.history.replaceState({}, '', '/tego-sheet/playground#recover');
   await renderPlayground(onReload);
+  const replaceState = vi.spyOn(window.history, 'replaceState');
   const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
   sheetMock.failRender = true;
   fireEvent.click(screen.getByRole('radio', { name: 'Controlled' }));
@@ -436,6 +490,11 @@ it('offers Reset and Reload after an unexpected render failure without exposing 
   sheetMock.failRender = false;
   fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
   expect(screen.getByTestId('tego-sheet-double')).toBeTruthy();
+  expect(replaceState).toHaveBeenCalledWith(
+    window.history.state,
+    '',
+    '/tego-sheet/playground?workspace=spreadsheet&mode=uncontrolled#recover',
+  );
   expect(consoleError).toHaveBeenCalled();
 });
 

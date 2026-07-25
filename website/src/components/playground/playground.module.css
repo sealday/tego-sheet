@@ -98,6 +98,10 @@
   color: white;
 }
 
+.workspacePanel[hidden] {
+  display: none;
+}
+
 .modePicker input:checked + span {
   border-color: var(--ifm-color-primary);
   background: var(--ifm-color-primary);
@@ -265,6 +269,7 @@
 }
 
 .outputStudioHeader h1,
+.outputStudioHeader h2,
 .outputStudioGrid h2 {
   margin-top: 0;
 }
@@ -461,6 +466,13 @@
   .outputStudioGrid {
     display: flex;
     flex-direction: column;
+    align-items: stretch;
+  }
+
+  .outputInputs,
+  .exactPreview,
+  .pipelineOutputs {
+    width: 100%;
   }
 
   .exactPreview {

@@ -11,6 +11,7 @@ import {
   useRef,
   useState,
   type ComponentProps,
+  type KeyboardEvent,
   type ReactElement,
 } from 'react';
 import { PLAYGROUND_LOCALES, PLAYGROUND_PRESETS, createFixture } from './playground-fixtures';
@@ -45,6 +46,10 @@ type SheetTabsRenderer = Exclude<SheetProps['sheetTabs'], 'default' | false | un
 
 const LOCALES = { en, 'zh-CN': zhCN, de, nl } as const;
 type LocaleId = keyof typeof LOCALES;
+const WORKSPACE_OPTIONS = Object.freeze([
+  { id: 'spreadsheet', label: 'Spreadsheet' },
+  { id: 'output', label: 'Output Studio' },
+] as const);
 
 function toPublicJson(value: unknown, seen = new WeakSet<object>()): PlaygroundEvent['payload'] {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
@@ -439,7 +444,11 @@ export function Playground({ onReload = reloadWindow }: PlaygroundProps = {}): R
 
   const urlForLocation = useCallback(
     (nextLocation: PlaygroundLocation): string =>
-      writePlaygroundLocation(window.location.pathname, window.location.search, nextLocation),
+      `${writePlaygroundLocation(
+        window.location.pathname,
+        window.location.search,
+        nextLocation,
+      )}${window.location.hash}`,
     [],
   );
 
@@ -454,7 +463,9 @@ export function Playground({ onReload = reloadWindow }: PlaygroundProps = {}): R
 
   useEffect(() => {
     const canonicalUrl = urlForLocation(location);
-    if (`${window.location.pathname}${window.location.search}` !== canonicalUrl) {
+    if (
+      `${window.location.pathname}${window.location.search}${window.location.hash}` !== canonicalUrl
+    ) {
       window.history.replaceState(window.history.state, '', canonicalUrl);
     }
   }, [location, urlForLocation]);
@@ -463,7 +474,10 @@ export function Playground({ onReload = reloadWindow }: PlaygroundProps = {}): R
     const onPopState = (): void => {
       const nextLocation = readPlaygroundLocation(window.location.search);
       const canonicalUrl = urlForLocation(nextLocation);
-      if (`${window.location.pathname}${window.location.search}` !== canonicalUrl) {
+      if (
+        `${window.location.pathname}${window.location.search}${window.location.hash}` !==
+        canonicalUrl
+      ) {
         window.history.replaceState(window.history.state, '', canonicalUrl);
       }
       setLocation(nextLocation);
@@ -485,6 +499,26 @@ export function Playground({ onReload = reloadWindow }: PlaygroundProps = {}): R
     pushLocation({ ...location, workspace });
   };
 
+  const navigateWorkspaceTabs = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    currentIndex: number,
+  ): void => {
+    let nextIndex: number;
+    if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % WORKSPACE_OPTIONS.length;
+    else if (event.key === 'ArrowLeft')
+      nextIndex = (currentIndex - 1 + WORKSPACE_OPTIONS.length) % WORKSPACE_OPTIONS.length;
+    else if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = WORKSPACE_OPTIONS.length - 1;
+    else return;
+
+    event.preventDefault();
+    const next = WORKSPACE_OPTIONS[nextIndex]!;
+    const tabs =
+      event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+    tabs?.[nextIndex]?.focus();
+    selectWorkspace(next.id);
+  };
+
   return (
     <main className={styles.playground}>
       <header className={styles.workspaceHeader}>
@@ -493,36 +527,50 @@ export function Playground({ onReload = reloadWindow }: PlaygroundProps = {}): R
           <h1>Playground</h1>
         </div>
         <div className={styles.workspaceTabs} role="tablist" aria-label="Playground workspace">
-          {(
-            [
-              ['spreadsheet', 'Spreadsheet'],
-              ['output', 'Output Studio'],
-            ] as const
-          ).map(([workspace, label]) => (
+          {WORKSPACE_OPTIONS.map((workspace, index) => (
             <button
-              key={workspace}
-              type="button"
+              key={workspace.id}
+              id={`workspace-tab-${workspace.id}`}
               role="tab"
-              aria-selected={location.workspace === workspace}
-              onClick={() => selectWorkspace(workspace)}
+              type="button"
+              aria-controls={`workspace-panel-${workspace.id}`}
+              aria-selected={location.workspace === workspace.id}
+              tabIndex={location.workspace === workspace.id ? 0 : -1}
+              onClick={() => selectWorkspace(workspace.id)}
+              onKeyDown={(event) => navigateWorkspaceTabs(event, index)}
             >
-              {label}
+              {workspace.label}
             </button>
           ))}
         </div>
       </header>
-      {location.workspace === 'spreadsheet' ? (
-        <SpreadsheetWorkspace
-          historyRevision={historyRevision}
-          mode={location.mode}
-          onModeChange={(mode) => pushLocation({ ...location, mode })}
-          onRecover={() => replaceLocation({ workspace: 'spreadsheet', mode: 'uncontrolled' })}
-          onReload={onReload}
-          restoredFromHistory={restoredFromHistory}
-        />
-      ) : (
-        <OutputStudio />
-      )}
+      <section
+        id="workspace-panel-spreadsheet"
+        className={styles.workspacePanel}
+        role="tabpanel"
+        aria-labelledby="workspace-tab-spreadsheet"
+        hidden={location.workspace !== 'spreadsheet'}
+      >
+        {location.workspace === 'spreadsheet' ? (
+          <SpreadsheetWorkspace
+            historyRevision={historyRevision}
+            mode={location.mode}
+            onModeChange={(mode) => pushLocation({ ...location, mode })}
+            onRecover={() => replaceLocation({ workspace: 'spreadsheet', mode: 'uncontrolled' })}
+            onReload={onReload}
+            restoredFromHistory={restoredFromHistory}
+          />
+        ) : null}
+      </section>
+      <section
+        id="workspace-panel-output"
+        className={styles.workspacePanel}
+        role="tabpanel"
+        aria-labelledby="workspace-tab-output"
+        hidden={location.workspace !== 'output'}
+      >
+        {location.workspace === 'output' ? <OutputStudio embedded /> : null}
+      </section>
     </main>
   );
 }
