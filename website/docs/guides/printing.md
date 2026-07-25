@@ -8,6 +8,12 @@ Printing is a compiler pipeline. Compile an explicit template, render it against
 deterministic environment inputs, then pass the immutable `GeneratedDocument` to preview or browser
 output. The adapter never reads the editor DOM, selection, scroll position, zoom, or Canvas pixels.
 
+Try the complete pipeline in
+[Output Studio](/playground?workspace=output): edit the prepared invoice template and sample data,
+regenerate its exact pages, then inspect browser print, PDF, PNG, and XLSX output actions. Preview,
+browser print, PDF, and PNG consume the immutable page display list; XLSX instead writes the
+semantic workbook carried by the same `GeneratedDocument`.
+
 ```ts
 import {
   compileSpreadsheetTemplate,

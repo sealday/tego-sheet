@@ -58,6 +58,16 @@ async function openNavigation(page: Page): Promise<void> {
   if (await toggle.isVisible()) await toggle.click();
 }
 
+async function openOutputStudio(page: Page): Promise<void> {
+  await page.goto('playground?workspace=output');
+  await expect(page).toHaveURL(
+    new RegExp(`${PROJECT_PATH}playground\\?workspace=output&mode=uncontrolled$`),
+  );
+  await expect(page.getByRole('heading', { name: 'Output Studio' })).toBeVisible();
+  await expect(page.getByText('GeneratedDocument · revision 1')).toBeVisible();
+  await expect(page.getByRole('article', { name: /Print page/ })).toHaveCount(2);
+}
+
 test('project-subpath navigation loads Docs, API, Playground, and Roadmap assets without 404s', async ({
   page,
 }) => {
@@ -89,6 +99,135 @@ test('project-subpath navigation loads Docs, API, Playground, and Roadmap assets
   }
 
   expect(missingAssets).toEqual([]);
+});
+
+test('Output Studio opens directly and is linked from the printing guide', async ({ page }) => {
+  await page.goto('docs/guides/printing');
+  const studioLink = page.getByRole('link', { name: 'Output Studio' });
+  await expect(studioLink).toHaveAttribute('href', `${PROJECT_PATH}playground?workspace=output`);
+  await studioLink.click();
+
+  await expect(page.getByRole('heading', { name: 'Output Studio' })).toBeVisible();
+  await expect(page.getByText('GeneratedDocument · revision 1')).toBeVisible();
+  await expect(page.getByRole('article', { name: /Print page/ })).toHaveCount(2);
+});
+
+test('Output Studio supports keyboard workspace switching', async ({ page }) => {
+  await openOutputStudio(page);
+  const outputTab = page.getByRole('tab', { name: 'Output Studio' });
+  await outputTab.focus();
+  await page.keyboard.press('ArrowLeft');
+
+  await expect(page.getByRole('tab', { name: 'Spreadsheet' })).toBeFocused();
+  await expect(page.getByRole('radio', { name: 'Uncontrolled' })).toBeVisible();
+  await expect.poll(() => new URL(page.url()).searchParams.get('workspace')).toBe('spreadsheet');
+
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('tab', { name: 'Output Studio' })).toBeFocused();
+  await expect(page.getByText('GeneratedDocument · revision 1')).toBeVisible();
+  await expect.poll(() => new URL(page.url()).searchParams.get('workspace')).toBe('output');
+});
+
+test('Output Studio regenerates one revision and disables stale outputs', async ({ page }) => {
+  await openOutputStudio(page);
+  await page.getByRole('button', { name: 'Edit template' }).click();
+  await page.getByLabel('Data JSON').fill(
+    JSON.stringify({
+      customer: { name: 'Northwind Traders', address: 'Berlin' },
+      invoice: { id: 'INV-2026-043', currency: 'EUR' },
+      items: [
+        { description: 'Hosting', quantity: 1, amount: 29 },
+        { description: 'Support', quantity: 4, amount: 75 },
+        { description: 'Training', quantity: 2, amount: 240 },
+      ],
+    }),
+  );
+
+  await expect(page.getByRole('status').filter({ hasText: 'Preview is stale' })).toBeVisible();
+  for (const name of ['Print 2 pages', 'Download PDF', 'Download PNG page 1', 'Download XLSX']) {
+    await expect(page.getByRole('button', { name })).toBeDisabled();
+  }
+
+  await page.getByRole('button', { name: 'Apply & regenerate' }).click();
+  await expect(page.getByText('GeneratedDocument · revision 2')).toBeVisible();
+  await expect(page.getByRole('article', { name: /Print page/ })).toHaveCount(2);
+  await expect(page.getByRole('button', { name: 'Download PDF' })).toBeEnabled();
+});
+
+test('Output Studio blocks invalid JSON without replacing the generated revision', async ({
+  page,
+}) => {
+  await openOutputStudio(page);
+  await page.getByRole('button', { name: 'Edit template' }).click();
+  await page.getByLabel('Data JSON').fill('{');
+  await page.getByRole('button', { name: 'Apply & regenerate' }).click();
+
+  await expect(page.getByRole('alert')).toHaveText('Data must be valid JSON before regeneration.');
+  await expect(page.getByText('GeneratedDocument · revision 1')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Download PDF' })).toBeDisabled();
+});
+
+test('Output Studio preserves its preview when generation is blocked', async ({ page }) => {
+  await openOutputStudio(page);
+  await page.getByRole('button', { name: 'Edit template' }).click();
+  await page.getByLabel('Expression for customer-name').fill('customer[');
+  await page.getByRole('button', { name: 'Apply & regenerate' }).click();
+
+  await expect(page.getByRole('status').filter({ hasText: 'Generation is blocked' })).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Generation diagnostics' })).toBeVisible();
+  await expect(page.getByText('GeneratedDocument · revision 1')).toBeVisible();
+  await expect(page.getByRole('article', { name: /Print page/ })).toHaveCount(2);
+  await expect(page.getByRole('button', { name: 'Download PDF' })).toBeDisabled();
+});
+
+test('Output Studio exposes stubbed output actions without opening native Print', async ({
+  page,
+}) => {
+  await openOutputStudio(page);
+
+  const actionNames = [
+    'Print 2 pages',
+    'Download PDF',
+    'Download PNG page 1',
+    'Download XLSX',
+  ] as const;
+  await page.evaluate((names) => {
+    const invoked: string[] = [];
+    Object.defineProperty(window, '__outputStudioActions', {
+      configurable: true,
+      value: invoked,
+    });
+    for (const button of document.querySelectorAll('button')) {
+      const name = button.textContent?.trim();
+      if (name === undefined || !names.includes(name as (typeof names)[number])) continue;
+      button.addEventListener(
+        'click',
+        (event) => {
+          event.stopImmediatePropagation();
+          invoked.push(name);
+        },
+        { capture: true },
+      );
+    }
+  }, actionNames);
+
+  for (const name of actionNames) {
+    await expect(page.getByRole('button', { name })).toBeEnabled();
+    await page.getByRole('button', { name }).click();
+  }
+
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as typeof window & {
+              __outputStudioActions: string[];
+            }
+          ).__outputStudioActions,
+      ),
+    )
+    .toEqual(actionNames);
 });
 
 test('Roadmap exposes five dependency phases and two non-interactive planned items', async ({

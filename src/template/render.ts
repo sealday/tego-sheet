@@ -188,8 +188,8 @@ function generatedSheetIds(
   sourceSheetId: string,
   structuralMappings: readonly StructuralMapping[],
 ): readonly string[] {
-  return [
-    ...new Set(
+  return Array.from(
+    new Set(
       structuralMappings
         .filter(
           ({ source, generated }) =>
@@ -197,7 +197,7 @@ function generatedSheetIds(
         )
         .map(({ generated }) => String(generated.sheetId)),
     ),
-  ];
+  );
 }
 
 function profileRangeForSheet(
