@@ -31,6 +31,7 @@ export type OutputStudioAction =
   | { readonly type: 'draft-changed' }
   | { readonly type: 'outputs-cancelled' }
   | { readonly type: 'render-started'; readonly revision: number }
+  | { readonly type: 'reset-started'; readonly revision: number }
   | {
       readonly type: 'render-succeeded';
       readonly revision: number;
@@ -140,6 +141,15 @@ export function reduceOutputStudioState(
       committedRevision: action.revision,
       diagnostics: [],
       outputs: changeRevisionOutputs(state.outputs),
+    };
+  }
+  if (action.type === 'reset-started') {
+    return {
+      ...state,
+      phase: 'rendering',
+      committedRevision: action.revision,
+      diagnostics: [],
+      outputs: createOutputs(),
     };
   }
   if ('revision' in action && action.revision !== state.committedRevision) return state;

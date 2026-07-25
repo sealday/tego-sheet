@@ -130,13 +130,14 @@ export function OutputStudio({
       data: unknown,
       metadata: OutputDocumentMetadata,
       activePrintProfileId: string,
+      resetOutputs = false,
     ): AbortController => {
       abortOutputRequests();
       generatedRevisionRef.current = null;
       controllerRef.current?.abort();
       const controller = new AbortController();
       controllerRef.current = controller;
-      dispatch({ type: 'render-started', revision });
+      dispatch({ type: resetOutputs ? 'reset-started' : 'render-started', revision });
       void renderOutputRevision({
         revision,
         document: fixture.document,
@@ -419,6 +420,7 @@ export function OutputStudio({
       fixture.data,
       outputDocumentMetadata(fixture.template, fixture.data, activePrintProfileId),
       activePrintProfileId,
+      true,
     );
   };
 
@@ -541,11 +543,13 @@ export function OutputStudio({
           {state.generatedDocument === null ? (
             <p role="status">Preparing deterministic invoice pages…</p>
           ) : (
-            <div
-              className={styles.previewCanvas}
-              style={{ '--output-preview-zoom': zoom / 100 } as CSSProperties}
-            >
-              <TemplatePreview document={state.generatedDocument} />
+            <div className={styles.previewViewport}>
+              <div
+                className={styles.previewCanvas}
+                style={{ '--output-preview-width': `${zoom}%` } as CSSProperties}
+              >
+                <TemplatePreview document={state.generatedDocument} />
+              </div>
             </div>
           )}
         </section>

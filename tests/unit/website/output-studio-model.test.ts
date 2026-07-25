@@ -140,6 +140,32 @@ describe('Output Studio model', () => {
     });
   });
 
+  it('starts a reset revision with every output outcome idle', () => {
+    const state = {
+      ...createOutputStudioState(),
+      phase: 'ready' as const,
+      diagnostics: [diagnostic('error')],
+      outputs: {
+        print: { requestId: null, status: 'cancelled' as const, message: 'Print cancelled.' },
+        pdf: { requestId: 4, status: 'busy' as const, message: 'Generating PDF…' },
+        png: { requestId: 5, status: 'success' as const, message: 'PNG page 1 downloaded' },
+        xlsx: { requestId: 6, status: 'error' as const, message: 'XLSX failed' },
+      },
+    };
+
+    expect(reduceOutputStudioState(state, { type: 'reset-started', revision: 3 })).toMatchObject({
+      phase: 'rendering',
+      committedRevision: 3,
+      diagnostics: [],
+      outputs: {
+        print: { requestId: null, status: 'idle', message: '' },
+        pdf: { requestId: null, status: 'idle', message: '' },
+        png: { requestId: null, status: 'idle', message: '' },
+        xlsx: { requestId: null, status: 'idle', message: '' },
+      },
+    });
+  });
+
   it('records output completion and failure without discarding generated output', () => {
     const document = {} as GeneratedDocument;
     const ready = {

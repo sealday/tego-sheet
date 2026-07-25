@@ -916,6 +916,7 @@ it('aborts an exporting request before resetting into a clean revision', async (
   expect(signal.aborted).toBe(true);
   await screen.findByText('GeneratedDocument · revision 2');
   expect(screen.queryByText('Generating PDF…')).toBeNull();
+  expect(screen.queryByText('PDF generation cancelled.')).toBeNull();
 
   pendingPdf.resolve(new Blob(['late'], { type: 'application/pdf' }));
   await act(async () => pendingPdf.promise);

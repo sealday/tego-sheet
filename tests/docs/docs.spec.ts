@@ -180,6 +180,42 @@ test('Output Studio preserves its preview when generation is blocked', async ({ 
   await expect(page.getByRole('button', { name: 'Download PDF' })).toBeDisabled();
 });
 
+test('Output Studio zooms inside its viewport without panel overlap and keeps 44px controls', async ({
+  page,
+}) => {
+  for (const width of [1024, 390]) {
+    await page.setViewportSize({ width, height: 1100 });
+    await openOutputStudio(page);
+
+    const preview = page.getByRole('region', { name: 'Exact page preview' });
+    const inputs = page.getByRole('region', { name: 'Output inputs' });
+    const firstPage = page.getByRole('article', { name: /Print page/ }).first();
+    const reset = page.getByRole('button', { name: 'Reset Output Studio' });
+    const currentPage = page.getByLabel('Current page');
+    const zoom = page.getByLabel('Preview zoom');
+    const basePageBox = await firstPage.boundingBox();
+    expect(basePageBox).not.toBeNull();
+
+    await zoom.selectOption('150');
+    await expect(page.getByText('Preview zoom · 150%')).toBeVisible();
+    const zoomedPageBox = await firstPage.boundingBox();
+    const previewBox = await preview.boundingBox();
+    const inputsBox = await inputs.boundingBox();
+    expect(zoomedPageBox).not.toBeNull();
+    expect(previewBox).not.toBeNull();
+    expect(inputsBox).not.toBeNull();
+    expect(zoomedPageBox!.width).toBeGreaterThan(basePageBox!.width * 1.45);
+    expect(zoomedPageBox!.height).toBeGreaterThan(basePageBox!.height * 1.45);
+    expect(previewBox!.y + previewBox!.height).toBeLessThanOrEqual(inputsBox!.y);
+
+    for (const control of [reset, currentPage, zoom]) {
+      const box = await control.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+    }
+  }
+});
+
 test('Output Studio exposes stubbed output actions without opening native Print', async ({
   page,
 }) => {

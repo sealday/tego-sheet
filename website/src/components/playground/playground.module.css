@@ -340,10 +340,14 @@
   width: 6rem;
 }
 
+.previewViewport {
+  max-width: 100%;
+  overflow: auto;
+}
+
 .previewCanvas {
-  width: calc(100% / var(--output-preview-zoom));
-  transform: scale(var(--output-preview-zoom));
-  transform-origin: top left;
+  width: var(--output-preview-width);
+  min-width: var(--output-preview-width);
 }
 
 .outputInputs {
@@ -357,7 +361,6 @@
 .exactPreview article {
   max-width: 100%;
   margin-bottom: 1rem;
-  overflow: auto;
   border: 1px solid var(--ifm-color-emphasis-200);
   background: white;
 }
