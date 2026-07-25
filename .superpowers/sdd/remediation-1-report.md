@@ -16,6 +16,17 @@ Completed the missing Output Studio functional state and recovery requirements:
 
 Implementation commit: `dbf37b3` (`fix(docs): complete output studio recovery controls`)
 
+Review follow-up commit: `0d63731` (`fix(docs): harden output studio reset and zoom`)
+
+The follow-up resolves all three review findings:
+
+- Reset now starts through a dedicated reducer action that clears every output to idle instead of
+  retaining a cancelled message from an aborted export.
+- Preview zoom now uses a horizontally scrollable viewport and intrinsic scaled dimensions instead
+  of a canceling transform, so scaled page height remains in layout flow.
+- Browser geometry coverage verifies visible 150% page bounds, no preview/input panel overlap, and
+  44px minimum Reset/current-page/zoom controls at 1024px and 390px.
+
 ## Changed Files
 
 - `website/src/components/playground/output-studio.tsx`
@@ -38,6 +49,8 @@ Implementation commit: `dbf37b3` (`fix(docs): complete output studio recovery co
   - Added selected-profile geometry and removed-profile blocking coverage.
 - `tests/component/docs-output-studio.test.tsx`
   - Added profile commit/reconciliation, selected-page PNG, clamping, zoom, and Reset regressions.
+- `tests/docs/docs.spec.ts`
+  - Added computed browser geometry and target-size coverage at intermediate and narrow widths.
 - `tests/component/docs-playground.test.tsx`
   - Added synchronous Output Studio render-failure containment and recovery coverage.
 
@@ -74,6 +87,27 @@ Implementation commit: `dbf37b3` (`fix(docs): complete output studio recovery co
 
    Result: exit 1 before implementation; the Output Studio workspace had no scoped recovery alert.
 
+4. Review follow-up — clean reset output state:
+
+   ```text
+   npx vitest run --project unit tests/unit/website/output-studio-model.test.ts \
+     -t "reset revision"
+   npx vitest run --project component tests/component/docs-output-studio.test.tsx \
+     -t "aborts an exporting"
+   ```
+
+   Result: both commands exited 1. The model retained cancelled/busy/success/error output states,
+   and the live reset displayed `PDF generation cancelled.` on the clean revision.
+
+5. Review follow-up — zoom geometry and target size:
+
+   ```text
+   npm run test:docs -- --grep "zooms inside"
+   ```
+
+   Result: exit 1 in both browser projects. The 150% page remained approximately `957.98px` wide,
+   identical to 100%, instead of exceeding the `1.45×` threshold.
+
 ### GREEN
 
 1. New remediation behaviors:
@@ -100,7 +134,7 @@ Implementation commit: `dbf37b3` (`fix(docs): complete output studio recovery co
      tests/unit/website/output-studio-pipeline.test.ts
    ```
 
-   Result: 2 files passed; 15 tests passed.
+   Result: 2 files passed; 16 tests passed.
 
    ```text
    npx vitest run --project component \
@@ -110,6 +144,16 @@ Implementation commit: `dbf37b3` (`fix(docs): complete output studio recovery co
    ```
 
    Result: 3 files passed; 63 tests passed.
+
+3. Review follow-up browser geometry:
+
+   ```text
+   npm run test:docs -- --grep "zooms inside"
+   ```
+
+   Result: 2 passed across desktop and narrow-touch projects. Each project verifies both 1024px
+   and 390px layouts, actual 150% page width and height, panel separation, and computed 44px
+   control heights.
 
 ## Verification
 
@@ -124,7 +168,7 @@ Implementation commit: `dbf37b3` (`fix(docs): complete output studio recovery co
 - `npm run docs:build`
   - PASS; optimized production documentation generated in `website/build`.
 - `npm run test:docs -- --grep "Output Studio"`
-  - PASS: 12 tests across desktop and narrow-touch projects.
+  - PASS: 14 tests across desktop and narrow-touch projects.
   - The existing browser action test intercepts every output button, including Print, before the
     application handler; automated verification did not open native print.
 - `npm test`
