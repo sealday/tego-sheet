@@ -159,7 +159,7 @@ tests.
 - `npm run lint`
   - PASS: exit 0, no warnings.
 - `npx vitest run --project component`
-  - PASS: 38 files, 266 tests.
+  - PASS: 38 files, 267 tests.
   - Existing unrelated React `act` and mount-only-option warnings remain in other component files;
     the Task 5 targeted suite is clean.
 - `npx vitest run --project architecture tests/architecture/documentation-site-contract.test.ts`
