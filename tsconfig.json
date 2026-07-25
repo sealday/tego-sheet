@@ -13,6 +13,9 @@
     "paths": {
       "tego-sheet": ["./src/index.ts"],
       "tego-sheet/styles.css": ["./src/ui/styles/index.less"],
+      "tego-sheet/output/pdf": ["./src/output/pdf/index.ts"],
+      "tego-sheet/output/xlsx": ["./src/output/xlsx/index.ts"],
+      "tego-sheet/output/image": ["./src/output/image/index.ts"],
       "tego-sheet/locales/en": ["./src/locales/en.ts"],
       "tego-sheet/locales/de": ["./src/locales/de.ts"],
       "tego-sheet/locales/nl": ["./src/locales/nl.ts"],

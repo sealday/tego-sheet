@@ -2,7 +2,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { GeneratedDocument } from '../../src/template';
+import { IsolatedBrowserPrintAdapter, type GeneratedDocument } from '../../src';
+import { downloadBlob } from '../../website/src/components/playground/output-download';
 import { OutputStudio } from '../../website/src/components/playground/output-studio';
 import { createCanvasHarness } from '../helpers/canvas-harness';
 
@@ -14,6 +15,10 @@ vi.mock('../../website/src/components/playground/output-studio-pipeline', () => 
 
 const playgroundStyles = readFileSync(
   resolve(process.cwd(), 'website/src/components/playground/playground.module.css'),
+  'utf8',
+);
+const outputStudioSource = readFileSync(
+  resolve(process.cwd(), 'website/src/components/playground/output-studio.tsx'),
   'utf8',
 );
 
@@ -83,6 +88,28 @@ const generatedDocument = {
   },
 } as unknown as GeneratedDocument;
 
+function createAdapterDoubles() {
+  return {
+    print: {
+      print: vi.fn().mockResolvedValue({ pageCount: 2 }),
+      dispose: vi.fn(),
+    },
+    pdf: {
+      render: vi.fn().mockResolvedValue(new Blob(['pdf'], { type: 'application/pdf' })),
+    },
+    image: {
+      render: vi.fn().mockResolvedValue([new Blob(['png'], { type: 'image/png' })] as const),
+    },
+    xlsx: {
+      render: vi.fn().mockResolvedValue(
+        new Blob(['xlsx'], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        }),
+      ),
+    },
+  };
+}
+
 function deferred<Value>(): {
   readonly promise: Promise<Value>;
   readonly resolve: (value: Value) => void;
@@ -102,6 +129,11 @@ beforeEach(() => {
     vi.fn(() => 1),
   );
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
+  vi.stubGlobal('URL', {
+    createObjectURL: vi.fn(() => 'blob:output-studio'),
+    revokeObjectURL: vi.fn(),
+  });
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
 });
 
 afterEach(() => {
@@ -134,6 +166,233 @@ it('renders the prepared revision and explains the shared artifact', async () =>
   ).toBeTruthy();
 });
 
+it('passes the current generated document to every output adapter', async () => {
+  pipeline.renderOutputRevision.mockResolvedValue({
+    revision: 1,
+    diagnostics: [],
+    document: generatedDocument,
+  });
+  const adapters = createAdapterDoubles();
+  render(<OutputStudio adapters={adapters} />);
+  await screen.findByText('GeneratedDocument · revision 1');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Print 2 pages' }));
+  await waitFor(() => expect(adapters.print.print).toHaveBeenCalledOnce());
+
+  fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Download PNG page 1' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Download XLSX' }));
+
+  await waitFor(() => expect(adapters.xlsx.render).toHaveBeenCalledOnce());
+  const generated = adapters.print.print.mock.calls[0]![0];
+  expect(adapters.pdf.render.mock.calls[0]![0]).toBe(generated);
+  expect(adapters.image.render.mock.calls[0]![0]).toBe(generated);
+  expect(adapters.xlsx.render.mock.calls[0]![0]).toBe(generated);
+});
+
+it('uses the approved adapter options and deterministic Blob downloads', async () => {
+  pipeline.renderOutputRevision.mockResolvedValue({
+    revision: 1,
+    diagnostics: [],
+    document: generatedDocument,
+  });
+  const adapters = createAdapterDoubles();
+  const downloads: string[] = [];
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(
+    function (this: HTMLAnchorElement) {
+      downloads.push(this.download);
+    },
+  );
+
+  render(<OutputStudio adapters={adapters} />);
+  await screen.findByText('GeneratedDocument · revision 1');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+  await screen.findByText('PDF downloaded');
+  fireEvent.click(screen.getByRole('button', { name: 'Download PNG page 1' }));
+  await screen.findByText('PNG page 1 downloaded');
+  fireEvent.click(screen.getByRole('button', { name: 'Download XLSX' }));
+  await screen.findByText('XLSX downloaded');
+
+  expect(adapters.pdf.render).toHaveBeenCalledWith(generatedDocument, {
+    pages: 'all',
+    metadata: { title: 'Customer invoice' },
+    tagged: false,
+  });
+  expect(adapters.image.render).toHaveBeenCalledWith(generatedDocument, {
+    format: 'png',
+    pages: [0],
+    background: '#ffffff',
+    dpi: 144,
+  });
+  expect(adapters.xlsx.render).toHaveBeenCalledWith(generatedDocument, {
+    formulaMode: 'formula-and-cached-value',
+    compatibility: 'excel',
+  });
+  const blobs = vi.mocked(URL.createObjectURL).mock.calls.map(([blob]) => blob as Blob);
+  expect(blobs.map(({ type }) => type)).toEqual([
+    'application/pdf',
+    'image/png',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ]);
+  expect(downloads).toEqual([
+    'invoice-INV-2026-042.pdf',
+    'invoice-INV-2026-042-page-1.png',
+    'invoice-INV-2026-042.xlsx',
+  ]);
+  await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledTimes(3));
+  expect(URL.revokeObjectURL).toHaveBeenNthCalledWith(1, 'blob:output-studio');
+});
+
+it('keeps other output actions available while one adapter is busy', async () => {
+  pipeline.renderOutputRevision.mockResolvedValue({
+    revision: 1,
+    diagnostics: [],
+    document: generatedDocument,
+  });
+  const pdf = deferred<Blob>();
+  const adapters = createAdapterDoubles();
+  adapters.pdf.render.mockReturnValue(pdf.promise);
+
+  render(<OutputStudio adapters={adapters} />);
+  await screen.findByText('GeneratedDocument · revision 1');
+  fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+
+  expect((screen.getByRole('button', { name: 'Download PDF' }) as HTMLButtonElement).disabled).toBe(
+    true,
+  );
+  expect(
+    (screen.getByRole('button', { name: 'Download PNG page 1' }) as HTMLButtonElement).disabled,
+  ).toBe(false);
+  expect(
+    (screen.getByRole('button', { name: 'Download XLSX' }) as HTMLButtonElement).disabled,
+  ).toBe(false);
+
+  pdf.resolve(new Blob(['pdf'], { type: 'application/pdf' }));
+  await screen.findByText('PDF downloaded');
+});
+
+it('tracks concurrent output actions as independently busy', async () => {
+  pipeline.renderOutputRevision.mockResolvedValue({
+    revision: 1,
+    diagnostics: [],
+    document: generatedDocument,
+  });
+  const pdf = deferred<Blob>();
+  const png = deferred<readonly Blob[]>();
+  const adapters = createAdapterDoubles();
+  adapters.pdf.render.mockReturnValue(pdf.promise);
+  adapters.image.render.mockReturnValue(png.promise);
+
+  render(<OutputStudio adapters={adapters} />);
+  await screen.findByText('GeneratedDocument · revision 1');
+  fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Download PNG page 1' }));
+
+  expect((screen.getByRole('button', { name: 'Download PDF' }) as HTMLButtonElement).disabled).toBe(
+    true,
+  );
+  expect(
+    (screen.getByRole('button', { name: 'Download PNG page 1' }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  expect(
+    (screen.getByRole('button', { name: 'Download XLSX' }) as HTMLButtonElement).disabled,
+  ).toBe(false);
+
+  pdf.resolve(new Blob(['pdf'], { type: 'application/pdf' }));
+  png.resolve([new Blob(['png'], { type: 'image/png' })]);
+  await waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledTimes(2));
+});
+
+it('removes the temporary anchor and revokes its Blob URL when clicking fails', async () => {
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {
+    throw new Error('download blocked');
+  });
+  const blob = new Blob(['pdf'], { type: 'application/pdf' });
+
+  expect(() => downloadBlob(blob, 'invoice.pdf')).toThrow('download blocked');
+  expect(document.querySelector('a[download="invoice.pdf"]')).toBeNull();
+  expect(URL.createObjectURL).toHaveBeenCalledWith(blob);
+  await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:output-studio'));
+});
+
+it('announces PRINT_BLOCKED without discarding the generated preview', async () => {
+  pipeline.renderOutputRevision.mockResolvedValue({
+    revision: 1,
+    diagnostics: [],
+    document: generatedDocument,
+  });
+  const adapters = createAdapterDoubles();
+  adapters.print.print.mockRejectedValue(
+    Object.assign(new Error('Browser print was blocked by the host'), {
+      code: 'PRINT_BLOCKED',
+    }),
+  );
+
+  render(<OutputStudio adapters={adapters} />);
+  await screen.findByText('GeneratedDocument · revision 1');
+  fireEvent.click(screen.getByRole('button', { name: 'Print 2 pages' }));
+
+  expect((await screen.findByRole('alert')).textContent).toBe(
+    'PRINT failed (PRINT_BLOCKED): Browser print was blocked by the host',
+  );
+  expect(screen.getAllByRole('article', { name: /Print page/u })).toHaveLength(2);
+});
+
+it('announces an XLSX rejection and leaves the preview visible', async () => {
+  pipeline.renderOutputRevision.mockResolvedValue({
+    revision: 1,
+    diagnostics: [],
+    document: generatedDocument,
+  });
+  const adapters = createAdapterDoubles();
+  adapters.xlsx.render.mockRejectedValue(new Error('Workbook packaging failed'));
+
+  render(<OutputStudio adapters={adapters} />);
+  await screen.findByText('GeneratedDocument · revision 1');
+  fireEvent.click(screen.getByRole('button', { name: 'Download XLSX' }));
+
+  expect((await screen.findByRole('alert')).textContent).toBe(
+    'XLSX failed: Workbook packaging failed',
+  );
+  expect(screen.getAllByRole('article', { name: /Print page/u })).toHaveLength(2);
+  expect(
+    (screen.getByRole('button', { name: 'Download XLSX' }) as HTMLButtonElement).disabled,
+  ).toBe(false);
+});
+
+it('disposes the default browser print adapter on unmount', () => {
+  pipeline.renderOutputRevision.mockReturnValue(new Promise(() => undefined));
+  const dispose = vi.spyOn(IsolatedBrowserPrintAdapter.prototype, 'dispose');
+
+  const rendered = render(<OutputStudio />);
+  rendered.unmount();
+
+  expect(dispose).toHaveBeenCalledOnce();
+});
+
+it('keeps every output disabled when generation is blocked', async () => {
+  pipeline.renderOutputRevision.mockResolvedValue({
+    revision: 1,
+    diagnostics: [
+      {
+        code: 'MISSING_DATA',
+        severity: 'error',
+        domain: 'template',
+        stage: 'render',
+        message: 'Invoice data is missing',
+      },
+    ],
+  });
+
+  render(<OutputStudio adapters={createAdapterDoubles()} />);
+  await screen.findByText('Generation is blocked. Review the diagnostics.');
+
+  for (const name of ['Print 0 pages', 'Download PDF', 'Download PNG page 1', 'Download XLSX']) {
+    expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);
+  }
+});
+
 it('keeps template edits as drafts until Apply and regenerate', async () => {
   pipeline.renderOutputRevision.mockImplementation(async ({ revision }) => ({
     revision,
@@ -155,6 +414,9 @@ it('keeps template edits as drafts until Apply and regenerate', async () => {
   expect(
     (screen.getByRole('button', { name: 'Print 2 pages' }) as HTMLButtonElement).disabled,
   ).toBe(true);
+  for (const name of ['Download PDF', 'Download PNG page 1', 'Download XLSX']) {
+    expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);
+  }
   expect(document.querySelector('[data-mode="template"]')).toBeTruthy();
 
   fireEvent.click(screen.getByRole('button', { name: 'Apply & regenerate' }));
@@ -230,6 +492,9 @@ it('aborts the regenerated request when the studio unmounts', async () => {
 });
 
 it('defines the approved responsive areas and accessible nested designer controls', () => {
+  expect(outputStudioSource).toContain("from 'tego-sheet/output/pdf'");
+  expect(outputStudioSource).toContain("from 'tego-sheet/output/image'");
+  expect(outputStudioSource).toContain("from 'tego-sheet/output/xlsx'");
   expect(playgroundStyles).toMatch(
     /\.outputStudioGrid\s*{[^}]*grid-template-areas:\s*['"]inputs preview outputs['"]/s,
   );

@@ -23,6 +23,18 @@ export default defineConfig({
   resolve: {
     alias: [
       {
+        find: 'tego-sheet/output/pdf',
+        replacement: resolve(repositoryRoot, 'src/output/pdf/index.ts'),
+      },
+      {
+        find: 'tego-sheet/output/xlsx',
+        replacement: resolve(repositoryRoot, 'src/output/xlsx/index.ts'),
+      },
+      {
+        find: 'tego-sheet/output/image',
+        replacement: resolve(repositoryRoot, 'src/output/image/index.ts'),
+      },
+      {
         find: 'tego-sheet/locales/en',
         replacement: resolve(repositoryRoot, 'src/locales/en.ts'),
       },
