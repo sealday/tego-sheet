@@ -18,9 +18,13 @@
     render replacement, adapter replacement, and unmount abort active work and suppress late
     downloads or state updates.
   - Review fix: PDF, image, XLSX, and print receive their public `signal` option.
+  - Final review fix: each initiating control exposes its own `aria-busy` state and adjacent live
+    busy/cancellation message.
 - `website/src/components/playground/output-studio-model.ts`
   - Review fix: replaced the global output result with request-scoped status/message state per
     output kind and committed invoice/title metadata per successful generated revision.
+  - Final review fix: draft/render revision transitions clear settled outcomes from the prior
+    generated revision while preserving same-revision independent outcomes.
 - `website/src/components/playground/playground.module.css`
   - Kept per-action outcomes adjacent to their 44px-minimum initiating controls.
 - `tests/component/docs-output-studio.test.tsx`
@@ -124,10 +128,32 @@ its PDF control disabled.
 After request cancellation was reflected in per-output reducer state, the focused component suite
 passed 23 of 23 tests.
 
+### Final review RED: lifecycle announcements and revision-scoped outcomes
+
+Commands:
+
+```text
+npx vitest run --project component tests/component/docs-output-studio.test.tsx
+npx vitest run --project unit tests/unit/website/output-studio-model.test.ts
+```
+
+Results:
+
+- Component: exit 1; 2 failed, 22 passed. The PDF control had no `aria-busy`/generating message, and
+  its completed revision-1 outcome remained after the draft moved toward revision 2.
+- Model: exit 1; 3 failed, 6 passed. Busy state had no per-kind message, cancellation collapsed to
+  idle, and settled outcomes were retained through draft/render revision transitions.
+
+### Final review GREEN
+
+After per-kind busy/cancelled messages, `aria-busy`, and revision-transition outcome resets were
+implemented, the focused component suite passed 24 of 24 tests and the model suite passed 9 of 9
+tests.
+
 ## Verification
 
 - `npx vitest run --project component tests/component/docs-output-studio.test.tsx`
-  - PASS: 1 file, 23 tests.
+  - PASS: 1 file, 24 tests.
 - `npx vitest run --project unit tests/unit/website/output-studio-model.test.ts`
   - PASS: 1 file, 9 tests.
 - `npm run lint`
@@ -152,6 +178,7 @@ passed 23 of 23 tests.
 
 - Implementation: `b019cf2` (`feat(docs): connect output studio adapters`)
 - Review fixes: `7aa2c51` (`fix(docs): harden output studio lifecycle`)
+- Final review fixes: `6896d26` (`fix(docs): announce output lifecycle states`)
 
 ## Risks
 
