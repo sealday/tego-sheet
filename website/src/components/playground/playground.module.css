@@ -5,6 +5,7 @@
   padding: clamp(1.5rem, 4vw, 3rem) 0;
 }
 
+.workspaceHeader,
 .header {
   display: grid;
   grid-template-columns: minmax(18rem, 1fr) minmax(24rem, 1.3fr);
@@ -13,10 +14,19 @@
   margin-bottom: 1.5rem;
 }
 
+.workspaceHeader {
+  align-items: center;
+}
+
+.workspaceHeader h1,
 .header h1,
 .inspector h2,
 .inspector h3 {
   margin-top: 0;
+}
+
+.workspaceHeader h1 {
+  margin-bottom: 0;
 }
 
 .eyebrow {
@@ -58,6 +68,7 @@
 }
 
 .modePicker span,
+.workspaceTabs button,
 .buttonRow button,
 .inspector button,
 .customChrome button {
@@ -74,6 +85,19 @@
   cursor: pointer;
 }
 
+.workspaceTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.workspaceTabs button[aria-selected='true'] {
+  border-color: var(--ifm-color-primary);
+  background: var(--ifm-color-primary);
+  color: white;
+}
+
 .modePicker input:checked + span {
   border-color: var(--ifm-color-primary);
   background: var(--ifm-color-primary);
@@ -81,6 +105,7 @@
 }
 
 .modePicker input:focus-visible + span,
+.workspaceTabs button:focus-visible,
 .buttonRow button:focus-visible,
 .inspector button:focus-visible,
 .customChrome button:focus-visible,
@@ -225,10 +250,10 @@
 }
 
 .outputStudio {
-  width: min(96rem, calc(100% - 2rem));
-  min-height: calc(100vh - var(--ifm-navbar-height));
-  margin: 0 auto;
-  padding: clamp(1.5rem, 4vw, 3rem) 0;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
 }
 
 .outputStudioHeader {
@@ -257,7 +282,7 @@
 .outputStudioGrid {
   display: grid;
   grid-template-areas: 'inputs preview outputs';
-  grid-template-columns: minmax(17rem, 0.7fr) minmax(0, 1.8fr) minmax(17rem, 0.7fr);
+  grid-template-columns: minmax(18rem, 0.8fr) minmax(28rem, 1.6fr) minmax(18rem, 0.85fr);
   gap: 1rem;
   align-items: start;
 }
@@ -407,6 +432,7 @@
 }
 
 @media (max-width: 72rem) {
+  .workspaceHeader,
   .header,
   .presetBoundary,
   .outputStudioHeader {
@@ -417,7 +443,12 @@
     grid-template-areas:
       'preview preview'
       'inputs outputs';
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .exactPreview {
+    grid-column: 1 / -1;
+    grid-row: 1;
   }
 
   .inspector {
@@ -426,22 +457,27 @@
   }
 }
 
-@media (max-width: 48rem) {
+@media (max-width: 42rem) {
   .outputStudioGrid {
-    grid-template-areas:
-      'preview'
-      'inputs'
-      'outputs';
-    grid-template-columns: minmax(0, 1fr);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .exactPreview {
+    order: 1;
+  }
+
+  .outputInputs {
+    order: 2;
+  }
+
+  .pipelineOutputs {
+    order: 3;
   }
 }
 
 @media (max-width: 36rem) {
   .playground {
-    width: min(100% - 1rem, 96rem);
-  }
-
-  .outputStudio {
     width: min(100% - 1rem, 96rem);
   }
 

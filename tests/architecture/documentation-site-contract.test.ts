@@ -550,8 +550,25 @@ describe('documentation site contract', () => {
     expect(playgroundStyles).toMatch(
       /\.modePicker span,[\s\S]*?\.inspector button,[\s\S]*?\.customChrome button\s*{[^}]*min-height:\s*2\.75rem/,
     );
+    expect(playgroundStyles).toMatch(
+      /\.workspaceTabs button(?:,[\s\S]*?)*\s*{[^}]*min-height:\s*2\.75rem/,
+    );
     expect(playgroundStyles).toMatch(/\.field select\s*{[^}]*min-height:\s*2\.75rem/);
     expect(playgroundStyles).not.toMatch(/min-height:\s*2\.35rem/);
+  });
+
+  it('keeps Output Studio preview-first across approved responsive breakpoints', () => {
+    const playgroundStyles = read('website/src/components/playground/playground.module.css');
+
+    expect(playgroundStyles).toMatch(
+      /\.outputStudioGrid\s*{[^}]*grid-template-columns:\s*minmax\(18rem,\s*0\.8fr\)\s+minmax\(28rem,\s*1\.6fr\)\s+minmax\(18rem,\s*0\.85fr\)/,
+    );
+    expect(playgroundStyles).toMatch(
+      /@media \(max-width:\s*72rem\)[\s\S]*?\.exactPreview\s*{[^}]*grid-column:\s*1\s*\/\s*-1;[^}]*grid-row:\s*1/,
+    );
+    expect(playgroundStyles).toMatch(
+      /@media \(max-width:\s*42rem\)[\s\S]*?\.outputStudioGrid\s*{[^}]*display:\s*flex;[^}]*flex-direction:\s*column/,
+    );
   });
 
   it('documents the exact React peer dependency range from package metadata', () => {
@@ -830,6 +847,8 @@ describe('documentation site contract', () => {
         'website/src/components/playground/playground-error-boundary.tsx',
         'website/src/components/playground/playground-fixtures.ts',
         'website/src/components/playground/playground-model.ts',
+        'website/src/components/playground/playground-workspace.ts',
+        'website/src/components/playground/output-studio.tsx',
         'website/src/components/playground/playground.tsx',
       ]),
     );

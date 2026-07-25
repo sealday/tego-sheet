@@ -789,7 +789,10 @@ it('defines the approved responsive areas and accessible nested designer control
     /@media \(max-width: 72rem\)[\s\S]*?grid-template-areas:\s*['"]preview preview['"]\s*['"]inputs outputs['"]/,
   );
   expect(playgroundStyles).toMatch(
-    /@media \(max-width: 48rem\)[\s\S]*?grid-template-areas:\s*['"]preview['"]\s*['"]inputs['"]\s*['"]outputs['"]/,
+    /@media \(max-width: 42rem\)[\s\S]*?\.outputStudioGrid\s*{[^}]*display:\s*flex;[^}]*flex-direction:\s*column/,
+  );
+  expect(playgroundStyles).toMatch(
+    /@media \(max-width: 42rem\)[\s\S]*?\.exactPreview\s*{[^}]*order:\s*1[^}]*}[\s\S]*?\.outputInputs\s*{[^}]*order:\s*2[^}]*}[\s\S]*?\.pipelineOutputs\s*{[^}]*order:\s*3/,
   );
   expect(playgroundStyles).toMatch(
     /\.templateSheet input:not\(\[type=['"]checkbox['"]\]\):not\(\[type=['"]radio['"]\]\)\s*{[^}]*min-height:\s*2\.75rem/s,

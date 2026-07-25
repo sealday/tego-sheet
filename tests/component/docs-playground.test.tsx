@@ -204,11 +204,14 @@ function installClipboard(writeText: (value: string) => Promise<void>): void {
   });
 }
 
-it('selects Controlled from the initial mode query', async () => {
+it('keeps Spreadsheet as the default for legacy mode URLs', async () => {
   window.history.replaceState({}, '', '/tego-sheet/playground?mode=controlled');
 
   await renderPlayground();
 
+  expect(screen.getByRole('tab', { name: 'Spreadsheet' }).getAttribute('aria-selected')).toBe(
+    'true',
+  );
   expect((screen.getByRole('radio', { name: 'Controlled' }) as HTMLInputElement).checked).toBe(
     true,
   );
@@ -229,7 +232,7 @@ it('canonicalizes an invalid mode while preserving the path and unrelated parame
   expect(replaceState).toHaveBeenCalledWith(
     window.history.state,
     '',
-    '/tego-sheet/playground?theme=dark&mode=uncontrolled',
+    '/tego-sheet/playground?theme=dark&mode=uncontrolled&workspace=spreadsheet',
   );
 });
 
@@ -242,8 +245,19 @@ it('canonicalizes a missing mode while preserving the path and unrelated paramet
   expect(replaceState).toHaveBeenCalledWith(
     window.history.state,
     '',
-    '/tego-sheet/playground?theme=dark&panel=events&mode=uncontrolled',
+    '/tego-sheet/playground?theme=dark&panel=events&workspace=spreadsheet&mode=uncontrolled',
   );
+});
+
+it('opens Output Studio directly and restores the selected Spreadsheet mode', async () => {
+  window.history.replaceState({}, '', '/tego-sheet/playground?workspace=output&mode=locales');
+
+  await renderPlayground();
+
+  expect(screen.getByRole('heading', { name: 'Output Studio' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('tab', { name: 'Spreadsheet' }));
+
+  expect((screen.getByRole('radio', { name: 'Locales' }) as HTMLInputElement).checked).toBe(true);
 });
 
 it('pushes a selected mode, changes the keyed preset boundary, and clears old events', async () => {
@@ -259,7 +273,7 @@ it('pushes a selected mode, changes the keyed preset boundary, and clears old ev
   expect(pushState).toHaveBeenCalledWith(
     window.history.state,
     '',
-    '/tego-sheet/playground?mode=controlled',
+    '/tego-sheet/playground?workspace=spreadsheet&mode=controlled',
   );
   expect(screen.getByTestId('preset-boundary').getAttribute('data-preset-key')).not.toBe(oldKey);
   expect(screen.getByTestId('tego-sheet-double').getAttribute('data-mount-id')).not.toBe(oldMount);
@@ -282,9 +296,25 @@ it('restores a remounted mode from popstate and removes the identical listener o
   expect((screen.getByRole('radio', { name: 'Locales' }) as HTMLInputElement).checked).toBe(true);
   expect(screen.getByTestId('tego-sheet-double').getAttribute('data-mount-id')).not.toBe(oldMount);
   expect(screen.getByLabelText('Locale')).toBeTruthy();
+  expect(screen.getByRole('status').textContent).toContain('Locales restored from browser history');
 
   rendered.unmount();
   expect(removeEventListener).toHaveBeenCalledWith('popstate', popstateListener);
+});
+
+it('restores the workspace and Spreadsheet mode from popstate', async () => {
+  window.history.replaceState({}, '', '/tego-sheet/playground?workspace=output&mode=controlled');
+  await renderPlayground();
+  expect(screen.getByRole('heading', { name: 'Output Studio' })).toBeTruthy();
+
+  window.history.pushState({}, '', '/tego-sheet/playground?workspace=spreadsheet&mode=locales');
+  fireEvent(window, new PopStateEvent('popstate'));
+
+  expect(screen.getByRole('tab', { name: 'Spreadsheet' }).getAttribute('aria-selected')).toBe(
+    'true',
+  );
+  expect((screen.getByRole('radio', { name: 'Locales' }) as HTMLInputElement).checked).toBe(true);
+  expect(screen.getByRole('status').textContent).toContain('Locales restored from browser history');
 });
 
 it('Reset mode recreates the current fixture without reloading the page', async () => {

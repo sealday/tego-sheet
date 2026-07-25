@@ -16,12 +16,18 @@ import {
 import { PLAYGROUND_LOCALES, PLAYGROUND_PRESETS, createFixture } from './playground-fixtures';
 import {
   appendPlaygroundEvent,
-  parsePlaygroundMode,
   type PlaygroundCallbackName,
   type PlaygroundEvent,
   type PlaygroundMode,
 } from './playground-model';
 import { PlaygroundErrorBoundary } from './playground-error-boundary';
+import {
+  readPlaygroundLocation,
+  writePlaygroundLocation,
+  type PlaygroundLocation,
+  type PlaygroundWorkspace,
+} from './playground-workspace';
+import { OutputStudio } from './output-studio';
 import styles from './playground.module.css';
 
 type SheetProps = ComponentProps<typeof TegoSheet>;
@@ -56,16 +62,6 @@ function toPublicJson(value: unknown, seen = new WeakSet<object>()): PlaygroundE
   return json;
 }
 
-function relativeUrlForMode(mode: PlaygroundMode): string {
-  const url = new URL(window.location.href);
-  url.searchParams.set('mode', mode);
-  return `${url.pathname}${url.search}${url.hash}`;
-}
-
-function modeFromLocation(): PlaygroundMode {
-  return parsePlaygroundMode(new URLSearchParams(window.location.search).get('mode'));
-}
-
 function sitePath(path: string): string {
   return `${window.location.pathname.replace(/\/playground\/?$/, '')}${path}`;
 }
@@ -76,6 +72,14 @@ function reloadWindow(): void {
 
 export interface PlaygroundProps {
   readonly onReload?: () => void;
+}
+
+interface SpreadsheetWorkspaceProps extends PlaygroundProps {
+  readonly historyRevision: number;
+  readonly mode: PlaygroundMode;
+  readonly onModeChange: (mode: PlaygroundMode) => void;
+  readonly onRecover: () => void;
+  readonly restoredFromHistory: boolean;
 }
 
 interface PresetSheetProps {
@@ -346,38 +350,31 @@ function PresetSession({ mode, presetKey, setStatus, onReset }: PresetSessionPro
   );
 }
 
-export function Playground({ onReload = reloadWindow }: PlaygroundProps = {}): ReactElement {
-  const [initialMode] = useState<PlaygroundMode>(modeFromLocation);
-  const [mode, setMode] = useState<PlaygroundMode>(initialMode);
+function SpreadsheetWorkspace({
+  historyRevision,
+  mode,
+  onModeChange,
+  onRecover,
+  onReload = reloadWindow,
+  restoredFromHistory,
+}: SpreadsheetWorkspaceProps): ReactElement {
   const [resetRevision, setResetRevision] = useState(0);
-  const [status, setStatus] = useState('');
-
-  const replaceMode = useCallback((nextMode: PlaygroundMode): void => {
-    window.history.replaceState(window.history.state, '', relativeUrlForMode(nextMode));
-  }, []);
-
-  useEffect(() => {
-    const rawMode = new URLSearchParams(window.location.search).get('mode');
-    if (rawMode !== initialMode) replaceMode(initialMode);
-  }, [initialMode, replaceMode]);
-
-  useEffect(() => {
-    const onPopState = (): void => {
-      const nextMode = modeFromLocation();
-      const rawMode = new URLSearchParams(window.location.search).get('mode');
-      if (rawMode !== nextMode) replaceMode(nextMode);
-      setMode(nextMode);
-      setResetRevision((revision) => revision + 1);
-      setStatus(`${PLAYGROUND_PRESETS[nextMode].label} restored from browser history`);
-    };
-    window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
-  }, [replaceMode]);
+  const [status, setStatusState] = useState({
+    historyRevision: restoredFromHistory ? historyRevision - 1 : historyRevision,
+    message: '',
+  });
+  const setStatus = useCallback(
+    (message: string): void => setStatusState({ historyRevision, message }),
+    [historyRevision],
+  );
+  const displayedStatus =
+    restoredFromHistory && status.historyRevision !== historyRevision
+      ? `${PLAYGROUND_PRESETS[mode].label} restored from browser history`
+      : status.message;
 
   const selectMode = (nextMode: PlaygroundMode): void => {
     if (nextMode === mode) return;
-    window.history.pushState(window.history.state, '', relativeUrlForMode(nextMode));
-    setMode(nextMode);
+    onModeChange(nextMode);
     setResetRevision(0);
     setStatus(`${PLAYGROUND_PRESETS[nextMode].label} selected`);
   };
@@ -388,20 +385,17 @@ export function Playground({ onReload = reloadWindow }: PlaygroundProps = {}): R
   };
 
   const recoverFromError = (): void => {
-    replaceMode('uncontrolled');
-    setMode('uncontrolled');
+    onRecover();
     setResetRevision((revision) => revision + 1);
     setStatus('Playground reset to Uncontrolled');
   };
 
-  const presetKey = `${mode}:${resetRevision}`;
+  const presetKey = `${mode}:${resetRevision}:${historyRevision}`;
 
   return (
-    <main className={styles.playground}>
+    <>
       <header className={styles.header}>
         <div>
-          <p className={styles.eyebrow}>Live public API examples</p>
-          <h1>Playground</h1>
           <p>Switch presets without leaving the page, then inspect document data and callbacks.</p>
         </div>
         <fieldset className={styles.modePicker}>
@@ -421,7 +415,7 @@ export function Playground({ onReload = reloadWindow }: PlaygroundProps = {}): R
         </fieldset>
       </header>
       <p className={styles.srStatus} role="status" aria-live="polite">
-        {status}
+        {displayedStatus}
       </p>
       <PlaygroundErrorBoundary key={presetKey} onReset={recoverFromError} onReload={onReload}>
         <PresetSession
@@ -432,6 +426,103 @@ export function Playground({ onReload = reloadWindow }: PlaygroundProps = {}): R
           onReset={resetMode}
         />
       </PlaygroundErrorBoundary>
+    </>
+  );
+}
+
+export function Playground({ onReload = reloadWindow }: PlaygroundProps = {}): ReactElement {
+  const [location, setLocation] = useState<PlaygroundLocation>(() =>
+    readPlaygroundLocation(window.location.search),
+  );
+  const [historyRevision, setHistoryRevision] = useState(0);
+  const [restoredFromHistory, setRestoredFromHistory] = useState(false);
+
+  const urlForLocation = useCallback(
+    (nextLocation: PlaygroundLocation): string =>
+      writePlaygroundLocation(window.location.pathname, window.location.search, nextLocation),
+    [],
+  );
+
+  const replaceLocation = useCallback(
+    (nextLocation: PlaygroundLocation): void => {
+      window.history.replaceState(window.history.state, '', urlForLocation(nextLocation));
+      setLocation(nextLocation);
+      setRestoredFromHistory(false);
+    },
+    [urlForLocation],
+  );
+
+  useEffect(() => {
+    const canonicalUrl = urlForLocation(location);
+    if (`${window.location.pathname}${window.location.search}` !== canonicalUrl) {
+      window.history.replaceState(window.history.state, '', canonicalUrl);
+    }
+  }, [location, urlForLocation]);
+
+  useEffect(() => {
+    const onPopState = (): void => {
+      const nextLocation = readPlaygroundLocation(window.location.search);
+      const canonicalUrl = urlForLocation(nextLocation);
+      if (`${window.location.pathname}${window.location.search}` !== canonicalUrl) {
+        window.history.replaceState(window.history.state, '', canonicalUrl);
+      }
+      setLocation(nextLocation);
+      setHistoryRevision((revision) => revision + 1);
+      setRestoredFromHistory(true);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [urlForLocation]);
+
+  const pushLocation = (nextLocation: PlaygroundLocation): void => {
+    window.history.pushState(window.history.state, '', urlForLocation(nextLocation));
+    setLocation(nextLocation);
+    setRestoredFromHistory(false);
+  };
+
+  const selectWorkspace = (workspace: PlaygroundWorkspace): void => {
+    if (workspace === location.workspace) return;
+    pushLocation({ ...location, workspace });
+  };
+
+  return (
+    <main className={styles.playground}>
+      <header className={styles.workspaceHeader}>
+        <div>
+          <p className={styles.eyebrow}>Live public API examples</p>
+          <h1>Playground</h1>
+        </div>
+        <div className={styles.workspaceTabs} role="tablist" aria-label="Playground workspace">
+          {(
+            [
+              ['spreadsheet', 'Spreadsheet'],
+              ['output', 'Output Studio'],
+            ] as const
+          ).map(([workspace, label]) => (
+            <button
+              key={workspace}
+              type="button"
+              role="tab"
+              aria-selected={location.workspace === workspace}
+              onClick={() => selectWorkspace(workspace)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </header>
+      {location.workspace === 'spreadsheet' ? (
+        <SpreadsheetWorkspace
+          historyRevision={historyRevision}
+          mode={location.mode}
+          onModeChange={(mode) => pushLocation({ ...location, mode })}
+          onRecover={() => replaceLocation({ workspace: 'spreadsheet', mode: 'uncontrolled' })}
+          onReload={onReload}
+          restoredFromHistory={restoredFromHistory}
+        />
+      ) : (
+        <OutputStudio />
+      )}
     </main>
   );
 }
