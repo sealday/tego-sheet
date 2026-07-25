@@ -41,13 +41,31 @@ describe('Output Studio rendering', () => {
     expect(result.diagnostics.some(({ severity }) => severity === 'error')).toBe(true);
   });
 
+  it('returns blocking diagnostics instead of throwing when no print profile exists', async () => {
+    const fixture = createInvoiceOutputFixture();
+    const result = await renderOutputRevision({
+      revision: 3,
+      document: fixture.document,
+      template: { ...fixture.template, printProfiles: [] },
+      data: fixture.data,
+      environment: fixture.environment,
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toMatchObject({
+      revision: 3,
+      diagnostics: [expect.objectContaining({ code: 'INVALID_PRINT_TARGET', severity: 'error' })],
+    });
+    expect(result.document).toBeUndefined();
+  });
+
   it('returns an atomic aborted result for a cancelled revision', async () => {
     const fixture = createInvoiceOutputFixture();
     const controller = new AbortController();
     controller.abort();
 
     const result = await renderOutputRevision({
-      revision: 3,
+      revision: 4,
       document: fixture.document,
       template: fixture.template,
       data: fixture.data,
@@ -56,7 +74,7 @@ describe('Output Studio rendering', () => {
     });
 
     expect(result).toMatchObject({
-      revision: 3,
+      revision: 4,
       diagnostics: [expect.objectContaining({ code: 'RENDER_ABORTED', severity: 'error' })],
     });
     expect(result.document).toBeUndefined();

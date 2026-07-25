@@ -42,12 +42,27 @@ export async function renderOutputRevision(
     });
   }
 
+  const profile = request.template.printProfiles[0];
+  if (profile === undefined) {
+    const diagnostic: Diagnostic = Object.freeze({
+      code: 'INVALID_PRINT_TARGET',
+      severity: 'error',
+      domain: 'template',
+      stage: 'validate',
+      message: 'Template has no print profile',
+    });
+    return Object.freeze({
+      revision: request.revision,
+      diagnostics: Object.freeze([...compilation.diagnostics, diagnostic]),
+    });
+  }
+
   const rendered = await renderSpreadsheetTemplate(
     {
       template: compilation.template,
       currentDocumentHash: hashSpreadsheetDocument(sourceDocument),
       data: request.data,
-      profileId: request.template.printProfiles[0]!.id,
+      profileId: profile.id,
       missingValue: 'error',
       signal: request.signal,
     },
