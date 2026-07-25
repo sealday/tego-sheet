@@ -25,7 +25,10 @@ describe('Output Studio model', () => {
       committedRevision: 1,
       generatedRevision: 1,
       generatedDocument: {} as GeneratedDocument,
-      activeOutput: 'pdf' as const,
+      outputs: {
+        ...createOutputStudioState().outputs,
+        pdf: { requestId: 4, status: 'busy' as const, message: '' },
+      },
     };
 
     expect(reduceOutputStudioState(ready, { type: 'draft-changed' })).toMatchObject({
@@ -33,7 +36,9 @@ describe('Output Studio model', () => {
       committedRevision: 1,
       generatedRevision: 1,
       generatedDocument: ready.generatedDocument,
-      activeOutput: null,
+      outputs: expect.objectContaining({
+        pdf: { requestId: null, status: 'idle', message: '' },
+      }),
     });
   });
 
@@ -66,6 +71,7 @@ describe('Output Studio model', () => {
         type: 'render-succeeded',
         revision: 2,
         document: {} as GeneratedDocument,
+        metadata: { invoiceId: 'INV-2', title: 'Invoice' },
         diagnostics: [],
       }),
     ).toBe(rendering);
@@ -108,8 +114,11 @@ describe('Output Studio model', () => {
     const exporting = {
       ...createOutputStudioState(),
       phase: 'ready' as const,
-      activeOutput: 'pdf' as const,
-      outputMessage: 'Older output error',
+      outputs: {
+        ...createOutputStudioState().outputs,
+        pdf: { requestId: 4, status: 'busy' as const, message: '' },
+        xlsx: { requestId: 3, status: 'error' as const, message: 'Older output error' },
+      },
     };
 
     expect(
@@ -117,8 +126,10 @@ describe('Output Studio model', () => {
     ).toMatchObject({
       phase: 'rendering',
       committedRevision: 2,
-      activeOutput: null,
-      outputMessage: '',
+      outputs: expect.objectContaining({
+        pdf: { requestId: null, status: 'idle', message: '' },
+        xlsx: { requestId: 3, status: 'error', message: 'Older output error' },
+      }),
     });
   });
 
@@ -134,32 +145,73 @@ describe('Output Studio model', () => {
     const exporting = reduceOutputStudioState(ready, {
       type: 'output-started',
       kind: 'xlsx',
+      requestId: 7,
     });
 
     expect(exporting).toMatchObject({
-      activeOutput: 'xlsx',
-      outputMessage: '',
+      outputs: {
+        xlsx: { requestId: 7, status: 'busy', message: '' },
+      },
       generatedDocument: document,
     });
     expect(
       reduceOutputStudioState(exporting, {
         type: 'output-failed',
+        kind: 'xlsx',
+        requestId: 7,
         message: 'XLSX output failed',
       }),
     ).toMatchObject({
-      activeOutput: null,
-      outputMessage: 'XLSX output failed',
+      outputs: {
+        xlsx: { requestId: 7, status: 'error', message: 'XLSX output failed' },
+      },
       generatedDocument: document,
     });
     expect(
       reduceOutputStudioState(exporting, {
         type: 'output-finished',
+        kind: 'xlsx',
+        requestId: 7,
         message: 'XLSX downloaded',
       }),
     ).toMatchObject({
-      activeOutput: null,
-      outputMessage: 'XLSX downloaded',
+      outputs: {
+        xlsx: { requestId: 7, status: 'success', message: 'XLSX downloaded' },
+      },
       generatedDocument: document,
+    });
+  });
+
+  it('retains outcomes per kind and ignores stale completions by request id', () => {
+    const state = {
+      ...createOutputStudioState(),
+      outputs: {
+        ...createOutputStudioState().outputs,
+        pdf: { requestId: 9, status: 'busy' as const, message: '' },
+        xlsx: { requestId: 3, status: 'error' as const, message: 'XLSX failed' },
+      },
+    };
+
+    expect(
+      reduceOutputStudioState(state, {
+        type: 'output-finished',
+        kind: 'pdf',
+        requestId: 8,
+        message: 'Stale PDF downloaded',
+      }),
+    ).toBe(state);
+    expect(
+      reduceOutputStudioState(state, {
+        type: 'output-finished',
+        kind: 'pdf',
+        requestId: 9,
+        message: 'PDF downloaded',
+      }),
+    ).toMatchObject({
+      outputs: {
+        pdf: { requestId: 9, status: 'success', message: 'PDF downloaded' },
+        xlsx: { requestId: 3, status: 'error', message: 'XLSX failed' },
+      },
     });
   });
 

@@ -24,6 +24,7 @@ import {
   createOutputStudioState,
   outputFilename,
   reduceOutputStudioState,
+  type OutputDocumentMetadata,
   type OutputKind,
 } from './output-studio-model';
 import { renderOutputRevision } from './output-studio-pipeline';
@@ -59,20 +60,58 @@ function outputErrorMessage(kind: OutputKind, error: unknown): string {
   return `${name} failed${code}: ${message}`;
 }
 
+function outputDocumentMetadata(
+  template: { readonly name: string },
+  data: unknown,
+): OutputDocumentMetadata {
+  const invoice =
+    typeof data === 'object' && data !== null && 'invoice' in data ? data.invoice : undefined;
+  const invoiceId =
+    typeof invoice === 'object' &&
+    invoice !== null &&
+    'id' in invoice &&
+    typeof invoice.id === 'string'
+      ? invoice.id
+      : 'output';
+  return { invoiceId, title: template.name };
+}
+
+interface ActiveOutputRequest {
+  readonly requestId: number;
+  readonly revision: number;
+  readonly controller: AbortController;
+}
+
 export function OutputStudio({ adapters: injectedAdapters }: OutputStudioProps = {}): ReactElement {
   const [fixture] = useState(createInvoiceOutputFixture);
-  const [adapters] = useState(() => injectedAdapters ?? createOutputStudioAdapters());
   const [draftTemplate, setDraftTemplate] = useState(fixture.template);
   const [draftData, setDraftData] = useState(() => JSON.stringify(fixture.data, null, 2));
   const [workbenchOpen, setWorkbenchOpen] = useState(false);
   const [dataError, setDataError] = useState('');
-  const [busyOutputs, setBusyOutputs] = useState<ReadonlySet<OutputKind>>(() => new Set());
   const [state, dispatch] = useReducer(reduceOutputStudioState, undefined, createOutputStudioState);
   const revisionRef = useRef(1);
   const controllerRef = useRef<AbortController | null>(null);
+  const adaptersRef = useRef<OutputStudioAdapters | null>(injectedAdapters ?? null);
+  const adapterPropRef = useRef(injectedAdapters);
+  const mountedRef = useRef(false);
+  const generatedRevisionRef = useRef<number | null>(null);
+  const outputRequestIdRef = useRef(0);
+  const outputRequestsRef = useRef(new Map<OutputKind, ActiveOutputRequest>());
+
+  const abortOutputRequests = useCallback((): void => {
+    for (const request of outputRequestsRef.current.values()) request.controller.abort();
+    outputRequestsRef.current.clear();
+  }, []);
 
   const startRender = useCallback(
-    (revision: number, template: typeof fixture.template, data: unknown): AbortController => {
+    (
+      revision: number,
+      template: typeof fixture.template,
+      data: unknown,
+      metadata: OutputDocumentMetadata,
+    ): AbortController => {
+      abortOutputRequests();
+      generatedRevisionRef.current = null;
       controllerRef.current?.abort();
       const controller = new AbortController();
       controllerRef.current = controller;
@@ -94,10 +133,12 @@ export function OutputStudio({ adapters: injectedAdapters }: OutputStudioProps =
               diagnostics: result.diagnostics,
             });
           } else {
+            generatedRevisionRef.current = revision;
             dispatch({
               type: 'render-succeeded',
               revision,
               document: result.document,
+              metadata,
               diagnostics: result.diagnostics,
             });
           }
@@ -115,22 +156,45 @@ export function OutputStudio({ adapters: injectedAdapters }: OutputStudioProps =
         });
       return controller;
     },
-    [fixture],
+    [abortOutputRequests, fixture],
   );
 
   useEffect(() => {
-    startRender(1, fixture.template, fixture.data);
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      generatedRevisionRef.current = null;
+      controllerRef.current?.abort();
+      abortOutputRequests();
+    };
+  }, [abortOutputRequests]);
+
+  useEffect(() => {
+    const adaptersChanged = adapterPropRef.current !== injectedAdapters;
+    adapterPropRef.current = injectedAdapters;
+    const adapters = injectedAdapters ?? createOutputStudioAdapters();
+    adaptersRef.current = adapters;
+    if (adaptersChanged) dispatch({ type: 'outputs-cancelled' });
+    return () => {
+      if (adaptersRef.current === adapters) adaptersRef.current = null;
+      abortOutputRequests();
+      if (injectedAdapters === undefined) adapters.print.dispose();
+    };
+  }, [abortOutputRequests, injectedAdapters]);
+
+  useEffect(() => {
+    startRender(
+      1,
+      fixture.template,
+      fixture.data,
+      outputDocumentMetadata(fixture.template, fixture.data),
+    );
     return () => controllerRef.current?.abort();
   }, [fixture, startRender]);
 
-  useEffect(
-    () => () => {
-      if (injectedAdapters === undefined) adapters.print.dispose();
-    },
-    [adapters, injectedAdapters],
-  );
-
   const markDraftChanged = (): void => {
+    abortOutputRequests();
+    generatedRevisionRef.current = null;
     controllerRef.current?.abort();
     controllerRef.current = null;
     dispatch({ type: 'draft-changed' });
@@ -157,71 +221,135 @@ export function OutputStudio({ adapters: injectedAdapters }: OutputStudioProps =
     }
     setDataError('');
     revisionRef.current += 1;
-    startRender(revisionRef.current, draftTemplate, data);
+    startRender(
+      revisionRef.current,
+      draftTemplate,
+      data,
+      outputDocumentMetadata(draftTemplate, data),
+    );
   };
 
   const pageCount = state.generatedDocument?.print.pages.length ?? 0;
-  const canOutput = state.phase === 'ready' && state.generatedDocument !== null;
-  const runOutput = async (
+  const canOutput =
+    state.phase === 'ready' && state.generatedDocument !== null && state.generatedMetadata !== null;
+  const runOutput = <Result,>(
     kind: OutputKind,
-    action: (generated: GeneratedDocument) => Promise<string>,
-  ): Promise<void> => {
+    action: (
+      adapters: OutputStudioAdapters,
+      generated: GeneratedDocument,
+      signal: AbortSignal,
+    ) => Promise<Result>,
+    finish: (result: Result, metadata: OutputDocumentMetadata) => string,
+  ): void => {
     const generated = state.generatedDocument;
-    if (!canOutput || generated === null) return;
-    setBusyOutputs((current) => new Set(current).add(kind));
-    dispatch({ type: 'output-started', kind });
-    try {
-      dispatch({ type: 'output-finished', message: await action(generated) });
-    } catch (error: unknown) {
-      dispatch({ type: 'output-failed', message: outputErrorMessage(kind, error) });
-    } finally {
-      setBusyOutputs((current) => {
-        const next = new Set(current);
-        next.delete(kind);
-        return next;
-      });
+    const metadata = state.generatedMetadata;
+    const adapters = adaptersRef.current;
+    const revision = state.generatedRevision;
+    if (
+      !canOutput ||
+      generated === null ||
+      metadata === null ||
+      adapters === null ||
+      revision === null
+    ) {
+      return;
     }
+    outputRequestsRef.current.get(kind)?.controller.abort();
+    const request: ActiveOutputRequest = {
+      requestId: (outputRequestIdRef.current += 1),
+      revision,
+      controller: new AbortController(),
+    };
+    outputRequestsRef.current.set(kind, request);
+    dispatch({ type: 'output-started', kind, requestId: request.requestId });
+    const isCurrent = (): boolean =>
+      mountedRef.current &&
+      !request.controller.signal.aborted &&
+      outputRequestsRef.current.get(kind) === request &&
+      generatedRevisionRef.current === request.revision;
+    void action(adapters, generated, request.controller.signal)
+      .then((result) => {
+        if (!isCurrent()) return;
+        const message = finish(result, metadata);
+        if (!isCurrent()) return;
+        dispatch({
+          type: 'output-finished',
+          kind,
+          requestId: request.requestId,
+          message,
+        });
+      })
+      .catch((error: unknown) => {
+        if (!isCurrent()) return;
+        dispatch({
+          type: 'output-failed',
+          kind,
+          requestId: request.requestId,
+          message: outputErrorMessage(kind, error),
+        });
+      })
+      .finally(() => {
+        if (outputRequestsRef.current.get(kind) === request) {
+          outputRequestsRef.current.delete(kind);
+        }
+      });
   };
   const print = (): void => {
-    void runOutput('print', async (generated) => {
-      await adapters.print.print(generated);
-      return 'Print dialog opened';
-    });
+    runOutput(
+      'print',
+      async (adapters, generated, signal) => adapters.print.print(generated, { signal }),
+      () => 'Print dialog opened',
+    );
   };
   const downloadPdf = (): void => {
-    void runOutput('pdf', async (generated) => {
-      const pdf = await adapters.pdf.render(generated, {
-        pages: 'all',
-        metadata: { title: fixture.template.name },
-        tagged: false,
-      });
-      downloadBlob(pdf, outputFilename('pdf', fixture.data.invoice.id));
-      return 'PDF downloaded';
-    });
+    runOutput(
+      'pdf',
+      async (adapters, generated, signal) =>
+        adapters.pdf.render(generated, {
+          pages: 'all',
+          metadata: { title: state.generatedMetadata?.title },
+          tagged: false,
+          signal,
+        }),
+      (pdf, metadata) => {
+        downloadBlob(pdf, outputFilename('pdf', metadata.invoiceId));
+        return 'PDF downloaded';
+      },
+    );
   };
   const downloadPng = (): void => {
     const selectedPage = 0;
-    void runOutput('png', async (generated) => {
-      const [png] = await adapters.image.render(generated, {
-        format: 'png',
-        pages: [selectedPage],
-        background: '#ffffff',
-        dpi: 144,
-      });
-      if (png === undefined) throw new Error('PNG adapter returned no page');
-      downloadBlob(png, outputFilename('png', fixture.data.invoice.id, selectedPage));
-      return 'PNG page 1 downloaded';
-    });
+    runOutput(
+      'png',
+      async (adapters, generated, signal) =>
+        adapters.image.render(generated, {
+          format: 'png',
+          pages: [selectedPage],
+          background: '#ffffff',
+          dpi: 144,
+          signal,
+        }),
+      ([png], metadata) => {
+        if (png === undefined) throw new Error('PNG adapter returned no page');
+        downloadBlob(png, outputFilename('png', metadata.invoiceId, selectedPage));
+        return 'PNG page 1 downloaded';
+      },
+    );
   };
   const downloadXlsx = (): void => {
-    void runOutput('xlsx', async (generated) => {
-      const xlsx = await adapters.xlsx.render(generated, {
-        formulaMode: 'formula-and-cached-value',
-        compatibility: 'excel',
-      });
-      downloadBlob(xlsx, outputFilename('xlsx', fixture.data.invoice.id));
-      return 'XLSX downloaded';
-    });
+    runOutput(
+      'xlsx',
+      async (adapters, generated, signal) =>
+        adapters.xlsx.render(generated, {
+          formulaMode: 'formula-and-cached-value',
+          compatibility: 'excel',
+          signal,
+        }),
+      (xlsx, metadata) => {
+        downloadBlob(xlsx, outputFilename('xlsx', metadata.invoiceId));
+        return 'XLSX downloaded';
+      },
+    );
   };
   const status =
     state.phase === 'dirty'
@@ -306,14 +434,6 @@ export function OutputStudio({ adapters: injectedAdapters }: OutputStudioProps =
           <p role="status" aria-live="polite">
             {status}
           </p>
-          {state.outputMessage === '' ? null : (
-            <p
-              role={state.outputMessage.includes(' failed') ? 'alert' : 'status'}
-              aria-live={state.outputMessage.includes(' failed') ? 'assertive' : 'polite'}
-            >
-              {state.outputMessage}
-            </p>
-          )}
           {state.diagnostics.length === 0 ? null : (
             <ul className={styles.outputDiagnostics} aria-label="Generation diagnostics">
               {state.diagnostics.map((diagnostic, index) => (
@@ -322,30 +442,90 @@ export function OutputStudio({ adapters: injectedAdapters }: OutputStudioProps =
             </ul>
           )}
           <div className={styles.outputActions}>
-            <button type="button" onClick={print} disabled={!canOutput || busyOutputs.has('print')}>
-              Print {pageCount} pages
-            </button>
-            <button
-              type="button"
-              onClick={downloadPdf}
-              disabled={!canOutput || busyOutputs.has('pdf')}
-            >
-              Download PDF
-            </button>
-            <button
-              type="button"
-              onClick={downloadPng}
-              disabled={!canOutput || busyOutputs.has('png')}
-            >
-              Download PNG page 1
-            </button>
-            <button
-              type="button"
-              onClick={downloadXlsx}
-              disabled={!canOutput || busyOutputs.has('xlsx')}
-            >
-              Download XLSX
-            </button>
+            <div className={styles.outputAction}>
+              <button
+                type="button"
+                onClick={print}
+                disabled={!canOutput || state.outputs.print.status === 'busy'}
+                aria-describedby={
+                  state.outputs.print.message === '' ? undefined : 'output-result-print'
+                }
+              >
+                Print {pageCount} pages
+              </button>
+              {state.outputs.print.message === '' ? null : (
+                <p
+                  id="output-result-print"
+                  role={state.outputs.print.status === 'error' ? 'alert' : 'status'}
+                  aria-live={state.outputs.print.status === 'error' ? 'assertive' : 'polite'}
+                >
+                  {state.outputs.print.message}
+                </p>
+              )}
+            </div>
+            <div className={styles.outputAction}>
+              <button
+                type="button"
+                onClick={downloadPdf}
+                disabled={!canOutput || state.outputs.pdf.status === 'busy'}
+                aria-describedby={
+                  state.outputs.pdf.message === '' ? undefined : 'output-result-pdf'
+                }
+              >
+                Download PDF
+              </button>
+              {state.outputs.pdf.message === '' ? null : (
+                <p
+                  id="output-result-pdf"
+                  role={state.outputs.pdf.status === 'error' ? 'alert' : 'status'}
+                  aria-live={state.outputs.pdf.status === 'error' ? 'assertive' : 'polite'}
+                >
+                  {state.outputs.pdf.message}
+                </p>
+              )}
+            </div>
+            <div className={styles.outputAction}>
+              <button
+                type="button"
+                onClick={downloadPng}
+                disabled={!canOutput || state.outputs.png.status === 'busy'}
+                aria-describedby={
+                  state.outputs.png.message === '' ? undefined : 'output-result-png'
+                }
+              >
+                Download PNG page 1
+              </button>
+              {state.outputs.png.message === '' ? null : (
+                <p
+                  id="output-result-png"
+                  role={state.outputs.png.status === 'error' ? 'alert' : 'status'}
+                  aria-live={state.outputs.png.status === 'error' ? 'assertive' : 'polite'}
+                >
+                  {state.outputs.png.message}
+                </p>
+              )}
+            </div>
+            <div className={styles.outputAction}>
+              <button
+                type="button"
+                onClick={downloadXlsx}
+                disabled={!canOutput || state.outputs.xlsx.status === 'busy'}
+                aria-describedby={
+                  state.outputs.xlsx.message === '' ? undefined : 'output-result-xlsx'
+                }
+              >
+                Download XLSX
+              </button>
+              {state.outputs.xlsx.message === '' ? null : (
+                <p
+                  id="output-result-xlsx"
+                  role={state.outputs.xlsx.status === 'error' ? 'alert' : 'status'}
+                  aria-live={state.outputs.xlsx.status === 'error' ? 'assertive' : 'polite'}
+                >
+                  {state.outputs.xlsx.message}
+                </p>
+              )}
+            </div>
           </div>
         </section>
       </div>

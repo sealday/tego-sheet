@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { IsolatedBrowserPrintAdapter, type GeneratedDocument } from '../../src';
 import { downloadBlob } from '../../website/src/components/playground/output-download';
@@ -113,12 +114,15 @@ function createAdapterDoubles() {
 function deferred<Value>(): {
   readonly promise: Promise<Value>;
   readonly resolve: (value: Value) => void;
+  readonly reject: (reason: unknown) => void;
 } {
   let resolvePromise!: (value: Value) => void;
-  const promise = new Promise<Value>((resolve) => {
+  let rejectPromise!: (reason: unknown) => void;
+  const promise = new Promise<Value>((resolve, reject) => {
     resolvePromise = resolve;
+    rejectPromise = reject;
   });
-  return { promise, resolve: resolvePromise };
+  return { promise, resolve: resolvePromise, reject: rejectPromise };
 }
 
 beforeEach(() => {
@@ -178,6 +182,9 @@ it('passes the current generated document to every output adapter', async () => 
 
   fireEvent.click(screen.getByRole('button', { name: 'Print 2 pages' }));
   await waitFor(() => expect(adapters.print.print).toHaveBeenCalledOnce());
+  expect(adapters.print.print).toHaveBeenCalledWith(generatedDocument, {
+    signal: expect.any(AbortSignal),
+  });
 
   fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
   fireEvent.click(screen.getByRole('button', { name: 'Download PNG page 1' }));
@@ -218,16 +225,19 @@ it('uses the approved adapter options and deterministic Blob downloads', async (
     pages: 'all',
     metadata: { title: 'Customer invoice' },
     tagged: false,
+    signal: expect.any(AbortSignal),
   });
   expect(adapters.image.render).toHaveBeenCalledWith(generatedDocument, {
     format: 'png',
     pages: [0],
     background: '#ffffff',
     dpi: 144,
+    signal: expect.any(AbortSignal),
   });
   expect(adapters.xlsx.render).toHaveBeenCalledWith(generatedDocument, {
     formulaMode: 'formula-and-cached-value',
     compatibility: 'excel',
+    signal: expect.any(AbortSignal),
   });
   const blobs = vi.mocked(URL.createObjectURL).mock.calls.map(([blob]) => blob as Blob);
   expect(blobs.map(({ type }) => type)).toEqual([
@@ -369,6 +379,252 @@ it('disposes the default browser print adapter on unmount', () => {
   rendered.unmount();
 
   expect(dispose).toHaveBeenCalledOnce();
+});
+
+it('recreates an owned default print adapter after the StrictMode effect probe', async () => {
+  pipeline.renderOutputRevision.mockResolvedValue({
+    revision: 1,
+    diagnostics: [],
+    document: generatedDocument,
+  });
+  const disposed = new WeakSet<object>();
+  vi.spyOn(IsolatedBrowserPrintAdapter.prototype, 'dispose').mockImplementation(
+    function (this: IsolatedBrowserPrintAdapter) {
+      disposed.add(this);
+    },
+  );
+  const print = vi
+    .spyOn(IsolatedBrowserPrintAdapter.prototype, 'print')
+    .mockImplementation(function (this: IsolatedBrowserPrintAdapter) {
+      return disposed.has(this)
+        ? Promise.reject(new Error('print adapter is disposed'))
+        : Promise.resolve({
+            pageIds: ['invoice-page-1', 'invoice-page-2'],
+            pageCount: 2,
+            cleanupReason: 'afterprint' as const,
+          });
+    });
+
+  render(
+    <StrictMode>
+      <OutputStudio />
+    </StrictMode>,
+  );
+  await screen.findByText('GeneratedDocument · revision 1');
+  fireEvent.click(screen.getByRole('button', { name: 'Print 2 pages' }));
+
+  await screen.findByText('Print dialog opened');
+  expect(print).toHaveBeenCalledOnce();
+  expect(disposed.has(print.mock.instances[0]!)).toBe(false);
+});
+
+it('switches adapter injections without disposing injected adapters or retaining an owned default', async () => {
+  pipeline.renderOutputRevision.mockResolvedValue({
+    revision: 1,
+    diagnostics: [],
+    document: generatedDocument,
+  });
+  const ownedDispose = vi.spyOn(IsolatedBrowserPrintAdapter.prototype, 'dispose');
+  const firstInjected = createAdapterDoubles();
+  const secondInjected = createAdapterDoubles();
+  const rendered = render(<OutputStudio />);
+  await screen.findByText('GeneratedDocument · revision 1');
+
+  rendered.rerender(<OutputStudio adapters={firstInjected} />);
+  rendered.rerender(<OutputStudio adapters={secondInjected} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Print 2 pages' }));
+  await waitFor(() => expect(secondInjected.print.print).toHaveBeenCalledOnce());
+
+  expect(firstInjected.print.print).not.toHaveBeenCalled();
+  expect(firstInjected.print.dispose).not.toHaveBeenCalled();
+  expect(secondInjected.print.dispose).not.toHaveBeenCalled();
+  expect(ownedDispose).toHaveBeenCalledOnce();
+  rendered.unmount();
+  expect(secondInjected.print.dispose).not.toHaveBeenCalled();
+});
+
+it('never disposes an injected adapter when switching back to an owned default', async () => {
+  pipeline.renderOutputRevision.mockResolvedValue({
+    revision: 1,
+    diagnostics: [],
+    document: generatedDocument,
+  });
+  const injected = createAdapterDoubles();
+  const rendered = render(<OutputStudio adapters={injected} />);
+  await screen.findByText('GeneratedDocument · revision 1');
+
+  rendered.rerender(<OutputStudio />);
+  rendered.unmount();
+
+  expect(injected.print.dispose).not.toHaveBeenCalled();
+});
+
+it('cancels old requests and clears their busy state when injected adapters change', async () => {
+  pipeline.renderOutputRevision.mockResolvedValue({
+    revision: 1,
+    diagnostics: [],
+    document: generatedDocument,
+  });
+  const pending = deferred<Blob>();
+  const firstInjected = createAdapterDoubles();
+  firstInjected.pdf.render.mockReturnValue(pending.promise);
+  const secondInjected = createAdapterDoubles();
+  const rendered = render(<OutputStudio adapters={firstInjected} />);
+  await screen.findByText('GeneratedDocument · revision 1');
+  fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+  const signal = firstInjected.pdf.render.mock.calls[0]![1].signal as AbortSignal;
+
+  rendered.rerender(<OutputStudio adapters={secondInjected} />);
+
+  expect(signal.aborted).toBe(true);
+  await waitFor(() =>
+    expect(
+      (screen.getByRole('button', { name: 'Download PDF' }) as HTMLButtonElement).disabled,
+    ).toBe(false),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+  await waitFor(() => expect(secondInjected.pdf.render).toHaveBeenCalledOnce());
+});
+
+it('aborts a pending output and ignores its late completion after a draft change', async () => {
+  pipeline.renderOutputRevision.mockResolvedValue({
+    revision: 1,
+    diagnostics: [],
+    document: generatedDocument,
+  });
+  const pdf = deferred<Blob>();
+  const adapters = createAdapterDoubles();
+  adapters.pdf.render.mockReturnValue(pdf.promise);
+  render(<OutputStudio adapters={adapters} />);
+  await screen.findByText('GeneratedDocument · revision 1');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+  const signal = adapters.pdf.render.mock.calls[0]![1].signal as AbortSignal;
+  fireEvent.click(screen.getByRole('button', { name: 'Edit template' }));
+  fireEvent.change(screen.getByLabelText('Expression for customer-name'), {
+    target: { value: 'customer.legalName' },
+  });
+
+  expect(signal.aborted).toBe(true);
+  pdf.resolve(new Blob(['late-pdf'], { type: 'application/pdf' }));
+  await act(async () => pdf.promise);
+  expect(URL.createObjectURL).not.toHaveBeenCalled();
+  expect(screen.queryByText('PDF downloaded')).toBeNull();
+});
+
+it('ignores an old revision output after a regenerated revision starts a new request', async () => {
+  pipeline.renderOutputRevision.mockImplementation(async ({ revision }) => ({
+    revision,
+    diagnostics: [],
+    document: generatedDocument,
+  }));
+  const oldPdf = deferred<Blob>();
+  const newPdf = deferred<Blob>();
+  const adapters = createAdapterDoubles();
+  adapters.pdf.render.mockReturnValueOnce(oldPdf.promise).mockReturnValueOnce(newPdf.promise);
+  render(<OutputStudio adapters={adapters} />);
+  await screen.findByText('GeneratedDocument · revision 1');
+  fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+  const oldSignal = adapters.pdf.render.mock.calls[0]![1].signal as AbortSignal;
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit template' }));
+  const data = JSON.parse((screen.getByLabelText('Data JSON') as HTMLTextAreaElement).value);
+  data.invoice.id = 'INV-REVISION-2';
+  fireEvent.change(screen.getByLabelText('Data JSON'), {
+    target: { value: JSON.stringify(data, null, 2) },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply & regenerate' }));
+  await screen.findByText('GeneratedDocument · revision 2');
+  expect(oldSignal.aborted).toBe(true);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+  newPdf.resolve(new Blob(['new'], { type: 'application/pdf' }));
+  await screen.findByText('PDF downloaded');
+  oldPdf.resolve(new Blob(['old'], { type: 'application/pdf' }));
+  await act(async () => oldPdf.promise);
+
+  expect(URL.createObjectURL).toHaveBeenCalledOnce();
+  expect(URL.createObjectURL).toHaveBeenCalledWith(
+    expect.objectContaining({ type: 'application/pdf' }),
+  );
+});
+
+it('aborts pending output and prevents downloads after unmount', async () => {
+  pipeline.renderOutputRevision.mockResolvedValue({
+    revision: 1,
+    diagnostics: [],
+    document: generatedDocument,
+  });
+  const png = deferred<readonly Blob[]>();
+  const adapters = createAdapterDoubles();
+  adapters.image.render.mockReturnValue(png.promise);
+  const rendered = render(<OutputStudio adapters={adapters} />);
+  await screen.findByText('GeneratedDocument · revision 1');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Download PNG page 1' }));
+  const signal = adapters.image.render.mock.calls[0]![1].signal as AbortSignal;
+  rendered.unmount();
+
+  expect(signal.aborted).toBe(true);
+  png.resolve([new Blob(['late-png'], { type: 'image/png' })]);
+  await act(async () => png.promise);
+  expect(URL.createObjectURL).not.toHaveBeenCalled();
+});
+
+it('retains independent output outcomes when overlapping requests settle out of order', async () => {
+  pipeline.renderOutputRevision.mockResolvedValue({
+    revision: 1,
+    diagnostics: [],
+    document: generatedDocument,
+  });
+  const pdf = deferred<Blob>();
+  const xlsx = deferred<Blob>();
+  const adapters = createAdapterDoubles();
+  adapters.pdf.render.mockReturnValue(pdf.promise);
+  adapters.xlsx.render.mockReturnValue(xlsx.promise);
+  render(<OutputStudio adapters={adapters} />);
+  await screen.findByText('GeneratedDocument · revision 1');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Download XLSX' }));
+  xlsx.reject(new Error('Workbook packaging failed'));
+  const xlsxAlert = await screen.findByRole('alert');
+  expect(xlsxAlert.textContent).toBe('XLSX failed: Workbook packaging failed');
+
+  pdf.resolve(new Blob(['pdf'], { type: 'application/pdf' }));
+  await screen.findByText('PDF downloaded');
+  expect(screen.getByRole('alert')).toBe(xlsxAlert);
+  expect(screen.getByText('PDF downloaded')).toBeTruthy();
+});
+
+it('uses metadata committed with the regenerated document for filenames', async () => {
+  pipeline.renderOutputRevision.mockImplementation(async ({ revision }) => ({
+    revision,
+    diagnostics: [],
+    document: generatedDocument,
+  }));
+  const adapters = createAdapterDoubles();
+  const downloads: string[] = [];
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(
+    function (this: HTMLAnchorElement) {
+      downloads.push(this.download);
+    },
+  );
+  render(<OutputStudio adapters={adapters} />);
+  await screen.findByText('GeneratedDocument · revision 1');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit template' }));
+  const data = JSON.parse((screen.getByLabelText('Data JSON') as HTMLTextAreaElement).value);
+  data.invoice.id = 'INV-REGENERATED-7';
+  fireEvent.change(screen.getByLabelText('Data JSON'), {
+    target: { value: JSON.stringify(data, null, 2) },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply & regenerate' }));
+  await screen.findByText('GeneratedDocument · revision 2');
+  fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+  await screen.findByText('PDF downloaded');
+
+  expect(downloads).toEqual(['invoice-INV-REGENERATED-7.pdf']);
 });
 
 it('keeps every output disabled when generation is blocked', async () => {

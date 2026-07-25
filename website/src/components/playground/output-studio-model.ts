@@ -2,24 +2,38 @@ import type { Diagnostic, GeneratedDocument } from 'tego-sheet';
 
 export type OutputStudioPhase = 'ready' | 'dirty' | 'rendering' | 'blocked';
 export type OutputKind = 'print' | 'pdf' | 'png' | 'xlsx';
+export type OutputStatus = 'idle' | 'busy' | 'success' | 'error';
+
+export interface OutputState {
+  readonly requestId: number | null;
+  readonly status: OutputStatus;
+  readonly message: string;
+}
+
+export interface OutputDocumentMetadata {
+  readonly invoiceId: string;
+  readonly title: string;
+}
 
 export interface OutputStudioState {
   readonly phase: OutputStudioPhase;
   readonly committedRevision: number;
   readonly generatedRevision: number | null;
   readonly generatedDocument: GeneratedDocument | null;
+  readonly generatedMetadata: OutputDocumentMetadata | null;
   readonly diagnostics: readonly Diagnostic[];
-  readonly activeOutput: OutputKind | null;
-  readonly outputMessage: string;
+  readonly outputs: Readonly<Record<OutputKind, OutputState>>;
 }
 
 export type OutputStudioAction =
   | { readonly type: 'draft-changed' }
+  | { readonly type: 'outputs-cancelled' }
   | { readonly type: 'render-started'; readonly revision: number }
   | {
       readonly type: 'render-succeeded';
       readonly revision: number;
       readonly document: GeneratedDocument;
+      readonly metadata: OutputDocumentMetadata;
       readonly diagnostics: readonly Diagnostic[];
     }
   | {
@@ -27,9 +41,45 @@ export type OutputStudioAction =
       readonly revision: number;
       readonly diagnostics: readonly Diagnostic[];
     }
-  | { readonly type: 'output-started'; readonly kind: OutputKind }
-  | { readonly type: 'output-finished'; readonly message: string }
-  | { readonly type: 'output-failed'; readonly message: string };
+  | { readonly type: 'output-started'; readonly kind: OutputKind; readonly requestId: number }
+  | {
+      readonly type: 'output-finished';
+      readonly kind: OutputKind;
+      readonly requestId: number;
+      readonly message: string;
+    }
+  | {
+      readonly type: 'output-failed';
+      readonly kind: OutputKind;
+      readonly requestId: number;
+      readonly message: string;
+    };
+
+function idleOutput(): OutputState {
+  return { requestId: null, status: 'idle', message: '' };
+}
+
+function createOutputs(): Readonly<Record<OutputKind, OutputState>> {
+  return {
+    print: idleOutput(),
+    pdf: idleOutput(),
+    png: idleOutput(),
+    xlsx: idleOutput(),
+  };
+}
+
+function cancelBusyOutputs(
+  outputs: Readonly<Record<OutputKind, OutputState>>,
+): Readonly<Record<OutputKind, OutputState>> {
+  const cancelled = (output: OutputState): OutputState =>
+    output.status === 'busy' ? idleOutput() : output;
+  return {
+    print: cancelled(outputs.print),
+    pdf: cancelled(outputs.pdf),
+    png: cancelled(outputs.png),
+    xlsx: cancelled(outputs.xlsx),
+  };
+}
 
 export function createOutputStudioState(): OutputStudioState {
   return {
@@ -37,9 +87,9 @@ export function createOutputStudioState(): OutputStudioState {
     committedRevision: 0,
     generatedRevision: null,
     generatedDocument: null,
+    generatedMetadata: null,
     diagnostics: [],
-    activeOutput: null,
-    outputMessage: '',
+    outputs: createOutputs(),
   };
 }
 
@@ -52,8 +102,7 @@ export function reduceOutputStudioState(
       ...state,
       phase: 'rendering',
       committedRevision: action.revision,
-      activeOutput: null,
-      outputMessage: '',
+      outputs: cancelBusyOutputs(state.outputs),
     };
   }
   if ('revision' in action && action.revision !== state.committedRevision) return state;
@@ -61,22 +110,43 @@ export function reduceOutputStudioState(
 
   switch (action.type) {
     case 'draft-changed':
-      return { ...state, phase: 'dirty', activeOutput: null };
+      return { ...state, phase: 'dirty', outputs: cancelBusyOutputs(state.outputs) };
+    case 'outputs-cancelled':
+      return { ...state, outputs: cancelBusyOutputs(state.outputs) };
     case 'render-succeeded':
       return {
         ...state,
         phase: 'ready',
         generatedRevision: action.revision,
         generatedDocument: action.document,
+        generatedMetadata: action.metadata,
         diagnostics: action.diagnostics,
       };
     case 'render-blocked':
       return { ...state, phase: 'blocked', diagnostics: action.diagnostics };
     case 'output-started':
-      return { ...state, activeOutput: action.kind, outputMessage: '' };
+      return {
+        ...state,
+        outputs: {
+          ...state.outputs,
+          [action.kind]: { requestId: action.requestId, status: 'busy', message: '' },
+        },
+      };
     case 'output-finished':
-    case 'output-failed':
-      return { ...state, activeOutput: null, outputMessage: action.message };
+    case 'output-failed': {
+      if (state.outputs[action.kind].requestId !== action.requestId) return state;
+      return {
+        ...state,
+        outputs: {
+          ...state.outputs,
+          [action.kind]: {
+            requestId: action.requestId,
+            status: action.type === 'output-finished' ? 'success' : 'error',
+            message: action.message,
+          },
+        },
+      };
+    }
   }
 }
 

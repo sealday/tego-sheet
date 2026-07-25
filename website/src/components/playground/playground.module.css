@@ -326,7 +326,18 @@
 .outputActions {
   display: flex;
   flex-wrap: wrap;
+  align-items: start;
   gap: 0.5rem;
+}
+
+.outputAction {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.outputAction p {
+  max-width: 16rem;
+  margin: 0;
 }
 
 .outputActions button:disabled {
