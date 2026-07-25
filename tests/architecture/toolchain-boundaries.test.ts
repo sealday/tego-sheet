@@ -27,6 +27,12 @@ it('externalizes every React and React DOM runtime subpath', () => {
   }
 });
 
+it('suppresses only the non-diagnostic slow-plugin build advisory', () => {
+  expect(viteConfig.build?.rollupOptions?.checks).toEqual({
+    pluginTimings: false,
+  });
+});
+
 it('keeps the core contract independent of React and browser globals', () => {
   const coreFiles = [
     'src/core/index.ts',

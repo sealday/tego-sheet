@@ -3,11 +3,12 @@
 ## Outcome
 
 - All targeted feature, static, package, documentation, full-suite, SSR, and browser visual gates
-  completed successfully after one verification-contract fix.
-- The only failure was an architecture assertion that still expected the five pre-Output-Studio
-  documentation screenshots. The visual spec now intentionally contains eight screenshot calls.
-- Updated the architecture contract from five to eight and reran the focused test plus the full
-  downstream suite.
+  completed successfully after two verification-contract fixes.
+- The initial automated failure was an architecture assertion that still expected the five
+  pre-Output-Studio documentation screenshots. The visual spec now intentionally contains eight
+  screenshot calls.
+- Final verification also identified Rolldown's slow-plugin advisory in the warning-free static
+  gate. The supported per-check switch now suppresses only that non-diagnostic advisory.
 - No dependency, production API, or feature implementation changed.
 
 ## Verification-only fix
@@ -16,6 +17,10 @@
   - Updated the deterministic documentation screenshot count from `5` to `8`.
   - Root cause: commit `caeb71a` added three ready-state Output Studio screenshot calls
     (desktop, intermediate, and narrow) while the architecture count remained at its prior value.
+- `vite.config.ts` and `tests/architecture/toolchain-boundaries.test.ts`
+  - Set Rolldown `checks.pluginTimings` to `false` and locked the setting with an architecture test.
+  - This suppresses only Rolldown's non-diagnostic slow-plugin performance advisory. Build
+    warnings and errors retain their normal log handling.
 
 ## Exact automated commands and results
 
@@ -68,7 +73,8 @@ npm run typecheck:docs
 
 - PASS: production library/declaration build and website TypeScript project exited 0 with no
   TypeScript diagnostics.
-- Vite printed its non-diagnostic `unplugin-dts` plugin-timing advisory.
+- PASS: the exact command emitted no warnings after narrowly disabling Rolldown's
+  `pluginTimings` performance advisory.
 
 ### Package and documentation gates
 
@@ -158,6 +164,40 @@ npm run lint
 
 - PASS: formatting across 648 files and Oxlint with no warnings.
 
+### Final-verifier follow-up
+
+```text
+npx vitest run --project architecture \
+  tests/architecture/toolchain-boundaries.test.ts
+```
+
+- RED before configuration: 1 failed, 3 passed; `checks` was `undefined`.
+- PASS after configuration: 1 file, 4 tests.
+
+```text
+npm run format:check
+npm run lint
+npm run typecheck
+npm run typecheck:docs
+```
+
+- PASS: all four exact static gates exited 0; no static gate emitted a warning.
+
+```text
+npm run docs:build
+npm run test:docs
+npm run test:docs-visual
+```
+
+- PASS: production documentation build, 22 of 22 browser tests, and 10 of 10 visual tests.
+
+```text
+npx vitest run --project component tests/component/docs-output-studio.test.tsx
+```
+
+- PASS: 1 file, 24 tests covering the durable workbench, output, cleanup, and focus contracts
+  referenced below.
+
 ## Browser visual and behavior QA
 
 Served the production Docusaurus output:
@@ -184,19 +224,27 @@ print dialog.
 | Intermediate 1024×1100 |                  1024 / 1024 |           2 | Preview-first stacked layout; no clipped viewport elements |
 | Narrow 390×1000        |                    390 / 390 |           2 | Single-column layout; no horizontal page overflow          |
 
-Inspected local screenshots:
+The manual QA session produced ignored, transient inspection captures under
+`.superpowers/sdd/task-8-evidence/`. They were inspected during Task 8 but are not claimed as
+durable repository artifacts.
 
-- `.superpowers/sdd/task-8-evidence/output-ready-desktop.png`
-- `.superpowers/sdd/task-8-evidence/output-ready-intermediate.png`
-- `.superpowers/sdd/task-8-evidence/output-ready-narrow.png`
-- `.superpowers/sdd/task-8-evidence/output-workbench-open-desktop.png`
-- `.superpowers/sdd/task-8-evidence/output-stale-desktop.png`
-- `.superpowers/sdd/task-8-evidence/output-invalid-json-desktop.png`
-- `.superpowers/sdd/task-8-evidence/output-blocked-desktop.png`
-- `.superpowers/sdd/task-8-evidence/output-focus-print-desktop.png`
+Durable tracked visual evidence:
 
-The release-owned equivalents remain tracked under
-`tests/docs-visual/docs-visual.spec.ts-snapshots/`.
+- `tests/docs-visual/docs-visual.spec.ts-snapshots/output-studio-ready-desktop-darwin.png`
+- `tests/docs-visual/docs-visual.spec.ts-snapshots/output-studio-ready-intermediate-darwin.png`
+- `tests/docs-visual/docs-visual.spec.ts-snapshots/output-studio-ready-narrow-darwin.png`
+- `tests/docs-visual/docs-visual.spec.ts-snapshots/output-studio-stale-desktop-darwin.png`
+- `tests/docs-visual/docs-visual.spec.ts-snapshots/output-studio-blocked-desktop-darwin.png`
+
+Durable automated behavioral evidence:
+
+- `tests/component/docs-output-studio.test.tsx` opens the workbench, verifies drafts remain stale
+  until explicit regeneration, and asserts the nested designer's `:focus-visible` outline
+  contract.
+- `tests/docs/docs.spec.ts` verifies the built site opens the workbench and localizes invalid JSON
+  without replacing revision 1.
+- `tests/docs-visual/docs-visual.spec.ts` owns the tracked ready, stale, and blocked screenshot
+  assertions.
 
 ### Behavior evidence
 
@@ -214,9 +262,9 @@ The release-owned equivalents remain tracked under
   `{ revision 1, pages 2 } → { revision 2, pages 2 }`; revision 1 was absent after completion.
 - Blocked expression: `Generation is blocked. Review the diagnostics.` and the diagnostic list
   were visible; revision 2 and both pages remained; all outputs were disabled.
-- Focus: keyboard traversal audited 67 visible controls inside the Output Studio panel. Every
-  focused control matched `:focus-visible` and had a nonzero visible outline. The inspected Print
-  screenshot showed a 3px focus ring.
+- Focus: keyboard traversal covered every enabled focusable exposed by the ready, open-workbench
+  Output Studio panel. Every focused control matched `:focus-visible` and had a nonzero visible
+  outline; the Print action showed a 3px focus ring.
 - Print safety: capture-intercepted clicks recorded Print, PDF, PNG, and XLSX in order; instrumented
   native print calls remained `0`, and no print iframe was created.
 - Accessibility: one labelled workspace tablist; Output Studio selected; inactive Spreadsheet
@@ -233,13 +281,15 @@ The release-owned equivalents remain tracked under
 
 - Verification fix: `0f335d2506318cc863d48e66db5ba9d3e1b5e5d8`
   (`fix(docs): harden output studio verification`)
-- This report is recorded in the following documentation-only commit.
+- Initial report: `d1ed9da86abed33ba253d9e70feae268d31c21e7`
+  (`docs: record task 8 verification evidence`)
+- Final-verifier corrections are recorded in the commit containing this report revision.
 
 ## Remaining risks and notes
 
 - Browser QA was performed on macOS Chromium. Platform-scoped deterministic screenshots and the
   automated Docusaurus visual gate provide the release comparison for the same platform.
-- Vite/Node printed timing, chunk-size, and experimental localStorage advisories during successful
-  build/test subprocesses. Oxlint, Oxfmt, and both TypeScript projects reported no source
-  diagnostics.
+- Package/docs subprocesses still print their existing chunk-size and experimental localStorage
+  advisories outside the warning-free static gate. The exact `typecheck:docs` static gate,
+  Oxlint, Oxfmt, and both TypeScript projects reported no warnings or source diagnostics.
 - No new dependencies or public APIs were introduced.

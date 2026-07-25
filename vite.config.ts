@@ -64,6 +64,9 @@ export default defineConfig({
       name: 'TegoSheet',
     },
     rollupOptions: {
+      checks: {
+        pluginTimings: false,
+      },
       external: isReactExternal,
       output: {
         exports: 'named',
