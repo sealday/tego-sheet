@@ -447,6 +447,7 @@ export function OutputStudio({ adapters: injectedAdapters }: OutputStudioProps =
                 type="button"
                 onClick={print}
                 disabled={!canOutput || state.outputs.print.status === 'busy'}
+                aria-busy={state.outputs.print.status === 'busy'}
                 aria-describedby={
                   state.outputs.print.message === '' ? undefined : 'output-result-print'
                 }
@@ -468,6 +469,7 @@ export function OutputStudio({ adapters: injectedAdapters }: OutputStudioProps =
                 type="button"
                 onClick={downloadPdf}
                 disabled={!canOutput || state.outputs.pdf.status === 'busy'}
+                aria-busy={state.outputs.pdf.status === 'busy'}
                 aria-describedby={
                   state.outputs.pdf.message === '' ? undefined : 'output-result-pdf'
                 }
@@ -489,6 +491,7 @@ export function OutputStudio({ adapters: injectedAdapters }: OutputStudioProps =
                 type="button"
                 onClick={downloadPng}
                 disabled={!canOutput || state.outputs.png.status === 'busy'}
+                aria-busy={state.outputs.png.status === 'busy'}
                 aria-describedby={
                   state.outputs.png.message === '' ? undefined : 'output-result-png'
                 }
@@ -510,6 +513,7 @@ export function OutputStudio({ adapters: injectedAdapters }: OutputStudioProps =
                 type="button"
                 onClick={downloadXlsx}
                 disabled={!canOutput || state.outputs.xlsx.status === 'busy'}
+                aria-busy={state.outputs.xlsx.status === 'busy'}
                 aria-describedby={
                   state.outputs.xlsx.message === '' ? undefined : 'output-result-xlsx'
                 }

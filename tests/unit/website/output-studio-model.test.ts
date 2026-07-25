@@ -28,6 +28,7 @@ describe('Output Studio model', () => {
       outputs: {
         ...createOutputStudioState().outputs,
         pdf: { requestId: 4, status: 'busy' as const, message: '' },
+        xlsx: { requestId: 3, status: 'success' as const, message: 'XLSX downloaded' },
       },
     };
 
@@ -37,7 +38,8 @@ describe('Output Studio model', () => {
       generatedRevision: 1,
       generatedDocument: ready.generatedDocument,
       outputs: expect.objectContaining({
-        pdf: { requestId: null, status: 'idle', message: '' },
+        pdf: { requestId: null, status: 'cancelled', message: 'PDF generation cancelled.' },
+        xlsx: { requestId: null, status: 'idle', message: '' },
       }),
     });
   });
@@ -127,8 +129,8 @@ describe('Output Studio model', () => {
       phase: 'rendering',
       committedRevision: 2,
       outputs: expect.objectContaining({
-        pdf: { requestId: null, status: 'idle', message: '' },
-        xlsx: { requestId: 3, status: 'error', message: 'Older output error' },
+        pdf: { requestId: null, status: 'cancelled', message: 'PDF generation cancelled.' },
+        xlsx: { requestId: null, status: 'idle', message: '' },
       }),
     });
   });
@@ -150,7 +152,7 @@ describe('Output Studio model', () => {
 
     expect(exporting).toMatchObject({
       outputs: {
-        xlsx: { requestId: 7, status: 'busy', message: '' },
+        xlsx: { requestId: 7, status: 'busy', message: 'Generating XLSX…' },
       },
       generatedDocument: document,
     });

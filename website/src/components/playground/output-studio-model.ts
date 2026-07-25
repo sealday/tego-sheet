@@ -2,7 +2,7 @@ import type { Diagnostic, GeneratedDocument } from 'tego-sheet';
 
 export type OutputStudioPhase = 'ready' | 'dirty' | 'rendering' | 'blocked';
 export type OutputKind = 'print' | 'pdf' | 'png' | 'xlsx';
-export type OutputStatus = 'idle' | 'busy' | 'success' | 'error';
+export type OutputStatus = 'idle' | 'busy' | 'success' | 'error' | 'cancelled';
 
 export interface OutputState {
   readonly requestId: number | null;
@@ -68,16 +68,50 @@ function createOutputs(): Readonly<Record<OutputKind, OutputState>> {
   };
 }
 
+function outputLabel(kind: OutputKind): string {
+  if (kind === 'print') return 'Print';
+  return kind === 'png' ? 'PNG' : kind.toUpperCase();
+}
+
+function busyOutput(kind: OutputKind, requestId: number): OutputState {
+  return {
+    requestId,
+    status: 'busy',
+    message: kind === 'print' ? 'Opening print dialog…' : `Generating ${outputLabel(kind)}…`,
+  };
+}
+
+function cancelledOutput(kind: OutputKind): OutputState {
+  return {
+    requestId: null,
+    status: 'cancelled',
+    message: kind === 'print' ? 'Print cancelled.' : `${outputLabel(kind)} generation cancelled.`,
+  };
+}
+
 function cancelBusyOutputs(
   outputs: Readonly<Record<OutputKind, OutputState>>,
 ): Readonly<Record<OutputKind, OutputState>> {
-  const cancelled = (output: OutputState): OutputState =>
-    output.status === 'busy' ? idleOutput() : output;
+  const cancelled = (kind: OutputKind): OutputState =>
+    outputs[kind].status === 'busy' ? cancelledOutput(kind) : outputs[kind];
   return {
-    print: cancelled(outputs.print),
-    pdf: cancelled(outputs.pdf),
-    png: cancelled(outputs.png),
-    xlsx: cancelled(outputs.xlsx),
+    print: cancelled('print'),
+    pdf: cancelled('pdf'),
+    png: cancelled('png'),
+    xlsx: cancelled('xlsx'),
+  };
+}
+
+function changeRevisionOutputs(
+  outputs: Readonly<Record<OutputKind, OutputState>>,
+): Readonly<Record<OutputKind, OutputState>> {
+  const changed = (kind: OutputKind): OutputState =>
+    outputs[kind].status === 'busy' ? cancelledOutput(kind) : idleOutput();
+  return {
+    print: changed('print'),
+    pdf: changed('pdf'),
+    png: changed('png'),
+    xlsx: changed('xlsx'),
   };
 }
 
@@ -102,7 +136,7 @@ export function reduceOutputStudioState(
       ...state,
       phase: 'rendering',
       committedRevision: action.revision,
-      outputs: cancelBusyOutputs(state.outputs),
+      outputs: changeRevisionOutputs(state.outputs),
     };
   }
   if ('revision' in action && action.revision !== state.committedRevision) return state;
@@ -110,7 +144,7 @@ export function reduceOutputStudioState(
 
   switch (action.type) {
     case 'draft-changed':
-      return { ...state, phase: 'dirty', outputs: cancelBusyOutputs(state.outputs) };
+      return { ...state, phase: 'dirty', outputs: changeRevisionOutputs(state.outputs) };
     case 'outputs-cancelled':
       return { ...state, outputs: cancelBusyOutputs(state.outputs) };
     case 'render-succeeded':
@@ -129,7 +163,7 @@ export function reduceOutputStudioState(
         ...state,
         outputs: {
           ...state.outputs,
-          [action.kind]: { requestId: action.requestId, status: 'busy', message: '' },
+          [action.kind]: busyOutput(action.kind, action.requestId),
         },
       };
     case 'output-finished':

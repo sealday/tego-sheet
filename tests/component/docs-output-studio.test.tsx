@@ -499,6 +499,9 @@ it('aborts a pending output and ignores its late completion after a draft change
   await screen.findByText('GeneratedDocument · revision 1');
 
   fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+  const pdfButton = screen.getByRole('button', { name: 'Download PDF' });
+  expect(pdfButton.getAttribute('aria-busy')).toBe('true');
+  expect(screen.getByText('Generating PDF…')).toBeTruthy();
   const signal = adapters.pdf.render.mock.calls[0]![1].signal as AbortSignal;
   fireEvent.click(screen.getByRole('button', { name: 'Edit template' }));
   fireEvent.change(screen.getByLabelText('Expression for customer-name'), {
@@ -506,9 +509,34 @@ it('aborts a pending output and ignores its late completion after a draft change
   });
 
   expect(signal.aborted).toBe(true);
+  expect(screen.getByText('PDF generation cancelled.')).toBeTruthy();
+  expect(pdfButton.getAttribute('aria-busy')).toBe('false');
   pdf.resolve(new Blob(['late-pdf'], { type: 'application/pdf' }));
   await act(async () => pdf.promise);
   expect(URL.createObjectURL).not.toHaveBeenCalled();
+  expect(screen.queryByText('PDF downloaded')).toBeNull();
+});
+
+it('clears completed output outcomes when the draft moves beyond their generated revision', async () => {
+  pipeline.renderOutputRevision.mockImplementation(async ({ revision }) => ({
+    revision,
+    diagnostics: [],
+    document: generatedDocument,
+  }));
+  const adapters = createAdapterDoubles();
+  render(<OutputStudio adapters={adapters} />);
+  await screen.findByText('GeneratedDocument · revision 1');
+  fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+  await screen.findByText('PDF downloaded');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit template' }));
+  fireEvent.change(screen.getByLabelText('Expression for customer-name'), {
+    target: { value: 'customer.legalName' },
+  });
+  expect(screen.queryByText('PDF downloaded')).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Apply & regenerate' }));
+  await screen.findByText('GeneratedDocument · revision 2');
   expect(screen.queryByText('PDF downloaded')).toBeNull();
 });
 
