@@ -224,10 +224,162 @@
   border: 0;
 }
 
+.outputStudio {
+  width: min(96rem, calc(100% - 2rem));
+  min-height: calc(100vh - var(--ifm-navbar-height));
+  margin: 0 auto;
+  padding: clamp(1.5rem, 4vw, 3rem) 0;
+}
+
+.outputStudioHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2rem;
+  align-items: end;
+  margin-bottom: 1.5rem;
+}
+
+.outputStudioHeader h1,
+.outputStudioGrid h2 {
+  margin-top: 0;
+}
+
+.revision {
+  margin: 0;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 999px;
+  background: var(--tego-surface-strong);
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.outputStudioGrid {
+  display: grid;
+  grid-template-columns: minmax(17rem, 0.7fr) minmax(0, 1.8fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.outputInputs,
+.exactPreview,
+.pipelineOutputs {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 0.75rem;
+  background: var(--tego-surface-strong);
+  box-shadow: 0 1rem 3rem rgb(15 23 42 / 8%);
+}
+
+.exactPreview {
+  grid-row: span 2;
+}
+
+.exactPreview article {
+  max-width: 100%;
+  margin-bottom: 1rem;
+  overflow: auto;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  background: white;
+}
+
+.exactPreview svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.outputInputs button,
+.outputActions button,
+.templateWorkbench button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 0.45rem;
+  background: var(--tego-surface-strong);
+  color: var(--tego-text);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.outputInputs button:focus-visible,
+.outputActions button:focus-visible,
+.templateWorkbench button:focus-visible,
+.dataField textarea:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--ifm-color-primary) 45%, transparent);
+  outline-offset: 2px;
+}
+
+.outputActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.outputActions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.templateWorkbench {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--ifm-color-emphasis-200);
+}
+
+.templateWorkbench h3 {
+  margin: 0;
+}
+
+.dataField {
+  display: grid;
+  gap: 0.4rem;
+  font-weight: 700;
+}
+
+.dataField textarea {
+  min-height: 8rem;
+  resize: vertical;
+  padding: 0.65rem;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 0.45rem;
+  background: var(--ifm-color-emphasis-100);
+  color: var(--tego-text);
+  font:
+    0.75rem/1.5 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+}
+
+.templateSheet {
+  height: 36rem;
+  overflow: auto;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 0.5rem;
+}
+
+.outputDiagnostics {
+  padding-left: 1.25rem;
+  color: var(--ifm-color-danger);
+}
+
 @media (max-width: 72rem) {
   .header,
-  .presetBoundary {
+  .presetBoundary,
+  .outputStudioHeader,
+  .outputStudioGrid {
     grid-template-columns: 1fr;
+  }
+
+  .exactPreview {
+    grid-row: auto;
   }
 
   .inspector {
@@ -238,6 +390,10 @@
 
 @media (max-width: 36rem) {
   .playground {
+    width: min(100% - 1rem, 96rem);
+  }
+
+  .outputStudio {
     width: min(100% - 1rem, 96rem);
   }
 
