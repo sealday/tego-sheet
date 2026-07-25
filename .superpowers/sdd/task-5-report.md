@@ -12,10 +12,26 @@
   - Added deterministic downloads, independent concurrent busy states, default print-adapter
     disposal, and accessible completion/failure announcements.
   - Kept all output actions disabled for dirty, rendering, and blocked revisions.
+  - Review fix: default adapters are now created and owned by effect lifetimes, including React
+    StrictMode probes and runtime injection changes; injected adapters are never disposed.
+  - Review fix: every output owns an abort controller plus request/revision token. Draft changes,
+    render replacement, adapter replacement, and unmount abort active work and suppress late
+    downloads or state updates.
+  - Review fix: PDF, image, XLSX, and print receive their public `signal` option.
+- `website/src/components/playground/output-studio-model.ts`
+  - Review fix: replaced the global output result with request-scoped status/message state per
+    output kind and committed invoice/title metadata per successful generated revision.
+- `website/src/components/playground/playground.module.css`
+  - Kept per-action outcomes adjacent to their 44px-minimum initiating controls.
 - `tests/component/docs-output-studio.test.tsx`
   - Added adapter identity/options, MIME type, filename, URL lifecycle, concurrent busy state,
     `PRINT_BLOCKED`, XLSX rejection, preview preservation, stale/blocked controls, public import, and
     default disposal coverage.
+  - Added StrictMode ownership, injection transitions, adapter-swap cancellation, draft/revision/
+    unmount abort guards, stale completion suppression, overlapping retained outcomes, and
+    regenerated filename coverage.
+- `tests/unit/website/output-studio-model.test.ts`
+  - Added request-ID ordering and per-output outcome retention coverage.
 - `vitest.config.ts`
   - Added test-only resolution aliases for the existing public PDF, image, and XLSX subpath exports.
 - `tsconfig.json`
@@ -70,14 +86,54 @@ the PDF button.
 After tracking busy output kinds independently, the same command passed 12 of 12 tests. Final
 coverage additions brought the targeted suite to 14 passing tests.
 
+### Review RED 1: ownership, cancellation, outcomes, and committed metadata
+
+Command:
+
+```text
+npx vitest run --project component tests/component/docs-output-studio.test.tsx
+```
+
+Result: exit 1; 7 failed, 14 passed. The focused failures proved:
+
+- the StrictMode effect probe disposed the still-captured default print adapter;
+- adapter injection rerenders retained or disposed the wrong adapter;
+- output options did not include abort signals and late completions were not guarded;
+- a later PDF success removed the retained XLSX alert;
+- regenerated data still downloaded with the initial invoice identifier.
+
+### Review GREEN 1
+
+After effect-owned adapters, per-output controllers/tokens, per-kind reducer outcomes, and committed
+metadata were implemented, the focused component suite passed 21 of 21 tests and the model suite
+passed 9 of 9 tests.
+
+### Review RED 2: adapter replacement busy state
+
+Command:
+
+```text
+npx vitest run --project component tests/component/docs-output-studio.test.tsx
+```
+
+Result: exit 1; 1 failed, 22 passed. Replacing injected adapters aborted the old request but left
+its PDF control disabled.
+
+### Review GREEN 2
+
+After request cancellation was reflected in per-output reducer state, the focused component suite
+passed 23 of 23 tests.
+
 ## Verification
 
 - `npx vitest run --project component tests/component/docs-output-studio.test.tsx`
-  - PASS: 1 file, 14 tests.
+  - PASS: 1 file, 23 tests.
+- `npx vitest run --project unit tests/unit/website/output-studio-model.test.ts`
+  - PASS: 1 file, 9 tests.
 - `npm run lint`
   - PASS: exit 0, no warnings.
 - `npx vitest run --project component`
-  - PASS: 38 files, 257 tests.
+  - PASS: 38 files, 266 tests.
   - Existing unrelated React `act` and mount-only-option warnings remain in other component files;
     the Task 5 targeted suite is clean.
 - `npx vitest run --project architecture tests/architecture/documentation-site-contract.test.ts`
@@ -95,12 +151,13 @@ coverage additions brought the targeted suite to 14 passing tests.
 ## Commit
 
 - Implementation: `b019cf2` (`feat(docs): connect output studio adapters`)
+- Review fixes: `7aa2c51` (`fix(docs): harden output studio lifecycle`)
 
 ## Risks
 
-- Output adapters are intentionally captured once per component mount. Supplying a different
-  injected adapter object after mount does not replace an in-flight adapter set.
 - URL revocation is intentionally queued to the next microtask after the browser accepts or rejects
   the anchor click; tests cover both paths.
+- Output completion messages are retained independently until the same action starts again. There
+  is no explicit dismiss control in this scoped playground task.
 - The Vitest and root TypeScript aliases mirror existing package exports and do not add or change a
   public output API.
