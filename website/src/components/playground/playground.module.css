@@ -274,6 +274,23 @@
   margin-top: 0;
 }
 
+.outputStudioHeader button,
+.previewControls input,
+.previewControls select {
+  min-height: 2.75rem;
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 0.45rem;
+  background: var(--tego-surface-strong);
+  color: var(--tego-text);
+  font: inherit;
+}
+
+.outputStudioHeader button {
+  cursor: pointer;
+  font-weight: 650;
+}
+
 .revision {
   margin: 0;
   padding: 0.65rem 0.8rem;
@@ -305,6 +322,28 @@
 
 .exactPreview {
   grid-area: preview;
+}
+
+.previewControls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.previewControls label {
+  display: grid;
+  gap: 0.35rem;
+  font-weight: 700;
+}
+
+.previewControls input {
+  width: 6rem;
+}
+
+.previewCanvas {
+  width: calc(100% / var(--output-preview-zoom));
+  transform: scale(var(--output-preview-zoom));
+  transform-origin: top left;
 }
 
 .outputInputs {
@@ -348,6 +387,9 @@
 .outputInputs button:focus-visible,
 .outputActions button:focus-visible,
 .templateWorkbench button:focus-visible,
+.outputStudioHeader button:focus-visible,
+.previewControls input:focus-visible,
+.previewControls select:focus-visible,
 .dataField textarea:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--ifm-color-primary) 45%, transparent);
   outline-offset: 2px;

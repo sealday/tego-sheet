@@ -5,6 +5,9 @@ interface PlaygroundErrorBoundaryProps {
   readonly children: ReactNode;
   readonly onReset: () => void;
   readonly onReload: () => void;
+  readonly title?: string;
+  readonly description?: string;
+  readonly resetLabel?: string;
 }
 
 interface PlaygroundErrorBoundaryState {
@@ -40,11 +43,14 @@ export class PlaygroundErrorBoundary extends Component<
 
     return (
       <section className={styles.errorState} role="alert">
-        <h2>The playground could not render this preset</h2>
-        <p>Reset to the default preset or reload the page to start again.</p>
+        <h2>{this.props.title ?? 'The playground could not render this preset'}</h2>
+        <p>
+          {this.props.description ??
+            'Reset to the default preset or reload the page to start again.'}
+        </p>
         <div className={styles.buttonRow}>
           <button type="button" onClick={this.reset}>
-            Reset
+            {this.props.resetLabel ?? 'Reset'}
           </button>
           <button type="button" onClick={this.reload}>
             Reload

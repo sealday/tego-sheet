@@ -498,6 +498,35 @@ it('offers Reset and Reload after an unexpected render failure without exposing 
   expect(consoleError).toHaveBeenCalled();
 });
 
+it('contains an Output Studio render failure behind workspace-specific recovery', async () => {
+  const onReload = vi.fn();
+  const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  window.history.replaceState(
+    {},
+    '',
+    '/tego-sheet/playground?workspace=output&mode=locales#recover-output',
+  );
+  await renderPlayground(onReload);
+  sheetMock.failRender = true;
+  fireEvent.click(screen.getByRole('button', { name: 'Edit template' }));
+
+  expect(screen.getByRole('alert').textContent).toContain('Output Studio could not render');
+  expect(screen.queryByText(/unexpected render failure/u)).toBeNull();
+  expect(screen.getByRole('tab', { name: 'Output Studio' }).getAttribute('aria-selected')).toBe(
+    'true',
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+  expect(onReload).toHaveBeenCalledOnce();
+
+  sheetMock.failRender = false;
+  fireEvent.click(screen.getByRole('button', { name: 'Reset Output Studio' }));
+  expect(await screen.findByRole('heading', { name: 'Output Studio' })).toBeTruthy();
+  expect(window.location.href).toContain(
+    '/tego-sheet/playground?workspace=output&mode=locales#recover-output',
+  );
+  expect(consoleError).toHaveBeenCalled();
+});
+
 it('clears a failed boundary when selecting a different keyed preset', async () => {
   await renderPlayground();
   vi.spyOn(console, 'error').mockImplementation(() => undefined);

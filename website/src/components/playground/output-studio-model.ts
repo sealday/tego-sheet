@@ -13,6 +13,8 @@ export interface OutputState {
 export interface OutputDocumentMetadata {
   readonly invoiceId: string;
   readonly title: string;
+  readonly activePrintProfileId: string;
+  readonly activePrintProfileName: string;
 }
 
 export interface OutputStudioState {
@@ -136,6 +138,7 @@ export function reduceOutputStudioState(
       ...state,
       phase: 'rendering',
       committedRevision: action.revision,
+      diagnostics: [],
       outputs: changeRevisionOutputs(state.outputs),
     };
   }

@@ -9,6 +9,7 @@ describe('Output Studio rendering', () => {
       revision: 1,
       document: fixture.document,
       template: fixture.template,
+      activePrintProfileId: fixture.template.printProfiles[0]!.id,
       data: fixture.data,
       environment: fixture.environment,
       signal: new AbortController().signal,
@@ -32,6 +33,7 @@ describe('Output Studio rendering', () => {
         ...fixture.template,
         bindings: [{ ...customerBinding, expression: 'missing.customer' }],
       },
+      activePrintProfileId: fixture.template.printProfiles[0]!.id,
       data: fixture.data,
       environment: fixture.environment,
       signal: new AbortController().signal,
@@ -47,6 +49,7 @@ describe('Output Studio rendering', () => {
       revision: 3,
       document: fixture.document,
       template: { ...fixture.template, printProfiles: [] },
+      activePrintProfileId: fixture.template.printProfiles[0]!.id,
       data: fixture.data,
       environment: fixture.environment,
       signal: new AbortController().signal,
@@ -68,6 +71,7 @@ describe('Output Studio rendering', () => {
       revision: 4,
       document: fixture.document,
       template: fixture.template,
+      activePrintProfileId: fixture.template.printProfiles[0]!.id,
       data: fixture.data,
       environment: fixture.environment,
       signal: controller.signal,
@@ -78,5 +82,61 @@ describe('Output Studio rendering', () => {
       diagnostics: [expect.objectContaining({ code: 'RENDER_ABORTED', severity: 'error' })],
     });
     expect(result.document).toBeUndefined();
+  });
+
+  it('renders the explicitly selected print profile', async () => {
+    const fixture = createInvoiceOutputFixture();
+    const selectedProfile = {
+      ...fixture.template.printProfiles[0]!,
+      id: 'invoice-letter-landscape',
+      name: 'Invoice · Letter landscape',
+      page: {
+        ...fixture.template.printProfiles[0]!.page,
+        paper: { type: 'Letter' as const },
+        orientation: 'landscape' as const,
+      },
+    };
+    const result = await renderOutputRevision({
+      revision: 5,
+      document: fixture.document,
+      template: {
+        ...fixture.template,
+        printProfiles: [...fixture.template.printProfiles, selectedProfile],
+      },
+      activePrintProfileId: selectedProfile.id,
+      data: fixture.data,
+      environment: fixture.environment,
+      signal: new AbortController().signal,
+    });
+
+    expect(result.document?.print.pages[0]).toMatchObject({
+      width: expect.any(Number),
+      height: expect.any(Number),
+    });
+    expect(result.document!.print.pages[0]!.width).toBeGreaterThan(
+      result.document!.print.pages[0]!.height,
+    );
+  });
+
+  it('blocks an explicit print profile that no longer exists', async () => {
+    const fixture = createInvoiceOutputFixture();
+    const result = await renderOutputRevision({
+      revision: 6,
+      document: fixture.document,
+      template: fixture.template,
+      activePrintProfileId: 'removed-profile',
+      data: fixture.data,
+      environment: fixture.environment,
+      signal: new AbortController().signal,
+    });
+
+    expect(result.document).toBeUndefined();
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: 'INVALID_PRINT_TARGET',
+        severity: 'error',
+        message: 'Selected print profile no longer exists',
+      }),
+    );
   });
 });

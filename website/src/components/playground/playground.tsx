@@ -441,6 +441,7 @@ export function Playground({ onReload = reloadWindow }: PlaygroundProps = {}): R
   );
   const [historyRevision, setHistoryRevision] = useState(0);
   const [restoredFromHistory, setRestoredFromHistory] = useState(false);
+  const [outputResetRevision, setOutputResetRevision] = useState(0);
 
   const urlForLocation = useCallback(
     (nextLocation: PlaygroundLocation): string =>
@@ -569,7 +570,18 @@ export function Playground({ onReload = reloadWindow }: PlaygroundProps = {}): R
         aria-labelledby="workspace-tab-output"
         hidden={location.workspace !== 'output'}
       >
-        {location.workspace === 'output' ? <OutputStudio embedded /> : null}
+        {location.workspace === 'output' ? (
+          <PlaygroundErrorBoundary
+            key={outputResetRevision}
+            title="Output Studio could not render"
+            description="Reset the prepared Output Studio workspace or reload the page to start again."
+            resetLabel="Reset Output Studio"
+            onReset={() => setOutputResetRevision((revision) => revision + 1)}
+            onReload={onReload}
+          >
+            <OutputStudio embedded />
+          </PlaygroundErrorBoundary>
+        ) : null}
       </section>
     </main>
   );

@@ -16,6 +16,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type CSSProperties,
   type ReactElement,
 } from 'react';
 import { downloadBlob } from './output-download';
@@ -62,8 +63,12 @@ function outputErrorMessage(kind: OutputKind, error: unknown): string {
 }
 
 function outputDocumentMetadata(
-  template: { readonly name: string },
+  template: {
+    readonly name: string;
+    readonly printProfiles: readonly { readonly id: string; readonly name: string }[];
+  },
   data: unknown,
+  activePrintProfileId: string,
 ): OutputDocumentMetadata {
   const invoice =
     typeof data === 'object' && data !== null && 'invoice' in data ? data.invoice : undefined;
@@ -74,7 +79,13 @@ function outputDocumentMetadata(
     typeof invoice.id === 'string'
       ? invoice.id
       : 'output';
-  return { invoiceId, title: template.name };
+  const activePrintProfile = template.printProfiles.find(({ id }) => id === activePrintProfileId);
+  return {
+    invoiceId,
+    title: template.name,
+    activePrintProfileId,
+    activePrintProfileName: activePrintProfile?.name ?? activePrintProfileId,
+  };
 }
 
 interface ActiveOutputRequest {
@@ -90,6 +101,11 @@ export function OutputStudio({
   const [fixture] = useState(createInvoiceOutputFixture);
   const [draftTemplate, setDraftTemplate] = useState(fixture.template);
   const [draftData, setDraftData] = useState(() => JSON.stringify(fixture.data, null, 2));
+  const [draftActivePrintProfileId, setDraftActivePrintProfileId] = useState(
+    fixture.template.printProfiles[0]!.id,
+  );
+  const [selectedPage, setSelectedPage] = useState(0);
+  const [zoom, setZoom] = useState(100);
   const [workbenchOpen, setWorkbenchOpen] = useState(false);
   const [dataError, setDataError] = useState('');
   const [state, dispatch] = useReducer(reduceOutputStudioState, undefined, createOutputStudioState);
@@ -113,6 +129,7 @@ export function OutputStudio({
       template: typeof fixture.template,
       data: unknown,
       metadata: OutputDocumentMetadata,
+      activePrintProfileId: string,
     ): AbortController => {
       abortOutputRequests();
       generatedRevisionRef.current = null;
@@ -124,6 +141,7 @@ export function OutputStudio({
         revision,
         document: fixture.document,
         template,
+        activePrintProfileId,
         data,
         environment: fixture.environment,
         signal: controller.signal,
@@ -137,11 +155,15 @@ export function OutputStudio({
               diagnostics: result.diagnostics,
             });
           } else {
+            const generatedDocument = result.document;
             generatedRevisionRef.current = revision;
+            setSelectedPage((page) =>
+              Math.min(page, Math.max(0, generatedDocument.print.pages.length - 1)),
+            );
             dispatch({
               type: 'render-succeeded',
               revision,
-              document: result.document,
+              document: generatedDocument,
               metadata,
               diagnostics: result.diagnostics,
             });
@@ -191,7 +213,8 @@ export function OutputStudio({
       1,
       fixture.template,
       fixture.data,
-      outputDocumentMetadata(fixture.template, fixture.data),
+      outputDocumentMetadata(fixture.template, fixture.data, fixture.template.printProfiles[0]!.id),
+      fixture.template.printProfiles[0]!.id,
     );
     return () => controllerRef.current?.abort();
   }, [fixture, startRender]);
@@ -205,7 +228,17 @@ export function OutputStudio({
   };
 
   const markTemplateDraft = (template: typeof fixture.template): void => {
+    const nextActivePrintProfileId =
+      template.printProfiles.find(({ id }) => id === draftActivePrintProfileId)?.id ??
+      template.printProfiles[0]?.id ??
+      '';
     setDraftTemplate(template);
+    setDraftActivePrintProfileId(nextActivePrintProfileId);
+    markDraftChanged();
+  };
+
+  const markActivePrintProfileDraft = (profileId: string): void => {
+    setDraftActivePrintProfileId(profileId);
     markDraftChanged();
   };
 
@@ -229,11 +262,13 @@ export function OutputStudio({
       revisionRef.current,
       draftTemplate,
       data,
-      outputDocumentMetadata(draftTemplate, data),
+      outputDocumentMetadata(draftTemplate, data, draftActivePrintProfileId),
+      draftActivePrintProfileId,
     );
   };
 
   const pageCount = state.generatedDocument?.print.pages.length ?? 0;
+  const selectedPageMetadata = state.generatedDocument?.print.pages[selectedPage];
   const canOutput =
     state.phase === 'ready' && state.generatedDocument !== null && state.generatedMetadata !== null;
   const runOutput = <Result,>(
@@ -322,21 +357,21 @@ export function OutputStudio({
     );
   };
   const downloadPng = (): void => {
-    const selectedPage = 0;
+    const page = selectedPage;
     runOutput(
       'png',
       async (adapters, generated, signal) =>
         adapters.image.render(generated, {
           format: 'png',
-          pages: [selectedPage],
+          pages: [page],
           background: '#ffffff',
           dpi: 144,
           signal,
         }),
       ([png], metadata) => {
         if (png === undefined) throw new Error('PNG adapter returned no page');
-        downloadBlob(png, outputFilename('png', metadata.invoiceId, selectedPage));
-        return 'PNG page 1 downloaded';
+        downloadBlob(png, outputFilename('png', metadata.invoiceId, page));
+        return `PNG page ${page + 1} downloaded`;
       },
     );
   };
@@ -364,6 +399,29 @@ export function OutputStudio({
           ? 'Generation is blocked. Review the diagnostics.'
           : 'Preview and outputs use the current generated document.';
 
+  const reset = (): void => {
+    abortOutputRequests();
+    controllerRef.current?.abort();
+    controllerRef.current = null;
+    generatedRevisionRef.current = null;
+    const activePrintProfileId = fixture.template.printProfiles[0]!.id;
+    setDraftTemplate(fixture.template);
+    setDraftData(JSON.stringify(fixture.data, null, 2));
+    setDraftActivePrintProfileId(activePrintProfileId);
+    setSelectedPage(0);
+    setZoom(100);
+    setDataError('');
+    setWorkbenchOpen(false);
+    revisionRef.current += 1;
+    startRender(
+      revisionRef.current,
+      fixture.template,
+      fixture.data,
+      outputDocumentMetadata(fixture.template, fixture.data, activePrintProfileId),
+      activePrintProfileId,
+    );
+  };
+
   const Root = embedded ? 'section' : 'main';
   const Title = embedded ? 'h2' : 'h1';
 
@@ -382,12 +440,22 @@ export function OutputStudio({
             ? 'Preparing GeneratedDocument'
             : `GeneratedDocument · revision ${state.generatedRevision}`}
         </p>
+        <button type="button" onClick={reset}>
+          Reset Output Studio
+        </button>
       </header>
 
       <div className={styles.outputStudioGrid}>
         <section className={styles.outputInputs} aria-labelledby="output-inputs-heading">
           <h2 id="output-inputs-heading">Output inputs</h2>
           <p>Invoice data and template changes are prepared here before regeneration.</p>
+          <p>
+            Active print profile ·{' '}
+            {state.generatedMetadata?.activePrintProfileName ??
+              draftTemplate.printProfiles.find(({ id }) => id === draftActivePrintProfileId)
+                ?.name ??
+              'None'}
+          </p>
           <button
             type="button"
             aria-expanded={workbenchOpen}
@@ -417,6 +485,8 @@ export function OutputStudio({
                   mode="template"
                   template={draftTemplate}
                   onTemplateChange={markTemplateDraft}
+                  activePrintProfileId={draftActivePrintProfileId}
+                  onActivePrintProfileChange={markActivePrintProfileDraft}
                 />
               </div>
               <button type="button" onClick={applyDraft} disabled={state.phase !== 'dirty'}>
@@ -428,10 +498,55 @@ export function OutputStudio({
 
         <section className={styles.exactPreview} aria-labelledby="exact-preview-heading">
           <h2 id="exact-preview-heading">Exact page preview</h2>
+          <div className={styles.previewControls}>
+            <label>
+              Current page
+              <input
+                type="number"
+                min={1}
+                max={Math.max(1, pageCount)}
+                value={selectedPage + 1}
+                onChange={(event) => {
+                  const requested = Number(event.currentTarget.value) - 1;
+                  setSelectedPage(
+                    Math.min(
+                      Math.max(Number.isFinite(requested) ? requested : 0, 0),
+                      pageCount - 1,
+                    ),
+                  );
+                }}
+                disabled={pageCount === 0}
+              />
+            </label>
+            <label>
+              Preview zoom
+              <select value={zoom} onChange={(event) => setZoom(Number(event.currentTarget.value))}>
+                <option value={75}>75%</option>
+                <option value={100}>100%</option>
+                <option value={125}>125%</option>
+                <option value={150}>150%</option>
+              </select>
+            </label>
+          </div>
+          {selectedPageMetadata === undefined ? null : (
+            <>
+              <p>
+                Selected page {selectedPage + 1} of {pageCount} · {selectedPageMetadata.width} ×{' '}
+                {selectedPageMetadata.height} pt · rows {selectedPageMetadata.rowStart + 1}–
+                {selectedPageMetadata.rowEnd + 1}
+              </p>
+              <p>Preview zoom · {zoom}%</p>
+            </>
+          )}
           {state.generatedDocument === null ? (
             <p role="status">Preparing deterministic invoice pages…</p>
           ) : (
-            <TemplatePreview document={state.generatedDocument} />
+            <div
+              className={styles.previewCanvas}
+              style={{ '--output-preview-zoom': zoom / 100 } as CSSProperties}
+            >
+              <TemplatePreview document={state.generatedDocument} />
+            </div>
           )}
         </section>
 
@@ -503,7 +618,7 @@ export function OutputStudio({
                   state.outputs.png.message === '' ? undefined : 'output-result-png'
                 }
               >
-                Download PNG page 1
+                Download PNG page {selectedPage + 1}
               </button>
               {state.outputs.png.message === '' ? null : (
                 <p

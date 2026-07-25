@@ -73,7 +73,12 @@ describe('Output Studio model', () => {
         type: 'render-succeeded',
         revision: 2,
         document: {} as GeneratedDocument,
-        metadata: { invoiceId: 'INV-2', title: 'Invoice' },
+        metadata: {
+          invoiceId: 'INV-2',
+          title: 'Invoice',
+          activePrintProfileId: 'invoice-a4',
+          activePrintProfileName: 'Invoice · A4',
+        },
         diagnostics: [],
       }),
     ).toBe(rendering);

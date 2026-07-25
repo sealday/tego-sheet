@@ -89,6 +89,18 @@ const generatedDocument = {
   },
 } as unknown as GeneratedDocument;
 
+const onePageDocument = {
+  ...generatedDocument,
+  print: {
+    ...generatedDocument.print,
+    pages: generatedDocument.print.pages.slice(0, 1),
+    displayList: {
+      ...generatedDocument.print.displayList,
+      pages: generatedDocument.print.displayList.pages.slice(0, 1),
+    },
+  },
+} as GeneratedDocument;
+
 function createAdapterDoubles() {
   return {
     print: {
@@ -718,6 +730,196 @@ it('keeps template edits as drafts until Apply and regenerate', async () => {
       }),
     }),
   );
+});
+
+it('commits the selected print profile and reconciles it when deleted', async () => {
+  pipeline.renderOutputRevision.mockImplementation(async ({ revision }) => ({
+    revision,
+    diagnostics: [],
+    document: generatedDocument,
+  }));
+
+  render(<OutputStudio />);
+  await screen.findByText('GeneratedDocument · revision 1');
+  expect(pipeline.renderOutputRevision).toHaveBeenCalledWith(
+    expect.objectContaining({ activePrintProfileId: 'invoice-a4' }),
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit template' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Add print profile' }));
+  const profileSelect = screen.getByLabelText('Active print profile') as HTMLSelectElement;
+  const addedProfile = [...profileSelect.options].find(({ value }) => value !== 'invoice-a4');
+  expect(addedProfile).toBeDefined();
+  fireEvent.change(profileSelect, { target: { value: addedProfile!.value } });
+  expect(
+    screen.getByText('Preview is stale. Apply & regenerate to update every output.'),
+  ).toBeTruthy();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Apply & regenerate' }));
+  await screen.findByText('GeneratedDocument · revision 2');
+  expect(pipeline.renderOutputRevision).toHaveBeenLastCalledWith(
+    expect.objectContaining({ activePrintProfileId: addedProfile!.value }),
+  );
+  expect(screen.getByText(`Active print profile · ${addedProfile!.text}`)).toBeTruthy();
+
+  fireEvent.click(screen.getByRole('button', { name: `Delete profile ${addedProfile!.value}` }));
+  expect(profileSelect.value).toBe('invoice-a4');
+  fireEvent.click(screen.getByRole('button', { name: 'Apply & regenerate' }));
+  await screen.findByText('GeneratedDocument · revision 3');
+  expect(pipeline.renderOutputRevision).toHaveBeenLastCalledWith(
+    expect.objectContaining({ activePrintProfileId: 'invoice-a4' }),
+  );
+});
+
+it('exports the selected page and exposes current-page and zoom controls', async () => {
+  pipeline.renderOutputRevision.mockResolvedValue({
+    revision: 1,
+    diagnostics: [],
+    document: generatedDocument,
+  });
+  const adapters = createAdapterDoubles();
+  const downloads: string[] = [];
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(
+    function (this: HTMLAnchorElement) {
+      downloads.push(this.download);
+    },
+  );
+
+  render(<OutputStudio adapters={adapters} />);
+  await screen.findByText('GeneratedDocument · revision 1');
+  const currentPage = screen.getByLabelText('Current page') as HTMLInputElement;
+  const zoom = screen.getByLabelText('Preview zoom') as HTMLSelectElement;
+  expect(currentPage.value).toBe('1');
+  expect(currentPage.max).toBe('2');
+  expect(zoom.value).toBe('100');
+
+  fireEvent.change(currentPage, { target: { value: '2' } });
+  fireEvent.change(zoom, { target: { value: '150' } });
+  expect(screen.getByText('Selected page 2 of 2 · 595 × 842 pt · rows 15–30')).toBeTruthy();
+  expect(screen.getByText('Preview zoom · 150%')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Download PNG page 2' }));
+  await screen.findByText('PNG page 2 downloaded');
+
+  expect(adapters.image.render).toHaveBeenCalledWith(
+    generatedDocument,
+    expect.objectContaining({ pages: [1] }),
+  );
+  expect(downloads).toEqual(['invoice-INV-2026-042-page-2.png']);
+});
+
+it('clamps the selected page after regeneration reduces the page count', async () => {
+  pipeline.renderOutputRevision
+    .mockResolvedValueOnce({ revision: 1, diagnostics: [], document: generatedDocument })
+    .mockResolvedValueOnce({ revision: 2, diagnostics: [], document: onePageDocument });
+
+  render(<OutputStudio />);
+  await screen.findByText('GeneratedDocument · revision 1');
+  fireEvent.change(screen.getByLabelText('Current page'), { target: { value: '2' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Edit template' }));
+  const data = JSON.parse((screen.getByLabelText('Data JSON') as HTMLTextAreaElement).value);
+  data.invoice.id = 'INV-ONE-PAGE';
+  fireEvent.change(screen.getByLabelText('Data JSON'), {
+    target: { value: JSON.stringify(data, null, 2) },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply & regenerate' }));
+  await screen.findByText('GeneratedDocument · revision 2');
+
+  expect((screen.getByLabelText('Current page') as HTMLInputElement).value).toBe('1');
+  expect(screen.getByText('Selected page 1 of 1 · 595 × 842 pt · rows 1–14')).toBeTruthy();
+});
+
+it('resets dirty drafts, page, zoom, and output outcomes into a new clean revision', async () => {
+  pipeline.renderOutputRevision.mockImplementation(async ({ revision }) => ({
+    revision,
+    diagnostics: [],
+    document: generatedDocument,
+  }));
+  const adapters = createAdapterDoubles();
+  render(<OutputStudio adapters={adapters} />);
+  await screen.findByText('GeneratedDocument · revision 1');
+  fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+  await screen.findByText('PDF downloaded');
+  fireEvent.change(screen.getByLabelText('Current page'), { target: { value: '2' } });
+  fireEvent.change(screen.getByLabelText('Preview zoom'), { target: { value: '150' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Edit template' }));
+  fireEvent.change(screen.getByLabelText('Expression for customer-name'), {
+    target: { value: 'customer.legalName' },
+  });
+
+  fireEvent.click(screen.getByRole('button', { name: 'Reset Output Studio' }));
+  await screen.findByText('GeneratedDocument · revision 2');
+
+  expect((screen.getByLabelText('Current page') as HTMLInputElement).value).toBe('1');
+  expect((screen.getByLabelText('Preview zoom') as HTMLSelectElement).value).toBe('100');
+  expect(screen.queryByText('PDF downloaded')).toBeNull();
+  expect(screen.queryByText(/Preview is stale/u)).toBeNull();
+  expect(pipeline.renderOutputRevision).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      revision: 2,
+      activePrintProfileId: 'invoice-a4',
+      template: expect.objectContaining({ name: 'Customer invoice' }),
+      data: expect.objectContaining({
+        invoice: expect.objectContaining({ id: 'INV-2026-042' }),
+      }),
+    }),
+  );
+});
+
+it('resets a blocked revision and clears its diagnostics', async () => {
+  pipeline.renderOutputRevision
+    .mockResolvedValueOnce({ revision: 1, diagnostics: [], document: generatedDocument })
+    .mockResolvedValueOnce({
+      revision: 2,
+      diagnostics: [
+        {
+          code: 'MISSING_DATA',
+          severity: 'error',
+          domain: 'template',
+          stage: 'render',
+          message: 'Invoice data is missing',
+        },
+      ],
+    })
+    .mockResolvedValueOnce({ revision: 3, diagnostics: [], document: generatedDocument });
+
+  render(<OutputStudio />);
+  await screen.findByText('GeneratedDocument · revision 1');
+  fireEvent.click(screen.getByRole('button', { name: 'Edit template' }));
+  fireEvent.change(screen.getByLabelText('Expression for customer-name'), {
+    target: { value: 'missing.customer' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply & regenerate' }));
+  await screen.findByText('Generation is blocked. Review the diagnostics.');
+  expect(screen.getByText('Invoice data is missing')).toBeTruthy();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Reset Output Studio' }));
+  await screen.findByText('GeneratedDocument · revision 3');
+  expect(screen.queryByText('Invoice data is missing')).toBeNull();
+});
+
+it('aborts an exporting request before resetting into a clean revision', async () => {
+  pipeline.renderOutputRevision.mockImplementation(async ({ revision }) => ({
+    revision,
+    diagnostics: [],
+    document: generatedDocument,
+  }));
+  const pendingPdf = deferred<Blob>();
+  const adapters = createAdapterDoubles();
+  adapters.pdf.render.mockReturnValue(pendingPdf.promise);
+
+  render(<OutputStudio adapters={adapters} />);
+  await screen.findByText('GeneratedDocument · revision 1');
+  fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+  const signal = adapters.pdf.render.mock.calls[0]![1].signal as AbortSignal;
+
+  fireEvent.click(screen.getByRole('button', { name: 'Reset Output Studio' }));
+  expect(signal.aborted).toBe(true);
+  await screen.findByText('GeneratedDocument · revision 2');
+  expect(screen.queryByText('Generating PDF…')).toBeNull();
+
+  pendingPdf.resolve(new Blob(['late'], { type: 'application/pdf' }));
+  await act(async () => pendingPdf.promise);
+  expect(URL.createObjectURL).not.toHaveBeenCalled();
 });
 
 it('keeps a newer draft stale when an older render resolves', async () => {

@@ -13,6 +13,7 @@ export interface OutputRevisionRequest {
   readonly revision: number;
   readonly document: SpreadsheetDocument;
   readonly template: SpreadsheetTemplate;
+  readonly activePrintProfileId: string;
   readonly data: unknown;
   readonly environment: RenderEnvironment;
   readonly signal: AbortSignal;
@@ -42,14 +43,19 @@ export async function renderOutputRevision(
     });
   }
 
-  const profile = request.template.printProfiles[0];
+  const profile = request.template.printProfiles.find(
+    ({ id }) => id === request.activePrintProfileId,
+  );
   if (profile === undefined) {
     const diagnostic: Diagnostic = Object.freeze({
       code: 'INVALID_PRINT_TARGET',
       severity: 'error',
       domain: 'template',
       stage: 'validate',
-      message: 'Template has no print profile',
+      message:
+        request.template.printProfiles.length === 0
+          ? 'Template has no print profile'
+          : 'Selected print profile no longer exists',
     });
     return Object.freeze({
       revision: request.revision,
