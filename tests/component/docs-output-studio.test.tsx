@@ -242,6 +242,12 @@ it('defines the approved responsive areas and accessible nested designer control
   expect(playgroundStyles).toMatch(
     /@media \(max-width: 48rem\)[\s\S]*?grid-template-areas:\s*['"]preview['"]\s*['"]inputs['"]\s*['"]outputs['"]/,
   );
-  expect(playgroundStyles).toMatch(/\.templateSheet input\s*{[^}]*min-height:\s*2\.75rem/s);
+  expect(playgroundStyles).toMatch(
+    /\.templateSheet input:not\(\[type=['"]checkbox['"]\]\):not\(\[type=['"]radio['"]\]\)\s*{[^}]*min-height:\s*2\.75rem/s,
+  );
+  expect(playgroundStyles).toMatch(
+    /\.templateSheet label:has\(> input\[type=['"]checkbox['"]\]\),\s*\.templateSheet label:has\(> input\[type=['"]radio['"]\]\)\s*{[^}]*min-height:\s*2\.75rem/s,
+  );
+  expect(playgroundStyles).not.toMatch(/\.templateSheet input\s*{[^}]*min-height:/s);
   expect(playgroundStyles).toMatch(/\.templateSheet input:focus-visible\s*{[^}]*outline:/s);
 });
