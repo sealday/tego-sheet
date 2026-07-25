@@ -256,7 +256,8 @@
 
 .outputStudioGrid {
   display: grid;
-  grid-template-columns: minmax(17rem, 0.7fr) minmax(0, 1.8fr);
+  grid-template-areas: 'inputs preview outputs';
+  grid-template-columns: minmax(17rem, 0.7fr) minmax(0, 1.8fr) minmax(17rem, 0.7fr);
   gap: 1rem;
   align-items: start;
 }
@@ -273,7 +274,15 @@
 }
 
 .exactPreview {
-  grid-row: span 2;
+  grid-area: preview;
+}
+
+.outputInputs {
+  grid-area: inputs;
+}
+
+.pipelineOutputs {
+  grid-area: outputs;
 }
 
 .exactPreview article {
@@ -365,6 +374,15 @@
   border-radius: 0.5rem;
 }
 
+.templateSheet input {
+  min-height: 2.75rem;
+}
+
+.templateSheet input:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--ifm-color-primary) 45%, transparent);
+  outline-offset: 2px;
+}
+
 .outputDiagnostics {
   padding-left: 1.25rem;
   color: var(--ifm-color-danger);
@@ -373,18 +391,30 @@
 @media (max-width: 72rem) {
   .header,
   .presetBoundary,
-  .outputStudioHeader,
-  .outputStudioGrid {
+  .outputStudioHeader {
     grid-template-columns: 1fr;
   }
 
-  .exactPreview {
-    grid-row: auto;
+  .outputStudioGrid {
+    grid-template-areas:
+      'preview preview'
+      'inputs outputs';
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
   .inspector {
     max-height: none;
     position: static;
+  }
+}
+
+@media (max-width: 48rem) {
+  .outputStudioGrid {
+    grid-template-areas:
+      'preview'
+      'inputs'
+      'outputs';
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

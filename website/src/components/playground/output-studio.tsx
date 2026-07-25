@@ -72,19 +72,25 @@ export function OutputStudio(): ReactElement {
   );
 
   useEffect(() => {
-    const controller = startRender(1, fixture.template, fixture.data);
-    return () => controller.abort();
+    startRender(1, fixture.template, fixture.data);
+    return () => controllerRef.current?.abort();
   }, [fixture, startRender]);
+
+  const markDraftChanged = (): void => {
+    controllerRef.current?.abort();
+    controllerRef.current = null;
+    dispatch({ type: 'draft-changed' });
+  };
 
   const markTemplateDraft = (template: typeof fixture.template): void => {
     setDraftTemplate(template);
-    dispatch({ type: 'draft-changed' });
+    markDraftChanged();
   };
 
   const markDataDraft = (event: ChangeEvent<HTMLTextAreaElement>): void => {
     setDraftData(event.currentTarget.value);
     setDataError('');
-    dispatch({ type: 'draft-changed' });
+    markDraftChanged();
   };
 
   const applyDraft = (): void => {
@@ -116,10 +122,9 @@ export function OutputStudio(): ReactElement {
         <div>
           <p className={styles.eyebrow}>Output playground</p>
           <h1>Output Studio</h1>
-          <p>
-            One document · many outputs. The exact generated display list shown here is the shared
-            artifact for print, PDF, images, and spreadsheets.
-          </p>
+          <p>One document · many outputs.</p>
+          <p>Preview, print, PDF, and PNG share one exact display list.</p>
+          <p>XLSX uses the semantic workbook in the same GeneratedDocument.</p>
         </div>
         <p className={styles.revision}>
           {state.generatedRevision === null
