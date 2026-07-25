@@ -3,6 +3,7 @@ yarn.lock
 
 .nyc_output/*
 .worktrees/
+.superpowers/
 coverage/
 dist/
 demo-dist/
