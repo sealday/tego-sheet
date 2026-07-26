@@ -71,6 +71,22 @@ describe('visual regression release contract', () => {
     expect(docsVisualConfig).toContain("outputFolder: 'playwright-report/docs-visual'");
     expect(docsVisualSpec).toContain('document.fonts.ready');
     expect(docsVisualSpec).toContain("reducedMotion: 'reduce'");
-    expect(docsVisualSpec.match(/toHaveScreenshot\(/g)).toHaveLength(8);
+    expect(docsVisualSpec.match(/toHaveScreenshot\(/g)).toHaveLength(10);
+    for (const snapshot of [
+      'home-desktop.png',
+      'quick-start-desktop.png',
+      'roadmap-desktop.png',
+      'playground-controlled-desktop.png',
+      'playground-uncontrolled-narrow.png',
+      'output-studio-ready-desktop.png',
+      'output-studio-ready-intermediate.png',
+      'output-studio-ready-narrow.png',
+      'output-studio-selected-page-two-controls.png',
+      'output-studio-selected-page-two-preview.png',
+      'output-studio-stale-desktop.png',
+      'output-studio-blocked-desktop.png',
+    ]) {
+      expect(docsVisualSpec).toContain(snapshot);
+    }
   });
 });
