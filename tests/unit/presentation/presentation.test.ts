@@ -690,7 +690,7 @@ describe('device-independent print display list', () => {
     expect(JSON.stringify(first)).not.toMatch(/devicePixelRatio|scroll|selection|zoom/u);
   });
 
-  it('keeps non-printable cell geometry and style while suppressing its content', () => {
+  it('@parity:correction.printable-cells keeps non-printable cell geometry and style while suppressing its content', () => {
     const presentation = resolverFixture().resolver.resolve({
       sheetId: 'sheet-1' as never,
       row: 0,
