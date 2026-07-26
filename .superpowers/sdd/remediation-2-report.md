@@ -9,7 +9,8 @@ and durable visual requirements.
   retained preview. The overlay identifies generated and committed revisions while preserving the
   last successful pages.
 - Compile, bind, and paginate are visible first-class stages with pending, active, complete, and
-  blocked states.
+  blocked states. Revision-scoped progress now comes from the real compile, binding, and pagination
+  execution boundaries; exactly one current stage is active.
 - Diagnostics are grouped as blocking errors and warnings. Each item renders its stable code,
   severity, normalized pipeline stage, message, and structured location when available.
 - Every enabled embedded workbench control has a computed 44px target at narrow width, including
@@ -25,13 +26,23 @@ Implementation commit:
 `88a1192e24c32a9f95dd5791c7ec7466847da911`
 (`fix(docs): complete output studio preview feedback`)
 
+Review follow-up commit:
+`dfdeb2832637b95aa770b5266ff0f47634c6de28`
+(`fix(docs): report real output pipeline progress`)
+
 ## Changed Files
 
 - `website/src/components/playground/output-studio-model.ts`
-  - Added diagnostic grouping, diagnostic-to-stage normalization, and derived pipeline stage state.
+  - Added diagnostic grouping and stored revision-scoped pipeline stage state.
+- `website/src/components/playground/output-studio-pipeline.ts`
+  - Emits compile progress and bridges internal bind/paginate render progress while suppressing
+    aborted callbacks.
 - `website/src/components/playground/output-studio.tsx`
-  - Added retained-preview overlays, stage presentation, grouped structured diagnostics, and the
-    system-print disclosure.
+  - Added retained-preview overlays, stage presentation, grouped structured diagnostics, the
+    system-print disclosure, and stale/aborted progress guards.
+- `src/template/render.ts`
+  - Reports internal binding and pagination progress at their actual execution boundaries without
+    changing the public `RenderRequest` or `renderSpreadsheetTemplate` signatures.
 - `website/src/components/playground/playground.module.css`
   - Added overlay/stage/diagnostic presentation and sufficiently specific scoped 44px workbench
     target rules without changing package defaults.
@@ -79,9 +90,7 @@ Implementation commit:
    Result: exit 1 in both browser projects. Enabled narrow toolbar buttons computed to 26px high;
    checkbox inputs exposed 13px boxes before their accessible label targets were measured.
 
-### GREEN
-
-1. Focused model and pipeline:
+4. Review follow-up — real revision-scoped stage progress:
 
    ```text
    npx vitest run --project unit \
@@ -89,7 +98,30 @@ Implementation commit:
      tests/unit/website/output-studio-pipeline.test.ts
    ```
 
-   Result: 2 files passed; 18 tests passed.
+   Result: exit 1; 4 failed. Rendering still derived all stages as active, progress callbacks were
+   absent, and stale progress had no state transition to reject.
+
+   ```text
+   npx vitest run --project component tests/component/docs-output-studio.test.tsx \
+     -t "consumes deferred revision progress"
+   ```
+
+   Result: exit 1; the deferred render displayed all three stages active before any callback.
+
+### GREEN
+
+1. Focused model and pipeline:
+
+   ```text
+   npx vitest run --project unit \
+     tests/unit/website/output-studio-model.test.ts \
+     tests/unit/website/output-studio-pipeline.test.ts \
+     tests/unit/template/render.test.ts
+   ```
+
+   Result: 3 files passed; 44 tests passed. Progress advanced compile → bind → paginate in order,
+   compile and bind failures retained their actual blocked stage, and an already-aborted revision
+   emitted no progress.
 
 2. Focused component:
 
@@ -100,7 +132,8 @@ Implementation commit:
      tests/component/template-designer.test.tsx
    ```
 
-   Result: 3 files passed; 66 tests passed.
+   Result: 3 files passed; 67 tests passed. Deferred callbacks proved one active stage at a time,
+   paginate blocking, abort suppression, stale-revision rejection, and reset/newer-revision safety.
 
 3. Documentation architecture:
 
