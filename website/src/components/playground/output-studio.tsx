@@ -23,7 +23,10 @@ import { downloadBlob } from './output-download';
 import { createInvoiceOutputFixture } from './output-studio-fixtures';
 import {
   createOutputStudioState,
+  groupOutputDiagnostics,
+  outputDiagnosticStage,
   outputFilename,
+  outputPipelineStages,
   reduceOutputStudioState,
   type OutputDocumentMetadata,
   type OutputKind,
@@ -86,6 +89,33 @@ function outputDocumentMetadata(
     activePrintProfileId,
     activePrintProfileName: activePrintProfile?.name ?? activePrintProfileId,
   };
+}
+
+function diagnosticLocation(diagnostic: Diagnostic): string {
+  const location = diagnostic.location;
+  if (location === undefined) return '';
+  const parts = [
+    location.sheetId === undefined ? null : `sheet ${location.sheetId}`,
+    location.bindingId === undefined ? null : `binding ${location.bindingId}`,
+    location.resourceId === undefined ? null : `resource ${location.resourceId}`,
+    location.objectId === undefined ? null : `object ${location.objectId}`,
+    location.adapterId === undefined ? null : `adapter ${location.adapterId}`,
+    location.commandId === undefined ? null : `command ${location.commandId}`,
+    location.cell === undefined
+      ? null
+      : `cell R${location.cell.row + 1}C${location.cell.column + 1}`,
+    location.range === undefined
+      ? null
+      : `range R${location.range.start.row + 1}C${location.range.start.column + 1}–R${
+          location.range.end.row + 1
+        }C${location.range.end.column + 1}`,
+  ].filter((part): part is string => part !== null);
+  return parts.join(' · ');
+}
+
+function stageLabel(diagnostic: Diagnostic): string {
+  const stage = outputDiagnosticStage(diagnostic);
+  return stage === 'compile' ? 'Compile' : stage === 'bind' ? 'Bind' : 'Paginate';
 }
 
 interface ActiveOutputRequest {
@@ -399,6 +429,25 @@ export function OutputStudio({
         : state.phase === 'blocked'
           ? 'Generation is blocked. Review the diagnostics.'
           : 'Preview and outputs use the current generated document.';
+  const stages = outputPipelineStages(state);
+  const groupedDiagnostics = groupOutputDiagnostics(state.diagnostics);
+  const previewOverlay =
+    state.generatedDocument === null || state.phase === 'ready'
+      ? null
+      : state.phase === 'dirty'
+        ? {
+            title: 'Stale preview',
+            detail: `Generated revision ${state.generatedRevision}. Committed revision ${state.committedRevision}. Draft changes are not generated.`,
+          }
+        : state.phase === 'rendering'
+          ? {
+              title: `Rendering committed revision ${state.committedRevision}`,
+              detail: `Showing generated revision ${state.generatedRevision} until rendering completes.`,
+            }
+          : {
+              title: 'Blocked preview',
+              detail: `Committed revision ${state.committedRevision} is blocked. Showing generated revision ${state.generatedRevision}.`,
+            };
 
   const reset = (): void => {
     abortOutputRequests();
@@ -543,12 +592,26 @@ export function OutputStudio({
           {state.generatedDocument === null ? (
             <p role="status">Preparing deterministic invoice pages…</p>
           ) : (
-            <div className={styles.previewViewport}>
-              <div
-                className={styles.previewCanvas}
-                style={{ '--output-preview-width': `${zoom}%` } as CSSProperties}
-              >
-                <TemplatePreview document={state.generatedDocument} />
+            <div className={styles.previewFrame}>
+              {previewOverlay === null ? null : (
+                <div
+                  className={styles.previewOverlay}
+                  data-testid="preview-state-overlay"
+                  data-preview-state={state.phase}
+                  aria-live="polite"
+                  aria-atomic="true"
+                >
+                  <strong>{previewOverlay.title}</strong>
+                  <span>{previewOverlay.detail}</span>
+                </div>
+              )}
+              <div className={styles.previewViewport}>
+                <div
+                  className={styles.previewCanvas}
+                  style={{ '--output-preview-width': `${zoom}%` } as CSSProperties}
+                >
+                  <TemplatePreview document={state.generatedDocument} />
+                </div>
               </div>
             </div>
           )}
@@ -560,23 +623,79 @@ export function OutputStudio({
           <p role="status" aria-live="polite">
             {status}
           </p>
-          {state.diagnostics.length === 0 ? null : (
-            <ul className={styles.outputDiagnostics} aria-label="Generation diagnostics">
-              {state.diagnostics.map((diagnostic, index) => (
-                <li key={`${diagnostic.code}-${index}`}>{diagnostic.message}</li>
-              ))}
-            </ul>
-          )}
+          <ol className={styles.pipelineStages} aria-label="Generation stages">
+            {stages.map((stage) => (
+              <li key={stage.id} data-stage-status={stage.status}>
+                <span>{stage.label}</span>
+                <strong>
+                  {stage.status === 'active'
+                    ? 'In progress'
+                    : `${stage.status[0]!.toUpperCase()}${stage.status.slice(1)}`}
+                </strong>
+              </li>
+            ))}
+          </ol>
+          <section className={styles.diagnostics} aria-labelledby="diagnostics-heading">
+            <h3 id="diagnostics-heading">Diagnostics</h3>
+            {groupedDiagnostics.blocking.length === 0 ? null : (
+              <>
+                <h4>Blocking errors</h4>
+                <ul aria-label="Blocking errors">
+                  {groupedDiagnostics.blocking.map((diagnostic, index) => (
+                    <li key={`${diagnostic.code}-${index}`}>
+                      <p>
+                        <strong>{diagnostic.code}</strong>
+                        <span>Error</span>
+                        <span>{stageLabel(diagnostic)}</span>
+                      </p>
+                      <p>{diagnostic.message}</p>
+                      {diagnosticLocation(diagnostic) === '' ? null : (
+                        <p>{diagnosticLocation(diagnostic)}</p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            {groupedDiagnostics.warnings.length === 0 ? null : (
+              <>
+                <h4>Warnings</h4>
+                <ul aria-label="Warnings">
+                  {groupedDiagnostics.warnings.map((diagnostic, index) => (
+                    <li key={`${diagnostic.code}-${index}`}>
+                      <p>
+                        <strong>{diagnostic.code}</strong>
+                        <span>Warning</span>
+                        <span>{stageLabel(diagnostic)}</span>
+                      </p>
+                      <p>{diagnostic.message}</p>
+                      {diagnosticLocation(diagnostic) === '' ? null : (
+                        <p>{diagnosticLocation(diagnostic)}</p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            {groupedDiagnostics.blocking.length === 0 &&
+            groupedDiagnostics.warnings.length === 0 ? (
+              <p>No blocking errors or warnings.</p>
+            ) : null}
+          </section>
           <div className={styles.outputActions}>
             <div className={styles.outputAction}>
+              <p id="system-print-disclosure">Print opens your system print dialog.</p>
               <button
                 type="button"
                 onClick={print}
                 disabled={!canOutput || state.outputs.print.status === 'busy'}
                 aria-busy={state.outputs.print.status === 'busy'}
-                aria-describedby={
-                  state.outputs.print.message === '' ? undefined : 'output-result-print'
-                }
+                aria-describedby={[
+                  'system-print-disclosure',
+                  state.outputs.print.message === '' ? null : 'output-result-print',
+                ]
+                  .filter((id): id is string => id !== null)
+                  .join(' ')}
               >
                 Print {pageCount} pages
               </button>

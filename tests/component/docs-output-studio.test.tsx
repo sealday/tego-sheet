@@ -689,6 +689,124 @@ it('keeps every output disabled when generation is blocked', async () => {
   }
 });
 
+it('overlays retained previews with generated and committed revisions while stale, rendering, and blocked', async () => {
+  const regeneration = deferred<{
+    readonly revision: number;
+    readonly diagnostics: readonly {
+      readonly code: string;
+      readonly severity: 'error';
+      readonly domain: 'template';
+      readonly stage: 'expand';
+      readonly message: string;
+    }[];
+  }>();
+  pipeline.renderOutputRevision
+    .mockResolvedValueOnce({ revision: 1, diagnostics: [], document: generatedDocument })
+    .mockReturnValueOnce(regeneration.promise);
+
+  render(<OutputStudio />);
+  await screen.findByText('GeneratedDocument · revision 1');
+  fireEvent.click(screen.getByRole('button', { name: 'Edit template' }));
+  fireEvent.change(screen.getByLabelText('Expression for customer-name'), {
+    target: { value: 'customer.legalName' },
+  });
+
+  let overlay = screen.getByTestId('preview-state-overlay');
+  expect(overlay.getAttribute('data-preview-state')).toBe('dirty');
+  expect(overlay.textContent).toContain('Stale preview');
+  expect(overlay.textContent).toContain('Generated revision 1');
+  expect(overlay.textContent).toContain('Committed revision 1');
+  expect(screen.getAllByRole('article', { name: /Print page/u })).toHaveLength(2);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Apply & regenerate' }));
+  overlay = screen.getByTestId('preview-state-overlay');
+  expect(overlay.getAttribute('data-preview-state')).toBe('rendering');
+  expect(overlay.textContent).toContain('Rendering committed revision 2');
+  expect(overlay.textContent).toContain('Showing generated revision 1');
+
+  regeneration.resolve({
+    revision: 2,
+    diagnostics: [
+      {
+        code: 'BINDING_EXPRESSION_INVALID',
+        severity: 'error',
+        domain: 'template',
+        stage: 'expand',
+        message: 'The customer binding is invalid',
+      },
+    ],
+  });
+  await screen.findByText('Blocked preview');
+  overlay = screen.getByTestId('preview-state-overlay');
+  expect(overlay.getAttribute('data-preview-state')).toBe('blocked');
+  expect(overlay.textContent).toContain('Committed revision 2 is blocked');
+  expect(overlay.textContent).toContain('Showing generated revision 1');
+  expect(screen.getAllByRole('article', { name: /Print page/u })).toHaveLength(2);
+});
+
+it('renders pipeline stages and grouped structured warning and blocking diagnostics', async () => {
+  pipeline.renderOutputRevision.mockResolvedValue({
+    revision: 1,
+    diagnostics: [
+      {
+        code: 'FONT_FALLBACK',
+        severity: 'warning',
+        domain: 'layout',
+        stage: 'layout',
+        message: 'Arial fallback metrics were used',
+      },
+      {
+        code: 'BINDING_MISSING',
+        severity: 'error',
+        domain: 'template',
+        stage: 'expand',
+        message: 'Customer name is missing',
+        location: {
+          sheetId: 'invoice-sheet',
+          bindingId: 'customer-name',
+          cell: { sheetId: 'invoice-sheet', row: 2, column: 0 },
+        },
+      },
+    ],
+  });
+
+  render(<OutputStudio />);
+  await screen.findByText('Generation is blocked. Review the diagnostics.');
+
+  const stages = screen.getByRole('list', { name: 'Generation stages' });
+  expect(stages.textContent).toContain('CompileComplete');
+  expect(stages.textContent).toContain('BindBlocked');
+  expect(stages.textContent).toContain('PaginatePending');
+
+  const blocking = screen.getByRole('list', { name: 'Blocking errors' });
+  expect(blocking.textContent).toContain('BINDING_MISSING');
+  expect(blocking.textContent).toContain('Error');
+  expect(blocking.textContent).toContain('Bind');
+  expect(blocking.textContent).toContain('sheet invoice-sheet');
+  expect(blocking.textContent).toContain('binding customer-name');
+  expect(blocking.textContent).toContain('cell R3C1');
+
+  const warnings = screen.getByRole('list', { name: 'Warnings' });
+  expect(warnings.textContent).toContain('FONT_FALLBACK');
+  expect(warnings.textContent).toContain('Warning');
+  expect(warnings.textContent).toContain('Paginate');
+});
+
+it('discloses the system print dialog before Print can be activated', async () => {
+  pipeline.renderOutputRevision.mockResolvedValue({
+    revision: 1,
+    diagnostics: [],
+    document: generatedDocument,
+  });
+
+  render(<OutputStudio adapters={createAdapterDoubles()} />);
+  await screen.findByText('GeneratedDocument · revision 1');
+
+  const disclosure = screen.getByText('Print opens your system print dialog.');
+  const print = screen.getByRole('button', { name: 'Print 2 pages' });
+  expect(print.getAttribute('aria-describedby')).toContain(disclosure.id);
+});
+
 it('keeps template edits as drafts until Apply and regenerate', async () => {
   pipeline.renderOutputRevision.mockImplementation(async ({ revision }) => ({
     revision,

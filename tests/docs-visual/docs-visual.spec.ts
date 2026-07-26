@@ -111,9 +111,27 @@ for (const [name, viewport, snapshot] of [
 ] as const) {
   test(`Output Studio ${name} ready`, async ({ page }) => {
     await openOutputStudio(page, viewport);
-    await expect(page).toHaveScreenshot(snapshot, { animations: 'disabled' });
+    await expect(page).toHaveScreenshot(snapshot, {
+      animations: 'disabled',
+      fullPage: name === 'narrow',
+    });
   });
 }
+
+test('Output Studio selected page two', async ({ page }) => {
+  await openOutputStudio(page, OUTPUT_DESKTOP);
+  await page.getByLabel('Current page').fill('2');
+  await expect(page.getByText('Selected page 2 of 2')).toBeVisible();
+  const preview = page.getByRole('region', { name: 'Exact page preview' });
+  await expect(preview.getByLabel('Current page').locator('..').locator('..')).toHaveScreenshot(
+    'output-studio-selected-page-two-controls.png',
+    { animations: 'disabled' },
+  );
+  await expect(preview.getByRole('article', { name: /Print page/ }).nth(1)).toHaveScreenshot(
+    'output-studio-selected-page-two-preview.png',
+    { animations: 'disabled' },
+  );
+});
 
 test('Output Studio desktop stale', async ({ page }) => {
   await openOutputStudio(page, OUTPUT_DESKTOP);
@@ -137,7 +155,7 @@ test('Output Studio desktop blocked diagnostic', async ({ page }) => {
   await page.getByLabel('Expression for customer-name').fill('customer[');
   await page.getByRole('button', { name: 'Apply & regenerate' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Generation is blocked' })).toBeVisible();
-  await expect(page.getByRole('list', { name: 'Generation diagnostics' })).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Blocking errors' })).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, 0));
   await expect(page).toHaveScreenshot('output-studio-blocked-desktop.png', {
     animations: 'disabled',

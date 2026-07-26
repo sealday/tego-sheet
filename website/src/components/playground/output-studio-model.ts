@@ -3,6 +3,19 @@ import type { Diagnostic, GeneratedDocument } from 'tego-sheet';
 export type OutputStudioPhase = 'ready' | 'dirty' | 'rendering' | 'blocked';
 export type OutputKind = 'print' | 'pdf' | 'png' | 'xlsx';
 export type OutputStatus = 'idle' | 'busy' | 'success' | 'error' | 'cancelled';
+export type OutputPipelineStageId = 'compile' | 'bind' | 'paginate';
+export type OutputPipelineStageStatus = 'pending' | 'active' | 'complete' | 'blocked';
+
+export interface OutputPipelineStage {
+  readonly id: OutputPipelineStageId;
+  readonly label: 'Compile' | 'Bind' | 'Paginate';
+  readonly status: OutputPipelineStageStatus;
+}
+
+export interface GroupedOutputDiagnostics {
+  readonly blocking: readonly Diagnostic[];
+  readonly warnings: readonly Diagnostic[];
+}
 
 export interface OutputState {
   readonly requestId: number | null;
@@ -208,4 +221,82 @@ export function outputFilename(
 
 export function hasBlockingDiagnostics(diagnostics: readonly Diagnostic[]): boolean {
   return diagnostics.some(({ severity }) => severity === 'error');
+}
+
+export function groupOutputDiagnostics(
+  diagnostics: readonly Diagnostic[],
+): GroupedOutputDiagnostics {
+  return {
+    blocking: diagnostics.filter(({ severity }) => severity === 'error'),
+    warnings: diagnostics.filter(({ severity }) => severity === 'warning'),
+  };
+}
+
+export function outputDiagnosticStage(diagnostic: Diagnostic): OutputPipelineStageId {
+  if (
+    diagnostic.stage === 'decode' ||
+    diagnostic.stage === 'validate' ||
+    diagnostic.stage === 'plan' ||
+    diagnostic.stage === 'compile'
+  ) {
+    return 'compile';
+  }
+  if (
+    diagnostic.stage === 'resolve' ||
+    diagnostic.stage === 'expand' ||
+    diagnostic.stage === 'recalculate'
+  ) {
+    return 'bind';
+  }
+  return 'paginate';
+}
+
+export function outputPipelineStages(state: OutputStudioState): readonly OutputPipelineStage[] {
+  if (state.phase === 'ready') {
+    return [
+      { id: 'compile', label: 'Compile', status: 'complete' },
+      { id: 'bind', label: 'Bind', status: 'complete' },
+      { id: 'paginate', label: 'Paginate', status: 'complete' },
+    ];
+  }
+  if (state.phase === 'rendering') {
+    return [
+      { id: 'compile', label: 'Compile', status: 'active' },
+      { id: 'bind', label: 'Bind', status: 'active' },
+      { id: 'paginate', label: 'Paginate', status: 'active' },
+    ];
+  }
+  if (state.phase === 'dirty') {
+    return [
+      { id: 'compile', label: 'Compile', status: 'pending' },
+      { id: 'bind', label: 'Bind', status: 'pending' },
+      { id: 'paginate', label: 'Paginate', status: 'pending' },
+    ];
+  }
+
+  const stageOrder = ['compile', 'bind', 'paginate'] as const;
+  const blockedIndex = state.diagnostics
+    .filter(({ severity }) => severity === 'error')
+    .reduce<number>(
+      (earliest, diagnostic) =>
+        Math.min(earliest, stageOrder.indexOf(outputDiagnosticStage(diagnostic))),
+      stageOrder.length,
+    );
+  const effectiveBlockedIndex = blockedIndex === stageOrder.length ? 0 : blockedIndex;
+  return (
+    [
+      ['compile', 'Compile'],
+      ['bind', 'Bind'],
+      ['paginate', 'Paginate'],
+    ] as const
+  ).map(([id, label], index) => ({
+    id,
+    label,
+    status:
+      index < effectiveBlockedIndex
+        ? 'complete'
+        : index === effectiveBlockedIndex
+          ? 'blocked'
+          : 'pending',
+  }));
 }

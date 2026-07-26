@@ -174,7 +174,7 @@ test('Output Studio preserves its preview when generation is blocked', async ({ 
   await page.getByRole('button', { name: 'Apply & regenerate' }).click();
 
   await expect(page.getByRole('status').filter({ hasText: 'Generation is blocked' })).toBeVisible();
-  await expect(page.getByRole('list', { name: 'Generation diagnostics' })).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Blocking errors' })).toBeVisible();
   await expect(page.getByText('GeneratedDocument · revision 1')).toBeVisible();
   await expect(page.getByRole('article', { name: /Print page/ })).toHaveCount(2);
   await expect(page.getByRole('button', { name: 'Download PDF' })).toBeDisabled();
@@ -214,6 +214,64 @@ test('Output Studio zooms inside its viewport without panel overlap and keeps 44
       expect(box!.height).toBeGreaterThanOrEqual(44);
     }
   }
+});
+
+test('Output Studio gives every enabled embedded workbench control a 44px target at narrow width', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 1100 });
+  await openOutputStudio(page);
+  await page.getByRole('button', { name: 'Edit template' }).click();
+
+  const workbench = page.getByRole('region', { name: 'Template workbench' });
+  const controls = workbench.locator(
+    '.tego-sheet button:enabled, .tego-sheet select:enabled, .tego-sheet input:enabled',
+  );
+  expect(await controls.count()).toBeGreaterThan(0);
+  const undersized = await controls.evaluateAll((elements) =>
+    elements
+      .map((element) => {
+        const target =
+          element instanceof HTMLInputElement &&
+          (element.type === 'checkbox' || element.type === 'radio')
+            ? (element.closest('label') ?? element)
+            : element;
+        const rect = target.getBoundingClientRect();
+        return {
+          label:
+            element.getAttribute('aria-label') ??
+            element.getAttribute('role') ??
+            element.textContent?.trim() ??
+            element.tagName,
+          height: rect.height,
+          width: rect.width,
+        };
+      })
+      .filter(({ height, width }) => height < 44 || width < 44),
+  );
+  expect(undersized).toEqual([]);
+});
+
+test('Output Studio keeps the complete narrow preview, inputs, diagnostics, and outputs order', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 1100 });
+  await openOutputStudio(page);
+
+  const ordered = [
+    page.getByRole('heading', { name: 'Exact page preview' }),
+    page.getByRole('heading', { name: 'Output inputs' }),
+    page.getByRole('heading', { name: 'Diagnostics' }),
+    page.getByText('Print opens your system print dialog.'),
+  ];
+  const positions = await Promise.all(
+    ordered.map(async (locator) => {
+      const box = await locator.boundingBox();
+      expect(box).not.toBeNull();
+      return box!.y;
+    }),
+  );
+  expect(positions).toEqual([...positions].sort((left, right) => left - right));
 });
 
 test('Output Studio exposes stubbed output actions without opening native Print', async ({

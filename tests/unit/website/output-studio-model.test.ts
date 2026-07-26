@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { Diagnostic, GeneratedDocument } from 'tego-sheet';
 import {
   createOutputStudioState,
+  groupOutputDiagnostics,
   hasBlockingDiagnostics,
   outputFilename,
+  outputPipelineStages,
   reduceOutputStudioState,
 } from '../../../website/src/components/playground/output-studio-model';
 
@@ -258,5 +260,47 @@ describe('Output Studio model', () => {
   it('treats only error diagnostics as blocking', () => {
     expect(hasBlockingDiagnostics([diagnostic('info'), diagnostic('warning')])).toBe(false);
     expect(hasBlockingDiagnostics([diagnostic('warning'), diagnostic('error')])).toBe(true);
+  });
+
+  it('groups blocking diagnostics separately from warnings', () => {
+    const warning = diagnostic('warning');
+    const error = diagnostic('error');
+
+    expect(groupOutputDiagnostics([warning, diagnostic('info'), error])).toEqual({
+      blocking: [error],
+      warnings: [warning],
+    });
+  });
+
+  it('exposes compile, bind, and paginate state for ready and blocked revisions', () => {
+    const ready = {
+      ...createOutputStudioState(),
+      phase: 'ready' as const,
+      committedRevision: 2,
+      generatedRevision: 2,
+    };
+    expect(outputPipelineStages(ready)).toEqual([
+      { id: 'compile', label: 'Compile', status: 'complete' },
+      { id: 'bind', label: 'Bind', status: 'complete' },
+      { id: 'paginate', label: 'Paginate', status: 'complete' },
+    ]);
+
+    expect(
+      outputPipelineStages({
+        ...ready,
+        phase: 'blocked',
+        generatedRevision: 1,
+        diagnostics: [
+          {
+            ...diagnostic('error'),
+            stage: 'expand',
+          },
+        ],
+      }),
+    ).toEqual([
+      { id: 'compile', label: 'Compile', status: 'complete' },
+      { id: 'bind', label: 'Bind', status: 'blocked' },
+      { id: 'paginate', label: 'Paginate', status: 'pending' },
+    ]);
   });
 });
