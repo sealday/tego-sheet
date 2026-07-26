@@ -23,6 +23,22 @@ export default defineConfig({
   resolve: {
     alias: [
       {
+        find: 'tego-sheet/analysis',
+        replacement: resolve(repositoryRoot, 'src/analysis/index.ts'),
+      },
+      {
+        find: 'tego-sheet/integrations',
+        replacement: resolve(repositoryRoot, 'src/integrations/index.ts'),
+      },
+      {
+        find: 'tego-sheet/interchange',
+        replacement: resolve(repositoryRoot, 'src/interchange/index.ts'),
+      },
+      {
+        find: 'tego-sheet/sdk',
+        replacement: resolve(repositoryRoot, 'src/sdk/index.ts'),
+      },
+      {
         find: 'tego-sheet/output/pdf',
         replacement: resolve(repositoryRoot, 'src/output/pdf/index.ts'),
       },

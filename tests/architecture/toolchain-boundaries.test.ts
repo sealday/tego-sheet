@@ -46,6 +46,22 @@ it('builds package exports before typechecking fresh CI checkouts', () => {
   );
 });
 
+it('resolves every source-backed package subpath during clean Vitest runs', () => {
+  const vitestConfig = readFileSync(resolve(import.meta.dirname, '../../vitest.config.ts'), 'utf8');
+
+  for (const subpath of [
+    'tego-sheet/analysis',
+    'tego-sheet/integrations',
+    'tego-sheet/interchange',
+    'tego-sheet/sdk',
+    'tego-sheet/output/pdf',
+    'tego-sheet/output/image',
+    'tego-sheet/output/xlsx',
+  ]) {
+    expect(vitestConfig, subpath).toContain(`find: '${subpath}'`);
+  }
+});
+
 it('keeps the core contract independent of React and browser globals', () => {
   const coreFiles = [
     'src/core/index.ts',
