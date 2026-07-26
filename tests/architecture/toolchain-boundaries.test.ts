@@ -33,6 +33,19 @@ it('suppresses only the non-diagnostic slow-plugin build advisory', () => {
   });
 });
 
+it('builds package exports before typechecking fresh CI checkouts', () => {
+  const workflow = readFileSync(
+    resolve(import.meta.dirname, '../../.github/workflows/ci.yml'),
+    'utf8',
+  );
+  const qualityJob = workflow.slice(workflow.indexOf('  quality:'), workflow.indexOf('  vitest:'));
+
+  expect(qualityJob.indexOf('- run: npm run build')).toBeGreaterThan(-1);
+  expect(qualityJob.indexOf('- run: npm run typecheck')).toBeGreaterThan(
+    qualityJob.indexOf('- run: npm run build'),
+  );
+});
+
 it('keeps the core contract independent of React and browser globals', () => {
   const coreFiles = [
     'src/core/index.ts',
