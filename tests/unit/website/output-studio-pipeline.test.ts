@@ -3,6 +3,86 @@ import { createInvoiceOutputFixture } from '../../../website/src/components/play
 import { renderOutputRevision } from '../../../website/src/components/playground/output-studio-pipeline';
 
 describe('Output Studio rendering', () => {
+  it('reports actual compile, bind, and paginate execution boundaries in order', async () => {
+    const fixture = createInvoiceOutputFixture();
+    const progress: string[] = [];
+
+    const result = await renderOutputRevision({
+      revision: 7,
+      document: fixture.document,
+      template: fixture.template,
+      activePrintProfileId: fixture.template.printProfiles[0]!.id,
+      data: fixture.data,
+      environment: fixture.environment,
+      signal: new AbortController().signal,
+      onProgress: ({ revision, stage, status }) => {
+        progress.push(`${revision}:${stage}:${status}`);
+      },
+    });
+
+    expect(result.document).toBeDefined();
+    expect(progress).toEqual(['7:compile:active', '7:bind:active', '7:paginate:active']);
+  });
+
+  it('reports the actual blocked stage for compile and binding failures', async () => {
+    const fixture = createInvoiceOutputFixture();
+    const customerBinding = fixture.template.bindings[0]!;
+    if (customerBinding.type !== 'value') throw new TypeError('Expected a value binding');
+    const compileProgress: string[] = [];
+    const compileResult = await renderOutputRevision({
+      revision: 8,
+      document: fixture.document,
+      template: {
+        ...fixture.template,
+        bindings: [{ ...customerBinding, expression: 'customer[' }],
+      },
+      activePrintProfileId: fixture.template.printProfiles[0]!.id,
+      data: fixture.data,
+      environment: fixture.environment,
+      signal: new AbortController().signal,
+      onProgress: ({ stage, status }) => compileProgress.push(`${stage}:${status}`),
+    });
+    expect(compileResult.document).toBeUndefined();
+    expect(compileProgress).toEqual(['compile:active', 'compile:blocked']);
+
+    const bindProgress: string[] = [];
+    const bindResult = await renderOutputRevision({
+      revision: 9,
+      document: fixture.document,
+      template: {
+        ...fixture.template,
+        bindings: [{ ...customerBinding, expression: 'missing.customer' }],
+      },
+      activePrintProfileId: fixture.template.printProfiles[0]!.id,
+      data: fixture.data,
+      environment: fixture.environment,
+      signal: new AbortController().signal,
+      onProgress: ({ stage, status }) => bindProgress.push(`${stage}:${status}`),
+    });
+    expect(bindResult.document).toBeUndefined();
+    expect(bindProgress).toEqual(['compile:active', 'bind:active', 'bind:blocked']);
+  });
+
+  it('does not report progress for an already aborted revision', async () => {
+    const fixture = createInvoiceOutputFixture();
+    const controller = new AbortController();
+    const progress: string[] = [];
+    controller.abort();
+
+    await renderOutputRevision({
+      revision: 10,
+      document: fixture.document,
+      template: fixture.template,
+      activePrintProfileId: fixture.template.printProfiles[0]!.id,
+      data: fixture.data,
+      environment: fixture.environment,
+      signal: controller.signal,
+      onProgress: ({ stage, status }) => progress.push(`${stage}:${status}`),
+    });
+
+    expect(progress).toEqual([]);
+  });
+
   it('renders the prepared invoice into two deterministic pages', async () => {
     const fixture = createInvoiceOutputFixture();
     const result = await renderOutputRevision({

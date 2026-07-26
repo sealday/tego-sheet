@@ -792,6 +792,46 @@ it('renders pipeline stages and grouped structured warning and blocking diagnost
   expect(warnings.textContent).toContain('Paginate');
 });
 
+it('consumes deferred revision progress one stage at a time and ignores stale or aborted callbacks', async () => {
+  const initial = deferred<{
+    readonly revision: number;
+    readonly diagnostics: readonly [];
+    readonly document: GeneratedDocument;
+  }>();
+  pipeline.renderOutputRevision.mockReturnValue(initial.promise);
+
+  render(<OutputStudio />);
+  const request = pipeline.renderOutputRevision.mock.calls[0]![0];
+  const stageStatuses = () =>
+    [...screen.getByRole('list', { name: 'Generation stages' }).querySelectorAll('li')].map(
+      (stage) => stage.getAttribute('data-stage-status'),
+    );
+
+  expect(stageStatuses()).toEqual(['pending', 'pending', 'pending']);
+  act(() => request.onProgress({ revision: 1, stage: 'compile', status: 'active' }));
+  expect(stageStatuses()).toEqual(['active', 'pending', 'pending']);
+  act(() => request.onProgress({ revision: 1, stage: 'bind', status: 'active' }));
+  expect(stageStatuses()).toEqual(['complete', 'active', 'pending']);
+  act(() => request.onProgress({ revision: 1, stage: 'paginate', status: 'active' }));
+  expect(stageStatuses()).toEqual(['complete', 'complete', 'active']);
+  act(() => request.onProgress({ revision: 1, stage: 'paginate', status: 'blocked' }));
+  expect(stageStatuses()).toEqual(['complete', 'complete', 'blocked']);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit template' }));
+  fireEvent.change(screen.getByLabelText('Expression for customer-name'), {
+    target: { value: 'customer.legalName' },
+  });
+  act(() => request.onProgress({ revision: 1, stage: 'bind', status: 'blocked' }));
+  expect(stageStatuses()).toEqual(['pending', 'pending', 'pending']);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Apply & regenerate' }));
+  const newerRequest = pipeline.renderOutputRevision.mock.calls[1]![0];
+  act(() => request.onProgress({ revision: 1, stage: 'paginate', status: 'active' }));
+  expect(stageStatuses()).toEqual(['pending', 'pending', 'pending']);
+  act(() => newerRequest.onProgress({ revision: 2, stage: 'compile', status: 'active' }));
+  expect(stageStatuses()).toEqual(['active', 'pending', 'pending']);
+});
+
 it('discloses the system print dialog before Print can be activated', async () => {
   pipeline.renderOutputRevision.mockResolvedValue({
     revision: 1,

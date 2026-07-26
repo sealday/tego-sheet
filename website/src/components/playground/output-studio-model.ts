@@ -37,6 +37,7 @@ export interface OutputStudioState {
   readonly generatedDocument: GeneratedDocument | null;
   readonly generatedMetadata: OutputDocumentMetadata | null;
   readonly diagnostics: readonly Diagnostic[];
+  readonly pipelineStages: readonly OutputPipelineStage[];
   readonly outputs: Readonly<Record<OutputKind, OutputState>>;
 }
 
@@ -45,6 +46,12 @@ export type OutputStudioAction =
   | { readonly type: 'outputs-cancelled' }
   | { readonly type: 'render-started'; readonly revision: number }
   | { readonly type: 'reset-started'; readonly revision: number }
+  | {
+      readonly type: 'render-progress';
+      readonly revision: number;
+      readonly stage: OutputPipelineStageId;
+      readonly status: 'active' | 'blocked';
+    }
   | {
       readonly type: 'render-succeeded';
       readonly revision: number;
@@ -82,6 +89,42 @@ function createOutputs(): Readonly<Record<OutputKind, OutputState>> {
     png: idleOutput(),
     xlsx: idleOutput(),
   };
+}
+
+const PIPELINE_STAGE_DEFINITIONS = Object.freeze([
+  { id: 'compile', label: 'Compile' },
+  { id: 'bind', label: 'Bind' },
+  { id: 'paginate', label: 'Paginate' },
+] as const);
+
+function pipelineStages(
+  currentStage?: OutputPipelineStageId,
+  currentStatus: 'active' | 'blocked' = 'active',
+): readonly OutputPipelineStage[] {
+  const currentIndex =
+    currentStage === undefined
+      ? -1
+      : PIPELINE_STAGE_DEFINITIONS.findIndex(({ id }) => id === currentStage);
+  return PIPELINE_STAGE_DEFINITIONS.map(({ id, label }, index) => ({
+    id,
+    label,
+    status:
+      currentIndex < 0
+        ? 'pending'
+        : index < currentIndex
+          ? 'complete'
+          : index === currentIndex
+            ? currentStatus
+            : 'pending',
+  }));
+}
+
+function completedPipelineStages(): readonly OutputPipelineStage[] {
+  return PIPELINE_STAGE_DEFINITIONS.map(({ id, label }) => ({
+    id,
+    label,
+    status: 'complete',
+  }));
 }
 
 function outputLabel(kind: OutputKind): string {
@@ -139,6 +182,7 @@ export function createOutputStudioState(): OutputStudioState {
     generatedDocument: null,
     generatedMetadata: null,
     diagnostics: [],
+    pipelineStages: pipelineStages(),
     outputs: createOutputs(),
   };
 }
@@ -153,6 +197,7 @@ export function reduceOutputStudioState(
       phase: 'rendering',
       committedRevision: action.revision,
       diagnostics: [],
+      pipelineStages: pipelineStages(),
       outputs: changeRevisionOutputs(state.outputs),
     };
   }
@@ -162,6 +207,7 @@ export function reduceOutputStudioState(
       phase: 'rendering',
       committedRevision: action.revision,
       diagnostics: [],
+      pipelineStages: pipelineStages(),
       outputs: createOutputs(),
     };
   }
@@ -170,7 +216,18 @@ export function reduceOutputStudioState(
 
   switch (action.type) {
     case 'draft-changed':
-      return { ...state, phase: 'dirty', outputs: changeRevisionOutputs(state.outputs) };
+      return {
+        ...state,
+        phase: 'dirty',
+        pipelineStages: pipelineStages(),
+        outputs: changeRevisionOutputs(state.outputs),
+      };
+    case 'render-progress':
+      if (state.phase !== 'rendering') return state;
+      return {
+        ...state,
+        pipelineStages: pipelineStages(action.stage, action.status),
+      };
     case 'outputs-cancelled':
       return { ...state, outputs: cancelBusyOutputs(state.outputs) };
     case 'render-succeeded':
@@ -181,9 +238,21 @@ export function reduceOutputStudioState(
         generatedDocument: action.document,
         generatedMetadata: action.metadata,
         diagnostics: action.diagnostics,
+        pipelineStages: completedPipelineStages(),
       };
-    case 'render-blocked':
-      return { ...state, phase: 'blocked', diagnostics: action.diagnostics };
+    case 'render-blocked': {
+      const alreadyBlocked = state.pipelineStages.some(({ status }) => status === 'blocked');
+      const blockingDiagnostic = action.diagnostics.find(({ severity }) => severity === 'error');
+      return {
+        ...state,
+        phase: 'blocked',
+        diagnostics: action.diagnostics,
+        pipelineStages:
+          alreadyBlocked || blockingDiagnostic === undefined
+            ? state.pipelineStages
+            : pipelineStages(outputDiagnosticStage(blockingDiagnostic), 'blocked'),
+      };
+    }
     case 'output-started':
       return {
         ...state,
@@ -252,51 +321,5 @@ export function outputDiagnosticStage(diagnostic: Diagnostic): OutputPipelineSta
 }
 
 export function outputPipelineStages(state: OutputStudioState): readonly OutputPipelineStage[] {
-  if (state.phase === 'ready') {
-    return [
-      { id: 'compile', label: 'Compile', status: 'complete' },
-      { id: 'bind', label: 'Bind', status: 'complete' },
-      { id: 'paginate', label: 'Paginate', status: 'complete' },
-    ];
-  }
-  if (state.phase === 'rendering') {
-    return [
-      { id: 'compile', label: 'Compile', status: 'active' },
-      { id: 'bind', label: 'Bind', status: 'active' },
-      { id: 'paginate', label: 'Paginate', status: 'active' },
-    ];
-  }
-  if (state.phase === 'dirty') {
-    return [
-      { id: 'compile', label: 'Compile', status: 'pending' },
-      { id: 'bind', label: 'Bind', status: 'pending' },
-      { id: 'paginate', label: 'Paginate', status: 'pending' },
-    ];
-  }
-
-  const stageOrder = ['compile', 'bind', 'paginate'] as const;
-  const blockedIndex = state.diagnostics
-    .filter(({ severity }) => severity === 'error')
-    .reduce<number>(
-      (earliest, diagnostic) =>
-        Math.min(earliest, stageOrder.indexOf(outputDiagnosticStage(diagnostic))),
-      stageOrder.length,
-    );
-  const effectiveBlockedIndex = blockedIndex === stageOrder.length ? 0 : blockedIndex;
-  return (
-    [
-      ['compile', 'Compile'],
-      ['bind', 'Bind'],
-      ['paginate', 'Paginate'],
-    ] as const
-  ).map(([id, label], index) => ({
-    id,
-    label,
-    status:
-      index < effectiveBlockedIndex
-        ? 'complete'
-        : index === effectiveBlockedIndex
-          ? 'blocked'
-          : 'pending',
-  }));
+  return state.pipelineStages;
 }

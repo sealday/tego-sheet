@@ -17,6 +17,13 @@ export interface OutputRevisionRequest {
   readonly data: unknown;
   readonly environment: RenderEnvironment;
   readonly signal: AbortSignal;
+  readonly onProgress?: (progress: OutputRevisionProgress) => void;
+}
+
+export interface OutputRevisionProgress {
+  readonly revision: number;
+  readonly stage: 'compile' | 'bind' | 'paginate';
+  readonly status: 'active' | 'blocked';
 }
 
 export interface OutputRevisionResult {
@@ -28,6 +35,16 @@ export interface OutputRevisionResult {
 export async function renderOutputRevision(
   request: OutputRevisionRequest,
 ): Promise<OutputRevisionResult> {
+  let activeStage: OutputRevisionProgress['stage'] = 'compile';
+  const report = (
+    stage: OutputRevisionProgress['stage'],
+    status: OutputRevisionProgress['status'],
+  ): void => {
+    if (request.signal.aborted) return;
+    activeStage = stage;
+    request.onProgress?.(Object.freeze({ revision: request.revision, stage, status }));
+  };
+  report('compile', 'active');
   const sourceDocument: SpreadsheetDocument = {
     ...request.document,
     templates: [
@@ -37,6 +54,7 @@ export async function renderOutputRevision(
   };
   const compilation = compileSpreadsheetTemplate(sourceDocument, request.template);
   if (compilation.template === undefined) {
+    report('compile', 'blocked');
     return Object.freeze({
       revision: request.revision,
       diagnostics: compilation.diagnostics,
@@ -57,23 +75,31 @@ export async function renderOutputRevision(
           ? 'Template has no print profile'
           : 'Selected print profile no longer exists',
     });
+    report('compile', 'blocked');
     return Object.freeze({
       revision: request.revision,
       diagnostics: Object.freeze([...compilation.diagnostics, diagnostic]),
     });
   }
 
-  const rendered = await renderSpreadsheetTemplate(
-    {
-      template: compilation.template,
-      currentDocumentHash: hashSpreadsheetDocument(sourceDocument),
-      data: request.data,
-      profileId: profile.id,
-      missingValue: 'error',
-      signal: request.signal,
+  const renderRequest = {
+    template: compilation.template,
+    currentDocumentHash: hashSpreadsheetDocument(sourceDocument),
+    data: request.data,
+    profileId: profile.id,
+    missingValue: 'error' as const,
+    signal: request.signal,
+    __internalStageProgress(stage: 'bind' | 'paginate') {
+      report(stage, 'active');
     },
-    request.environment,
-  );
+  };
+  const rendered = await renderSpreadsheetTemplate(renderRequest, request.environment);
+  if (
+    rendered.document === undefined &&
+    rendered.diagnostics.some(({ severity }) => severity === 'error')
+  ) {
+    report(activeStage, 'blocked');
+  }
 
   return Object.freeze({
     revision: request.revision,

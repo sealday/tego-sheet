@@ -273,34 +273,124 @@ describe('Output Studio model', () => {
   });
 
   it('exposes compile, bind, and paginate state for ready and blocked revisions', () => {
-    const ready = {
-      ...createOutputStudioState(),
-      phase: 'ready' as const,
-      committedRevision: 2,
-      generatedRevision: 2,
-    };
+    const rendering = reduceOutputStudioState(createOutputStudioState(), {
+      type: 'render-started',
+      revision: 2,
+    });
+    const ready = reduceOutputStudioState(rendering, {
+      type: 'render-succeeded',
+      revision: 2,
+      document: {} as GeneratedDocument,
+      metadata: {
+        invoiceId: 'INV-2',
+        title: 'Invoice',
+        activePrintProfileId: 'invoice-a4',
+        activePrintProfileName: 'Invoice · A4',
+      },
+      diagnostics: [],
+    });
     expect(outputPipelineStages(ready)).toEqual([
       { id: 'compile', label: 'Compile', status: 'complete' },
       { id: 'bind', label: 'Bind', status: 'complete' },
       { id: 'paginate', label: 'Paginate', status: 'complete' },
     ]);
 
-    expect(
-      outputPipelineStages({
-        ...ready,
-        phase: 'blocked',
-        generatedRevision: 1,
-        diagnostics: [
-          {
-            ...diagnostic('error'),
-            stage: 'expand',
-          },
-        ],
-      }),
-    ).toEqual([
+    const blockedRendering = reduceOutputStudioState(rendering, {
+      type: 'render-progress',
+      revision: 2,
+      stage: 'bind',
+      status: 'blocked',
+    });
+    const blocked = reduceOutputStudioState(blockedRendering, {
+      type: 'render-blocked',
+      revision: 2,
+      diagnostics: [{ ...diagnostic('error'), stage: 'expand' }],
+    });
+    expect(outputPipelineStages(blocked)).toEqual([
       { id: 'compile', label: 'Compile', status: 'complete' },
       { id: 'bind', label: 'Bind', status: 'blocked' },
       { id: 'paginate', label: 'Paginate', status: 'pending' },
+    ]);
+  });
+
+  it('advances one revision-scoped pipeline stage at a time', () => {
+    const started = reduceOutputStudioState(createOutputStudioState(), {
+      type: 'render-started',
+      revision: 2,
+    });
+    expect(outputPipelineStages(started)).toEqual([
+      { id: 'compile', label: 'Compile', status: 'pending' },
+      { id: 'bind', label: 'Bind', status: 'pending' },
+      { id: 'paginate', label: 'Paginate', status: 'pending' },
+    ]);
+
+    const compiling = reduceOutputStudioState(started, {
+      type: 'render-progress',
+      revision: 2,
+      stage: 'compile',
+      status: 'active',
+    });
+    expect(outputPipelineStages(compiling).map(({ status }) => status)).toEqual([
+      'active',
+      'pending',
+      'pending',
+    ]);
+
+    const binding = reduceOutputStudioState(compiling, {
+      type: 'render-progress',
+      revision: 2,
+      stage: 'bind',
+      status: 'active',
+    });
+    expect(outputPipelineStages(binding).map(({ status }) => status)).toEqual([
+      'complete',
+      'active',
+      'pending',
+    ]);
+
+    const paginating = reduceOutputStudioState(binding, {
+      type: 'render-progress',
+      revision: 2,
+      stage: 'paginate',
+      status: 'active',
+    });
+    expect(outputPipelineStages(paginating).map(({ status }) => status)).toEqual([
+      'complete',
+      'complete',
+      'active',
+    ]);
+  });
+
+  it('retains a blocked stage and ignores stale progress after a newer render or reset', () => {
+    const rendering = reduceOutputStudioState(createOutputStudioState(), {
+      type: 'render-started',
+      revision: 3,
+    });
+    const blocked = reduceOutputStudioState(rendering, {
+      type: 'render-progress',
+      revision: 3,
+      stage: 'bind',
+      status: 'blocked',
+    });
+    expect(outputPipelineStages(blocked).map(({ status }) => status)).toEqual([
+      'complete',
+      'blocked',
+      'pending',
+    ]);
+
+    const newer = reduceOutputStudioState(blocked, { type: 'reset-started', revision: 4 });
+    expect(
+      reduceOutputStudioState(newer, {
+        type: 'render-progress',
+        revision: 3,
+        stage: 'paginate',
+        status: 'active',
+      }),
+    ).toBe(newer);
+    expect(outputPipelineStages(newer).map(({ status }) => status)).toEqual([
+      'pending',
+      'pending',
+      'pending',
     ]);
   });
 });

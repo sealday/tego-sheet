@@ -920,6 +920,15 @@ function isAborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
 }
 
+interface InternalRenderProgressRequest {
+  readonly __internalStageProgress?: (stage: 'bind' | 'paginate') => void;
+}
+
+function reportInternalStage(request: RenderRequest, stage: 'bind' | 'paginate'): void {
+  if (isAborted(request.signal)) return;
+  (request as RenderRequest & InternalRenderProgressRequest).__internalStageProgress?.(stage);
+}
+
 /** Executes expand → recalculate → present → paginate against one immutable source. */
 export async function renderSpreadsheetTemplate(
   request: RenderRequest,
@@ -936,6 +945,7 @@ export async function renderSpreadsheetTemplate(
       ],
     });
   }
+  reportInternalStage(request, 'bind');
   const limits = Object.freeze({ ...DEFAULT_LIMITS, ...request.limits });
   const start = Date.now();
   const resourceController = new AbortController();
@@ -1167,6 +1177,7 @@ export async function renderSpreadsheetTemplate(
         return segments.length === 0 ? [] : [[sheet.id, segments] as const];
       }),
     );
+    reportInternalStage(request, 'paginate');
     const resolvedTargets = targets(
       expansion.document,
       profile,

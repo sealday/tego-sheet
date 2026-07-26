@@ -30,6 +30,7 @@ import {
   reduceOutputStudioState,
   type OutputDocumentMetadata,
   type OutputKind,
+  type OutputPipelineStageId,
 } from './output-studio-model';
 import { renderOutputRevision } from './output-studio-pipeline';
 import styles from './playground.module.css';
@@ -166,6 +167,7 @@ export function OutputStudio({
       generatedRevisionRef.current = null;
       controllerRef.current?.abort();
       const controller = new AbortController();
+      let activeStage: OutputPipelineStageId = 'compile';
       controllerRef.current = controller;
       dispatch({ type: resetOutputs ? 'reset-started' : 'render-started', revision });
       void renderOutputRevision({
@@ -176,6 +178,11 @@ export function OutputStudio({
         data,
         environment: fixture.environment,
         signal: controller.signal,
+        onProgress(progress) {
+          if (controller.signal.aborted || controllerRef.current !== controller) return;
+          activeStage = progress.stage;
+          dispatch({ type: 'render-progress', ...progress });
+        },
       })
         .then((result) => {
           if (controller.signal.aborted) return;
@@ -209,6 +216,12 @@ export function OutputStudio({
             stage: 'render',
             message: error instanceof Error ? error.message : 'Unable to generate the document',
           };
+          dispatch({
+            type: 'render-progress',
+            revision,
+            stage: activeStage,
+            status: 'blocked',
+          });
           dispatch({ type: 'render-blocked', revision, diagnostics: [diagnostic] });
         });
       return controller;
